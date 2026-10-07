@@ -9,24 +9,80 @@ Rules this module enforces so individual steps do not have to:
 
 from __future__ import annotations
 
+import codecs
+import getpass
 import ipaddress
+import os
+import select
+import shutil
 import socket
-import subprocess
 import sys
 import time
 from typing import Callable, Iterable, Sequence
 
+from . import hostsys
 
-class QuitRun(RuntimeError):
-    """The operator typed quit at a prompt."""
+
+class QuitRun(SystemExit):
+    """The operator chose to quit at a prompt.
+
+    A SystemExit, so a standalone tool that does not catch it simply stops
+    with a short message rather than a traceback; the main tool catches it and
+    says how to resume.
+    """
+
+    def __init__(self, reason: str = "") -> None:
+        super().__init__("Stopped.")
+        self.reason = reason
 
 
 BULLET = "    "
+QUIT_WORDS = {"q", "quit", "exit", "abort"}
+QUIT_HINT = " (q to quit)"
+QUIT_OPTION = "Quit - stop here"
 
 
 def _emit(lines: Iterable[str]) -> None:
     for line in lines:
         print(f"{BULLET}{line}", flush=True)
+
+
+def _colour_ok() -> bool:
+    """ANSI colour only on a real terminal that understands it."""
+    if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
+        return False
+    if hostsys.IS_WINDOWS:
+        # Windows Terminal and current consoles understand ANSI; the classic
+        # console does only once virtual-terminal mode is on.
+        return bool(os.environ.get("WT_SESSION")) or _enable_windows_vt()
+    return True
+
+
+def _enable_windows_vt() -> bool:
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
+    except (AttributeError, OSError):
+        return False
+
+
+def warning_box(title: str, body: Sequence[str]) -> None:
+    """A warning that cannot be skimmed past: boxed, and bold red where possible."""
+    width = max(len(title), *(len(line) for line in body)) + 4
+    start, end = ("\x1b[1;31m", "\x1b[0m") if _colour_ok() else ("", "")
+    rule = "!" * (width + 4)
+    lines = [rule, f"!! {title.upper().center(width - 2)} !!", rule]
+    lines += [f"!! {line.ljust(width - 2)} !!" for line in body]
+    lines.append(rule)
+    print("", flush=True)
+    for line in lines:
+        print(f"{start}{line}{end}", flush=True)
 
 
 def section(title: str, body: Sequence[str] = ()) -> None:
@@ -39,11 +95,209 @@ def section(title: str, body: Sequence[str] = ()) -> None:
 def _raw(question: str, default: str | None) -> str:
     suffix = f" [{default}]" if default else ""
     answer = input(f"{question}{suffix}: ").strip()
-    if answer.lower() in {"quit", "exit", "abort"}:
+    if answer.lower() in QUIT_WORDS:
         raise QuitRun("stopped at an operator prompt")
     if not answer and default is not None:
         return default
     return answer
+
+
+class SecretLine:
+    """What a password prompt holds and shows, without any terminal involved.
+
+    The last character typed is shown until the next keystroke (or a pause),
+    so a slip of the finger is visible; everything before it is an asterisk.
+    """
+
+    ERASE = {"\x7f", "\x08"}
+    KILL = "\x15"  # Ctrl-U clears the line, as it does at a shell prompt
+
+    def __init__(self) -> None:
+        self.chars: list[str] = []
+
+    def feed(self, char: str) -> bool:
+        """Apply one keystroke.  True when it added a visible character."""
+        if char in self.ERASE:
+            if self.chars:
+                self.chars.pop()
+            return False
+        if char == self.KILL:
+            self.chars.clear()
+            return False
+        if char.isprintable():
+            self.chars.append(char)
+            return True
+        return False  # any other control character is ignored
+
+    def display(self, reveal_last: bool) -> str:
+        if not self.chars:
+            return ""
+        last = self.chars[-1] if reveal_last else "*"
+        return "*" * (len(self.chars) - 1) + last
+
+    @property
+    def value(self) -> str:
+        return "".join(self.chars)
+
+
+def ask_secret(prompt: str, reveal_seconds: float = 1.0) -> str:
+    """Read a password, showing only the character just typed.
+
+    Nothing is echoed by the terminal itself, nothing is written anywhere, and
+    the line is redrawn as all asterisks before Enter moves on - so the
+    scrollback never holds a readable character.  Without an interactive
+    terminal it falls back to getpass, which shows nothing at all.
+    """
+    prompt = prompt.rstrip().rstrip(":") + QUIT_HINT + ": "
+    value = _read_secret(prompt, reveal_seconds)
+    # Real passwords here are at least eight characters, so a lone q cannot
+    # be one.
+    if value.strip().lower() in QUIT_WORDS:
+        raise QuitRun("stopped at a password prompt")
+    return value
+
+
+def _read_secret(prompt: str, reveal_seconds: float) -> str:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return getpass.getpass(prompt)
+    out = sys.stdout
+    # Keep the whole field on one row so a carriage return can redraw it.
+    if len(prompt) + 65 >= shutil.get_terminal_size().columns:
+        out.write(prompt.rstrip() + "\n")
+        prompt = "> "
+    if hostsys.IS_WINDOWS:
+        return _ask_secret_windows(prompt, reveal_seconds)
+    try:
+        import termios
+        import tty
+    except ImportError:  # not a POSIX terminal
+        return getpass.getpass(prompt)
+
+    fd = sys.stdin.fileno()
+    line = SecretLine()
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
+
+    def draw(reveal_last: bool) -> None:
+        out.write("\r\x1b[K" + prompt + line.display(reveal_last))
+        out.flush()
+
+    saved = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)  # no echo, no line buffering; Ctrl-C still interrupts
+        draw(False)
+        revealed = False
+        while True:
+            timeout = reveal_seconds if revealed else None
+            ready, _, _ = select.select([fd], [], [], timeout)
+            if not ready:
+                draw(False)
+                revealed = False
+                continue
+            byte = os.read(fd, 1)
+            if not byte or byte == b"\x04":
+                raise EOFError
+            if byte == b"\x1b":
+                # Arrow and function keys arrive as escape sequences: discard.
+                while select.select([fd], [], [], 0.02)[0]:
+                    os.read(fd, 16)
+                continue
+            text = decoder.decode(byte)
+            if not text:
+                continue  # the middle of a multi-byte character
+            if text in ("\n", "\r"):
+                break
+            revealed = line.feed(text)
+            draw(revealed)
+    finally:
+        draw(False)
+        out.write("\n")
+        out.flush()
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+    return line.value
+
+
+def _ask_secret_windows(prompt: str, reveal_seconds: float) -> str:
+    """The same behaviour through the Windows console's key-by-key reader."""
+    import msvcrt
+
+    out = sys.stdout
+    line = SecretLine()
+
+    def draw(reveal_last: bool) -> None:
+        out.write("\r" + " " * (len(prompt) + 66) + "\r" + prompt + line.display(reveal_last))
+        out.flush()
+
+    try:
+        draw(False)
+        revealed_at: float | None = None
+        while True:
+            if not msvcrt.kbhit():
+                if revealed_at is not None and time.monotonic() - revealed_at >= reveal_seconds:
+                    draw(False)
+                    revealed_at = None
+                time.sleep(0.02)
+                continue
+            char = msvcrt.getwch()
+            if char in ("\x00", "\xe0"):
+                msvcrt.getwch()  # arrow and function keys arrive as two characters
+                continue
+            if char == "\x03":
+                raise KeyboardInterrupt
+            if char == "\x1a":
+                raise EOFError
+            if char in ("\r", "\n"):
+                break
+            if line.feed("\x7f" if char == "\x08" else char):
+                revealed_at = time.monotonic()
+                draw(True)
+            else:
+                revealed_at = None
+                draw(False)
+    finally:
+        draw(False)
+        out.write("\n")
+        out.flush()
+    return line.value
+
+
+def wait_for_key(prompt: str = "Press any key to continue, or q to quit...") -> None:
+    """Pause until one key is pressed; q quits, anything else carries on.
+
+    Without an interactive terminal there is nobody to wait for, so it returns.
+    """
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    try:
+        if hostsys.IS_WINDOWS:
+            import msvcrt
+
+            char = msvcrt.getwch()
+            if char in ("\x00", "\xe0"):
+                msvcrt.getwch()
+            if char == "\x03":
+                raise KeyboardInterrupt
+            if char.lower() == "q":
+                raise QuitRun("stopped before starting")
+            return
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        saved = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            key = os.read(fd, 1)
+            while select.select([fd], [], [], 0.02)[0]:
+                os.read(fd, 16)  # the rest of an arrow or function key
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        if key.lower() == b"q":
+            raise QuitRun("stopped before starting")
+    finally:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
 
 def ask_text(
@@ -53,13 +307,14 @@ def ask_text(
     default: str | None = None,
     example: str | None = None,
     validate: Callable[[str], tuple[bool, str]] | None = None,
+    quit_hint: bool = True,
 ) -> str:
     if help_lines:
         _emit(help_lines)
     if example:
         _emit([f"Example: {example}"])
     while True:
-        answer = _raw(question, default)
+        answer = _raw(question + (QUIT_HINT if quit_hint else ""), default)
         if not answer:
             _emit(["An answer is needed here. Type quit to stop."])
             continue
@@ -79,7 +334,7 @@ def ask_yes_no(
 ) -> bool:
     if help_lines:
         _emit(help_lines)
-    hint = {True: "Y/n", False: "y/N", None: "y/n"}[default]
+    hint = {True: "Y/n", False: "y/N", None: "y/n"}[default] + ", q to quit"
     while True:
         answer = _raw(f"{question} ({hint})", None).lower()
         if not answer and default is not None:
@@ -88,14 +343,18 @@ def ask_yes_no(
             return True
         if answer in {"n", "no"}:
             return False
-        _emit(["Please answer y or n. Type quit to stop."])
+        _emit(["Please answer y or n, or q to quit."])
 
 
 def ask_choice(question: str, options: Sequence[str], *, help_lines: Sequence[str] = ()) -> int:
-    """Returns the zero-based index of the chosen option."""
+    """Returns the zero-based index of the chosen option.
+
+    Every menu ends with a Quit option, which stops the run cleanly.
+    """
     if help_lines:
         _emit(help_lines)
-    for index, option in enumerate(options, 1):
+    shown = [*options, QUIT_OPTION]
+    for index, option in enumerate(shown, 1):
         _emit([f"{index}. {option}"])
     while True:
         answer = _raw(question, None)
@@ -104,20 +363,15 @@ def ask_choice(question: str, options: Sequence[str], *, help_lines: Sequence[st
         except ValueError:
             _emit(["Type the number of one of the options above."])
             continue
+        if chosen == len(shown):
+            raise QuitRun("stopped at an operator prompt")
         if 1 <= chosen <= len(options):
             return chosen - 1
-        _emit([f"Choose a number between 1 and {len(options)}."])
+        _emit([f"Choose a number between 1 and {len(shown)}."])
 
 
 def ping_ok(address: str, timeout: int = 2) -> bool:
-    try:
-        completed = subprocess.run(
-            ["ping", "-c", "1", "-W", str(timeout), address],
-            capture_output=True, timeout=timeout + 3, check=False,
-        )
-        return completed.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
+    return hostsys.ping_ok(address, timeout)
 
 
 def ask_ipv4(
@@ -213,7 +467,6 @@ def wait_or_ask(
             [
                 "Keep waiting",
                 f"{what.capitalize()} is on a different address - let me type it",
-                "Stop here",
             ],
             help_lines=help_lines or [
                 "It may still be starting up, or it may have been given a new",
@@ -233,31 +486,7 @@ def scan_wifi_ssids(timeout: float = 20.0) -> list[str]:
     Best effort: returns an empty list when no supported scanner is present, so
     callers must treat "nothing found" as "do not know", never as "not there".
     """
-    attempts = (
-        ["nmcli", "-t", "-f", "SSID", "device", "wifi", "list", "--rescan", "auto"],
-        ["nmcli", "-t", "-f", "SSID", "device", "wifi", "list"],
-        ["iwlist", "scanning"],
-    )
-    for command in attempts:
-        try:
-            completed = subprocess.run(
-                command, capture_output=True, text=True, timeout=timeout, check=False
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if completed.returncode != 0:
-            continue
-        names: list[str] = []
-        for line in completed.stdout.splitlines():
-            line = line.strip()
-            if command[0] == "iwlist":
-                if "ESSID:" in line:
-                    names.append(line.split("ESSID:", 1)[1].strip().strip('"'))
-            elif line:
-                names.append(line)
-        if names:
-            return names
-    return []
+    return hostsys.wifi_ssids(timeout=timeout)
 
 
 def find_ssid(prefix: str, timeout: float = 20.0) -> str | None:
