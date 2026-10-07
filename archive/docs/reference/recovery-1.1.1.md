@@ -8,7 +8,7 @@
   file hash matches the SHA-256 digest returned by the authenticated vendor
   manifest.
 - No authentic 1.1.1 application image or 1.1.1 manifest is present in the
-  project, Claude cache, Codex temporary files, or ordinary local download
+  project, local application caches and temporary files, or ordinary local download
   locations searched on 2026-09-01.
 - No public 1.1.1 download was found in searches by firmware family, internal
   model string, device model, and vendor filename.

@@ -126,7 +126,7 @@ zero. A smaller custom app could remove the size objection, but image validation
 signature policy, bootloader compatibility, rollback behavior, and required
 partition data remain unproven blockers.
 
-## Vendor firmware header — 24 bytes captured (2026-09-01)
+## Vendor firmware header - 24 bytes captured (2026-09-01)
 
 The device's actual HTTP request to the vendor server was intercepted using a
 router-level DNAT rule and a fail-closed relay proxy running on the workstation.
@@ -136,7 +136,7 @@ router-level DNAT rule and a fail-closed relay proxy running on the workstation.
 The S60 at `192.168.1.96` connects to `52.57.99.135:8088` to download firmware.
 A PREROUTING DNAT rule on the UniFi Cloud Gateway Ultra redirected those packets
 to `192.168.1.141:8088` (workstation relay). A POSTROUTING MASQUERADE rule was
-also required to avoid asymmetric routing — without it the S60 would receive
+also required to avoid asymmetric routing - without it the S60 would receive
 SYN-ACK from the workstation's LAN address rather than from the vendor server,
 causing an immediate TCP RST.
 
@@ -198,7 +198,7 @@ Interpretation:
 |--------|------|-------|---------|
 | 0 | 1 | `0x03` | Sonoff/Itead proprietary OTA format magic |
 | 1 | 1 | `0x01` | Format sub-version |
-| 2 | 6 | `31 2e 32 2e 30 00` | "1.2.0\0" — firmware version, null-terminated |
+| 2 | 6 | `31 2e 32 2e 30 00` | "1.2.0\0" - firmware version, null-terminated |
 | 8 | 12 | `00 × 12` | Reserved / padding |
 | 20 | 4 | `3C 76 CC 65` | Big-endian CRC-32 of bytes `0..19` |
 

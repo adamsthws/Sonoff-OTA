@@ -56,7 +56,7 @@ The data subtype is named `spiffs` because that is the conventional Tasmota
 partition label/subtype. Whether this exact reduced Tasmota build mounts it
 must be established in a disposable build before modifying the hardware.
 
-## What a CSV does—and does not do
+## What a CSV does, and does not do
 
 The bootloader reads the binary table from flash on every boot. A partition
 CSV used while compiling an app does not repartition a device, and uploading

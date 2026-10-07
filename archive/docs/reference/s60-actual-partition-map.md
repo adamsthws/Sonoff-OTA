@@ -6,7 +6,7 @@ flash offset `0x8000`.
 
 | Partition | Type | Subtype | Start | End (exclusive) | Size | Flags | Installed content |
 |---|---|---|---:|---:|---:|---:|---|
-| Partition table | — | — | `0x008000` | `0x009000` | 4 KiB (`0x001000`) | — | Original Sonoff partition table |
+| Partition table | - | - | `0x008000` | `0x009000` | 4 KiB (`0x001000`) | - | Original Sonoff partition table |
 | `nvs` | data (`0x01`) | NVS (`0x02`) | `0x009000` | `0x019000` | 64 KiB (`0x010000`) | `0x0` | Configuration data |
 | `reserve` | data (`0x01`) | NVS (`0x02`) | `0x019000` | `0x01d000` | 16 KiB (`0x004000`) | `0x0` | Sonoff reserved data |
 | `otadata` | data (`0x01`) | OTA (`0x00`) | `0x01d000` | `0x01f000` | 8 KiB (`0x002000`) | `0x0` | OTA boot-selection records |

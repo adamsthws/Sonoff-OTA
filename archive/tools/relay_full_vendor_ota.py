@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-relay_full_vendor_ota.py — relay the complete vendor firmware to the S60
+relay_full_vendor_ota.py - relay the complete vendor firmware to the S60
 while saving a local copy for checksum analysis.
 
 Unlike capture_vendor_header_proxy.py (which returns 502 to the device after
@@ -150,7 +150,7 @@ def analyse_binary(data: bytes, output_dir: Path) -> None:
     """Print checksum analysis for the captured vendor binary."""
     total = len(data)
     if total < 100:
-        print(f"  Only {total} bytes — too short to analyse")
+        print(f"  Only {total} bytes - too short to analyse")
         return
 
     header = data[:100]
@@ -211,7 +211,7 @@ def analyse_binary(data: bytes, output_dir: Path) -> None:
         if match:
             found = True
     if not found:
-        print("    No match found — checksum is likely HMAC or proprietary.")
+        print("    No match found - checksum is likely HMAC or proprietary.")
 
     # Save binary
     out = output_dir / "user1.full.bin"
@@ -266,7 +266,7 @@ def main() -> int:
     thread.start()
     print(f"\nRelay listening on {args.listen_ip}:{args.listen_port}")
     print(f"Upstream: {UPSTREAM_HOST}:{UPSTREAM_PORT}")
-    print(f"Device will flash vendor 1.2.0 — this is intentional.\n")
+    print(f"Device will flash vendor 1.2.0 - this is intentional.\n")
 
     # eWeLink login
     try:
@@ -335,7 +335,7 @@ def main() -> int:
         args.output_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         analyse_binary(bytes(server.buf[:server.bytes_captured]), args.output_dir)
     else:
-        print("No bytes captured — device did not connect.")
+        print("No bytes captured - device did not connect.")
         return 1
 
     return 0
