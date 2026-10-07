@@ -24,6 +24,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from . import output
+
 SYSTEM = platform.system()  # "Linux", "Darwin" or "Windows"
 IS_WINDOWS = SYSTEM == "Windows"
 IS_MAC = SYSTEM == "Darwin"
@@ -310,13 +312,14 @@ def elevated(command: Sequence[str]) -> int:
             "-Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode"
         )
         try:
-            return subprocess.call(["powershell", "-NoProfile", "-Command", script])
+            result = subprocess.run(["powershell", "-NoProfile", "-Command", script],
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         except OSError:
             return 127
-    try:
-        return subprocess.call(["sudo", *command])
-    except OSError:
-        return 127
+        if result.stdout.strip():
+            output.detail(result.stdout.rstrip("\n"))
+        return result.returncode
+    return elevated_output(command)[0]
 
 
 def elevated_output(command: Sequence[str]) -> tuple[int, str]:
@@ -327,13 +330,16 @@ def elevated_output(command: Sequence[str]) -> tuple[int, str]:
     """
     if IS_WINDOWS:
         return elevated(command), ""
+    output.before_input("administrator rights requested: " + " ".join(command))
     try:
         result = subprocess.run(["sudo", *command], stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True)
     except OSError:
         return 127, ""
+    finally:
+        output.after_input()
     if result.stdout:
-        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+        output.detail(result.stdout.rstrip("\n"))
     return result.returncode, result.stdout
 
 

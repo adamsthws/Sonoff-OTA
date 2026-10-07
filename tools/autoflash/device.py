@@ -81,6 +81,14 @@ class Device:
 
     # -- commands -----------------------------------------------------------
 
+    def console_log(self, timeout: float | None = None) -> list[str]:
+        """The lines in Tasmota's web console log, oldest first.
+
+        The page answers only requests with a Referer, which _get sends.
+        """
+        body = self._get("/cs", {"c2": "0"}, timeout or self.timeout)
+        return [line.strip() for line in re.split(r"[\x1e\n]", body) if line.strip()]
+
     def command(self, command: str, timeout: float | None = None) -> Any:
         """Run one Tasmota console command and return parsed JSON when possible."""
         body = self._get("/cm", {"cmnd": command}, timeout or self.timeout)
@@ -189,6 +197,21 @@ class Device:
                 return value
         return None
 
+    def started_at(self) -> str | None:
+        """Which boot this is: the plug's own boot time and boot count.
+
+        A restart changes it whatever the uptime happened to be before, so it
+        catches a restart that follows closely on another, which an uptime
+        comparison misses.  The count covers a plug with no clock, whose boot
+        time would read the same every time.
+        """
+        status = self.command("Status 1")
+        if isinstance(status, dict):
+            prm = status.get("StatusPRM", {})
+            if prm.get("StartupUTC") or prm.get("BootCount") is not None:
+                return f"{prm.get('StartupUTC')}#{prm.get('BootCount')}"
+        return None
+
     def is_safeboot(self) -> bool:
         if "safeboot" in self.firmware_version().lower():
             return True
@@ -236,6 +259,7 @@ class Device:
         timeout: float = 240.0,
         settle: float = 5.0,
         before: int | None = None,
+        started_at: str | None = None,
     ) -> float:
         """Wait for the plug to restart.  Returns seconds waited.
 
@@ -251,6 +275,16 @@ class Device:
             if not self.reachable(timeout=2.0):
                 seen_offline = True
                 continue
+            if started_at is not None:
+                try:
+                    current = self.started_at()
+                except (DeviceError, urllib.error.URLError, OSError):
+                    continue
+                if current is not None and current != started_at:
+                    time.sleep(settle)
+                    return time.monotonic() - started
+                if before is None:
+                    continue  # same boot as before the upload: keep waiting
             now = self.uptime_seconds()
             if before is not None:
                 # The reliable signal: the device's clock went backwards.
@@ -273,26 +307,44 @@ class Device:
 
     def upload_firmware(self, path: Path, timeout: float = 600.0) -> str:
         """POST an application image to Tasmota's or Safeboot's upgrade endpoint."""
-        payload = path.read_bytes()
+        # Mirror what the browser does: fetch the upgrade page first, then post
+        # to u2 with the file size in the query.  Tasmota's own form action is
+        # "u2?fsz=" and its JavaScript fills the size in; without it the upload
+        # is accepted, the device restarts, and nothing is ever committed.
+        return self._upload("/up", path.name, path.read_bytes(), timeout)
+
+    def download_settings(self, timeout: float = 30.0) -> bytes:
+        """Tasmota's configuration backup (the .dmp file the web UI offers)."""
+        query = urllib.parse.urlencode(self._auth_params())
+        request = urllib.request.Request(
+            f"{self.base_url}/dl" + (f"?{query}" if query else ""),
+            headers={"User-Agent": "S60Autoflash/1", "Referer": f"{self.base_url}/"},
+        )
+        with _OPENER.open(request, timeout=timeout) as response:
+            return response.read()
+
+    def restore_settings(self, backup: bytes, timeout: float = 60.0) -> str:
+        """Restore a configuration backup; Tasmota checks it, saves it and restarts."""
+        # Visiting the restore page is what marks the next upload as settings.
+        return self._upload("/rs", "Config.dmp", backup, timeout)
+
+    def _upload(self, page: str, filename: str, payload: bytes, timeout: float) -> str:
         boundary = "----s60autoflash" + secrets.token_hex(8)
-        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         body = b"".join(
             [
                 f"--{boundary}\r\n".encode(),
-                f'Content-Disposition: form-data; name="u2"; filename="{path.name}"\r\n'.encode(),
+                f'Content-Disposition: form-data; name="u2"; filename="{filename}"\r\n'.encode(),
                 f"Content-Type: {content_type}\r\n\r\n".encode(),
                 payload,
                 f"\r\n--{boundary}--\r\n".encode(),
             ]
         )
-        # Mirror what the browser does: fetch the upgrade page first, then post
-        # to u2 with the file size in the query.  Tasmota's own form action is
-        # "u2?fsz=" and its JavaScript fills the size in; without it the upload
-        # is accepted, the device restarts, and nothing is ever committed.
         try:
-            self._get("/up", {}, self.timeout)
+            self._get(page, {}, self.timeout)
         except (DeviceError, urllib.error.URLError, OSError):
-            pass  # the page is a courtesy, not a requirement
+            if page != "/up":
+                raise  # a restore must arm the restore page, or the file is taken as firmware
         query = urllib.parse.urlencode({**self._auth_params(), "fsz": str(len(payload))})
         url = f"{self.base_url}/u2?{query}"
         request = urllib.request.Request(

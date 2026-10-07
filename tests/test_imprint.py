@@ -16,6 +16,8 @@ from tools.autoflash.imprint import (
     find_field,
     derived_from,
     imprint,
+    imprinted_ssid,
+    read_c_string,
     repair_image,
 )
 
@@ -124,13 +126,44 @@ class ImprintTests(unittest.TestCase):
         result = imprint(self.image, "OpenNet", "")
         self.assertTrue(parse_esp_image(result)["sha256_valid"])
 
-    def test_imprinting_is_repeatable(self):
+    def test_imprinting_is_deterministic_from_the_template(self):
         once = imprint(self.image, "Net", "Pass")
-        twice = imprint(once, "Net", "Pass")
-        self.assertEqual(once, twice)
-        different = imprint(once, "Other", "Pass")
+        self.assertEqual(once, imprint(self.image, "Net", "Pass"))
+        different = imprint(self.image, "Other", "Pass")
         self.assertNotEqual(once, different)
         self.assertTrue(parse_esp_image(different)["sha256_valid"])
+
+    def test_an_imprinted_copy_cannot_be_imprinted_again(self):
+        once = imprint(self.image, "Net", "Pass")
+        with self.assertRaisesRegex(ImprintError, "not built to have credentials"):
+            imprint(once, "Other", "Pass")
+
+    def test_the_firmware_reads_exactly_the_credentials_given(self):
+        # The compiled string literal starts at the marker, so that is where the
+        # firmware starts reading. Regression: values written after the marker
+        # left the plug looking for "S60-IMPRINT-SSID>Net".
+        ssid_at = find_field(self.image, SSID_MARKER, SSID_FIELD_BYTES)
+        pass_at = find_field(self.image, PASSWORD_MARKER, PASSWORD_FIELD_BYTES)
+        result = imprint(self.image, "Wonky-2G", "correct horse")
+        self.assertEqual(read_c_string(result, ssid_at), b"Wonky-2G")
+        self.assertEqual(read_c_string(result, pass_at), b"correct horse")
+        self.assertNotIn(SSID_MARKER, result)
+        self.assertNotIn(PASSWORD_MARKER, result)
+
+    def test_the_network_name_can_be_read_back_from_an_imprinted_copy(self):
+        result = imprint(self.image, "Wonky-2G", "correct horse")
+        self.assertEqual(imprinted_ssid(result, self.image), "Wonky-2G")
+
+    def test_an_image_written_after_the_marker_is_refused(self):
+        # What the faulty tool produced: marker kept, value after it.
+        payload = (
+            b"some other rodata\x00"
+            + SSID_MARKER + b"Net".ljust(SSID_FIELD_BYTES, b"\x00") + b"\x00"
+            + b"more rodata\x00"
+            + PASSWORD_MARKER + b"Pass".ljust(PASSWORD_FIELD_BYTES, b"\x00") + b"\x00"
+        )
+        with self.assertRaisesRegex(ImprintError, "still in this image"):
+            require_imprinted(build_image(payload))
 
 
 if __name__ == "__main__":
@@ -201,3 +234,29 @@ class DerivationTests(unittest.TestCase):
     def test_a_different_firmware_is_not_derived(self):
         other = build_image(placeholder_payload() + b"different build\x00")
         self.assertFalse(derived_from(other, self.published))
+
+
+class RecoverySafebootHeaderTests(unittest.TestCase):
+    """The published build is unchanged unless settings-saving is asked for."""
+
+    def header(self, persist: bool) -> str:
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+        from configure_imprintable_safeboot import render_header
+        return render_header(persist).decode()
+
+    def test_the_default_build_is_the_published_one(self):
+        self.assertNotIn("S60_RECOVERY_PERSIST_SETTINGS", self.header(False))
+        self.assertIn("S60_RECOVERY_WIFI_DEFAULTS", self.header(False))
+
+    def test_settings_saving_is_asked_for_explicitly(self):
+        self.assertIn("S60_RECOVERY_PERSIST_SETTINGS", self.header(True))
+
+    def test_the_patch_guards_against_being_used_alone(self):
+        patch = (Path(__file__).resolve().parents[1]
+                 / "repartition/recovery-safeboot/persist-settings.patch").read_text()
+        # It must refuse to build without the Wi-Fi defaults it saves, and must
+        # never overwrite settings a configured device already has.
+        self.assertIn("#error S60_RECOVERY_PERSIST_SETTINGS requires", patch)
+        self.assertIn("CFG_HOLDER == stored->cfg_holder", patch)
+        self.assertIn("left alone", patch)

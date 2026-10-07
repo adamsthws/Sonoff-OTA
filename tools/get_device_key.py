@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import getpass
 import hashlib
 import hmac
 import json
@@ -16,6 +15,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+try:
+    from tools.autoflash.prompts import ask_secret
+except ModuleNotFoundError:  # running from inside tools/
+    from autoflash.prompts import ask_secret
 
 
 # Public client credentials used by the open-source SonoffLAN integration at
@@ -153,7 +157,7 @@ def main() -> int:
     args = parser.parse_args()
 
     email = args.email or input("eWeLink email: ").strip()
-    password = os.environ.get("EWELINK_PASSWORD") or getpass.getpass(
+    password = os.environ.get("EWELINK_PASSWORD") or ask_secret(
         "eWeLink password (not stored): "
     )
     if not email or not password:

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
 import os
 import sys
@@ -13,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.autoflash.prompts import ask_secret
     from tools.get_device_key import (
         API,
         EwelinkError,
@@ -23,6 +23,7 @@ try:
         target_id_from_mdns,
     )
 except ModuleNotFoundError:  # Support direct execution as tools/query_ota.py.
+    from autoflash.prompts import ask_secret
     from get_device_key import (
         API,
         EwelinkError,
@@ -63,7 +64,8 @@ def query_ota(region: str, token: str, identity: dict[str, str]) -> dict[str, An
 
 
 def ota_endpoints(ota_list: list[dict[str, Any]]) -> list[tuple[str, int]]:
-    """Extract only non-sensitive host/port pairs needed for router rules."""
+    """Extract only non-sensitive host/port pairs (informational; the
+    conversion delivers firmware directly and does not redirect these)."""
     endpoints: set[tuple[str, int]] = set()
     for ota in ota_list:
         for item in ota.get("binList", []):
@@ -97,7 +99,7 @@ def main() -> int:
     args = parser.parse_args()
 
     email = args.email or input("eWeLink email: ").strip()
-    password = os.environ.get("EWELINK_PASSWORD") or getpass.getpass(
+    password = os.environ.get("EWELINK_PASSWORD") or ask_secret(
         "eWeLink password (not stored): "
     )
     if not email or not password:
@@ -109,7 +111,9 @@ def main() -> int:
         device = select_device(get_devices(region, token), device_id)
         identity = ota_identity(device)
         response = query_ota(region, token, identity)
-        private_json(args.output, {"query": identity, "response": response})
+        # productModel names the region: S60TPG (UK) or S60TPF (Europe).
+        private_json(args.output, {"query": identity, "product": device.get("productModel"),
+                                   "response": response})
     except EwelinkError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -127,11 +131,11 @@ def main() -> int:
         print(f"Version: {ota.get('version')} | files: {len(ota.get('binList', []))}")
     endpoints = ota_endpoints(ota_list)
     if endpoints:
-        print("Router interception destination(s):")
+        print("Vendor OTA endpoint(s) (informational - not used; we deliver directly):")
         for host, port in endpoints:
             print(f"  Vendor OTA host: {host} | port: {port} | protocol: TCP")
     else:
-        print("Router interception destination: not present in OTA metadata")
+        print("Vendor OTA endpoint: not present in OTA metadata")
     print("No upgrade command was sent.")
     return 0
 

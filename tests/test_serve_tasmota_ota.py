@@ -29,6 +29,23 @@ class FirmwareServerTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_shutdown_is_not_held_up_by_an_open_keep_alive_connection(self):
+        # The plug leaves its connection open after the last range. Shutdown
+        # used to wait on it forever, after every byte had been delivered.
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.server.server_address[1], timeout=2
+        )
+        connection.request("GET", "/user1.bin", headers={"Range": "bytes=0-99"})
+        response = connection.getresponse()
+        self.assertEqual(response.read(), self.firmware)
+        try:
+            stopper = threading.Thread(target=self.server.shutdown, daemon=True)
+            stopper.start()
+            stopper.join(timeout=3)
+            self.assertFalse(stopper.is_alive(), "shutdown blocked on an idle connection")
+        finally:
+            connection.close()
+
     def test_serves_only_exact_firmware_paths(self):
         status, _, body = self.request("/wrong.bin")
         self.assertEqual((status, body), (404, b""))

@@ -1,0 +1,163 @@
+"""The Wi-Fi password and other secrets are never left on disk."""
+
+import json
+import os
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from tools import prepare_imprinted_bundle as bundle
+from tools.safeboot_migration import RECOVERY_ARTIFACT
+
+ROOT = Path(__file__).resolve().parents[1]
+LOCAL = ROOT / "captures" / "safeboot-recovery-migration"
+OFFICIAL = {name: LOCAL / name for name in
+            ("tasmota32c3.factory.bin", "tasmota32c3-safeboot.bin", "tasmota32c3.bin")}
+HAVE_OFFICIAL = all(path.exists() for path in OFFICIAL.values())
+
+
+@unittest.skipUnless(HAVE_OFFICIAL, "needs the official release files from a real bundle")
+class MemoryOnlyBundleTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.out = Path(directory.name)
+        with mock.patch("builtins.print"):
+            self.manifest, self.image = bundle.build_bundle(
+                "TestNet-2G", "correct-horse-battery", self.out,
+                OFFICIAL["tasmota32c3.factory.bin"], OFFICIAL["tasmota32c3-safeboot.bin"],
+                OFFICIAL["tasmota32c3.bin"])
+
+    def test_the_password_is_nowhere_in_the_bundle(self):
+        for path in self.out.rglob("*"):
+            if path.is_file():
+                self.assertNotIn(b"correct-horse-battery", path.read_bytes(), path.name)
+        self.assertFalse((self.out / bundle.RECOVERY_FILE).exists())
+        self.assertEqual(bundle.bundle_ssid(self.manifest), "TestNet-2G")
+
+    def test_the_right_password_rebuilds_the_pinned_image(self):
+        self.assertEqual(bundle.recovery_image(self.manifest, "TestNet-2G", "correct-horse-battery"),
+                         self.image)
+
+    def test_a_wrong_password_is_caught(self):
+        with self.assertRaisesRegex(bundle.BundleError, "does not match"):
+            bundle.recovery_image(self.manifest, "TestNet-2G", "correct-horse-batterz")
+
+    def test_the_bundle_checks_out_before_the_password_is_known(self):
+        bundle.validate_bundle(self.manifest)
+
+    def test_the_server_takes_the_image_through_a_pipe(self):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        evidence = self.out / "live"
+        process = subprocess.Popen(
+            [sys.executable, "-u", str(ROOT / "tools" / "serve_safeboot_migration.py"), "preflight",
+             "--manifest", str(self.manifest), "--evidence-dir", str(evidence),
+             "--listen-ip", "127.0.0.1", "--listen-port", str(port), "--device-ip", "127.0.0.1",
+             "--recovery-from-stdin", "--no-sensitive-captures", "--wait", "5"],
+            cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        process.stdin.write(self.image)
+        process.stdin.close()
+        output, deadline = b"", time.monotonic() + 15
+        while time.monotonic() < deadline and b"/berry/preflight.be" not in output:
+            chunk = process.stdout.read1(4096) if hasattr(process.stdout, "read1") else b""
+            if not chunk:
+                break
+            output += chunk
+        process.terminate()
+        process.wait(timeout=10)
+        self.assertIn(b"/berry/preflight.be", output, output.decode(errors="replace"))
+        self.assertFalse((self.out / bundle.RECOVERY_FILE).exists())
+
+    def test_an_old_bundle_is_converted_and_its_image_deleted(self):
+        manifest = json.loads(self.manifest.read_text())
+        del manifest["artifacts"][RECOVERY_ARTIFACT]["memory_only"]
+        del manifest["imprinted_safeboot"]["ssid"]
+        self.manifest.write_text(json.dumps(manifest))
+        (self.out / bundle.RECOVERY_FILE).write_bytes(self.image)
+        self.assertTrue(bundle.forget_stored_password(self.manifest))
+        self.assertFalse((self.out / bundle.RECOVERY_FILE).exists())
+        self.assertEqual(bundle.bundle_ssid(self.manifest), "TestNet-2G")
+        bundle.recovery_image(self.manifest, "TestNet-2G", "correct-horse-battery")
+
+
+@unittest.skipUnless(HAVE_OFFICIAL, "needs the official release files from a real bundle")
+class BundleWithoutWifiTests(unittest.TestCase):
+    """A5 builds the bundle with no Wi-Fi; E1 writes in what it reads off the plug."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.out = Path(directory.name)
+        with mock.patch("builtins.print"):
+            self.manifest, image = bundle.build_bundle(
+                None, None, self.out,
+                OFFICIAL["tasmota32c3.factory.bin"], OFFICIAL["tasmota32c3-safeboot.bin"],
+                OFFICIAL["tasmota32c3.bin"])
+        self.assertIsNone(image)
+
+    def test_it_checks_out_and_has_no_network(self):
+        bundle.validate_bundle(self.manifest)
+        self.assertIsNone(bundle.bundle_ssid(self.manifest))
+        with self.assertRaisesRegex(bundle.BundleError, "no Wi-Fi details yet"):
+            bundle.recovery_image(self.manifest, "TestNet-2G", "correct-horse-battery")
+
+    def test_pinning_the_wifi_needs_no_download_and_keeps_no_password(self):
+        with mock.patch.object(bundle, "obtain") as download:
+            image = bundle.pin_wifi(self.manifest, "TestNet-2G", "correct-horse-battery")
+        download.assert_not_called()
+        self.assertEqual(bundle.bundle_ssid(self.manifest), "TestNet-2G")
+        self.assertEqual(bundle.recovery_image(self.manifest, "TestNet-2G", "correct-horse-battery"),
+                         image)
+        bundle.validate_bundle(self.manifest, image)
+        for path in self.out.rglob("*"):
+            if path.is_file():
+                self.assertNotIn(b"correct-horse-battery", path.read_bytes(), path.name)
+
+    def test_it_can_be_pinned_again_for_another_network(self):
+        bundle.pin_wifi(self.manifest, "TestNet-2G", "correct-horse-battery")
+        image = bundle.pin_wifi(self.manifest, "Other-2G", "another password")
+        self.assertEqual(bundle.bundle_ssid(self.manifest), "Other-2G")
+        self.assertEqual(bundle.recovery_image(self.manifest, "Other-2G", "another password"), image)
+
+    def test_unusable_details_leave_the_bundle_as_it_was(self):
+        before = self.manifest.read_bytes()
+        with self.assertRaises(bundle.BundleError):
+            bundle.pin_wifi(self.manifest, "x" * 40, "too long a name")
+        self.assertEqual(self.manifest.read_bytes(), before)
+
+    def test_a_bundle_from_another_startup_firmware_is_refused(self):
+        manifest = json.loads(self.manifest.read_text())
+        manifest["imprinted_safeboot"]["published_sha256"] = "0" * 64
+        self.manifest.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(ValueError, "different startup firmware"):
+            bundle.validate_bundle(self.manifest)
+
+
+class RunSecretsTests(unittest.TestCase):
+    def test_only_the_secret_files_are_removed(self):
+        import tools.s60_autoflash as autoflash
+        with tempfile.TemporaryDirectory(dir=ROOT / "tests") as directory:
+            run = Path(directory)
+            (run / "live").mkdir()
+            for name in autoflash.SECRET_FILES:
+                (run / name).write_bytes(b"secret")
+            kept = [run / "autoflash-state.json", run / "live" / "stage-report.json"]
+            for path in kept:
+                path.write_text("{}")
+            removed = autoflash.forget_run_secrets(run)
+            self.assertEqual(len(removed), len(autoflash.SECRET_FILES))
+            for name in autoflash.SECRET_FILES:
+                self.assertFalse((run / name).exists(), name)
+            for path in kept:
+                self.assertTrue(path.exists(), path.name)
+
+
+if __name__ == "__main__":
+    unittest.main()

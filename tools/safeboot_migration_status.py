@@ -82,9 +82,13 @@ def main() -> int:
     evidence_dir = (args.evidence_dir or manifest_path.parent / "live").resolve()
     try:
         manifest = load_manifest(manifest_path)
-        verify_manifest_files(manifest_path, manifest)
+        # A memory-only recovery image (it holds the Wi-Fi password) is never
+        # on disk to check; everything else is.
+        memory_only = bool(manifest.get("artifacts", {}).get("recovery_safeboot", {}).get("memory_only"))
+        verify_manifest_files(manifest_path, manifest, allow_unprovided=True)
         require_pinned_artifacts(manifest)
-        require_recovery_manifest(manifest_path, manifest)
+        if not memory_only:
+            require_recovery_manifest(manifest_path, manifest)
         recovery_mode = is_recovery_manifest(manifest)
         target = parse_partition_sector(
             (manifest_path.parent / manifest["artifacts"]["target_table"]["file"]).read_bytes()

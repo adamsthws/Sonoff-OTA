@@ -27,6 +27,7 @@ try:
     from tools.safeboot_migration import (
         CANONICAL_NVS_SIZE,
         OTADATA_SIZE,
+        RECOVERY_ARTIFACT,
         SAFEBOOT_SIZE,
         SECTOR_SIZE,
         SOURCE_PARTITIONS,
@@ -39,6 +40,7 @@ try:
         load_evidence,
         load_manifest,
         parse_partition_sector,
+        provide_in_memory,
         require_exact_partitions,
         require_pinned_artifacts,
         require_recovery_manifest,
@@ -52,6 +54,7 @@ except ModuleNotFoundError:
     from safeboot_migration import (
         CANONICAL_NVS_SIZE,
         OTADATA_SIZE,
+        RECOVERY_ARTIFACT,
         SAFEBOOT_SIZE,
         SECTOR_SIZE,
         SOURCE_PARTITIONS,
@@ -64,6 +67,7 @@ except ModuleNotFoundError:
         load_evidence,
         load_manifest,
         parse_partition_sector,
+        provide_in_memory,
         require_exact_partitions,
         require_pinned_artifacts,
         require_recovery_manifest,
@@ -157,6 +161,9 @@ def phase_confirmation_refusal(
 
 
 class MigrationState:
+    # Whether to keep the bytes of captures that can hold credentials.
+    sensitive_captures = True
+
     def __init__(
         self,
         manifest_path: Path,
@@ -367,7 +374,8 @@ class MigrationState:
         nvs_report = analyze_canonical_nvs(nvs)
         if not nvs_report["ready"] and not self.recovery_mode:
             atomic_write(self.evidence_dir / "live-partition-table.bin", table)
-            atomic_write(self.evidence_dir / "live-canonical-nvs.bin", nvs)
+            if self.sensitive_captures:
+                atomic_write(self.evidence_dir / "live-canonical-nvs.bin", nvs)
             atomic_write(self.evidence_dir / "live-old-otadata.bin", otadata)
             evidence = self._base_evidence("preflight", "FAIL")
             evidence.update(
@@ -398,7 +406,8 @@ class MigrationState:
         }
         require_report_fields(report, expected)
         atomic_write(self.evidence_dir / "live-partition-table.bin", table)
-        atomic_write(self.evidence_dir / "live-canonical-nvs.bin", nvs)
+        if self.sensitive_captures:
+            atomic_write(self.evidence_dir / "live-canonical-nvs.bin", nvs)
         atomic_write(self.evidence_dir / "live-old-otadata.bin", otadata)
         evidence = self._base_evidence("preflight", "PASS")
         evidence.update(expected)
@@ -422,7 +431,8 @@ class MigrationState:
             "staged_size": str(len(self.safeboot)),
         }
         require_report_fields(report, expected)
-        atomic_write(self.evidence_dir / "staged-safeboot-readback.bin", staged)
+        if self.sensitive_captures:
+            atomic_write(self.evidence_dir / "staged-safeboot-readback.bin", staged)
         evidence = self._base_evidence("stage", "PASS")
         evidence.update(expected)
         atomic_json(self.evidence_dir / "stage-report.json", evidence)
@@ -586,7 +596,19 @@ def main() -> int:
     parser.add_argument("--wait", type=int, default=1800, help="seconds to wait for a phase report")
     parser.add_argument(COMMIT_FLAG, action="store_true")
     parser.add_argument(RESTORE_FLAG, action="store_true")
+    parser.add_argument(
+        "--recovery-from-stdin", action="store_true",
+        help="read the credential-carrying recovery image from standard input, "
+        "so it never exists as a file",
+    )
+    parser.add_argument(
+        "--no-sensitive-captures", action="store_true",
+        help="keep only hashes of the plug's NVS and of the staged recovery image, "
+        "not the bytes - they can hold credentials",
+    )
     args = parser.parse_args()
+    if args.recovery_from_stdin:
+        provide_in_memory(RECOVERY_ARTIFACT, sys.stdin.buffer.read())
 
     try:
         listen_ip = validate_lan_ipv4(args.listen_ip, "--listen-ip")
@@ -623,6 +645,7 @@ def main() -> int:
         state = MigrationState(
             manifest_path, manifest, args.phase, base_url, evidence_dir, args.max_evidence_age
         )
+        state.sensitive_captures = not args.no_sensitive_captures
         rendered = state.render_berry()
     except (OSError, ValueError, KeyError) as exc:
         print(f"REFUSING: {exc}", file=sys.stderr)

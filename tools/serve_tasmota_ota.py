@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import getpass
 import http.server
 import ipaddress
 import json
@@ -23,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.autoflash.prompts import ask_secret
     from tools.analyze_vendor_ota import analyze
     from tools.build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE, DEFAULT_MODEL
     from tools.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
@@ -30,6 +30,7 @@ try:
     from tools.query_ota import ota_identity
     from tools.websocket_minimal import WebSocket, WebSocketError
 except ModuleNotFoundError:
+    from autoflash.prompts import ask_secret
     from analyze_vendor_ota import analyze
     from build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE, DEFAULT_MODEL
     from get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
@@ -39,14 +40,26 @@ except ModuleNotFoundError:
 
 
 SAFETY_FLAG = "--i-understand-stock-has-no-automatic-rollback"
+# The eWeLink model of every plug this bridge has been proven on.  Another
+# Sonoff on the same account must never be sent it.
+S60_DEVICE_MODEL = "SN-ESP32C3-S60-01"
 
 
 class FirmwareHandler(http.server.BaseHTTPRequestHandler):
     """Serve the wrapped Tasmota binary, including Range request support."""
     server_version = "TasmotaOTA/1.0"
     protocol_version = "HTTP/1.1"  # keep-alive by default
+    # The plug holds its keep-alive connection open after the last range. With
+    # no idle limit the handler waits on it forever, and shutdown() - which
+    # waits for the handler - never returns.
+    timeout = 10
 
     def log_message(self, fmt, *args):
+        # Successful range requests become one progress line on a terminal;
+        # anything else - refusals, errors - is always printed in full.
+        if self.server.live and len(args) > 1 and str(args[1]).startswith("2"):
+            return
+        self.server.end_progress()
         print(f"  [{self.client_address[0]}] {fmt % args}")
 
     def _empty_response(self, status: int) -> None:
@@ -91,18 +104,39 @@ class FirmwareHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         self.end_headers()
         self.wfile.write(chunk)
-        print(f"  Served {path} bytes {lo:,}-{hi:,} ({len(chunk):,} bytes)")
         self.server.bytes_served += len(chunk)
         self.server.served_ranges.append((lo, hi))
+        if self.server.live:
+            unique = self.server.unique_bytes_served()
+            sys.stdout.write(f"\r  Delivered {unique:,} of {total:,} bytes "
+                             f"({100 * unique // total}%)   ")
+            sys.stdout.flush()
+            self.server.progress_shown = True
+        else:
+            print(f"  Served {path} bytes {lo:,}-{hi:,} ({len(chunk):,} bytes)")
 
 
-class FirmwareServer(http.server.HTTPServer):
+class FirmwareServer(http.server.ThreadingHTTPServer):
+    # Connections are handled on their own threads, so the accept loop - and
+    # with it shutdown() - is never stuck behind an open connection.
+    daemon_threads = True
+    block_on_close = False
+
     def __init__(self, addr, firmware: bytes, device_ip: str):
         super().__init__(addr, FirmwareHandler)
         self.firmware = firmware
         self.device_ip = device_ip
         self.bytes_served = 0
         self.served_ranges: list[tuple[int, int]] = []
+        # One updating progress line on a terminal; full per-request lines in
+        # logs and tests.
+        self.live = sys.stdout.isatty()
+        self.progress_shown = False
+
+    def end_progress(self) -> None:
+        if self.progress_shown:
+            sys.stdout.write("\n")
+            self.progress_shown = False
 
     def unique_bytes_served(self) -> int:
         if not self.served_ranges:
@@ -203,7 +237,7 @@ def main():
     sha256_wrapped = hashlib.sha256(firmware).hexdigest()
     print(f"Firmware: {args.firmware} ({len(firmware):,} bytes)")
 
-    password = os.environ.get("EWELINK_PASSWORD") or getpass.getpass("eWeLink password: ")
+    password = os.environ.get("EWELINK_PASSWORD") or ask_secret("eWeLink password: ")
     server: FirmwareServer | None = None
     thread: threading.Thread | None = None
     ws: WebSocket | None = None
@@ -218,6 +252,10 @@ def main():
         identity = ota_identity(device)
         print(f"Device: {device.get('name')} ({identity['model']}, stock {identity['version']})")
 
+        if identity["model"] != S60_DEVICE_MODEL:
+            raise EwelinkError(
+                f"Device model is {identity['model']}, not the S60's {S60_DEVICE_MODEL}; refusing"
+            )
         if not device.get("online"):
             raise EwelinkError("Device is offline; refusing to send")
         if identity["version"] != args.expected_current_version:
@@ -268,6 +306,7 @@ def main():
             if server.unique_bytes_served() == len(firmware):
                 if complete_at is None:
                     complete_at = time.monotonic()
+                    server.end_progress()
                     print("  Complete firmware byte coverage observed; allowing verification time.")
                 elif time.monotonic() - complete_at >= 8:
                     break
@@ -275,6 +314,7 @@ def main():
             if ws is not None:
                 try:
                     msg = ws.receive_json(timeout=0.5)
+                    server.end_progress()
                     print(f"  Cloud: {json.dumps(cloud_summary(msg))}")
                     if msg.get("sequence") == seq and msg.get("error", 0) != 0:
                         raise EwelinkError(f"Cloud rejected upgrade command: error {msg['error']}")
@@ -283,6 +323,7 @@ def main():
                 except WebSocketError as exc:
                     # The device going offline for its reboot commonly closes
                     # the cloud stream. HTTP delivery must continue regardless.
+                    server.end_progress()
                     print(f"  Cloud monitoring ended ({exc}); HTTP server remains active.")
                     try:
                         ws.close()

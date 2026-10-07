@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import http.client
 import http.server
 import ipaddress
@@ -21,10 +20,12 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.autoflash.prompts import ask_secret
     from tools.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
     from tools.query_ota import ota_identity
     from tools.websocket_minimal import WebSocket, WebSocketError
 except ModuleNotFoundError:
+    from autoflash.prompts import ask_secret
     from get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
     from query_ota import ota_identity
     from websocket_minimal import WebSocket, WebSocketError
@@ -138,7 +139,7 @@ def main() -> int:
         return 2
 
     email = args.email or input("eWeLink email: ").strip()
-    password = getpass.getpass("eWeLink password (not stored): ")
+    password = ask_secret("eWeLink password (not stored): ")
     server = CaptureServer((args.listen_ip, args.port))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

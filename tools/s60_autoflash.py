@@ -13,12 +13,13 @@ interrupted run resumes where it stopped.
 from __future__ import annotations
 
 import argparse
-import getpass
 import ipaddress
 import json
 import os
+import platform
+import re
+import shutil
 import signal
-import socket
 import subprocess
 import sys
 import time
@@ -28,38 +29,82 @@ from typing import Any, Callable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from tools.autoflash import hostsys, output, setup_network  # noqa: E402
+from tools.autoflash import tasmota_settings  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
-from tools.autoflash.phases import PhaseRunner  # noqa: E402
+from tools.autoflash.hostsys import FirewallRule  # noqa: E402
+from tools.autoflash.phases import PhaseError, PhaseRunner, PlugNeverConnected  # noqa: E402
 from tools.autoflash.prompts import (  # noqa: E402
     QuitRun,
     ask_choice,
     ask_ipv4,
+    ask_secret,
     ask_text,
     ask_yes_no,
     find_ssid,
-    resolve_host,
     section,
+    wait_for_key,
+    warning_box,
     wait_for_ssid,
     wait_or_ask,
 )
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED, RunState  # noqa: E402
+from tools.discover_ewelink import discover  # noqa: E402
+from tools.prepare_imprinted_bundle import (  # noqa: E402
+    BundleError,
+    ask_credentials,
+    ask_password,
+    build_bundle,
+    bundle_ssid,
+    forget_stored_password,
+    pin_wifi,
+    recovery_image,
+    validate_bundle,
+)
 from tools.query_ota import ota_endpoints  # noqa: E402
+from tools.serve_tasmota_ota import S60_DEVICE_MODEL  # noqa: E402
 from tools.safeboot_migration import (  # noqa: E402
     APP0_OFFSET,
+    PINNED_ARTIFACTS,
     SAFEBOOT_OFFSET,
     TABLE_OFFSET,
     TABLE_SIZE,
     load_manifest,
-    verify_manifest_files,
+    sha256_bytes,
 )
 
 DEFAULT_MANIFEST = Path("captures/safeboot-recovery-migration/manifest.json")
-S60_TEMPLATE = (
-    '{"NAME":"Sonoff S60TPG","GPIO":[1,1,1,1,224,544,1,3104,1,32,1,0,0,0,0,0,0,0,'
-    '1,1,1,1],"FLAG":0,"BASE":1}'
-)
-COMMIT_PHRASE = "replace the partition table"
+# Ports the bridge may be served on, in order of preference.  The upgrade
+# command names whichever is chosen, and the plug fetches from that port:
+# 8088 matches the vendor OTA port, but the research probe was served on
+# 8765.  The phase servers have their own ports, so the two never share one.
+DELIVERY_PORTS = (8088, *range(8090, 8100))
+# The S60's wiring: relay GPIO4, status LED GPIO5, power meter GPIO7, button
+# GPIO9.  The UK S60TPG and the European S60TPF publish the same pins.
+S60_GPIO = [1, 1, 1, 1, 224, 544, 1, 3104, 1, 32, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1]
+# eWeLink's product model for a Wi-Fi S60: S60TP and the plug-type letter.
+S60_PRODUCT = re.compile(r"S60TP[A-Z]")
+# Typed once, before the first write that cannot be undone, for the whole conversion.
+CONSENT_WORD = "proceed"
+# After this step the plug no longer runs its Sonoff firmware.
+POINT_OF_NO_RETURN = "C2"
+# Seconds to stop with Ctrl-C before the partition table is rewritten.
+COMMIT_COUNTDOWN = 10
+# Below this the startup firmware may struggle to rejoin on its own after E3.
+WEAK_SIGNAL_DBM = -75
 BRIDGE_AP_PREFIX = "S60-OTA-Bridge"
+# Fixed in the published bridge firmware; not a secret.
+BRIDGE_PASSWORD = "s60-ota-bridge"
+# v5: joins the home network the stock firmware was on, and gives Tasmota
+# its Wi-Fi at D1.  Where it cannot, it behaves exactly as v3 did.
+BRIDGE_OTA = Path("artifacts/s60-ota-bridge-v5-9.9.9.ota")
+# Ports the migration phase servers (serve_safeboot_migration.py) may listen
+# on, in order of preference.  Nothing on the plug keeps the port: each phase
+# starts its own server and sends the plug a loader URL that names it.
+PHASE_PORTS = (8089, *range(8100, 8110))
+SETTINGS_PATH = ROOT / "captures" / "settings.json"
+# Where people share how their conversion went: the pinned "Test reports" thread.
+REPORTS_URL = "https://github.com/adamsthws/SonoffS60OTA/discussions/1"
 TASMOTA_AP_PREFIX = "tasmota-"
 
 
@@ -70,13 +115,14 @@ class Abort(RuntimeError):
 # ---------------------------------------------------------------- utilities
 
 
-def say(message: str = "") -> None:
-    print(message, flush=True)
+def say(message: str = "", *, show: bool = False) -> None:
+    """A message for the run's log; on screen too in verbose mode, or with show."""
+    (output.show if show else output.detail)(message)
 
 
-def rule(title: str) -> None:
-    say("")
-    say(f"== {title}")
+def tell(message: str = "") -> None:
+    """A message the person running the tool needs to see, in every mode."""
+    say(message, show=True)
 
 
 def ask(prompt: str) -> str:
@@ -87,12 +133,15 @@ def confirm(prompt: str) -> bool:
     return ask_yes_no(prompt, default=False)
 
 
-def require_phrase(phrase: str) -> bool:
-    say("")
-    say("To go ahead, type this line exactly, then Enter:")
-    say(f"    {phrase}")
-    say("Anything else - including y - stops here and changes nothing.")
-    return ask_text(">", validate=lambda a: (True, "")) == phrase
+def require_word(word: str) -> bool:
+    """True only if the operator types `word` - any capitalisation - and Enter."""
+    tell("")
+    # Read directly: an empty answer must stop here, not be asked again.
+    question = f"Type {word.upper()} to go ahead - anything else stops, changing nothing: "
+    output.before_input(question)
+    answer = input(question)
+    output.answered(answer)
+    return answer.strip().lower() == word.lower()
 
 
 def run_tool(
@@ -101,52 +150,15 @@ def run_tool(
     interactive: bool = False,
     env: dict[str, str] | None = None,
 ) -> int:
+    """Run one of the reviewed tools.  Its output goes to the run's log, and to
+    the screen as well in verbose mode; it reads the keyboard as before, but
+    none of the tools run here asks anything (the password reaches them
+    through the environment), so `interactive` no longer changes anything.
+    """
     say(f"$ {' '.join(str(a) for a in args)}")
-    if interactive:
-        return subprocess.call(args, cwd=str(cwd), env=env)
-    completed = subprocess.run(args, cwd=str(cwd), text=True, env=env)
-    return completed.returncode
-
-
-def route_towards(target: str) -> tuple[str | None, str | None]:
-    """Ask the kernel which interface and source address reach `target`.
-
-    `ip route get` answers both in one line, e.g.
-      192.168.1.185 dev enp3s0 src 192.168.1.57 uid 1000
-    so neither has to be typed or guessed on a machine with several interfaces.
-    """
-    try:
-        completed = subprocess.run(
-            ["ip", "route", "get", target],
-            capture_output=True, text=True, timeout=5, check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None, None
-    if completed.returncode != 0:
-        return None, None
-    fields = completed.stdout.split()
-    device = source = None
-    for index, field in enumerate(fields[:-1]):
-        if field == "dev":
-            device = fields[index + 1]
-        elif field == "src":
-            source = fields[index + 1]
-    return device, source
-
-
-def local_ip_towards(target: str) -> str:
-    """The address this machine would use to reach `target`.
-
-    A UDP connect sends nothing; it just makes the kernel pick the route and
-    therefore the correct source interface.  That beats guessing when a machine
-    has several - ethernet, Wi-Fi, docker bridges, VPN.
-    """
-    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        probe.connect((target, 9))
-        return probe.getsockname()[0]
-    finally:
-        probe.close()
+    process = subprocess.Popen(args, cwd=str(cwd), env=env,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    return output.stream(process)
 
 
 def run_directories() -> list[Path]:
@@ -187,71 +199,127 @@ def read_current() -> str | None:
 
 
 def describe_run(directory: Path) -> str:
+    """Where a run stopped, briefly: the plug, the step, when, and how far in."""
+    import datetime as dt
+
     state = RunState.open(directory)
-    done = sum(1 for step, _, _ in STEPS if state.is_done(step))
-    where = state.input("plug_ip") or "no address yet"
-    when = state.data.get("updated_utc", "")[:16].replace("T", " ")
-    return f"{where:<16} {done}/{len(STEPS)} steps done   last touched {when}"
+    where = state.input("plug_ip") or "a plug not yet found"
+    pending = next((step for step, _, _ in STEPS if not state.is_done(step)), None)
+    try:
+        when = dt.datetime.fromisoformat(state.data.get("updated_utc", "")).astimezone()
+        today = when.date() == dt.date.today()
+        stamp = when.strftime("%H:%M today" if today else "%d %b %H:%M")
+    except ValueError:
+        stamp = "an unknown time"
+    details = [f"stopped at step {pending}" if pending else "finished", stamp]
+    if state.is_done(POINT_OF_NO_RETURN):
+        details.append("past the point of no return")
+    return f"the plug at {where} ({', '.join(details)})"
 
 
 def new_run_name(plug_ip: str | None) -> str:
     """A name the operator never has to type, but can recognise if they look."""
-    if plug_ip:
-        return "plug-" + plug_ip.replace(".", "-")
-    return "conversion-" + time.strftime("%Y%m%d-%H%M")
+    base = ("plug-" + plug_ip.replace(".", "-")) if plug_ip else (
+        "conversion-" + time.strftime("%Y%m%d-%H%M"))
+    existing = {d.name for d in run_directories()}
+    name, suffix = base, 2
+    while name in existing:
+        name, suffix = f"{base}-{suffix}", suffix + 1
+    return name
 
 
-def resolve_run_name(requested: str | None, force_new: bool, plug_ip: str | None) -> str:
+def start_new_run(plug_ip: str | None) -> str:
+    name = new_run_name(plug_ip)
+    remember_current(name)
+    return name
+
+
+def resolve_run_name(
+    requested: str | None, force_new: bool, plug_ip: str | None, ask: bool = False
+) -> str:
     """Work out which conversion this is, without asking for an identifier.
 
-    Mirrors how resumable tools normally behave: one in-flight operation,
-    remembered in a well-known place, and a numbered menu if that is genuinely
-    ambiguous.  Nothing opaque is ever typed by the operator.
+    One in-flight operation, remembered in a well-known place.  With `ask` - a
+    `run` - an unfinished conversion is offered back rather than resumed
+    silently, so starting the next plug is never mistaken for finishing the
+    last.  Nothing opaque is ever typed by the operator.
     """
     if requested:
         remember_current(requested)
         return requested
+    if force_new:
+        return start_new_run(plug_ip)
 
     unfinished = [d for d in run_directories() if not run_is_complete(d)]
-
-    if force_new:
-        name = new_run_name(plug_ip)
-        suffix = 2
-        existing = {d.name for d in run_directories()}
-        while name in existing:
-            name = f"{new_run_name(plug_ip)}-{suffix}"
-            suffix += 1
-        remember_current(name)
-        return name
+    if not unfinished:
+        return start_new_run(plug_ip)
 
     pointer = read_current()
-    if pointer and any(d.name == pointer for d in unfinished):
-        say(f"Continuing the conversion of {RunState.open(ROOT / 'captures' / pointer).input('plug_ip') or pointer}.")
-        return pointer
+    # Most recently touched first, so the likely answer is option 1.
+    unfinished.sort(key=lambda d: (d.name != pointer, -d.stat().st_mtime))
+    if not ask:
+        chosen = unfinished[0]
+        say(f"Continuing {describe_run(chosen)}.")
+        remember_current(chosen.name)
+        return chosen.name
 
-    if not unfinished:
-        name = new_run_name(plug_ip)
-        remember_current(name)
-        return name
+    while unfinished:
+        any_past = any(RunState.open(d).is_done(POINT_OF_NO_RETURN) for d in unfinished)
+        keep = ("the unfinished one stays" if len(unfinished) == 1
+                else "the unfinished ones stay")
+        options = [f"Continue {describe_run(d)}" for d in unfinished] + [
+            f"Start a new plug - {keep} on record, to finish later",
+            "Remove an unfinished run",
+        ]
+        chosen = ask_choice(
+            "A conversion did not finish last time. What now",
+            options,
+            help_lines=(
+                ["A plug past the point of no return no longer runs its Sonoff",
+                 "firmware - finish it before long; running this again offers it back."]
+                if any_past else []
+            ),
+        )
+        if chosen < len(unfinished):
+            remember_current(unfinished[chosen].name)
+            return unfinished[chosen].name
+        if chosen == len(unfinished):
+            return start_new_run(plug_ip)
+        target = unfinished[0] if len(unfinished) == 1 else unfinished[ask_choice(
+            "Which run should be removed",
+            [describe_run(d)[0].upper() + describe_run(d)[1:] for d in unfinished],
+        )]
+        if remove_run(target):
+            unfinished.remove(target)
+    return start_new_run(plug_ip)
 
-    if len(unfinished) == 1:
-        name = unfinished[0].name
-        say(f"Continuing the conversion of {RunState.open(unfinished[0]).input('plug_ip') or name}.")
-        remember_current(name)
-        return name
 
-    options = [describe_run(d) for d in unfinished] + ["Start a new conversion"]
-    chosen = ask_choice(
-        "Which one",
-        options,
-        help_lines=["There is more than one conversion part way through."],
-    )
-    if chosen == len(unfinished):
-        name = new_run_name(plug_ip)
-        remember_current(name)
-        return name
-    remember_current(unfinished[chosen].name)
-    return unfinished[chosen].name
+def remove_run(directory: Path) -> bool:
+    """Delete one run's record, after removing any firewall rule it left behind."""
+    state = RunState.open(directory)
+    description = describe_run(directory)
+    if state.is_done(POINT_OF_NO_RETURN):
+        section("This plug is part-converted", [
+            "It no longer runs its Sonoff firmware, so it will not show up as a",
+            "new plug either. Once its record is removed, this tool cannot finish",
+            "it - finishing would mean doing the remaining steps by hand.",
+        ])
+    if not ask_yes_no(f"Remove the record of {description}", default=False):
+        return False
+    rules = [FirewallRule.from_json(item) for item in state.input("firewall_rules") or []]
+    if rules:
+        say("It left a temporary firewall rule letting that plug connect to this")
+        say("computer. Removing it needs administrator rights, so you may be asked")
+        say("for this computer's password.")
+        left = [rule for rule in rules if not hostsys.close_firewall(rule)]
+        for rule in left:
+            say("Remove it yourself: "
+                + hostsys.display(hostsys.firewall_commands(rule.kind, rule.plug_ip, rule.ports)[1]))
+    shutil.rmtree(directory)
+    if read_current() == directory.name:
+        CURRENT_POINTER.unlink(missing_ok=True)
+    say(f"Removed the record of {description}.")
+    return True
 
 
 class Context:
@@ -263,16 +331,94 @@ class Context:
         self.state = RunState.open(self.dir)
         self.manifest_path = (ROOT / args.manifest).resolve()
         self.dry_run = args.dry_run
+        # Research only: a different bridge, after which the run stops (see
+        # archive/docs/reference/automatic-wifi.md).  The plug goes back to stock on a power cycle.
+        self.bridge = Path(getattr(args, "bridge", None) or BRIDGE_OTA)
+        self.research_bridge = self.bridge != BRIDGE_OTA
         if args.plug_ip:
             self.state.set_input("plug_ip", args.plug_ip)
-        if args.listen_ip:
-            self.state.set_input("listen_ip", args.listen_ip)
         if args.email:
-            self.state.set_input("email", args.email)
+            self.remember_email(args.email)
         if args.web_user:
             self.state.set_input("web_user", args.web_user)
         self.web_password = args.web_password
         self._ewelink_password: str | None = None
+        self._finder: PlugFinder | None = None
+        # Held only in memory: the Wi-Fi details, and the recovery image built
+        # from them.  Neither is ever written to disk.
+        self._wifi: tuple[str, str] | None = None
+        self._recovery: bytes | None = None
+
+    def remember_wifi(self, ssid: str, password: str, image: bytes) -> None:
+        self._wifi, self._recovery = (ssid, password), image
+
+    def wifi(self, why: list[str] | None = None) -> tuple[str, str]:
+        """The Wi-Fi name and password: read from the plug where it can be.
+
+        From D1 the plug runs Tasmota connected to the home network, so the
+        details are read from there rather than typed - and they are known to
+        work, which typed ones are not until F2 tries them.  Asking is the
+        fallback, with `why` saying what it is for; `--wifi` forces it.
+        """
+        forced = getattr(self.args, "wifi", False)
+        if self._wifi is None and not forced:
+            found = read_wifi_from_plug(self)
+            if found is not None:
+                self.adopt_wifi(*found)
+        if self._wifi is not None:
+            return self._wifi
+        self.state.set_input("wifi_typed", True)
+        section("Your Wi-Fi details are needed", [
+            *(["You chose to type them (--wifi)."] if forced else why or [
+                "They could not be read off the plug (the reason is above).",
+                "The startup firmware has to rejoin your Wi-Fi by itself after the",
+                "next stage, so it needs them written in.",
+            ]),
+            "",
+            "Use the 2.4 GHz network the plug should stay on. The password is held",
+            "in memory for this run only, never written to disk, and you are not",
+            "asked again later in the run.",
+        ])
+        while self._wifi is None:
+            ssid = bundle_ssid(self.manifest_path)
+            if ssid is None:
+                self.adopt_wifi(*ask_credentials())
+                continue
+            say(f"The bundle is set up for '{ssid}'.")
+            password = ask_secret(f"Wi-Fi password for '{ssid}': ")
+            try:
+                self.remember_wifi(ssid, password, recovery_image(self.manifest_path, ssid, password))
+            except BundleError as exc:
+                tell(f"    {exc}.")
+                choice = ask_choice("What now", [
+                    "Type the password again",
+                    "Use a different network, or a changed password - enter both",
+                ])
+                if choice == 1:
+                    self.adopt_wifi(*ask_credentials())
+        return self._wifi
+
+    def adopt_wifi(self, ssid: str, password: str) -> None:
+        """Use these details, setting the bundle up for them if it is not already."""
+        try:
+            image = recovery_image(self.manifest_path, ssid, password)
+        except BundleError:
+            say(f"    Writing the Wi-Fi for '{ssid}' into the startup firmware (in memory)...")
+            try:
+                image = pin_wifi(self.manifest_path, ssid, password)
+            except BundleError as first:
+                # A bundle this checkout can no longer use: build it again.
+                say(f"    {first}; preparing the firmware bundle again...")
+                try:
+                    _, image = build_bundle(ssid, password, self.manifest_path.parent)
+                except BundleError as exc:
+                    raise Abort(f"the bundle could not be prepared: {exc}") from exc
+        self.remember_wifi(ssid, password, image)
+
+    def recovery_bytes(self) -> bytes:
+        self.wifi()
+        assert self._recovery is not None
+        return self._recovery
 
     def ewelink_env(self) -> dict[str, str]:
         """Ask for the account password once and reuse it for this run only.
@@ -282,34 +428,84 @@ class Context:
         which serve_tasmota_ota.py already supported.
         """
         if self._ewelink_password is None:
-            self._ewelink_password = getpass.getpass(
-                "eWeLink password (asked once for this run, not stored): "
-            )
+            self._ewelink_password = ask_secret(f"eWeLink password for {self.email()}: ")
         return {**os.environ, "EWELINK_PASSWORD": self._ewelink_password}
 
+    def email(self) -> str:
+        """The eWeLink account email, chosen once per run.
+
+        The last account used on this computer is offered first; a plug in
+        another account needs that account's email instead.
+        """
+        email = self.state.input("email")
+        if not email:
+            last = load_settings().get("ewelink_email")
+            if last and ask_choice("Which eWeLink account is this plug in", [
+                f"The one used last time: {last}",
+                "A different account - enter its email",
+            ]) == 0:
+                email = last
+            else:
+                email = ask_text(
+                    "eWeLink account email",
+                    validate=lambda answer: (
+                        ("@" in answer, "That does not look like an email address.")
+                    ),
+                )
+        self.remember_email(email)
+        return email
+
+    def remember_email(self, email: str) -> None:
+        self.state.set_input("email", email)
+        settings = load_settings()
+        if settings.get("ewelink_email") != email:
+            settings["ewelink_email"] = email
+            save_settings(settings)
+
     def listen_ip(self) -> str:
-        """Where the plug fetches from: given, remembered, or derived."""
-        existing = self.state.input("listen_ip")
-        if existing:
-            return existing
+        """This computer's address as the plug sees it, worked out afresh each time.
+
+        Remembering it went wrong when a cable was unplugged mid-run: the tool
+        kept offering an address the computer no longer had.  --listen-ip still
+        overrides it.
+        """
+        if self.args.listen_ip:
+            return self.args.listen_ip
         plug_ip = self.state.input("plug_ip")
         if not plug_ip:
-            raise Abort("the plug address is not known yet, so the workstation "
-                        "address cannot be derived; pass --listen-ip")
-        _, routed = route_towards(plug_ip)
+            raise Abort("the plug address is not known yet, so this computer's "
+                        "address cannot be worked out; pass --listen-ip")
         try:
-            derived = routed or local_ip_towards(plug_ip)
+            derived = hostsys.local_ip_towards(plug_ip)
         except OSError as exc:
             raise Abort(
-                f"could not work out how this machine reaches {plug_ip} ({exc}); "
+                f"could not work out how this computer reaches {plug_ip} ({exc}); "
                 "check you are on the same network as the plug, or pass --listen-ip"
             ) from exc
         address = ipaddress.ip_address(derived)
         if not (address.is_private and address.version == 4):
-            raise Abort(f"derived workstation address {derived} is not a private IPv4 LAN address")
-        say(f"Workstation address towards {plug_ip}: {derived}")
-        self.state.set_input("listen_ip", derived)
+            raise Abort(f"this computer's address towards the plug, {derived}, is not "
+                        "a home-network address")
+        remembered = self.state.input("listen_ip")
+        if remembered != derived:
+            if remembered:
+                say(f"This computer's address towards the plug is now {derived} "
+                    f"(it was {remembered}).")
+            else:
+                say(f"This computer's address towards the plug: {derived}")
+            self.state.set_input("listen_ip", derived)
         return derived
+
+    def set_plug_ip(self, address: str) -> None:
+        if address != self.state.input("plug_ip"):
+            say(f"The plug is now at {address}.")
+            self.state.set_input("plug_ip", address)
+
+    @property
+    def finder(self) -> "PlugFinder":
+        if self._finder is None:
+            self._finder = PlugFinder(self)
+        return self._finder
 
     @property
     def device(self) -> Device:
@@ -323,14 +519,301 @@ class Context:
         )
 
     def phase_runner(self) -> PhaseRunner:
+        port = choose_port(self, "phase_port", PHASE_PORTS, "the migration steps")
+        ensure_firewall(self)
         return PhaseRunner(
             repo_root=ROOT,
             manifest=self.manifest_path,
             evidence_dir=self.evidence,
             listen_ip=self.listen_ip(),
             device=self.device,
-            log=say,
+            log=phase_log,
+            listen_port=port,
+            # Piped, never a file; and only hashes of captures that hold secrets.
+            recovery=self.recovery_bytes(),
         )
+
+
+def load_settings() -> dict[str, Any]:
+    """Preferences kept between runs on this computer - never secrets."""
+    try:
+        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(settings: dict[str, Any]) -> None:
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(json.dumps(settings, indent=2, sort_keys=True) + "\n",
+                             encoding="utf-8")
+
+
+# ----------------------------------------------------------------- firewall
+
+
+def s60_template(product_model: str | None) -> str:
+    """The Tasmota template, named after the plug's own model where eWeLink gave it.
+
+    S60TPG or S60TPF when the model is one of those; otherwise, or for a run
+    begun before the model was recorded, the series name.  Nothing but a
+    model matching S60_PRODUCT ever reaches the Tasmota command.
+    """
+    product = (product_model or "").strip().upper()
+    name = f"Sonoff {product}" if S60_PRODUCT.fullmatch(product) else "Sonoff S60"
+    return json.dumps({"NAME": name, "GPIO": S60_GPIO, "FLAG": 0, "BASE": 1}, separators=(",", ":"))
+
+
+# A phase server's line that says why it stopped, rather than how it is getting on.
+PHASE_PROBLEM_RE = re.compile(r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in", re.IGNORECASE)
+
+
+def phase_log(text: str) -> None:
+    say(text, show=bool(PHASE_PROBLEM_RE.search(text)))
+
+
+def choose_port(ctx: Context, key: str, candidates: tuple[int, ...], serving: str) -> int:
+    """The first of `candidates` free on this computer, recorded as `key`.
+
+    Chosen afresh each time, so a port that was busy last run is tried again.
+    Raises Abort - before anything reaches the plug - when none is free.
+    """
+    port = hostsys.first_free_port(ctx.listen_ip(), candidates)
+    if port is None:
+        raise Abort(
+            f"ports {candidates[0]} and {candidates[1]}-{candidates[-1]} are all in use on this "
+            f"computer, so there is nowhere to serve {serving} from. Stop whatever is "
+            "using them and run this again - nothing was sent to the plug"
+        )
+    if port != candidates[0]:
+        say(f"Port {candidates[0]} is in use on this computer; serving {serving} on {port} instead.")
+    ctx.state.set_input(key, str(port))
+    return port
+
+
+def firewall_ports(ctx: Context) -> list[int]:
+    """The ports the plug connects to this computer on: bridge delivery and phases."""
+    return sorted({int(ctx.state.input("delivery_port") or DELIVERY_PORTS[0]),
+                   int(ctx.state.input("phase_port") or PHASE_PORTS[0])})
+
+
+def recorded_rules(ctx: Context) -> list[FirewallRule]:
+    return [FirewallRule.from_json(item) for item in ctx.state.input("firewall_rules") or []]
+
+
+def ensure_firewall(ctx: Context) -> None:
+    """Let the plug's connections through this computer's firewall, once per address.
+
+    The rule admits only the plug's address on the two ports the tool listens
+    on, and is recorded so it can be removed exactly when the run finishes.
+    """
+    plug_ip = ctx.state.input("plug_ip")
+    ports = firewall_ports(ctx)
+    rules = recorded_rules(ctx)
+    if not plug_ip or any(r.plug_ip == plug_ip and set(ports) <= set(r.ports) for r in rules):
+        return
+    kind = hostsys.active_firewall()
+    if kind is None:
+        return
+    add, _ = hostsys.firewall_commands(kind, plug_ip, ports)
+    prompt_note = [
+        "Windows will ask whether to allow the change - choose Yes. This window",
+        "does not need to be run as administrator; only this rule asks for it.",
+        "If Windows Security then asks whether Python may use networks, choose",
+        "Allow: cancelling can block the plug even with this rule in place.",
+    ] if hostsys.IS_WINDOWS else ["You may be asked for this computer's password."]
+    what = ("lets Python accept incoming connections - the macOS firewall allows "
+            "programs, not ports" if kind == "macos"
+            else f"allows only {plug_ip} in, on TCP ports {', '.join(map(str, ports))}")
+    section("Let the plug through this computer's firewall", [
+        f"This computer's firewall ({kind}) would block the plug from fetching its",
+        f"firmware. Adding one rule that {what}.",
+        "It is removed again when the conversion finishes.",
+        *prompt_note,
+    ])
+    try:
+        rule = hostsys.open_firewall(plug_ip, ports)
+    except OSError:
+        section("The firewall rule could not be added", [
+            "Add it yourself, in another window, with:",
+            f"  {hostsys.display(add)}",
+            "and remove it after the conversion. Carrying on - if the plug is still",
+            "blocked, the next step stops and says so.",
+        ])
+        return
+    if rule is not None:
+        rules.append(rule)
+        ctx.state.set_input("firewall_rules", [r.to_json() for r in rules])
+        say("The rule was already there, so it is left in place afterwards."
+            if rule.detail.get("preexisting") else "Firewall rule added.")
+
+
+def firewall_hint(ctx: Context) -> list[str]:
+    """What to say when the plug never reached this computer."""
+    plug_ip = ctx.state.input("plug_ip") or "PLUG_IP"
+    lines = [
+        "The plug never connected to this computer. That is almost always this",
+        "computer's firewall, or this computer having changed address.",
+    ]
+    kind = hostsys.active_firewall()
+    if kind:
+        add, _ = hostsys.firewall_commands(kind, plug_ip, firewall_ports(ctx))
+        lines += ["", f"A {kind} firewall is on. This allows the plug in:", f"  {hostsys.display(add)}"]
+    return lines
+
+
+def close_firewall_rules(ctx: Context) -> None:
+    """Remove every rule this run added, and say what is left, if anything."""
+    rules = recorded_rules(ctx)
+    if not rules:
+        return
+    permission = (
+        "Windows will ask for permission again"
+        if hostsys.IS_WINDOWS else "you may be asked for this computer's password again"
+    )
+    tell("Removing the temporary firewall rule added at the start, which let the")
+    tell("plug connect to this computer. Changing the firewall needs administrator")
+    tell(f"rights, so {permission}.")
+    left: list[FirewallRule] = []
+    for rule in rules:
+        if not hostsys.close_firewall(rule):
+            left.append(rule)
+    ctx.state.set_input("firewall_rules", [r.to_json() for r in left])
+    if left:
+        section("Remove the temporary firewall rules yourself", [
+            hostsys.display(hostsys.firewall_commands(r.kind, r.plug_ip, r.ports)[1])
+            for r in left
+        ])
+    else:
+        say("The temporary firewall rules have been removed.")
+
+
+# ------------------------------------------------------------ finding the plug
+
+
+class PlugFinder:
+    """Where the plug is now: its known address, or wherever its hardware address is.
+
+    The hardware (MAC) address of the plug's Wi-Fi is the same under every
+    firmware, so once recorded it finds the plug after a restart onto a new
+    address, so nobody has to reserve one in their router.
+    """
+
+    SWEEP_EVERY = 30.0
+
+    def __init__(self, ctx: Context) -> None:
+        self.ctx = ctx
+        self.last_sweep = 0.0
+
+    def poll(self) -> str | None:
+        current = self.ctx.state.input("plug_ip")
+        mac = self.ctx.state.input("plug_mac")
+        if current and hostsys.ping_ok(current):
+            seen = hostsys.neighbour_table().get(current)
+            if not mac or seen in (None, mac):
+                return current
+        if mac and current and time.monotonic() - self.last_sweep > self.SWEEP_EVERY:
+            self.last_sweep = time.monotonic()
+            found = hostsys.find_by_mac(mac, current)
+            if found:
+                self.ctx.set_plug_ip(found)
+                return found
+        return None
+
+
+def locate_plug(ctx: Context, *, timeout: float = 300.0) -> str:
+    """Wait for the plug on the home network; ask only if it cannot be found."""
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        found = ctx.finder.poll()
+        if found:
+            output.progress_clear()
+            say(f"    The plug is on your network at {found}.")
+            return found
+        output.progress(f"looking for the plug on your network... {time.monotonic() - started:.0f}s")
+        time.sleep(5)
+    output.progress_clear()
+    found = wait_or_ask(ctx.state.input("plug_ip"), what="the plug", timeout=60.0)
+    ctx.set_plug_ip(found)
+    return found
+
+
+# --------------------------------------------------- the plug's own networks
+
+
+def wait_until_joined(network: str, marker: str | None = None) -> None:
+    """Block until this computer has joined the plug's network.
+
+    With `marker`, the page must mention it (the bridge).  Without, only the web
+    port is touched: Tasmota scans for networks on every page request in setup
+    mode, which drops this computer off its network.
+    """
+    def tick(elapsed: float) -> None:
+        output.progress(f"waiting for this computer to join {network}... {elapsed:.0f}s")
+
+    joined = (setup_network.wait_for_page(marker, tick=tick) if marker
+              else setup_network.wait_for_port(tick=tick))
+    if not joined:
+        output.progress_clear()
+        raise Abort(f"this computer did not join {network} within 15 minutes")
+    output.progress_clear()
+    say(f"    Connected to {network}.")
+
+
+def configure_plug_wifi(ctx: Context, network: str | None) -> str:
+    """Give Tasmota, waiting on its setup network, the bundle's Wi-Fi details.
+
+    The operator joins the setup network; the details are sent from here.  Tasmota
+    saves them only after it has connected with them, so a failure leaves the
+    plug waiting to be set up, never lost.
+    """
+    network = network or "tasmota-XXXXXX-NNNN"
+    credentials = ctx.wifi(why=[
+        "Tasmota could not be given them automatically, so it is waiting on its",
+        "own setup network for them. Type them here and this sends them to the",
+        "plug for you once you have joined that network.",
+    ])
+    section("Join the plug's setup network", [
+        f"In {hostsys.wifi_menu_hint()}, join:",
+        f"    {network}      (open - no password)",
+        "",
+        "If a setup page opens by itself, close it: while that page is open the",
+        "plug keeps scanning for networks, which can drop this computer off its",
+        "network.",
+    ])
+    wait_until_joined(network)
+    outcome = "manual"
+    if credentials is not None:
+        ssid, password = credentials
+        tell(f"    Sending the Wi-Fi details for '{ssid}'. The plug tests them first -")
+        tell("    stay on its network for about 20 seconds...")
+        try:
+            outcome, address = setup_network.send_wifi(ssid, password)
+        except setup_network.SetupError as exc:
+            outcome, address = "unknown", None
+            tell(f"    {exc}")
+        if outcome == "saved":
+            tell(f"    The plug connected to '{ssid}' and is restarting onto it"
+                + (f" at {address}." if address else "."))
+            if address:
+                ctx.set_plug_ip(address)
+        elif outcome == "rejected":
+            tell(f"    The plug could not connect to '{ssid}' with the bundle's details.")
+        else:
+            tell("    The plug did not say whether it connected. If it does not turn up")
+            tell("    on your Wi-Fi, it is still waiting on its setup network: run this")
+            tell("    again to retry.")
+    if outcome in ("rejected", "manual"):
+        section("Set the Wi-Fi up on the plug's page instead", [
+            "Stay on the plug's network for this.",
+            f"Browse to http://{setup_network.SETUP_HOST}, choose your home Wi-Fi,",
+            "type its password and save. When it says the connection worked:",
+        ])
+    section("Back to your usual Wi-Fi", [
+        "Your computer should rejoin your usual Wi-Fi by itself, if it doesn't,",
+        "join it now.",
+    ])
+    return locate_plug(ctx, timeout=600.0)
+
 
 
 # -------------------------------------------------------------------- steps
@@ -351,25 +834,53 @@ def upload_or_prompt(ctx: "Context", path: Path, what: str) -> str:
         say(f"{what} uploaded in {seconds}s")
         return f"http:{seconds}s"
     except Exception as exc:  # noqa: BLE001 - any failure falls back to the operator
-        say(f"Automatic upload failed: {exc}")
+        tell(f"Automatic upload failed: {exc}")
         say("")
-        say(f"Upload it by hand instead - the file is identical:")
-        say(f"  open http://{device.host}/  ->  Firmware Upgrade  ->  choose file")
-        say(f"  {path}")
+        tell(f"Upload it by hand instead - the file is identical:")
+        tell(f"  open http://{device.host}/  ->  Firmware Upgrade  ->  choose file")
+        tell(f"  {path}")
         if not confirm(f"{what} uploaded through the web UI?"):
             raise Abort(f"{what} was not uploaded")
         return "manual"
 
 
-def step_check(ctx: Context) -> dict[str, Any]:
-    """A5 - offline preconditions.  Touches nothing."""
-    manifest = load_manifest(ctx.manifest_path)
-    verify_manifest_files(ctx.manifest_path, manifest)
-    say("manifest and pinned artifacts: OK")
 
-    code = run_tool(["sha256sum", "-c", "SHA256SUMS"])
-    if code != 0:
-        raise Abort("artifact checksums failed")
+def step_prerequisites(ctx: Context) -> dict[str, Any]:
+    """A0 - what has to be in place first, for anyone who skipped the README."""
+    if any(ctx.state.is_done(step) for step, _, _ in STEPS if step != "A0"):
+        return {"shown": False}  # a run from before this step existed
+    section("Before you start", [
+        "- The eWeLink app on your phone, signed in to an eWeLink account",
+        "  (free - a throwaway account is fine).",
+        "- The S60 set up in the app on the 2.4 GHz Wi-Fi it should stay on:",
+        "  it keeps that network after the conversion, and cannot use 5 GHz.",
+        "- LAN Control turned on in the plug's settings in the app.",
+        "- The plug in a socket nobody will switch off until the run finishes.",
+        "",
+        "Nothing on the plug changes until you confirm, once, just before the",
+        "point of no return - you will be asked then.",
+    ])
+    wait_for_key()
+    return {"shown": True}
+
+
+def step_check(ctx: Context) -> dict[str, Any]:
+    """A5 - offline preconditions, building the bundle if there is none.  Touches no plug."""
+    try:
+        manifest = validate_bundle(ctx.manifest_path)
+    except ValueError as exc:
+        if ctx.manifest_path != (ROOT / DEFAULT_MANIFEST).resolve():
+            raise Abort(f"the bundle at {ctx.manifest_path} cannot be used: {exc}") from exc
+        manifest = make_bundle(ctx, problem=None if not ctx.manifest_path.exists() else str(exc))
+    else:
+        # Nothing is asked about Wi-Fi here: the details are read off the plug
+        # at E1, and the bundle is rebuilt then if they are for another network.
+        say("bundle and pinned artifacts: OK")
+
+    problems = hostsys.check_sha256sums(ROOT / "SHA256SUMS")
+    if problems:
+        raise Abort("artifact checksums failed: " + "; ".join(problems))
+    say("published artifact checksums: OK")
 
     for lock in ("RECOVERY_LOCK", "REPARTITION_LOCK"):
         if not (ROOT / lock).exists():
@@ -383,28 +894,170 @@ def step_check(ctx: Context) -> dict[str, Any]:
     return {"mode": manifest.get("migration_mode", "official")}
 
 
-def step_pair(ctx: Context) -> dict[str, Any]:
-    """A1 - operator action."""
-    section("Set the plug up in the eWeLink app", [
-        "Do these in the phone app before answering:",
+
+def make_bundle(ctx: Context, problem: str | None) -> dict[str, Any]:
+    """Build the bundle in place.  Asks nothing: the Wi-Fi is added at E1."""
+    section("Prepare the firmware bundle", quiet=True, body=[
+        *(["The existing bundle cannot be used:", f"  {problem}", ""] if problem else []),
+        "This downloads the official Tasmota files and checks each one against",
+        "its pinned fingerprint. It is done once; later plugs reuse it.",
         "",
-        "1. Plug the S60 into a socket you can reach.",
-        "2. In eWeLink, add it as a new device. It must join the same 2.4 GHz",
-        "   Wi-Fi network this computer is on - the plug cannot use 5 GHz.",
-        "3. Open the device, go into its settings, and turn ON 'LAN Control'.",
-        "4. In your router's admin page, find the plug in the list of connected",
-        "   devices and reserve its address so it cannot change later.",
-        "",
-        "The address is shown in your router's device list, and in eWeLink under",
-        "the device's settings or information page.",
+        "Your Wi-Fi details are not needed for this. Later in the run they are",
+        "read off the plug and written into an in-memory copy of the small",
+        "temporary firmware, which has to rejoin your Wi-Fi by itself.",
     ])
-    ip = ask_ipv4(
-        "What address did the plug get",
-        help_lines=["Four numbers with dots. Not the plug's name."],
-        must_respond=True,
-    )
+    try:
+        build_bundle(output=ctx.manifest_path.parent)
+    except BundleError as exc:
+        raise Abort(f"the bundle could not be prepared: {exc}") from exc
+    say("Bundle ready.")
+    return validate_bundle(ctx.manifest_path)
+
+
+def read_wifi_from_plug(ctx: "Context") -> tuple[str, str] | None:
+    """The Wi-Fi details the plug is connected with, or None if they cannot be read.
+
+    Tasmota never reports its password to a command, but its own configuration
+    backup carries one.  It is decoded in memory, never written down, and only
+    used when the name in it matches the network the plug says it is on - so
+    the details are known to work at that moment.
+    """
+    def unreadable(reason: str) -> None:
+        tell(f"    The Wi-Fi details could not be read off the plug: {reason}.")
+
+    try:
+        device = ctx.device
+        status = device.command("Status 11")
+        wifi = status.get("StatusSTS", {}).get("Wifi", {}) if isinstance(status, dict) else {}
+        connected = wifi.get("SSId")
+        if not connected:
+            return unreadable("it did not say which network it is on")
+        record = tasmota_settings.decode_backup(device.download_settings())
+        if tasmota_settings.problems(record):
+            return unreadable("its settings backup is not in the expected format")
+        ssid = tasmota_settings.text(record, tasmota_settings.SET_STASSID1)
+        password = tasmota_settings.text(record, tasmota_settings.SET_STAPWD1)
+    except (Abort, DeviceError, ValueError, OSError) as exc:
+        return unreadable(f"it did not answer as Tasmota ({exc})")
+    if ssid != connected:
+        return unreadable(f"it is on '{connected}', not the network in its first slot")
+    if not password:
+        return unreadable(f"'{connected}' has no password to read")
+    say(f"    Read the Wi-Fi details the plug is connected with ('{ssid}') - none to type.")
+    return ssid, password
+
+
+def check_plug_network(ctx: Context) -> dict[str, Any]:
+    """The plug must be on the network the startup firmware will join.
+
+    After E3 the startup firmware rejoins Wi-Fi by itself, with only the details
+    in the bundle.  The plug's own connection proves a network name works from
+    where it stands; the bundle must name that network.  The password cannot be
+    checked - Tasmota never reports it.
+    """
+    wanted = bundle_ssid(ctx.manifest_path)
+    if wanted is None:
+        say("This bundle's Wi-Fi details are not readable, so the network check is skipped.")
+        return {"network_check": "skipped"}
+    status = ctx.device.command("Status 11")
+    wifi = status.get("StatusSTS", {}).get("Wifi", {}) if isinstance(status, dict) else {}
+    connected = wifi.get("SSId")
+    signal = wifi.get("Signal")
+    if not connected:
+        raise Abort(
+            "the plug did not say which Wi-Fi network it is on, so the bundle's "
+            "network cannot be checked. Nothing was written"
+        )
+    while connected != wanted:
+        section("The bundle is set up for a different Wi-Fi network", [
+            f"The plug is connected to        '{connected}'",
+            f"The bundle's firmware will join '{wanted}'",
+            "",
+            "Later the plug has to rejoin Wi-Fi using only the bundle's details.",
+            "With these it would never come back. Nothing has been written.",
+            "",
+            f"Give the password for '{connected}' and the startup firmware is set",
+            "up for that network instead.",
+        ])
+        if not ask_yes_no(f"Enter the password for '{connected}' now", default=True):
+            raise Abort(f"the plug is on '{connected}' but the bundle is set up for '{wanted}'")
+        ctx.adopt_wifi(connected, ask_password(connected))
+        wanted = bundle_ssid(ctx.manifest_path)
+    say(f"Network check: the plug is on '{connected}', the network the startup "
+        f"firmware will join (signal {signal} dBm).")
+    if isinstance(signal, int) and signal < WEAK_SIGNAL_DBM:
+        section("The plug's Wi-Fi signal is weak", [
+            f"It reports {signal} dBm. After the next stage the startup firmware has",
+            "to rejoin on its own, and a weak signal makes that less certain.",
+            "Moving the plug nearer the access point first is worth it.",
+        ])
+        if not ask_yes_no("Carry on anyway", default=False):
+            raise Abort("stopped for a weak Wi-Fi signal; nothing was written")
+    return {"network": connected, "signal_dbm": signal}
+
+
+
+def step_pair(ctx: Context) -> dict[str, Any]:
+    """A1 - find the plug on the network, asking only when it is ambiguous."""
+    ip = ctx.state.input("plug_ip")
+    while not ip:
+        say("Looking for Sonoff plugs on your network...")
+        plugs = find_ewelink_plugs()
+        if len(plugs) == 1:
+            ip, name = plugs[0]
+            say(f"Found {name} at {ip}.")
+        elif plugs:
+            choice = ask_choice(
+                "More than one Sonoff plug answered. Which one is this run for",
+                [f"{name} at {address}" for address, name in plugs],
+            )
+            ip = plugs[choice][0]
+        else:
+            section("No Sonoff plug answered on this network", [
+                "Check, in the eWeLink app:",
+                "- the S60 is added, on the same 2.4 GHz Wi-Fi network as this",
+                "  computer - the plug cannot use 5 GHz",
+                "- LAN Control is turned on in the plug's settings",
+                "- the plug is switched on at the wall",
+            ])
+            choice = ask_choice(
+                "What now",
+                ["Look again", "Type the plug's address myself"],
+            )
+            if choice == 1:
+                ip = ask_ipv4(
+                    "The plug's address",
+                    help_lines=["It is in your router's device list, and in eWeLink's device information."],
+                    must_respond=True,
+                )
     ctx.state.set_input("plug_ip", ip)
-    return {"plug_ip": ip}
+    mac = hostsys.mac_of(ip)
+    if mac:
+        ctx.state.set_input("plug_mac", mac)
+    return {"plug_ip": ip, "plug_mac": mac}
+
+
+def find_ewelink_plugs(timeout: float = 6.0) -> list[tuple[str, str]]:
+    """(address, name) for each eWeLink device answering mDNS on this network."""
+    try:
+        report = discover(timeout)
+    except OSError:
+        return []
+    found: dict[str, str] = {}
+    for packet in report.get("packets", []):
+        source = packet.get("source")
+        if not source or "records" not in packet:
+            continue
+        label = found.get(source, "a Sonoff plug")
+        for record in packet["records"]:
+            if record.get("type") == "TXT":
+                for value in record.get("value") or []:
+                    if str(value).startswith("id="):
+                        label = f"eWeLink device {str(value)[3:]}"
+        found[source] = label
+    return sorted(found.items())
+
+
 
 
 def step_discover(ctx: Context) -> dict[str, Any]:
@@ -412,186 +1065,84 @@ def step_discover(ctx: Context) -> dict[str, Any]:
     plug_ip = ctx.state.require("plug_ip")[0]
     mdns = ctx.dir / "mdns.json"
     meta = ctx.dir / "ota-metadata.json"
-    key = ctx.dir / "device-key.json"
 
-    if run_tool([sys.executable, "tools/discover_ewelink.py", "--timeout", "8",
-                 "--target", plug_ip, "--output", str(mdns)]) != 0:
-        raise Abort("discovery failed")
+    # The same report the discovery tool writes, without its console output.
+    report = discover(8.0, None, plug_ip)
+    if not report["packets"]:
+        raise Abort(f"the plug at {plug_ip} did not answer the eWeLink discovery; check "
+                    "it is switched on and LAN Control is on in the eWeLink app")
+    mdns.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    email = ctx.email()
     env = ctx.ewelink_env()
     if run_tool([sys.executable, "tools/query_ota.py", "--mdns-capture", str(mdns),
-                 "--output", str(meta)], interactive=True, env=env) != 0:
-        raise Abort("OTA metadata query failed")
-    if run_tool([sys.executable, "tools/get_device_key.py", "--mdns-capture", str(mdns),
-                 "--output", str(key)], interactive=True, env=env) != 0:
-        raise Abort("device key retrieval failed")
+                 "--email", email, "--output", str(meta)], interactive=True, env=env) != 0:
+        reasons = output.tool_problems(1)
+        raise Abort("the eWeLink query failed" + (f": {reasons[0]}" if reasons else ""))
 
     # Read what query_ota just wrote instead of asking the operator to retype it.
     try:
         metadata = json.loads(meta.read_text(encoding="utf-8"))
         version = str(metadata["query"]["version"])
         model = str(metadata["query"].get("model", ""))
+        product = str(metadata.get("product") or "")
         endpoints = ota_endpoints(metadata["response"]["data"]["otaInfoList"])
     except (OSError, KeyError, TypeError, ValueError) as exc:
         raise Abort(f"could not read the OTA metadata just written: {exc}") from exc
-
-    if not endpoints:
-        raise Abort("the OTA metadata contains no vendor download endpoint to redirect")
-    if len(endpoints) > 1:
-        say("The metadata names more than one vendor endpoint:")
-        for index, (host, port) in enumerate(endpoints, 1):
-            say(f"  {index}. {host}:{port}")
-        choice = ask("Which one does the router rule target? [number]")
-        try:
-            vendor_ip, vendor_port_int = endpoints[int(choice) - 1]
-        except (ValueError, IndexError) as exc:
-            raise Abort("no valid endpoint chosen") from exc
-    else:
-        vendor_ip, vendor_port_int = endpoints[0]
-    vendor_port = str(vendor_port_int)
-
-    section("What the plug reported", [
-        f"Model            {model}",
-        f"Firmware now     {version}",
-        f"Update server    {vendor_ip} port {vendor_port}",
-        "",
-        "The update server is the address the plug would normally download",
-        "Sonoff firmware from. The next step redirects just that one connection",
-        "to this computer, so the plug downloads our firmware instead.",
-    ])
-    if not ask_yes_no(
-        "Does that match the lines printed just above",
-        help_lines=["Answer n if anything looks different and we will stop."],
-        default=True,
-    ):
-        raise Abort("metadata not confirmed")
-
-    ctx.state.set_input("stock_version", version)
-    ctx.state.set_input("vendor_ip", vendor_ip)
-    ctx.state.set_input("vendor_port", vendor_port)
-    return {"stock_version": version, "vendor": f"{vendor_ip}:{vendor_port}", "model": model}
-
-
-def step_intercept(ctx: Context) -> dict[str, Any]:
-    """B1/B2 - router DNAT, then prove it before anything is written."""
-    plug_ip, vendor_ip, vendor_port = ctx.state.require("plug_ip", "vendor_ip", "vendor_port")
-    listen_ip = ctx.listen_ip()
-    section("Redirect the plug's update connection", [
-        "You now need one rule in your router. It sends the plug's firmware",
-        "download to this computer instead of to Sonoff's server. Nothing else",
-        "on your network is affected, and you remove the rule at the end.",
-        "",
-        "In the router admin page look for a section called any of:",
-        "  Port Forwarding / NAT / Virtual Server / Destination NAT / DNAT",
-        "(On OpenWrt it is Network > Firewall > Port Forwards.)",
-        "",
-        "Create a rule with these values:",
-        f"  Protocol            TCP",
-        f"  Source address      {plug_ip}          (the plug)",
-        f"  Destination address {vendor_ip}",
-        f"  Destination port    {vendor_port}",
-        f"  Forward to address  {listen_ip}          (this computer)",
-        f"  Forward to port     {vendor_port}",
-        "",
-        "If your router has an option called NAT reflection, hairpin NAT or",
-        "masquerading, turn it on. Without it the reply can reach the plug from",
-        "the wrong address and the plug ignores it.",
-        "",
-        "If you cannot find this in your router, stop here and ask - a normal",
-        "'port forward from the internet' is NOT the same thing and will not work.",
-    ])
-    if not ask_yes_no("Have you saved that rule", default=False):
-        raise Abort("the redirect rule is needed before anything can be installed")
-
-    # The kernel already knows which network connection reaches the plug, so
-    # this is stated rather than asked: an operator has no way to check it.
-    interface, _ = route_towards(plug_ip)
-    if interface:
-        say(f"This computer reaches the plug over its {interface} connection.")
-    else:
-        section("Which network connection reaches the plug", [
-            "This computer could not work that out by itself, so it needs telling.",
-            "Below is a list of this machine's network connections. Find the one",
-            "holding an address on the same network as the plug - the one starting",
-            f"with the same numbers as {plug_ip} - and type its name, the short word",
-            "on the left such as eth0, enp34s0 or wlan0.",
-        ])
-        subprocess.run(["ip", "-brief", "address"], check=False)
-        interface = ask_text(
-            "Connection name",
-            example="enp34s0",
-            validate=lambda answer: (
-                (False, "That looks like an address. Type the short name on the "
-                        "left of the list instead, such as enp34s0.")
-                if ("." in answer or ":" in answer)
-                else (True, "")
-            ),
-        )
-    section("Test the rule before touching the plug", [
-        "The test borrows the plug's address for a few seconds to check the",
-        "redirect really works. The plug must be switched off first, or two",
-        "devices would answer to the same address.",
-        "",
-        "Pull the plug out of the socket now. Leave it out until asked.",
-    ])
-    if not ask_yes_no("Is the plug unplugged from the wall", default=False):
-        raise Abort("the plug must be powered off for this test")
-    say("")
-    say("You will be asked for your computer's password - the test needs")
-    say("administrator rights to add and remove a temporary address.")
-
-    code = run_tool(
-        ["sudo", "./tools/test_ota_firewall.sh", interface, plug_ip, listen_ip,
-         vendor_ip, vendor_port],
-        interactive=True,
-    )
-    if code != 0:
+    finally:
+        # Its download links may work as access tokens; what is needed is now read.
+        meta.unlink(missing_ok=True)
+    if model != S60_DEVICE_MODEL:
         raise Abort(
-            "the redirect test failed. The rule is not working yet, and sending "
-            "the upgrade command now would make the plug install Sonoff's own "
-            "firmware instead. Fix the rule and run this step again."
+            f"{plug_ip} is a {model or 'device of unknown model'}, not a Sonoff S60 "
+            f"({S60_DEVICE_MODEL}). This tool only converts the S60; nothing was written"
         )
-    section("Test passed", [
-        "Plug the S60 back into the wall. Nothing else to do - this will notice",
-        "when it reconnects.",
+
+    # Our upgrade command names this computer as the download address and
+    # carries our firmware's hash, so the plug fetches our image directly
+    # whether or not Sonoff is also offering it one.  We never redirect
+    # Sonoff's own download, so no router rule is involved in any case.
+    #
+    # Earlier versions added a router DNAT rule whenever an update was on
+    # offer, as a guard against the plug fetching Sonoff's genuine update in
+    # the same window.  That guard was dropped; the "Getting in" note in
+    # docs/what-happens.md and the DNAT recipe in
+    # archive/docs/reference/ota-findings.md record how to reinstate it.
+    if endpoints:
+        offered = f"{endpoints[0][0]} port {endpoints[0][1]} (not used - we deliver directly)"
+    else:
+        offered = "none - this is the latest Sonoff firmware"
+    section("What the plug reported", quiet=True, body=[
+        f"Model            {model}",
+        f"Product          {product or 'not given'}",
+        f"Firmware now     {version}",
+        f"Update offered   {offered}",
+        "",
+        "The plug fetches our firmware straight from this computer, so no",
+        "router rule is needed.",
     ])
-    found = wait_or_ask(plug_ip, what="the plug")
-    if found != plug_ip:
-        ctx.state.set_input("plug_ip", found)
-    return {"interface": interface, "verified": True}
+    ctx.state.set_input("stock_version", version)
+    ctx.state.set_input("product_model", product)
+    return {"stock_version": version, "update_offered": bool(endpoints), "model": model}
+
 
 
 def step_bridge(ctx: Context) -> dict[str, Any]:
     """C - stock to recovery bridge.  First write; no rollback below this line."""
-    plug_ip, version, vendor_port = ctx.state.require(
-        "plug_ip", "stock_version", "vendor_port"
-    )
+    plug_ip, version = ctx.state.require("plug_ip", "stock_version")
     listen_ip = ctx.listen_ip()
-    email = ctx.state.input("email") or ask("eWeLink email:")
-    ctx.state.set_input("email", email)
+    email = ctx.email()
+    port = choose_port(ctx, "delivery_port", DELIVERY_PORTS, "the firmware")
+    ensure_firewall(ctx)
     env = ctx.ewelink_env()
 
-    section("First firmware install - read this one", [
-        "Everything so far has been reversible. This step is not.",
-        "",
-        "It replaces the plug's Sonoff firmware with our own. If the new",
-        "firmware fails to start - which has not happened in testing, but can -",
-        "the plug cannot be recovered over Wi-Fi. Getting it back would mean",
-        "opening the case and connecting a USB-serial adapter to it.",
-        "",
-        "Before answering:",
-        "  - the plug is in a socket that will not be switched off",
-        "  - nothing else is about to interrupt your Wi-Fi",
-        "  - you are willing to lose this plug if it goes wrong",
-        "",
-        "You will be asked for your eWeLink password next. It is used to tell",
-        "the plug to start its update, and is not saved anywhere.",
+    warning_box("Before going on", [
+        "From here the plug's Sonoff firmware is replaced, so the eWeLink app",
+        "will no longer control it. Later its memory layout is rewritten; losing",
+        "power during that minute would mean opening the plug to recover it.",
+        "Only go ahead with a plug you can afford to lose. You won't be asked again.",
     ])
-    if not ask_yes_no(
-        "Go ahead and install",
-        help_lines=["Answer n to stop. Nothing has been written to the plug yet."],
-        default=False,
-    ):
-        raise Abort("not confirmed")
+    if not require_word(CONSENT_WORD):
+        raise Abort("not confirmed - nothing has been written to the plug")
 
     lock = ROOT / "RECOVERY_LOCK"
     moved = ROOT / "RECOVERY_LOCK.owner-authorized"
@@ -600,9 +1151,9 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
     try:
         code = run_tool(
             [sys.executable, "tools/serve_tasmota_ota.py",
-             "--listen-ip", listen_ip, "--listen-port", vendor_port,
+             "--listen-ip", listen_ip, "--listen-port", str(port),
              "--device-ip", plug_ip,
-             "--firmware", "artifacts/s60-ota-bridge-v3-1.2.1.ota",
+             "--firmware", str(ctx.bridge),
              "--email", email, "--expected-current-version", version,
              "--mdns-capture", str(ctx.dir / "mdns.json"),
              "--i-understand-stock-has-no-automatic-rollback"],
@@ -613,99 +1164,164 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
         moved.rename(lock)
         say("RECOVERY_LOCK restored")
     if code != 0:
+        # The sender can fail after the plug already has everything - the cloud
+        # reporting it offline is exactly what a successful install looks like.
+        installed, reason = evidence_bridge_installed(ctx)
+        if installed:
+            say(f"  {reason}")
+            return {"seconds": round(time.monotonic() - started, 1), "confirmed_by": "bridge network"}
+        reported = output.tool_problems()
+        section("The bridge was not delivered", [
+            *(["The sender reported:", *(f"  {line}" for line in reported), ""] if reported else []),
+            *firewall_hint(ctx),
+        ])
         raise Abort("bridge delivery failed")
     return {"seconds": round(time.monotonic() - started, 1)}
 
 
-def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
-    """D1/D2 - Berry-capable Tasmota through the bridge AP (operator-assisted)."""
-    image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
-    say("Looking for the bridge's Wi-Fi network...")
-    bridge_ssid = find_ssid(BRIDGE_AP_PREFIX) or "S60-OTA-Bridge-XXXX   (the XXXX varies)"
-    section("Switch this computer's Wi-Fi to the plug", [
-        "The plug is now running our small recovery firmware. It has made its",
-        "own Wi-Fi network, and the only way to talk to it is to join that.",
-        "",
-        "1. In this computer's Wi-Fi menu, join:",
-        f"       network   {bridge_ssid}",
-        "       password  s60-ota-bridge",
-        "2. You will lose internet while joined to it. That is expected.",
-        "3. Open a SECOND terminal window, go to this same folder, and run the",
-        "   command below. Leave this window alone.",
-    ])
-    say("")
-    say("  curl --http1.1 --silent --show-error --connect-timeout 5 --max-time 300 \\")
-    say("    -H 'Expect:' -H 'Content-Type: application/octet-stream' \\")
-    say(f"    --data-binary '@{image}' \\")
-    say("    http://192.168.4.1/update")
-    say("")
-    say(f"It sends {image.stat().st_size:,} bytes and takes a few minutes.")
-    say("Success looks like:  Upload verified. Rebooting into the new application...")
-    say("")
-    if not ask_yes_no(
-        "Did the upload finish and report success",
-        help_lines=[
-            "Answer n if it errored, stalled, or you are unsure. Nothing is lost:",
-            "the plug still has the recovery firmware and this step can be re-run.",
-        ],
-        default=False,
-    ):
-        raise Abort("the firmware upload did not complete")
 
+
+def bridge_on_home_network(ctx: Context, *, timeout: float = 60.0) -> str | None:
+    """The bridge's address on the home network, if it joined it.
+
+    Bridge v4 joins the network the stock firmware was using.  It has the
+    plug's own hardware address there, so it is found where the plug was.
+    """
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        address = ctx.finder.poll()
+        if address:
+            body = setup_network.page(address, timeout=3.0)
+            if body is not None and setup_network.BRIDGE_PAGE_MARKER.lower() in body.lower():
+                output.progress_clear()
+                return address
+        output.progress(f"looking for the installer on your network... {time.monotonic() - started:.0f}s")
+        time.sleep(2.0)
+    output.progress_clear()
+    return None
+
+
+def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
+    """D1/D2 - Berry-capable Tasmota through the bridge."""
+    image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
+    say("Looking for the plug's Wi-Fi network...")
+    bridge = find_ssid(BRIDGE_AP_PREFIX)
+    setup = None if bridge else find_ssid(TASMOTA_AP_PREFIX)
+    if setup:
+        # Resuming after the upload: Tasmota is already installed and waiting.
+        say(f"    Tasmota is already installed and waiting on {setup}.")
+        ctx.state.set_input("device_name", setup)
+        ip = configure_plug_wifi(ctx, setup)
+        return {"plug_ip": ip, "device_name": setup, "resumed": True}
+
+    address = bridge_on_home_network(ctx)
+    if address:
+        say(f"    The installer joined your network at {address}.")
+        preset = give_tasmota_the_wifi(ctx, address)
+        upload_tasmota(image, host=address)
+        if preset:
+            found = tasmota_on_home_network(ctx)
+            if found:
+                return {"plug_ip": found, "upload_route": "home network", "wifi": "preset",
+                        "device_name": ctx.state.input("device_name")}
+            section("Tasmota has not appeared on your network", QUICK_POWER_CYCLE_HINT)
+            return finish_tasmota_setup(ctx, route="home network", wait=900.0)
+        return finish_tasmota_setup(ctx, route="home network")
+    bridge = bridge or "S60-OTA-Bridge-XXXX   (the XXXX varies)"
+    copied = hostsys.copy_to_clipboard(BRIDGE_PASSWORD)
+    section("Join the bridge's Wi-Fi network", [
+        "The plug is running our small installer, which has made its own Wi-Fi",
+        f"network. In {hostsys.wifi_menu_hint()}, join:",
+        f"    network   {bridge}",
+        f"    password  {BRIDGE_PASSWORD}"
+        + ("      (already copied - just paste it)" if copied else ""),
+        "",
+        "Your Wi-Fi internet drops while joined - expected. A wired connection,",
+        "if this computer has one, can stay connected. This carries on by itself.",
+    ])
+    wait_until_joined(bridge.split()[0], setup_network.BRIDGE_PAGE_MARKER)
+    upload_tasmota(image)
+    return finish_tasmota_setup(ctx, route="bridge network")
+
+
+# Tasmota with Wi-Fi details that do not work keeps retrying them and never
+# opens its setup network.  Its quick power-cycle reset is the way out:
+# settings.ino UpdateQuickPowerCycle, 7 boots in a row each under
+# POWER_CYCLE_TIME (8 s), erases its settings and it starts as new.
+QUICK_POWER_CYCLE_HINT = [
+    "It was given the Wi-Fi details the installer had just joined with, so",
+    "this is unusual. If a few more minutes pass and it still has not appeared:",
+    "",
+    "  Switch the plug off and on 7 times in a row, leaving it on for only",
+    "  2-3 seconds each time, then leave it on.",
+    "",
+    "That makes Tasmota clear its settings and open its setup network",
+    "(tasmota-XXXXXX-NNNN). This carries on from there by itself.",
+]
+
+
+def give_tasmota_the_wifi(ctx: Context, address: str) -> bool:
+    """Have bridge v5 save Tasmota's settings with the Wi-Fi it joined with."""
+    template, reason = tasmota_settings.load_template(ROOT, PINNED_ARTIFACTS["bluetooth"]["sha256"])
+    if template is None:
+        say(f"    Tasmota will need its Wi-Fi given by hand: {reason}.")
+        return False
+    try:
+        setup_network.send_tasmota_settings(template, host=address,
+                                            layout=tasmota_settings.layout_query())
+    except setup_network.SetupError as exc:
+        say(f"    Tasmota will need its Wi-Fi given by hand: {exc}")
+        return False
+    say("    Tasmota will start with your Wi-Fi details, so it joins by itself.")
+    return True
+
+
+def tasmota_on_home_network(ctx: Context, *, timeout: float = 240.0) -> str | None:
+    """Tasmota's address once it has started and joined, at the plug's own MAC."""
+    say("Waiting for Tasmota to start and join your network...")
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        address = ctx.finder.poll()
+        body = setup_network.page(address, timeout=3.0) if address else None
+        if body and "tasmota" in body.lower() and \
+                setup_network.BRIDGE_PAGE_MARKER.lower() not in body.lower():
+            output.progress_clear()
+            ctx.set_plug_ip(address)
+            try:
+                status = Device(address).command("Status 5")
+                name = status.get("StatusNET", {}).get("Hostname") if isinstance(status, dict) else None
+            except (DeviceError, OSError):
+                name = None
+            if name:
+                ctx.state.set_input("device_name", name)
+            say(f"    Tasmota is on your network at {address}" + (f" as {name}." if name else "."))
+            return address
+        output.progress(f"waiting for Tasmota on your network... {time.monotonic() - started:.0f}s")
+        time.sleep(3.0)
+    output.progress_clear()
+    return None
+
+
+def upload_tasmota(image: Path, host: str = setup_network.SETUP_HOST) -> None:
+    say(f"    Sending Tasmota ({image.stat().st_size:,} bytes) - about a minute...")
+    started = time.monotonic()
+    try:
+        setup_network.upload_to_bridge(image, host=host)
+    except setup_network.SetupError as exc:
+        raise Abort(f"{exc}. The plug still has the installer; run this again") from exc
+    say(f"    Upload verified in {time.monotonic() - started:.0f}s; the plug is restarting into Tasmota.")
+
+
+def finish_tasmota_setup(ctx: Context, *, route: str, wait: float = 120.0) -> dict[str, Any]:
     say("")
-    say("Waiting for the plug to restart and announce itself...")
-    device_name = wait_for_ssid(TASMOTA_AP_PREFIX, timeout=120.0)
+    say("Waiting for Tasmota to start and make its setup network...")
+    device_name = wait_for_ssid(TASMOTA_AP_PREFIX, timeout=wait)
     if device_name:
         ctx.state.set_input("device_name", device_name)
-        naming = [
-            f"2. This plug's name is  {device_name}",
-            "   That is the name of its setup network, and the same name it will",
-            "   show under in your router's list of connected devices - useful if",
-            "   you have several plugs and cannot tell them apart.",
-        ]
-    else:
-        device_name = None
-        naming = [
-            "2. Its network is named  tasmota-XXXXXX-NNNN  where the X's and N's",
-            "   differ per plug. The same name appears in your router's device",
-            "   list, so note it when you join.",
-        ]
+        say(f"    This plug is {device_name} - the same name shows in your router.")
+    ip = configure_plug_wifi(ctx, device_name)
+    return {"plug_ip": ip, "device_name": device_name, "upload_route": route}
 
-    section("Put the plug back on your Wi-Fi", [
-        "The plug has rebooted into Tasmota and made its own setup network.",
-        "",
-        f"1. Join that Wi-Fi network. It is open - there is no password.",
-        *naming,
-        "3. A setup page should open by itself. If not, browse to",
-        "       http://192.168.4.1",
-        "4. Choose your normal home Wi-Fi, type its password, and save.",
-        "5. Rejoin this computer to your normal Wi-Fi.",
-    ])
-    if not ask_yes_no("Done - is the plug on your home Wi-Fi now", default=True):
-        raise Abort("the plug needs to be on your network before the next step")
-
-    ip = None
-    if device_name:
-        say(f"Looking up {device_name} on your network...")
-        ip = resolve_host(device_name)
-        if ip:
-            say(f"Found it at {ip} - no need to go hunting in the router.")
-            if not ask_yes_no(f"Use {ip}", default=True):
-                ip = None
-    if not ip:
-        looking_for = device_name or "a name beginning tasmota-"
-        ip = ask_ipv4(
-            "What address is the plug on now",
-            help_lines=[
-                "Open your router's list of connected devices and find",
-                f"  {looking_for}",
-                "then read off its address. It is usually different from the one",
-                "the plug had as a Sonoff device.",
-            ],
-            must_respond=True,
-        )
-    ctx.state.set_input("plug_ip", ip)
-    return {"plug_ip": ip, "device_name": device_name}
 
 
 def step_promote(ctx: Context) -> dict[str, Any]:
@@ -716,7 +1332,8 @@ def step_promote(ctx: Context) -> dict[str, Any]:
     slot = device.current_ota()
     say(f"The plug is running from slot {slot}. The migration needs slot 1.")
     if slot == 1:
-        say("Nothing to do here.")
+        device.command("SaveData 0")
+        say("Already there. SaveData 0 - settings frozen so the migration's checks stay stable")
         return {"current_ota": slot, "uploads": 0}
     if ctx.dry_run:
         say("[dry-run] would upload the same image through Firmware Upgrade")
@@ -727,11 +1344,11 @@ def step_promote(ctx: Context) -> dict[str, Any]:
     # odd position.  Anything beyond that is a real fault, not bad luck.
     uploads = 0
     for attempt in range(2):
-        uptime_before = device.uptime_seconds()
+        booted, uptime = device.started_at(), device.uptime_seconds()
         upload_or_prompt(ctx, image, "Berry Tasmota")
         uploads += 1
         say("Waiting for the plug to restart into the other slot...")
-        device.wait_for_reboot(timeout=300, before=uptime_before)
+        device.wait_for_reboot(timeout=300, started_at=booted, before=uptime)
         slot = device.current_ota()
         say(f"Now running from slot {slot}.")
         if slot == 1:
@@ -753,10 +1370,12 @@ def step_promote(ctx: Context) -> dict[str, Any]:
 
 def step_preflight(ctx: Context) -> dict[str, Any]:
     """E1 - read-only inspection.  Re-runnable at any time."""
+    ctx.wifi()  # read them off the plug first, so the check below compares the right network
+    network = check_plug_network(ctx)
     code, _ = ctx.phase_runner().run("preflight")
     if code != 0:
         raise Abort(f"preflight did not pass (exit {code})")
-    return {"exit": code}
+    return {"exit": code, **network}
 
 
 def step_stage(ctx: Context) -> dict[str, Any]:
@@ -769,19 +1388,49 @@ def step_stage(ctx: Context) -> dict[str, Any]:
 
 def step_commit(ctx: Context) -> dict[str, Any]:
     """E3 - the single destructive operation.  Never automatically re-run."""
-    section("The point of no return", [
-        "Both checks above passed. The next operation rewrites the one small",
-        "area of memory that tells the plug where its firmware lives.",
+    # E1 and E2 pinned the bundle as it was then.  If it has been rebuilt since,
+    # or the plug has moved networks, send the run back to E1 rather than fail
+    # inside the commit server with nothing the operator can act on.
+    def staged_bundle_is_current() -> bool:
+        try:
+            report = json.loads((ctx.evidence / "stage-report.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return report.get("manifest_sha256") == sha256_bytes(ctx.manifest_path.read_bytes())
+
+    try:
+        check_plug_network(ctx)  # may rebuild the bundle
+        if not staged_bundle_is_current():
+            raise Abort(
+                "the bundle has changed since the checks and staging were done, so "
+                "they need to run again - run the same command. Nothing was written"
+            )
+    except Abort:
+        for step in ("E1", "E2"):
+            ctx.state.mark(step, FAILED, error="redo: bundle or network changed before E3")
+        raise
+    section("Rewriting the plug's memory layout", [
+        "Both checks above passed. This rewrites the one small area of memory",
+        "that tells the plug where its firmware lives - the step you agreed to",
+        "at the start. It takes about a minute.",
         "",
-        "It takes about a minute. If power is lost during it, the plug will not",
-        "start again and cannot be fixed over Wi-Fi - only by opening the case.",
-        "",
-        "Do not unplug it, do not switch the socket off, and do not close this",
-        "window until it reports PASS.",
+        "Leave the plug in its socket and this window open. Nothing needs",
+        "unplugging, now or later: the run carries on by itself afterwards.",
     ])
 
     def gate(_: str) -> bool:
-        return require_phrase(COMMIT_PHRASE)
+        # Consent was given once, before the first write; this is the last
+        # chance to stop, not another question.
+        try:
+            for remaining in range(COMMIT_COUNTDOWN, 0, -1):
+                output.progress(f"starting in {remaining}s - press Ctrl-C to stop")
+                time.sleep(1)
+        except KeyboardInterrupt:
+            output.progress_clear()
+            tell("    Stopped before anything was written.")
+            return False  # the runner shuts its server down cleanly
+        output.progress_clear()
+        return True
 
     lock = ROOT / "REPARTITION_LOCK"
     moved = ROOT / "REPARTITION_LOCK.owner-authorized"
@@ -797,51 +1446,38 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         say("REPARTITION_LOCK restored")
     if code != 0:
         raise Abort(f"commit did not pass (exit {code})")
+    tell("The new layout is written. Leave the plug in - it restarts by itself,")
+    tell("and the run carries on.")
     return {"exit": code}
+
 
 
 def step_canonical(ctx: Context) -> dict[str, Any]:
     """F - first canonical boot, then the official application."""
     app = ROOT / "captures/safeboot-recovery-migration/tasmota32c3.bin"
-    current = ctx.state.input("plug_ip")
-    section("The plug has restarted with its new layout", [
+    section("The plug has restarted with its new layout", quiet=True, body=[
         "It is now running a small recovery firmware whose only job is to accept",
         "the real Tasmota. It joins your Wi-Fi by itself.",
-        "",
-        f"It may come back on {current}, or take a new address. Check your",
-        "router's device list if it does not answer.",
     ])
     # Answering a ping proves nothing here: the old firmware is still up for a
     # second or two after Restart 99.  Wait for the firmware itself to change.
     say("")
     say("Waiting for the plug to restart into the recovery firmware.")
-    say("This waits for the firmware to actually change, not just for a ping.")
     time.sleep(10)
     waited = 0.0
     started = time.monotonic()
     while time.monotonic() - started < 300:
-        device = ctx.device
-        if device.reachable(timeout=3.0):
+        if ctx.finder.poll():
+            device = ctx.device
             try:
                 version = device.firmware_version()
             except (DeviceError, OSError):
                 version = ""
-            if version and "safeboot" in version.lower():
+            if "safeboot" in version.lower() or (not version and device.is_safeboot()):
                 waited = time.monotonic() - started
                 say(f"    Recovery firmware is up at {device.host} "
-                    f"({version}, after {waited:.0f}s).")
+                    f"({version or 'safeboot'}, after {waited:.0f}s).")
                 break
-            if version:
-                say(f"    {device.host} is answering, but still running {version} "
-                    "- waiting for the restart.")
-            else:
-                say(f"    {device.host} is answering but not saying what it runs "
-                    "- checking its web page instead.")
-                if device.is_safeboot():
-                    waited = time.monotonic() - started
-                    say(f"    Recovery firmware is up at {device.host} "
-                        f"(after {waited:.0f}s).")
-                    break
         time.sleep(5)
     else:
         choice = ask_choice(
@@ -849,27 +1485,25 @@ def step_canonical(ctx: Context) -> dict[str, Any]:
             [
                 "Keep waiting",
                 "It is on a different address - let me type it",
-                "Stop here",
             ],
             help_lines=[
                 "It should restart into a small recovery firmware whose version",
-                "contains the word safeboot. If the plug is answering but still",
-                "reports the old firmware, the restart has not happened.",
+                "contains the word safeboot, on your Wi-Fi.",
             ],
         )
         if choice == 1:
-            ctx.state.set_input("plug_ip", ask_ipv4("What address is it on now", must_respond=True))
+            ctx.set_plug_ip(ask_ipv4("What address is it on now", must_respond=True))
         raise Abort("the recovery firmware did not appear; nothing was written")
     device = ctx.device
+    saved = startup_settings_report(device)
     if ctx.dry_run:
         say("[dry-run] would upload the official application")
-        return {"safeboot_seconds": round(waited, 1)}
-    before = device.uptime_seconds()
+        return {"safeboot_seconds": round(waited, 1), "startup_settings": saved}
     how = upload_or_prompt(ctx, app, "Official Tasmota (app0)")
 
-    # The new firmware starts with no Wi-Fi details, because the migration
-    # resets the plug's saved settings.  So it may come back on the network, or
-    # it may raise its own setup network instead.  Both mean it worked.
+    # The startup firmware normally saved the Wi-Fi where Tasmota reads it, so
+    # Tasmota comes back on the network.  If it did not, Tasmota raises its own
+    # setup network instead and F4 sets it up through that.  Both mean it worked.
     say("")
     say("Waiting for the full Tasmota to start. It will either rejoin your")
     say("Wi-Fi, or put up its own setup network - both are normal.")
@@ -877,83 +1511,113 @@ def step_canonical(ctx: Context) -> dict[str, Any]:
     outcome = None
     while time.monotonic() - started < 300:
         time.sleep(5)
-        if device.reachable(timeout=3.0) and not device.is_safeboot():
+        if ctx.finder.poll() and not ctx.device.is_safeboot():
             outcome = "rejoined the network"
-            say(f"    The plug is back at {device.host} running the full Tasmota.")
+            say(f"    The plug is back at {ctx.device.host} running the full Tasmota.")
             break
-        setup_network = find_ssid(TASMOTA_AP_PREFIX, timeout=10)
-        if setup_network:
-            outcome = f"raised its setup network {setup_network}"
-            say(f"    The plug has started and is asking to be set up.")
-            say(f"    Its network is called  {setup_network}")
-            ctx.state.set_input("device_name", setup_network)
+        setup = find_ssid(TASMOTA_AP_PREFIX, timeout=10)
+        if setup:
+            outcome = f"raised its setup network {setup}"
+            say(f"    The plug has started and is asking to be set up on {setup}.")
+            ctx.state.set_input("device_name", setup)
             break
     if outcome is None:
         raise Abort(
             "the plug neither rejoined the network nor put up a setup network "
             "within five minutes"
         )
-    return {"safeboot_seconds": round(waited, 1), "app_upload": how, "outcome": outcome}
+    return {"safeboot_seconds": round(waited, 1), "app_upload": how, "outcome": outcome,
+            "startup_settings": saved}
+
+
+STARTUP_LOG_PREFIX = "S60 recovery:"
+
+
+def startup_settings_report(device: Device) -> str | None:
+    """What the startup firmware logged about saving the Wi-Fi for Tasmota.
+
+    Kept in the run's record either way, so a fall back to the setup network
+    at F4 can be explained.  None if its log could not be read or says nothing.
+    """
+    try:
+        lines = device.console_log(timeout=10.0)
+    except (DeviceError, OSError, ValueError) as exc:
+        say(f"    Could not read the recovery firmware's log ({exc}).")
+        return None
+    notes = [line[line.index(STARTUP_LOG_PREFIX):] for line in lines if STARTUP_LOG_PREFIX in line]
+    if not notes:
+        say("    The recovery firmware's log does not say whether it saved your Wi-Fi.")
+        return None
+    note = notes[-1]
+    if "saved for the next firmware" in note:
+        say("    It has saved your Wi-Fi where official Tasmota reads it, so Tasmota")
+        say("    should join your network by itself.")
+    elif "left alone" in note:
+        say("    Tasmota settings from before were still there; it left them as they were.")
+    else:
+        say(f"    It could not save your Wi-Fi for official Tasmota: {note[len(STARTUP_LOG_PREFIX):].strip()}.")
+        say("    Tasmota will ask to be set up through its own network instead, as before.")
+    return note
+
+
 
 
 def step_configure(ctx: Context) -> dict[str, Any]:
     """F3/F4 - Wi-Fi, settings persistence and the S60 template."""
-    current = ctx.state.input("plug_ip")
-    section("Set up the finished firmware", [
-        "The real Tasmota is installed. If it is already on your Wi-Fi there is",
-        "nothing to do here. If it is not, it will have made a setup network again:",
-        "",
-        "  join  tasmota-XXXXXX-NNNN  (open, no password)",
-        "  browse to http://192.168.4.1 and choose your home Wi-Fi",
-        "",
-        "Then rejoin your normal Wi-Fi before answering.",
-    ])
-    found = wait_or_ask(current, what="the plug", timeout=300.0)
-    if found != current:
-        ctx.state.set_input("plug_ip", found)
+    if ctx.finder.poll():
+        route = "joined by itself"
+        say("Official Tasmota joined your Wi-Fi by itself, with the details the")
+        say("startup firmware saved - no setup network needed.")
+    else:
+        setup = find_ssid(TASMOTA_AP_PREFIX, timeout=15)
+        if setup:
+            route = "setup network"
+            tell("Official Tasmota did not join your Wi-Fi by itself, so it is set up")
+            tell("through its own network instead.")
+            configure_plug_wifi(ctx, setup)
+        else:
+            route = "located"
+            locate_plug(ctx)
     device = ctx.device
     device.wait_reachable(timeout=300)
+    # Tasmota may be running on the record the startup firmware saved, which
+    # holds the Wi-Fi but only what a Safeboot sets (it skips most defaults,
+    # never expecting to save them).  Reset 4 rebuilds every setting from this
+    # firmware's own defaults and keeps the Wi-Fi.  Harmless when Tasmota
+    # started from defaults anyway.
+    booted, uptime = device.started_at(), device.uptime_seconds()
+    device.command("Reset 4")
+    say("Settings reset to Tasmota's defaults, keeping the Wi-Fi; the plug restarts")
+    device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
+    booted, uptime = device.started_at(), device.uptime_seconds()
     device.command("SaveData 1")
-    device.command(f"Template {S60_TEMPLATE}")
+    template = s60_template(ctx.state.input("product_model"))
+    device.command(f"Template {template}")
     device.command("Module 0")
-    say("Template applied; the plug restarts")
-    device.wait_for_reboot(timeout=180)
-    return {"template": "applied"}
+    say(f"Template applied as {json.loads(template)['NAME']}; the plug restarts")
+    device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
+    return {"template": "applied", "wifi_route": route}
+
 
 
 def step_restore(ctx: Context) -> dict[str, Any]:
     """G - replace the private recovery Safeboot with official bytes."""
     runner = ctx.phase_runner()
-    rule("Restore official Safeboot")
+    say("== Restore official Safeboot")
 
     def gate(_: str) -> bool:
-        section("Swap the temporary startup firmware for the official one", [
-            "To get the plug through the rebuild, it was given a small startup",
-            "firmware with your Wi-Fi details built into it. That was only ever",
-            "meant to be temporary.",
-            "",
-            "This step replaces it with the official Tasmota version, so the plug",
-            "ends up exactly matching the published release.",
-            "",
-            "This is a safe step. The plug carries on running normally the whole",
-            "time, and nothing it needs to start up is touched. If it goes wrong",
-            "you can simply run it again.",
-        ])
+        say("Swapping the temporary startup firmware - the one with your Wi-Fi")
+        say("details in it - for the official one. The plug keeps running throughout.")
         try:
             matches, problem = verify_app(ctx)
         except (DeviceError, OSError, ValueError) as exc:
-            say(f"  Could not check the plug's firmware first: {exc}")
-            matches = False
-            problem = "the check could not run"
+            matches, problem = False, f"the check could not run: {exc}"
         if matches:
-            say("  Checked: the plug is running the official Tasmota, unmodified.")
-        else:
-            say(f"  Warning: {problem}.")
-            say("  That is not what was expected here. Stopping is the safer answer.")
-        return ask_yes_no(
-            "Go ahead and put the official startup firmware on",
-            default=matches,
-        )
+            say("  Checked first: the plug is running the official Tasmota, unmodified.")
+            return True
+        tell(f"  Stopping: {problem}. Swapping the startup firmware is only safe")
+        tell("  under the official Tasmota, so nothing was written.")
+        return False
 
     code, _ = runner.run(
         "restore", extra_flags=["--i-confirm-normal-app-is-stable"], confirm=gate
@@ -982,10 +1646,11 @@ def step_verify(ctx: Context) -> dict[str, Any]:
         matched = actual == wanted.lower()
         ok = ok and matched
         results[name] = {"expected": wanted, "actual": actual, "match": matched}
-        say(f"  {name:<9} 0x{address:06X} {length:>9,}  {'MATCH' if matched else 'DIFFERS'}")
+        report = tell if not matched else say
+        report(f"  {name:<9} 0x{address:06X} {length:>9,}  {'MATCH' if matched else 'DIFFERS'}")
         if not matched:
-            say(f"    expected {wanted}")
-            say(f"    actual   {actual}")
+            tell(f"    expected {wanted}")
+            tell(f"    actual   {actual}")
     if not ok:
         raise Abort("device does not match the pinned artifacts")
     say("")
@@ -1050,10 +1715,10 @@ STEP_VERIFIERS: dict[str, Callable[["Context"], tuple[bool, str]]] = {
 
 
 STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = [
+    ("A0", "Before you start", step_prerequisites),
     ("A5", "Offline preconditions", step_check),
     ("A1", "Pair the plug in eWeLink", step_pair),
     ("A2", "Discover, metadata and device key", step_discover),
-    ("B2", "Router DNAT and interception proof", step_intercept),
     ("C2", "Stock to recovery bridge", step_bridge),
     ("D1", "Berry-capable Tasmota via bridge AP", step_berry_tasmota),
     ("D4", "Promote to high slot and freeze NVS", step_promote),
@@ -1090,27 +1755,43 @@ def cmd_status(ctx: Context) -> int:
 DESTRUCTIVE_STEPS = {"C2", "E2", "E3", "F2", "G1"}
 
 
+
+def begin_stage(step: str) -> None:
+    number = next(index for index, (name, _, _) in enumerate(STEPS, 1) if name == step)
+    output.stage_begin(number, len(STEPS), STAGE_NAMES.get(step, STEP_INDEX[step][0]))
+
+
 def execute(ctx: Context, step: str) -> int:
     title, handler = STEP_INDEX[step]
-    rule(f"{step}  {title}")
+    begin_stage(step)
+    say(f"{step}  {title}")
     if step in DESTRUCTIVE_STEPS:
         ctx.state.mark(step, ATTEMPTED)
     try:
         captured = handler(ctx)
     except QuitRun:
-        say("")
-        say(f"Stopped at {step}. Nothing was left half-done; run the same command")
-        say("again when you are ready and it will pick up here.")
+        output.stage_end("stopped")
+        tell("")
+        tell(f"Stopped at {step}. Nothing was left half-done.")
         return 130
-    except (Abort, DeviceError, ValueError) as exc:
+    except PlugNeverConnected as exc:
         ctx.state.mark(step, FAILED, error=str(exc))
-        say(f"FAILED: {exc}")
+        output.stage_end("stopped")
+        section(f"{step} could not start", firewall_hint(ctx))
+        tell(f"FAILED: {exc}")
+        return 1
+    except (Abort, DeviceError, ValueError, PhaseError) as exc:
+        ctx.state.mark(step, FAILED, error=str(exc))
+        output.stage_end("stopped")
+        tell(f"FAILED: {exc}")
         return 1
     ctx.state.mark(step, DONE, **{"result": captured})
     for key, value in (captured or {}).items():
         ctx.state.capture(f"{step}.{key}", value)
+    output.stage_end("complete")
     say(f"{step} done")
     return 0
+
 
 
 def cmd_step(ctx: Context, step: str) -> int:
@@ -1120,12 +1801,32 @@ def cmd_step(ctx: Context, step: str) -> int:
     return execute(ctx, step)
 
 
+# Each step's name on its stage line, in words that need no knowledge of the
+# internals.
+STAGE_NAMES = {
+    "A0": "Checking you have everything",
+    "A5": "Checking the files on this computer",
+    "A1": "Finding the plug on your network",
+    "A2": "Asking the plug about its firmware",
+    "C2": "Installing the installer firmware",
+    "D1": "Installing Tasmota",
+    "D4": "Making room in the plug's memory",
+    "E1": "Checking the plug's memory layout",
+    "E2": "Copying the new startup firmware",
+    "E3": "Rewriting the memory layout - leave the plug in",
+    "F2": "Installing official Tasmota",
+    "F4": "Setting up Wi-Fi and the plug's settings",
+    "G1": "Installing the official startup firmware",
+    "H1": "Checking the finished plug",
+}
+
+
 # What each step does, in words that assume no knowledge of the internals.
 PLAIN_DESCRIPTION = {
+    "A0": "lists what needs to be in place before starting",
     "A5": "checks the files on this computer before anything is touched",
     "A1": "gets the plug onto your network through the eWeLink app",
     "A2": "asks the plug what firmware it is running",
-    "B2": "tests that your router is redirecting the plug's update download",
     "C2": "replaces the plug's Sonoff firmware with our small installer firmware",
     "D1": "puts a full Tasmota onto the plug through the installer's own Wi-Fi",
     "D4": "moves Tasmota into the other half of the plug's memory, out of the way",
@@ -1154,47 +1855,39 @@ def evidence_bridge_installed(ctx: "Context") -> tuple[bool | None, str]:
     )
 
 
+
 def evidence_official_app_installed(ctx: "Context") -> tuple[bool | None, str]:
     """Safeboot still running means the official firmware never landed."""
-    device = ctx.device
-    if not device.reachable(timeout=3.0):
+    if not ctx.finder.poll():
         # Not answering may simply mean it is waiting to be set up: the migration
         # clears its Wi-Fi details, so the new firmware comes up asking for them.
-        setup_network = find_ssid(TASMOTA_AP_PREFIX)
-        if setup_network:
+        setup = find_ssid(TASMOTA_AP_PREFIX)
+        if setup:
             return True, (
-                f"The plug is not on your network, but it is broadcasting a Wi-Fi\n"
-                f"  network called '{setup_network}'.\n"
+                f"The plug is not on your network, but it is broadcasting '{setup}'.\n"
                 "  That is the full Tasmota asking to be set up - the temporary\n"
-                "  Safeboot firmware cannot do that, so the install did finish.\n"
-                "\n"
-                "  You will need to join that network, open http://192.168.4.1,\n"
-                "  choose your home Wi-Fi and save. The next step walks you\n"
-                "  through it, so carrying on is the right answer."
+                "  startup firmware cannot do that, so the install did finish."
             )
         return None, (
-            f"The plug at {device.host} is not answering and no setup network is\n"
-            "  visible from here. It may still be starting, or it may have taken a\n"
-            "  different address - your router's device list will show it.\n"
-            "  Give it a minute and try again."
+            "The plug is not answering and no setup network is visible from here.\n"
+            "  It may still be starting."
         )
+    device = ctx.device
     if device.is_safeboot():
         return False, (
-            "The plug's web page still shows Safeboot.\n"
-            "  Safeboot is the small temporary firmware that only knows how to\n"
-            "  accept an update - so the full Tasmota is not installed yet, and\n"
-            "  this step needs to run again."
+            "The plug's web page still shows Safeboot, the small temporary\n"
+            "  firmware - so the full Tasmota is not installed yet."
         )
     version = device.firmware_version()
     if version:
         return True, (
-            f"The plug is running {version}, not Safeboot.\n"
-            "  The full Tasmota is installed, so this step did finish."
+            f"The plug is running {version}, not Safeboot, so the install did finish."
         )
     return None, (
         "The plug is answering but will not say what it is running, so there is\n"
         "  no way to tell from here."
     )
+
 
 
 # Consulted when a step was interrupted, to answer "did it finish?" from the
@@ -1220,67 +1913,245 @@ def confirm_skip(ctx: Context, step: str, title: str) -> bool:
         say(f"[skip] {step} {title} (done, and the plug still agrees)")
         return True
     say("")
-    say(f"{step} is recorded as done, but {message}.")
-    say("The record and the device disagree, so the checklist cannot be trusted here.")
+    tell(f"{step} is recorded as done, but {message}.")
+    tell("The record and the device disagree, so the checklist cannot be trusted here.")
     return not ask_yes_no(f"Run {step} again", default=False)
 
 
+
 def cmd_run(ctx: Context) -> int:
+    try:
+        return run_steps(ctx)
+    finally:
+        # However the run ends - finished, failed, quit, Ctrl-C or stopped.
+        forget_run_secrets(ctx.dir)
+
+
+def run_steps(ctx: Context) -> int:
+    started = time.monotonic()
+    resumed = any(ctx.state.is_done(step) for step, _, _ in STEPS)
+    tell("")
+    tell("Converting a plug usually takes under 10 minutes. Some stages take a")
+    tell("minute or two with little to see - that's normal. Keep the plug plugged")
+    tell("in, and this computer awake, until the last stage says complete.")
+    if output.concise() and output.log_path():
+        tell(f"Full details go to {display_path(output.log_path())}; add --verbose to see them here.")
+    tell("")
     for step, title, _ in STEPS:
-        if ctx.state.is_done(step) and confirm_skip(ctx, step, title):
-            continue
+        if ctx.state.is_done(step):
+            begin_stage(step)
+            if confirm_skip(ctx, step, title):
+                output.stage_end("already done")
+                continue
         if ctx.state.status(step) == ATTEMPTED:
-            section("The last step was interrupted", [
-                f"The step that {PLAIN_DESCRIPTION.get(step, title.lower())} was",
-                "stopped part way through - a crash, a dropped connection, or a",
-                "closed window. Nothing is broken; we just need to know whether it",
-                "got far enough before it stopped.",
-                "",
-                "Doing it again is normally safe. Every step checks the plug before",
-                "writing anything and refuses if the plug is not as it expects.",
-            ])
-            options = [
-                "Do that step again",
-                "It did finish - move on to the next step",
-                "Stop, I want to look at the plug myself",
-            ]
+            say("")
+            tell(f"{step} was interrupted last time - checking whether it finished...")
+            finished, reason = None, ""
             evidence = ATTEMPTED_EVIDENCE.get(step)
             if evidence is not None:
-                say("Checking the plug to work out which it is...")
                 try:
                     finished, reason = evidence(ctx)
                 except (DeviceError, Abort, OSError, ValueError) as exc:
                     finished, reason = None, f"The check itself could not run: {exc}"
-                say(f"  {reason}")
-                if finished is True:
-                    options[1] += "   <- recommended"
-                elif finished is False:
-                    options[0] += "   <- recommended"
+                tell(f"  {reason}")
+            if finished is True:
+                # The plug itself shows the step completed: nothing to decide.
+                ctx.state.mark(step, DONE, note="the plug showed it had completed")
+                continue
+            section("The last step was interrupted", [
+                f"The step that {PLAIN_DESCRIPTION.get(step, title.lower())} was",
+                "stopped part way through, and the plug does not show whether it",
+                "finished. Doing it again is normally safe: every step checks the",
+                "plug before writing anything and refuses if it is not as expected.",
+            ])
+            options = [
+                "Do that step again" + ("   <- recommended" if finished is False else ""),
+                "It did finish - move on to the next step",
+            ]
             choice = ask_choice("What would you like to do", options)
             if choice == 1:
                 ctx.state.mark(step, DONE, note="operator confirmed it completed")
-                say(f"{step} marked done on your say-so.")
+                tell(f"{step} marked done on your say-so.")
                 continue
-            if choice == 2:
-                say("Stopped. Run the same command again when you are ready.")
-                return 1
         code = execute(ctx, step)
+        if code == 0 and step == POINT_OF_NO_RETURN and ctx.research_bridge:
+            section("Research bridge installed - stopping here", [
+                f"{ctx.bridge.name} is on the plug. Join the bridge's network",
+                f"(password {BRIDGE_PASSWORD}) and run its research tool, e.g.:",
+                "  python tools/inspect_stock_nvs.py",
+                "Then switch the plug off and on: it goes back to its Sonoff",
+                "firmware. Or run this tool again to carry on the conversion.",
+            ])
+            close_firewall_rules(ctx)
+            return 0
+        if code == 130:
+            return code  # the operator chose to quit; execute() has said so
         if code != 0:
-            say("")
-            say(f"Stopped at {step}. Fix the cause, then resume with:")
-            say("  python3 tools/s60_autoflash.py run")
+            tell("")
+            tell(f"Stopped at {step}. Fix the cause, then resume with:")
+            tell("  python3 tools/s60_autoflash.py run")
+            if recorded_rules(ctx):
+                tell("To abandon this plug instead and remove the temporary firewall rule:")
+                tell("  python3 tools/s60_autoflash.py cleanup")
+            if output.log_path():
+                tell(f"What happened, in full: {display_path(output.log_path())}")
+            tell("Stuck? Ask in the Test reports thread:")
+            output.show_link(REPORTS_URL)
             return code
     say("")
-    say("Conversion complete.")
+    close_firewall_rules(ctx)
+    tell("")
+    tell("Conversion complete. The plug is running official Tasmota.")
+    if output.log_path():
+        tell(f"The full log is in {display_path(output.log_path())}.")
+    invite_report(ctx, time.monotonic() - started, resumed)
     return 0
+
+
+def computer_description() -> str:
+    """The operating system and its version, as someone else would want to know it."""
+    if hostsys.IS_WINDOWS:
+        system = f"Windows {platform.release()} (build {platform.version()})"
+    elif hostsys.IS_MAC:
+        system = f"macOS {platform.mac_ver()[0]}"
+    else:
+        try:
+            system = platform.freedesktop_os_release().get("PRETTY_NAME") or ""
+        except OSError:
+            system = ""
+        system = system or f"Linux {platform.release()}"
+    return f"{system}, Python {platform.python_version()}"
+
+
+# The plug type and region each S60 model letter stands for.
+REGIONS = {"G": "UK (Type G)", "F": "Europe (Type E/F)"}
+
+
+def report_fields(ctx: Context, seconds: float, resumed: bool) -> list[tuple[str, str]]:
+    """This run's answers for a Test reports post, as (label, value) - nothing private.
+
+    No addresses, Wi-Fi name, account or device id: only what is useful to
+    someone deciding whether the tool will work for them.  "__" marks what
+    only the person can add.
+    """
+    product = str(ctx.state.input("product_model") or "").strip().upper()
+    model = product if S60_PRODUCT.fullmatch(product) else ""
+    captures = ctx.state.data.get("captures", {})
+    joined = (captures.get("D1.upload_route") == "bridge network"
+              or captures.get("D1.resumed") is True
+              or (captures.get("D1.upload_route") == "home network" and captures.get("D1.wifi") != "preset")
+              or captures.get("F4.wifi_route") == "setup network")
+    took = output.elapsed(seconds) + (" (this session; the run was resumed)" if resumed else "")
+    return [
+        ("Result", "converted"),
+        ("Plug model", model or "__"),
+        ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),
+        ("Stock firmware", ctx.state.input("stock_version") or "__"),
+        ("Computer", computer_description()),
+        ("Time taken", took),
+        ("Typed the Wi-Fi", "yes" if ctx.state.input("wifi_typed") else "no"),
+        ("Joined setup network", "yes" if joined else "no"),
+        ("Name in Tasmota", json.loads(s60_template(product))["NAME"]),
+        ("Relay/button/LED/power OK", "__"),
+        ("System prompts", "__"),
+    ]
+
+
+def report_markdown(fields: list[tuple[str, str]]) -> str:
+    """For pasting into the thread, where the labels show in bold."""
+    return "".join(f"**{label}:** {value}\n" for label, value in fields)
+
+
+def report_screen(fields: list[tuple[str, str]]) -> list[str]:
+    """For the terminal, which shows Markdown as typed: plain labels, lined up."""
+    width = max(len(label) for label, _ in fields) + 1
+    return [f"  {label + ':':<{width}} {value}" for label, value in fields]
+
+
+def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
+    """Ask for a report, with this run's details ready to paste."""
+    fields = report_fields(ctx, seconds, resumed)
+    copied = hostsys.copy_to_clipboard(report_markdown(fields))
+    tell("")
+    tell("Please share how it went - it takes a minute, and it is how the next")
+    tell("person finds out this works for a plug and a computer like yours.")
+    tell("Post it in the Test reports thread:")
+    output.show_link(REPORTS_URL)
+    tell("")
+    tell("These details from this run are " + ("copied - just paste them:" if copied
+                                                 else "ready to copy from here:"))
+    for line in report_screen(fields):
+        tell(line)
+    tell("")
+    tell("Fill in the blanks (__): whether the relay, button, LED and power readings")
+    tell("behave, and any prompts your computer showed and what you chose. Nothing")
+    tell("above is private.")
+
+
+def display_path(path: Path) -> str:
+    """A path as short as it can be: relative to the repository when it is inside."""
+    try:
+        return str(path.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+# Files a run can leave that hold secrets: the plug's eWeLink LAN key (no
+# longer fetched), update links that may act as tokens, the plug's settings
+# memory, and the staged copy of the recovery image with the Wi-Fi password in
+# it.  Their reports keep only hashes, which is all later steps use.
+SECRET_FILES = (
+    "device-key.json",
+    "ota-metadata.json",
+    "live/live-canonical-nvs.bin",
+    "live/staged-safeboot-readback.bin",
+)
+
+
+def forget_run_secrets(directory: Path) -> list[str]:
+    """Delete one run's secret files.  Returns what was removed."""
+    removed = []
+    for name in SECRET_FILES:
+        path = directory / name
+        if path.exists():
+            path.unlink()
+            removed.append(str(path.relative_to(ROOT)))
+    return removed
+
+
+def forget_all_secrets() -> list[str]:
+    """Delete every run's secret files, and the bundle's stored password."""
+    removed = [item for directory in run_directories() for item in forget_run_secrets(directory)]
+    if forget_stored_password((ROOT / DEFAULT_MANIFEST).resolve()):
+        removed.append("the Wi-Fi password in the bundle's recovery image")
+    return removed
+
+
+def cmd_cleanup(ctx: Context) -> int:
+    """Remove this run's temporary firewall rules, and every stored secret."""
+    if recorded_rules(ctx):
+        close_firewall_rules(ctx)
+    else:
+        say("This run added no firewall rules.")
+    removed = forget_all_secrets()
+    if removed:
+        say("Removed stored secrets:")
+        for item in removed:
+            say(f"  {item}")
+    else:
+        say("No stored secrets were found.")
+    return 0
+
 
 
 def main() -> int:
     # Keep piping into head/less quiet rather than raising BrokenPipeError.
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    # Being stopped must still run the cleanup in cmd_run's finally.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["run", "status", "step", "list"])
+    parser.add_argument("command", choices=["run", "status", "step", "list", "cleanup"])
     parser.add_argument("step_id", nargs="?")
     parser.add_argument(
         "--run",
@@ -1299,15 +2170,30 @@ def main() -> int:
     parser.add_argument("--email")
     parser.add_argument("--web-user", help="Tasmota web username when the UI has a password")
     parser.add_argument("--web-password", help="Tasmota web password (not stored in run state)")
+    parser.add_argument("--wifi", action="store_true",
+                        help="type the Wi-Fi details instead of reading them from the plug")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="show every action as it happens (it is all in the run's log either way)")
+    parser.add_argument("--bridge", help=argparse.SUPPRESS)  # research: archive/docs/reference/automatic-wifi.md
     args = parser.parse_args()
 
     try:
         if args.command == "list":
             args.run = args.run or "-"
+        elif args.command in ("status", "cleanup") and not args.run:
+            # Report on the latest run; never start a new one just to look.
+            args.run = read_current() or (run_directories()[-1].name if run_directories() else None)
+            if not args.run:
+                say("No conversions recorded yet.")
+                return 0
         else:
-            args.run = resolve_run_name(args.run, args.new, args.plug_ip)
+            args.run = resolve_run_name(args.run, args.new, args.plug_ip,
+                                        ask=args.command == "run")
         ctx = Context(args)
+    except QuitRun:
+        say("Stopped. Nothing was changed.")
+        return 130
     except (Abort, ValueError, OSError) as exc:
         say(f"REFUSING: {exc}")
         return 2
@@ -1327,12 +2213,32 @@ def main() -> int:
 
     if args.command == "status":
         return cmd_status(ctx)
+    if args.command == "cleanup":
+        return cmd_cleanup(ctx)
     if args.command == "step":
         if not args.step_id:
             say("step requires a step id")
             return 2
-        return cmd_step(ctx, args.step_id)
-    return cmd_run(ctx)
+        output.start(ctx.dir / "run.log", verbose=args.verbose)
+        try:
+            return cmd_step(ctx, args.step_id)
+        finally:
+            output.finish()
+    output.start(ctx.dir / "run.log", verbose=args.verbose)
+    try:
+        return cmd_run(ctx)
+    except QuitRun:
+        tell("")
+        tell("Stopped. Run the same command again to pick up where it stopped.")
+        return 130
+    except KeyboardInterrupt:
+        output.stage_end("stopped")
+        tell("")
+        tell("Stopped with Ctrl-C. Run the same command again to pick up where it stopped:")
+        tell("every step checks the plug first, so carrying on is safe.")
+        return 130
+    finally:
+        output.finish()
 
 
 if __name__ == "__main__":

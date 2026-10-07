@@ -49,7 +49,7 @@ def read_name(packet: bytes, offset: int, seen: set[int] | None = None) -> tuple
     """Decode a (possibly compressed) DNS name starting at ``offset``.
 
     Returns ``(name, next_offset)`` where ``next_offset`` is the position in
-    ``packet`` immediately after the encoded name — that is, where the caller
+    ``packet`` immediately after the encoded name - that is, where the caller
     should continue parsing, not where the name's data ended up.
 
     DNS name compression (RFC 1035 §4.1.4) lets a label sequence end with a
@@ -110,13 +110,13 @@ def _decode_rdata(packet: bytes, rtype: int, offset: int, length: int) -> Any:
     nothing is silently lost.
     """
     raw = packet[offset : offset + length]
-    if rtype in (12,):  # PTR — service instance name, e.g. "eWeLink_1000.…"
+    if rtype in (12,):  # PTR - service instance name, e.g. "eWeLink_1000.…"
         return read_name(packet, offset)[0]
-    if rtype == 33 and length >= 6:  # SRV — where the service actually lives
+    if rtype == 33 and length >= 6:  # SRV - where the service actually lives
         priority, weight, port = struct.unpack_from("!HHH", packet, offset)
         target = read_name(packet, offset + 6)[0]
         return {"priority": priority, "weight": weight, "port": port, "target": target}
-    if rtype == 16:  # TXT — one or more length-prefixed "key=value" strings
+    if rtype == 16:  # TXT - one or more length-prefixed "key=value" strings
         values: list[str] = []
         cursor = 0
         while cursor < len(raw):
@@ -125,9 +125,9 @@ def _decode_rdata(packet: bytes, rtype: int, offset: int, length: int) -> Any:
             values.append(raw[cursor : cursor + size].decode("utf-8", errors="replace"))
             cursor += size
         return values
-    if rtype == 1 and length == 4:  # A — IPv4 address of the device
+    if rtype == 1 and length == 4:  # A - IPv4 address of the device
         return socket.inet_ntop(socket.AF_INET, raw)
-    if rtype == 28 and length == 16:  # AAAA — IPv6 address
+    if rtype == 28 and length == 16:  # AAAA - IPv6 address
         return socket.inet_ntop(socket.AF_INET6, raw)
     return raw.hex()
 
@@ -185,16 +185,18 @@ def parse_packet(packet: bytes) -> list[dict[str, Any]]:
     return records
 
 
-def make_query(service: str = SERVICE) -> bytes:
+def make_query(service: str = SERVICE, unicast: bool = True) -> bytes:
     """Build the single-question mDNS query packet asking who offers ``service``."""
-    # ID=0, standard mDNS query, one PTR question. Set the unicast-response bit
-    # so discovery also works when binding multicast port 5353 is unavailable.
+    # ID=0, standard mDNS query, one PTR question. With ``unicast`` set, the
+    # unicast-response bit lets discovery work when binding multicast port 5353
+    # is unavailable.
     #
     # Header fields: id=0, flags=0 (standard query), 1 question, no answers or
     # authority/additional records. The question is QTYPE=12 (PTR) and
-    # QCLASS=0x8001 — class IN with the high "QU" bit set, which asks
+    # QCLASS=0x8001 - class IN with the high "QU" bit set, which asks
     # responders to reply directly to our source port instead of multicasting.
-    return struct.pack("!HHHHHH", 0, 0, 1, 0, 0, 0) + encode_name(service) + struct.pack("!HH", 12, 0x8001)
+    qclass = 0x8001 if unicast else 0x0001
+    return struct.pack("!HHHHHH", 0, 0, 1, 0, 0, 0) + encode_name(service) + struct.pack("!HH", 12, qclass)
 
 
 def discover(timeout: float, interface: str | None = None, target: str | None = None) -> dict[str, Any]:
@@ -212,7 +214,7 @@ def discover(timeout: float, interface: str | None = None, target: str | None = 
         sock.bind(("", MDNS_PORT))
     except OSError:
         # Port already owned by a system responder (avahi/Bonjour) or not
-        # permitted — fall back to an ephemeral port. Only unicast replies
+        # permitted - fall back to an ephemeral port. Only unicast replies
         # arrive in this mode, which is why make_query() sets the QU bit.
         bind_port = 0
         sock.bind(("", 0))
@@ -228,7 +230,10 @@ def discover(timeout: float, interface: str | None = None, target: str | None = 
     # Short per-recv timeout so the loop below can re-check the overall deadline
     # rather than blocking for the full duration on a quiet network.
     sock.settimeout(min(timeout, 0.5))
-    sock.sendto(make_query(), (MDNS_GROUP, MDNS_PORT))
+    # When 5353 is shared with avahi/Bonjour (SO_REUSEADDR), the kernel hands a
+    # unicast reply to only one of the sockets on that port - usually the system
+    # responder's - so ask for a multicast reply, which every socket receives.
+    sock.sendto(make_query(unicast=bind_port != MDNS_PORT), (MDNS_GROUP, MDNS_PORT))
     packets: list[dict[str, Any]] = []
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

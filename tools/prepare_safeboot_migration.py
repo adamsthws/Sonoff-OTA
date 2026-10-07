@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.autoflash import output
     from tools.safeboot_migration import (
         APP0_OFFSET,
         APP0_SIZE,
@@ -40,6 +41,7 @@ try:
         validate_native_image,
     )
 except ModuleNotFoundError:
+    from autoflash import output
     from safeboot_migration import (
         APP0_OFFSET,
         APP0_SIZE,
@@ -82,7 +84,7 @@ def obtain(path: Path | None, url: str, destination: Path) -> bytes:
             data = response.read()
         source = url
     destination.write_bytes(data)
-    print(f"Pinned {destination.name}: {len(data):,} bytes from {source}")
+    output.detail(f"Pinned {destination.name}: {len(data):,} bytes from {source}")
     return data
 
 

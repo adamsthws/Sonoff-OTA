@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Callable, Iterable, Sequence
 
-from . import hostsys
+from . import hostsys, output
 
 
 class QuitRun(SystemExit):
@@ -44,57 +44,35 @@ QUIT_OPTION = "Quit - stop here"
 
 def _emit(lines: Iterable[str]) -> None:
     for line in lines:
-        print(f"{BULLET}{line}", flush=True)
+        output.show(f"{BULLET}{line}")
 
 
-def _colour_ok() -> bool:
-    """ANSI colour only on a real terminal that understands it."""
-    if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
-        return False
-    if hostsys.IS_WINDOWS:
-        # Windows Terminal and current consoles understand ANSI; the classic
-        # console does only once virtual-terminal mode is on.
-        return bool(os.environ.get("WT_SESSION")) or _enable_windows_vt()
-    return True
-
-
-def _enable_windows_vt() -> bool:
-    try:
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.GetStdHandle(-11)
-        mode = ctypes.c_uint32()
-        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-            return False
-        return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
-    except (AttributeError, OSError):
-        return False
+_colour_ok = output.colour_ok
 
 
 def warning_box(title: str, body: Sequence[str]) -> None:
-    """A warning that cannot be skimmed past: boxed, and bold red where possible."""
-    width = max(len(title), *(len(line) for line in body)) + 4
-    start, end = ("\x1b[1;31m", "\x1b[0m") if _colour_ok() else ("", "")
-    rule = "!" * (width + 4)
-    lines = [rule, f"!! {title.upper().center(width - 2)} !!", rule]
-    lines += [f"!! {line.ljust(width - 2)} !!" for line in body]
-    lines.append(rule)
-    print("", flush=True)
-    for line in lines:
-        print(f"{start}{line}{end}", flush=True)
+    """A short note to read before going on: a highlighted title, then the text."""
+    output.show("")
+    output.show(f"! {title}", output.BOLD, output.YELLOW)
+    for line in body:
+        output.show(f"  {line}")
 
 
-def section(title: str, body: Sequence[str] = ()) -> None:
-    print("", flush=True)
-    print(f"-- {title}", flush=True)
-    if body:
-        _emit(body)
+def section(title: str, body: Sequence[str] = (), *, quiet: bool = False) -> None:
+    """A heading and its text.  quiet: for information only, so it is shown in
+    verbose mode and otherwise just logged."""
+    say = output.detail if quiet else output.show
+    say("")
+    say(f"-- {title}")
+    for line in body:
+        say(f"{BULLET}{line}")
 
 
 def _raw(question: str, default: str | None) -> str:
     suffix = f" [{default}]" if default else ""
+    output.before_input(f"{question}{suffix}")
     answer = input(f"{question}{suffix}: ").strip()
+    output.answered(answer)
     if answer.lower() in QUIT_WORDS:
         raise QuitRun("stopped at an operator prompt")
     if not answer and default is not None:
@@ -149,7 +127,11 @@ def ask_secret(prompt: str, reveal_seconds: float = 1.0) -> str:
     terminal it falls back to getpass, which shows nothing at all.
     """
     prompt = prompt.rstrip().rstrip(":") + QUIT_HINT + ": "
-    value = _read_secret(prompt, reveal_seconds)
+    output.before_input(prompt)  # the question is logged; the answer never is
+    try:
+        value = _read_secret(prompt, reveal_seconds)
+    finally:
+        output.after_input()
     # Real passwords here are at least eight characters, so a lone q cannot
     # be one.
     if value.strip().lower() in QUIT_WORDS:
@@ -267,6 +249,7 @@ def wait_for_key(prompt: str = "Press any key to continue, or q to quit...") -> 
     """
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return
+    output.before_input(prompt)
     sys.stdout.write(prompt)
     sys.stdout.flush()
     try:
@@ -298,6 +281,7 @@ def wait_for_key(prompt: str = "Press any key to continue, or q to quit...") -> 
     finally:
         sys.stdout.write("\n")
         sys.stdout.flush()
+        output.after_input()
 
 
 def ask_text(
@@ -432,22 +416,20 @@ def wait_for_host(
     Prints a live count so it never looks hung, and returns False on timeout so
     the caller can offer something more useful than failing.
     """
-    print(f"{BULLET}Watching for {what} at {address} - this can take a minute.",
-          flush=True)
+    output.detail(f"{BULLET}Watching for {what} at {address} - this can take a minute.")
     started = time.monotonic()
     while time.monotonic() - started < timeout:
         if ping_ok(address):
             elapsed = time.monotonic() - started
-            sys.stdout.write("\r" + " " * 60 + "\r")
-            print(f"{BULLET}{what.capitalize()} is back at {address} "
-                  f"(after {elapsed:.0f}s).", flush=True)
+            output.progress_clear()
+            output.detail(f"{BULLET}{what.capitalize()} is back at {address} "
+                          f"(after {elapsed:.0f}s).")
             return True
         elapsed = int(time.monotonic() - started)
-        sys.stdout.write(f"\r{BULLET}still waiting... {elapsed}s")
-        sys.stdout.flush()
+        output.progress(f"waiting for {what}... {elapsed}s")
         time.sleep(poll)
-    sys.stdout.write("\r" + " " * 60 + "\r")
-    print(f"{BULLET}No answer from {address} after {timeout:.0f}s.", flush=True)
+    output.progress_clear()
+    output.show(f"{BULLET}No answer from {address} after {timeout:.0f}s.")
     return False
 
 
@@ -505,10 +487,9 @@ def wait_for_ssid(prefix: str, *, timeout: float = 90.0, poll: float = 8.0) -> s
         if found:
             return found
         elapsed = int(time.monotonic() - started)
-        sys.stdout.write(f"\r{BULLET}looking for a '{prefix}' network... {elapsed}s")
-        sys.stdout.flush()
+        output.progress(f"looking for a '{prefix}' network... {elapsed}s")
         time.sleep(poll)
-    sys.stdout.write("\r" + " " * 60 + "\r")
+    output.progress_clear()
     return None
 
 

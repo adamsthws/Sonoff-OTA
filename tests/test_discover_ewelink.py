@@ -18,6 +18,11 @@ class MdnsTests(unittest.TestCase):
         self.assertEqual(rtype, 12)
         self.assertEqual(rclass, 0x8001)
 
+    def test_query_can_request_multicast_reply(self):
+        packet = make_query(unicast=False)
+        _, cursor = read_name(packet, 12)
+        self.assertEqual(struct.unpack_from("!HH", packet, cursor), (12, 0x0001))
+
     def test_parses_ptr_srv_and_a(self):
         service = encode_name("_ewelink._tcp.local")
         instance = encode_name("eWeLink_test._ewelink._tcp.local")
