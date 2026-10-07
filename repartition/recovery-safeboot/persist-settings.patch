@@ -1,0 +1,79 @@
+--- a/tasmota/tasmota_support/settings.ino
++++ b/tasmota/tasmota_support/settings.ino
+@@ -793,6 +793,66 @@
+   CounterInterruptDisable(false);
+ #endif
+ }
++#ifdef S60_RECOVERY_PERSIST_SETTINGS
++#include <nvs_flash.h>
++#ifndef S60_RECOVERY_WIFI_DEFAULTS
++#error S60_RECOVERY_PERSIST_SETTINGS requires S60_RECOVERY_WIFI_DEFAULTS
++#endif
++// Save the compiled-in defaults - which carry this build's Wi-Fi - where
++// Tasmota reads its settings, so the firmware installed next joins the network
++// by itself instead of raising its setup access point.  Only when no usable
++// settings are already stored, so a configured device is never overwritten.
++//
++// NVS is wiped first.  After the repartition it is the first 20 KiB of the old
++// area: full of what the Sonoff firmware left, with at best part of an earlier
++// Tasmota record, and sometimes no free page.  Saving into an empty area does
++// not depend on any of that.  Nothing from here on needs what was there; the
++// radio calibration it held is measured again and saved on the next start.
++//
++// Every failure is logged and otherwise silent: the next firmware then
++// behaves exactly as it would have without this.
++void S60PersistRecoverySettings(void) {
++  TSettings *stored = (TSettings*)calloc(1, sizeof(TSettings));
++  if (nullptr == stored) { return; }
++  bool present = NvmLoad("main", "Settings", stored, sizeof(TSettings)) &&
++                 ((uint16_t)CFG_HOLDER == stored->cfg_holder);
++  if (present) {
++    free(stored);
++    AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery: settings already stored, left alone"));
++    return;
++  }
++  esp_err_t result = nvs_flash_erase();  // de-initialises it first
++  if (ESP_OK == result) {
++    result = nvs_flash_init();
++  }
++  if (ESP_OK != result) {
++    free(stored);
++    AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery: settings not saved, NVS wipe failed (%d)"), result);
++    return;
++  }
++  Settings->cfg_crc32 = GetSettingsCrc32();
++  NvmSave("main", "Settings", Settings, sizeof(TSettings));
++
++  // Read it back exactly as the next firmware will.
++  memset(stored, 0, sizeof(TSettings));
++  nvs_handle_t handle;
++  size_t size = sizeof(TSettings);
++  result = nvs_open("main", NVS_READONLY, &handle);
++  if (ESP_OK == result) {
++    result = nvs_get_blob(handle, "Settings", stored, &size);
++    nvs_close(handle);
++  }
++  bool same = (ESP_OK == result) && (sizeof(TSettings) == size) &&
++              (0 == memcmp(stored, Settings, sizeof(TSettings)));
++  free(stored);
++  if (same) {
++    AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery: Wi-Fi settings saved for the next firmware"));
++  } else {
++    AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery: settings not saved, read-back failed (%d)"), result);
++  }
++}
++#endif  // S60_RECOVERY_PERSIST_SETTINGS
++
+ void SettingsLoad(void) {
+ #ifdef ESP8266
+   // Load configuration from optional file and flash (eeprom and 7 additonal slots) if first valid load does not stop_flash_rotate
+@@ -862,6 +922,9 @@
+   SettingsDefaultSet2();
+   settings_location = 0;
+   AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery Wi-Fi defaults active"));
++#ifdef S60_RECOVERY_PERSIST_SETTINGS
++  S60PersistRecoverySettings();
++#endif
+ #endif
+ 
+ #ifndef FIRMWARE_MINIMAL

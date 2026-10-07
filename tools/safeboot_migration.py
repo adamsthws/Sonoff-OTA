@@ -67,6 +67,11 @@ SPIFFS_SIZE = 0x50000
 SAFEBOOT_STAGE_OFFSET = OLD_OTA0_OFFSET
 
 OFFICIAL_INSTALL_COMMIT = "dcfc2bd2d958add881e4ecb2ccc182a15602be1d"
+# Changing this release, or the Bluetooth build pinned below?  The Tasmota
+# settings template (artifacts/tasmota-settings-template-*.bin), which lets
+# D1 give Tasmota the Wi-Fi without its setup network, was checked against
+# both.  See tools/autoflash/tasmota_settings.py: until it is re-checked and
+# re-captured, D1 falls back to the setup network and the tests say so.
 OFFICIAL_TASMOTA_COMMIT = "db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892"
 OFFICIAL_RELEASE_BASE = (
     "https://raw.githubusercontent.com/tasmota/install/"
@@ -111,7 +116,7 @@ IMPRINTED_MODE = "public-imprinted-safeboot-v1"
 PUBLISHED_RECOVERY_FILE = (
     Path(__file__).resolve().parents[1] / "artifacts" / "s60-recovery-safeboot-imprintable.bin"
 )
-PUBLISHED_RECOVERY_SHA256 = "7a4f719402d9e86ef03d13d36701efb83ec751d7c694c9d7723e5219721dc803"
+PUBLISHED_RECOVERY_SHA256 = "aa32fafa4a9470152d5f8826fc6aedf94387575332353b50b8ce454ec1f9d364"
 RECOVERY_ARTIFACT = "recovery_safeboot"
 RECOVERY_MARKER = b"S60 recovery Wi-Fi defaults active"
 RECOVERY_PATCH = (
@@ -624,14 +629,40 @@ def load_manifest(path: Path) -> dict[str, Any]:
     return manifest
 
 
-def verify_manifest_files(manifest_path: Path, manifest: dict[str, Any]) -> None:
-    root = manifest_path.parent
+# Artifacts handed over in memory instead of read from a file.  The recovery
+# image carries Wi-Fi credentials, so it is marked memory_only in the manifest
+# and never written to disk; it is checked against the same pinned size and
+# SHA-256 as any file would be.
+_MEMORY_ARTIFACTS: dict[str, bytes] = {}
+
+
+def provide_in_memory(name: str, data: bytes) -> None:
+    _MEMORY_ARTIFACTS[name] = data
+
+
+def _artifact_data(manifest_path: Path, name: str, artifact: dict[str, Any]) -> bytes:
+    if name in _MEMORY_ARTIFACTS:
+        return _MEMORY_ARTIFACTS[name]
+    if artifact.get("memory_only"):
+        raise ValueError(f"{name} is kept only in memory and was not provided")
+    try:
+        return (manifest_path.parent / artifact["file"]).read_bytes()
+    except OSError as exc:
+        raise ValueError(f"could not read {name} artifact: {exc}") from exc
+
+
+def verify_manifest_files(
+    manifest_path: Path, manifest: dict[str, Any], allow_unprovided: bool = False
+) -> None:
+    """Every artifact is present and unchanged.
+
+    With `allow_unprovided`, a memory-only artifact that has not been handed
+    over yet is skipped - for checking a bundle before its secrets are known.
+    """
     for name, artifact in manifest["artifacts"].items():
-        path = root / artifact["file"]
-        try:
-            data = path.read_bytes()
-        except OSError as exc:
-            raise ValueError(f"could not read {name} artifact: {exc}") from exc
+        if allow_unprovided and artifact.get("memory_only") and name not in _MEMORY_ARTIFACTS:
+            continue
+        data = _artifact_data(manifest_path, name, artifact)
         if len(data) != artifact["size"]:
             raise ValueError(f"{name} size changed")
         if sha256_bytes(data) != artifact["sha256"]:
@@ -646,11 +677,7 @@ def artifact_bytes(
         artifact = manifest["artifacts"][name]
     except KeyError as exc:
         raise ValueError(f"manifest has no {name} artifact") from exc
-    path = manifest_path.parent / artifact["file"]
-    try:
-        data = path.read_bytes()
-    except OSError as exc:
-        raise ValueError(f"could not read {name} artifact: {exc}") from exc
+    data = _artifact_data(manifest_path, name, artifact)
     if len(data) != artifact["size"]:
         raise ValueError(f"{name} size changed")
     if sha256_bytes(data) != artifact["sha256"]:

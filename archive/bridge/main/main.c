@@ -12,9 +12,24 @@
  *
  * This cannot protect against failure before app_main starts, but it makes a
  * later Wi-Fi/HTTP failure recoverable by power-cycling back to stock.
+ *
+ * v4: the stock firmware keeps its Wi-Fi details where ESP-IDF does
+ * (nvs.net80211 sta.ssid / sta.pswd).  The bridge reads them, read-only, and
+ * joins that network as well as making its own, so the host can upload over
+ * the home network.  If they are missing or the join fails within
+ * STA_WINDOW_MS, the bridge drops to its own network alone, exactly as v3.
+ * Wi-Fi's own NVS use stays off (sdkconfig.defaults): nothing Wi-Fi does is
+ * saved, and the stock firmware's data is only read.
+ *
+ * v5: POST /tasmota-settings takes a Tasmota settings template (no Wi-Fi in
+ * it), fills in the network the bridge joined, and saves it where Tasmota
+ * reads its settings at boot (NVS "main"/"Settings").  Tasmota then joins the
+ * home network on its first boot instead of making a setup network.  Only
+ * done once the bridge has joined with those details, so they are known good.
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_err.h"
@@ -24,18 +39,30 @@
 #include "esp_mac.h"
 #include "esp_netif.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include "tasmota_settings.h"
 
 #define BRIDGE_AP_PASSWORD "s60-ota-bridge"
 #define BRIDGE_MAX_IMAGE_SIZE 0x1f0000
 #define UPLOAD_BUFFER_SIZE 4096
+#define BRIDGE_HOSTNAME "s60-ota-bridge"
+/* How long to try the home network before keeping to the bridge's own. */
+#define STA_WINDOW_MS 45000
 
 static const char *TAG = "s60_bridge";
 static const esp_partition_t *s_running;
 static const esp_partition_t *s_peer;
+static volatile bool s_sta_trying;
+static volatile uint32_t s_sta_ip; /* network byte order; 0 until joined */
+static volatile bool s_tasmota_settings_saved;
+#define TASMOTA_SETTINGS_SIZE 4096
+static uint8_t s_settings[TASMOTA_SETTINGS_SIZE];
 /* Keep the flash buffer out of the HTTP server task's relatively small stack.
  * A large automatic buffer can reset the bridge on handler entry, before the
  * recovery slot is pinned. */
@@ -70,6 +97,158 @@ static esp_err_t root_handler(httpd_req_t *req)
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
+}
+
+#ifdef BRIDGE_NVS_READOUT
+/* Research build only: stream the stock NVS partition exactly as it is, so the
+ * host can see where the stock firmware keeps its Wi-Fi details.  Read-only:
+ * nothing here writes flash, and NVS is never initialised. */
+static esp_err_t nvs_handler(httpd_req_t *req)
+{
+    const esp_partition_t *nvs = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, NULL);
+    if (nvs == NULL) {
+        httpd_resp_set_status(req, "404 Not Found");
+        return httpd_resp_sendstr(req, "No NVS partition.\n");
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    for (size_t offset = 0; offset < nvs->size; offset += sizeof(s_upload_buffer)) {
+        size_t length = nvs->size - offset < sizeof(s_upload_buffer)
+                            ? nvs->size - offset
+                            : sizeof(s_upload_buffer);
+        if (esp_partition_read(nvs, offset, s_upload_buffer, length) != ESP_OK ||
+            httpd_resp_send_chunk(req, s_upload_buffer, length) != ESP_OK) {
+            httpd_resp_send_chunk(req, NULL, 0);
+            return ESP_FAIL;
+        }
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+#endif
+
+/* Plain-text state for the host: which networks the bridge is on. */
+static esp_err_t status_handler(httpd_req_t *req)
+{
+    char body[96];
+    uint32_t ip = s_sta_ip;
+    if (ip != 0) {
+        snprintf(body, sizeof(body), "bridge v5\nhome network: joined " IPSTR "\n%s",
+                 IP2STR((esp_ip4_addr_t *)&ip),
+                 s_tasmota_settings_saved ? "tasmota settings: saved\n" : "");
+    } else {
+        snprintf(body, sizeof(body), "bridge v5\nhome network: %s\n",
+                 s_sta_trying ? "joining" : "not joined");
+    }
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_sendstr(req, body);
+}
+
+static esp_err_t settings_reply(httpd_req_t *req, const char *status, const char *message)
+{
+    memset(s_settings, 0, sizeof(s_settings));
+    httpd_resp_set_status(req, status);
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, message);
+}
+
+static bool query_number(const char *query, const char *key, size_t *value)
+{
+    char text[12];
+    if (httpd_query_key_value(query, key, text, sizeof(text)) != ESP_OK) {
+        return false;
+    }
+    char *end = NULL;
+    unsigned long number = strtoul(text, &end, 10);
+    if (end == text || *end != 0) {
+        return false;
+    }
+    *value = number;
+    return true;
+}
+
+/* Fill a Tasmota settings template with the network the bridge joined and
+ * save it where Tasmota reads it at boot.  The layout comes in the query, so
+ * the bridge needs no knowledge of Tasmota's release. */
+static esp_err_t tasmota_settings_handler(httpd_req_t *req)
+{
+    if (s_sta_ip == 0) {
+        return settings_reply(req, "409 Conflict",
+                              "The bridge has not joined a network, so there are no proven "
+                              "Wi-Fi details to give Tasmota. Nothing was saved.\n");
+    }
+    char query[96];
+    size_t pool, pool_size, ssid_index, password_index, crc;
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        !query_number(query, "pool", &pool) || !query_number(query, "pool_size", &pool_size) ||
+        !query_number(query, "ssid", &ssid_index) ||
+        !query_number(query, "password", &password_index) || !query_number(query, "crc", &crc)) {
+        return settings_reply(req, "400 Bad Request", "Missing layout. Nothing was saved.\n");
+    }
+    if (req->content_len != TASMOTA_SETTINGS_SIZE) {
+        return settings_reply(req, "400 Bad Request", "Wrong size. Nothing was saved.\n");
+    }
+    size_t received = 0;
+    while (received < TASMOTA_SETTINGS_SIZE) {
+        int got = httpd_req_recv(req, (char *)s_settings + received, TASMOTA_SETTINGS_SIZE - received);
+        if (got == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (got <= 0) {
+            return settings_reply(req, "400 Bad Request", "Upload interrupted. Nothing was saved.\n");
+        }
+        received += (size_t)got;
+    }
+
+    wifi_config_t joined = {0};
+    if (esp_wifi_get_config(WIFI_IF_STA, &joined) != ESP_OK) {
+        return settings_reply(req, "500 Internal Server Error", "No Wi-Fi details. Nothing was saved.\n");
+    }
+    const tasmota_layout_t layout = {
+        .pool = pool, .pool_size = pool_size,
+        .ssid = (unsigned)ssid_index, .password = (unsigned)password_index, .crc = crc,
+    };
+    size_t ssid_len = strnlen((const char *)joined.sta.ssid, sizeof(joined.sta.ssid));
+    size_t password_len = strnlen((const char *)joined.sta.password, sizeof(joined.sta.password));
+    int filled = tasmota_fill(s_settings, sizeof(s_settings), &layout,
+                              (const char *)joined.sta.ssid, ssid_len,
+                              (const char *)joined.sta.password, password_len);
+    memset(&joined, 0, sizeof(joined));
+    if (filled != TASMOTA_OK) {
+        static const char *const reasons[] = {
+            "", "The layout does not fit the record.", "The template arrived damaged.",
+            "The template's text settings are not in Tasmota's format.",
+            "The Wi-Fi details do not fit in Tasmota's text settings.",
+        };
+        char message[120];
+        snprintf(message, sizeof(message), "%s Nothing was saved.\n",
+                 filled < 5 ? reasons[filled] : "Unknown error.");
+        return settings_reply(req, "400 Bad Request", message);
+    }
+
+    esp_err_t err = nvs_flash_init();
+    nvs_handle_t handle;
+    if (err == ESP_OK) {
+        err = nvs_open("main", NVS_READWRITE, &handle);
+        if (err == ESP_OK) {
+            err = nvs_set_blob(handle, "Settings", s_settings, sizeof(s_settings));
+            if (err == ESP_OK) {
+                err = nvs_commit(handle);
+            }
+            nvs_close(handle);
+        }
+        nvs_flash_deinit();
+    }
+    if (err != ESP_OK) {
+        char message[120];
+        snprintf(message, sizeof(message), "Could not save Tasmota's settings (%s).\n",
+                 esp_err_to_name(err));
+        return settings_reply(req, "500 Internal Server Error", message);
+    }
+    s_tasmota_settings_saved = true;
+    ESP_LOGI(TAG, "Tasmota settings saved");
+    return settings_reply(req, "200 OK", "Tasmota settings saved with the home network.\n");
 }
 
 static esp_err_t upload_error(httpd_req_t *req, const char *message)
@@ -134,6 +313,72 @@ static esp_err_t update_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* The stock firmware's saved station details, if it saved any.  Read-only:
+ * NVS is opened NVS_READONLY and never erased, even if initialising fails. */
+static bool read_stock_wifi(wifi_config_t *sta)
+{
+    esp_err_t err = nvs_flash_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "stock NVS not readable (%s)", esp_err_to_name(err));
+        return false;
+    }
+    bool found = false;
+    nvs_handle_t handle;
+    if (nvs_open("nvs.net80211", NVS_READONLY, &handle) == ESP_OK) {
+        struct {
+            uint32_t len;
+            uint8_t ssid[32];
+        } ssid;
+        char password[65];
+        size_t ssid_size = sizeof(ssid), password_size = sizeof(password);
+        if (nvs_get_blob(handle, "sta.ssid", &ssid, &ssid_size) == ESP_OK &&
+            ssid_size == sizeof(ssid) && ssid.len > 0 && ssid.len <= 32 &&
+            nvs_get_blob(handle, "sta.pswd", password, &password_size) == ESP_OK &&
+            password_size <= sizeof(password)) {
+            memcpy(sta->sta.ssid, ssid.ssid, ssid.len);
+            password[sizeof(password) - 1] = 0;
+            strlcpy((char *)sta->sta.password, password, sizeof(sta->sta.password));
+            found = true;
+        }
+        memset(password, 0, sizeof(password));
+        nvs_close(handle);
+    }
+    nvs_flash_deinit();
+    return found;
+}
+
+static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START && s_sta_trying) {
+        esp_wifi_connect();
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        s_sta_ip = 0;
+        if (s_sta_trying) {
+            esp_wifi_connect();
+        }
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        s_sta_ip = ((ip_event_got_ip_t *)data)->ip_info.ip.addr;
+        ESP_LOGI(TAG, "joined the home network: " IPSTR,
+                 IP2STR(&((ip_event_got_ip_t *)data)->ip_info.ip));
+    }
+}
+
+/* Give up on the home network if it has not worked in time, so the bridge's
+ * own network is steady for the operator to join instead. */
+static void station_window(void *unused)
+{
+    (void)unused;
+    vTaskDelay(pdMS_TO_TICKS(STA_WINDOW_MS));
+    if (s_sta_ip == 0) {
+        ESP_LOGW(TAG, "home network not joined; keeping to the bridge's own");
+        s_sta_trying = false;
+        esp_wifi_disconnect();
+        esp_wifi_set_mode(WIFI_MODE_AP);
+    }
+    vTaskDelete(NULL);
+}
+
 static esp_err_t start_access_point(void)
 {
     ESP_ERROR_CHECK(esp_netif_init());
@@ -142,9 +387,18 @@ static esp_err_t start_access_point(void)
         return ESP_FAIL;
     }
 
+    wifi_config_t station = {0};
+    bool have_station = read_stock_wifi(&station);
+    esp_netif_t *sta_netif = have_station ? esp_netif_create_default_wifi_sta() : NULL;
+    if (sta_netif != NULL) {
+        esp_netif_set_hostname(sta_netif, BRIDGE_HOSTNAME);
+    }
+
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&init));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi_event, NULL));
 
     uint8_t mac[6];
     ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP));
@@ -160,10 +414,22 @@ static esp_err_t start_access_point(void)
     config.ap.pmf_cfg.capable = true;
     config.ap.pmf_cfg.required = false;
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    if (sta_netif != NULL) {
+        station.sta.pmf_cfg.capable = true;
+        station.sta.pmf_cfg.required = false;
+        s_sta_trying = true;
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &station));
+    } else {
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    }
+    memset(&station, 0, sizeof(station));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &config));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI(TAG, "AP ready: %s", config.ap.ssid);
+    if (sta_netif != NULL) {
+        xTaskCreate(station_window, "sta_window", 2048, NULL, 5, NULL);
+    }
     return ESP_OK;
 }
 
@@ -184,6 +450,21 @@ static esp_err_t start_web_server(void)
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &root));
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &update));
+    const httpd_uri_t status = {
+        .uri = "/status", .method = HTTP_GET, .handler = status_handler, .user_ctx = NULL,
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &status));
+    const httpd_uri_t tasmota_settings = {
+        .uri = "/tasmota-settings", .method = HTTP_POST,
+        .handler = tasmota_settings_handler, .user_ctx = NULL,
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &tasmota_settings));
+#ifdef BRIDGE_NVS_READOUT
+    const httpd_uri_t nvs = {
+        .uri = "/nvs", .method = HTTP_GET, .handler = nvs_handler, .user_ctx = NULL,
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &nvs));
+#endif
     return ESP_OK;
 }
 

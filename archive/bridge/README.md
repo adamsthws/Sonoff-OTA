@@ -14,6 +14,21 @@ The remaining irreducible risk is failure before `app_main` executes. The stock
 1.2.0 bootloader was built without ESP-IDF application rollback, so no software
 running in an app partition can eliminate that risk.
 
+Bridge v5, the one the run installs, adds two things. It reads the Wi-Fi the
+stock firmware saved and joins that network as well as raising its own, so the
+run finds it where the plug was. And it takes Tasmota's settings template,
+fills in the Wi-Fi it joined with, and saves it where Tasmota reads its
+settings, so Tasmota joins by itself. The password never leaves the plug.
+Where stock saved no Wi-Fi, or the network cannot be joined, it behaves
+exactly as v3 does.
+
+`sdkconfig.defaults` holds the settings v3 was built with; with them a rebuild
+matches the published v3 except for the build time, date and ELF hash. Keep
+`CONFIG_ESP_WIFI_NVS_ENABLED=n`: the bridge never initialises NVS, so with it
+on `esp_wifi_init()` fails and the bridge aborts at start-up (the plug then
+falls back to stock by itself). Delete any generated `sdkconfig.*` before
+rebuilding, or old settings are reused.
+
 Build with PlatformIO from a path without spaces (the ESP-IDF builder used here
 does not correctly quote every generated CMake path):
 
@@ -33,8 +48,8 @@ Wrap the application for the stock updater and validate it:
 ```sh
 python3 tools/build_vendor_ota.py \
   /tmp/s60-bridge-build/.pio/build/s60-ota-bridge/firmware.bin \
-  artifacts/s60-ota-bridge-v3-1.2.1.ota --version 1.2.1
-python3 tools/analyze_vendor_ota.py artifacts/s60-ota-bridge-v3-1.2.1.ota
+  artifacts/s60-ota-bridge-v5-9.9.9.ota --version 9.9.9
+python3 tools/analyze_vendor_ota.py artifacts/s60-ota-bridge-v5-9.9.9.ota
 ```
 
 On a successful first boot it creates `S60-OTA-Bridge-XXXX`, protected with

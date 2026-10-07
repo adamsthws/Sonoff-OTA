@@ -51,7 +51,7 @@ def c_literal(marker: bytes, field_bytes: int) -> str:
     return '"' + "".join(f"\\x{byte:02x}" for byte in body) + '"'
 
 
-def render_header() -> bytes:
+def render_header(persist_settings: bool = False) -> bytes:
     return (
         "/* Generated. Contains placeholders, not credentials - safe to publish\n"
         " * the image built from it. tools/autoflash/imprint.py writes the real\n"
@@ -59,6 +59,7 @@ def render_header() -> bytes:
         "#ifndef _USER_CONFIG_OVERRIDE_H_\n"
         "#define _USER_CONFIG_OVERRIDE_H_\n\n"
         "#define S60_RECOVERY_WIFI_DEFAULTS\n"
+        + ("#define S60_RECOVERY_PERSIST_SETTINGS\n" if persist_settings else "") +
         "#define S60_IMPRINTABLE_BUILD\n"
         "#undef STA_SSID1\n"
         f"#define STA_SSID1 {c_literal(SSID_MARKER, SSID_FIELD_BYTES)}\n"
@@ -75,9 +76,14 @@ def render_header() -> bytes:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument(
+        "--no-persist-settings", action="store_true",
+        help="leave out saving the Wi-Fi where Tasmota reads it (persist-settings.patch); "
+             "the published image includes it",
+    )
     args = parser.parse_args()
 
-    atomic_private_write(args.output, render_header())
+    atomic_private_write(args.output, render_header(persist_settings=not args.no_persist_settings))
     output_dir = args.output.parent
     image = output_dir / "tasmota32c3-safeboot-recovery.bin"
     print(f"Wrote {args.output}")

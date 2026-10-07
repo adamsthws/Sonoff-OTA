@@ -4,10 +4,14 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import os
 import tempfile
 from pathlib import Path
+
+try:
+    from tools.autoflash.prompts import ask_secret
+except ModuleNotFoundError:  # running from inside tools/
+    from autoflash.prompts import ask_secret
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,8 +86,8 @@ def main() -> int:
     args = parser.parse_args()
 
     ssid = input("Wi-Fi SSID: ")
-    password = getpass.getpass("Wi-Fi password (hidden): ")
-    confirmation = getpass.getpass("Repeat Wi-Fi password: ")
+    password = ask_secret("Wi-Fi password (hidden): ")
+    confirmation = ask_secret("Repeat Wi-Fi password: ")
     if password != confirmation:
         parser.error("passwords differ")
     try:

@@ -18,6 +18,7 @@ from upstream Tasmota commit
 [`db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892`](https://github.com/arendst/Tasmota/tree/db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892).
 The corresponding project changes and build tooling are
 `repartition/recovery-safeboot/volatile-wifi-defaults.patch`,
+`repartition/recovery-safeboot/persist-settings.patch`,
 `tools/configure_imprintable_safeboot.py`, and
 `tools/build_recovery_safeboot.sh`.
 

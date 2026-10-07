@@ -22,6 +22,7 @@ try:
         find_build_paths,
         find_field,
         imprint,
+        read_c_string,
     )
 except ModuleNotFoundError:  # running from inside tools/
     from analyze_vendor_ota import parse_esp_image
@@ -34,6 +35,7 @@ except ModuleNotFoundError:  # running from inside tools/
         find_build_paths,
         find_field,
         imprint,
+        read_c_string,
     )
 
 SAFEBOOT_PARTITION_BYTES = 0xD0000
@@ -82,6 +84,11 @@ def main() -> int:
         round_trip = parse_esp_image(patched)
         ok = bool(round_trip["checksum_valid"]) and round_trip["sha256_valid"] is not False
         checks.append(("credentials can be written and the image stays valid", ok, ""))
+        reads_back = (
+            read_c_string(patched, find_field(image, SSID_MARKER, SSID_FIELD_BYTES)) == b"S" * 32
+            and read_c_string(patched, find_field(image, PASSWORD_MARKER, PASSWORD_FIELD_BYTES)) == b"P" * 63
+        )
+        checks.append(("the firmware would read exactly the credentials written", reads_back, ""))
         checks.append((
             "no credential survives into the shipped image",
             b"S" * 32 not in image and b"P" * 63 not in image,

@@ -12,6 +12,8 @@ expected_commit=db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892
 settings_file="$source_dir/tasmota/tasmota_support/settings.ino"
 source_header="$source_dir/tasmota/user_config_override.h"
 patch_file="$project_dir/repartition/recovery-safeboot/volatile-wifi-defaults.patch"
+# Applied only when the header asks for it, so the default build is unchanged.
+persist_patch="$project_dir/repartition/recovery-safeboot/persist-settings.patch"
 build_dir="$source_dir/.pio/build/$environment"
 variant_copy="$source_dir/variants/tasmota/tasmota32c3-safeboot.bin"
 output_image="$output_dir/tasmota32c3-safeboot-recovery.bin"
@@ -19,12 +21,16 @@ output_report="$output_dir/recovery-safeboot-validation.json"
 pio_core="$project_dir/.platformio-core"
 pio_home="$project_dir/.pio-home"
 patch_applied=0
+persist_applied=0
 source_touched=0
 
 cleanup() {
   set +e
   if (( source_touched )); then
     rm -f -- "$source_header"
+    if (( persist_applied )); then
+      git -C "$source_dir" apply --reverse "$persist_patch"
+    fi
     if (( patch_applied )); then
       git -C "$source_dir" apply --reverse "$patch_file"
     fi
@@ -68,6 +74,12 @@ source_touched=1
 git -C "$source_dir" apply --check "$patch_file"
 git -C "$source_dir" apply "$patch_file"
 patch_applied=1
+if grep -q "^#define S60_RECOVERY_PERSIST_SETTINGS" "$private_header"; then
+  git -C "$source_dir" apply --check "$persist_patch"
+  git -C "$source_dir" apply "$persist_patch"
+  persist_applied=1
+  echo "Settings-saving recovery Safeboot: persist-settings.patch applied"
+fi
 install -m 0600 "$private_header" "$source_header"
 rm -f -- "$variant_copy"
 
