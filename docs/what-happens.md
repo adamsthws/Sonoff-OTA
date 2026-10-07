@@ -2,7 +2,7 @@
 
 Written for someone who wants to understand what they are about to do, without
 needing to know anything about embedded firmware. Nothing here is required
-reading — the tool works without it — but the one irreversible step is easier
+reading - the tool works without it - but the one irreversible step is easier
 to consent to if you know why it is irreversible.
 
 ## The problem
@@ -13,28 +13,48 @@ the chip inside. That is fiddly, voids everything, and on a mains plug it is
 genuinely dangerous if you get it wrong.
 
 There is another way in. The plug already knows how to replace its own
-firmware — that is how Sonoff ships updates. It will do it when the owner of
+firmware - that is how Sonoff ships updates. It will do it when the owner of
 the plug asks. You are the owner.
 
 ## Getting in
 
-When the plug updates itself, it asks Sonoff's servers what is available, and
-they answer with a download address. The plug then fetches the firmware from
-that address and installs it.
+The plug already knows how to replace its own firmware, and it does it when the
+account that owns the plug tells it to. When Sonoff ships an update, their
+servers send the plug an *upgrade command*: a message that names where to
+download the new firmware and the exact fingerprint - a SHA-256 hash - the
+download must match. The plug fetches that address, checks the hash, and
+installs what it gets.
 
-The tool intercepts exactly that one download. You add a rule to your router
-saying "when this plug tries to reach that particular address, send it to my
-computer instead". The plug asks for its update, your computer answers, and the
-plug installs what it is given.
+Two things about that command are the whole way in. It only has to come from the
+account that owns the plug - your eWeLink account - and the download address and
+hash inside it are not tied to Sonoff. So the tool, signed in as you, sends the
+plug its own upgrade command: one that names *your computer* as the download
+address, and our firmware's hash. The plug fetches our firmware straight from
+your computer and installs it, exactly as it would a genuine update.
 
-This is why the router rule matters so much, and why the tool refuses to go on
-until it has proved the rule works. If the redirect silently fails, the plug
-just downloads Sonoff's genuine firmware and updates normally — no harm, but no
-progress either.
+Nothing is faked or bypassed. The plug does every check it normally does - it
+confirms the command came from its owner, and it verifies the firmware it
+downloaded against the hash in the command. It simply has no reason to care that
+the address is your computer and the firmware is Tasmota rather than Sonoff's.
 
-Nothing is faked or bypassed here. The command telling the plug to update is
-signed in to your own eWeLink account, and the plug verifies that. It simply
-does not care that the file it receives is not Sonoff's.
+Because the plug downloads straight from your computer, **no router rule is
+involved at all.** The tool points the plug at your computer and serves it our
+firmware; it never touches, redirects or depends on Sonoff's own download
+address. This holds whether or not Sonoff has an update waiting for the plug -
+the address and hash in our command decide what the plug installs, not whatever
+Sonoff happens to be offering.
+
+> **A note on history.** Earlier versions added one rule to your router
+> whenever Sonoff was offering the plug an update. It was never how our firmware
+> was delivered - that has always come straight from your computer - only a
+> guard against a second, unlikely possibility: that the plug might *also* fetch
+> and install Sonoff's genuine update on its own, in the same short window, from
+> a one-time signed address only the plug can produce. That guard was dropped to
+> keep the process simple, since the owner's command already decides what is
+> installed. If a future plug ever turns out to race its own update during the
+> conversion, the guard can be put back: [router-rules.md](router-rules.md)
+> has the rule, how to test it and where the old step lives - and how a
+> simpler router rule can stop a stock plug installing Sonoff updates at all.
 
 ## Why it takes several stages
 
@@ -56,8 +76,8 @@ should.
 
 ## The step that cannot be undone
 
-At the very start of the plug's memory is a small table — a few thousand bytes
-— listing where everything lives. The bootloader reads it every time the plug
+At the very start of the plug's memory is a small table, a few thousand bytes
+long, listing where everything lives. The bootloader reads it every time the plug
 powers on. Without it, the plug does not know where its firmware is and will
 not start at all.
 
@@ -67,7 +87,7 @@ one much larger area for Tasmota, and space for files. To get the official
 layout, that table has to be replaced.
 
 There is only one copy of it. No spare, no backup the bootloader can fall back
-on. Replacing it means erasing it and writing the new one — and for the moment
+on. Replacing it means erasing it and writing the new one - and for the moment
 in between, the plug has no valid table. That moment is about a second, inside
 a step that takes a minute, and if the power fails during it, the plug is
 finished as far as Wi-Fi is concerned.
@@ -78,14 +98,14 @@ the table is touched, the replacement table is checked byte for byte in memory
 first, and the plug refuses the whole operation unless it is running from the
 far end of memory, well away from everything being changed.
 
-## Why your Wi-Fi details disappear
+## How your Wi-Fi carries across
 
-The new layout has a smaller settings area than the old one, in a different
-place. The plug's saved settings do not survive that move, so after the rebuild
-Tasmota starts up as if it were brand new and asks to be set up again.
+The plug keeps the Wi-Fi network it was set up with in the eWeLink app. The installer reads and joins the saved WiFi network automatically.
 
-That is expected, not a fault. It is why the tool asks you to join the plug's
-own setup network twice during the process.
+The small temporary firmware that runs after the rebuild saves your Wi-Fi again, where official Tasmota reads it, and Tasmota joins your network by itself.
+
+If any of that does not work, the tool falls back to asking you to
+join the plug's own setup network.
 
 ## At the end
 
@@ -97,7 +117,7 @@ of each, and compares them against the official Tasmota release files:
 - Tasmota itself
 
 If all three match, the plug is byte-for-byte identical to a plug flashed over
-USB with the official release. Not equivalent — identical.
+USB with the official release. Not equivalent, identical.
 
 From then on it is an ordinary Tasmota device: normal updates through its own
 web page, normal integrations, and none of it touching Sonoff's servers.
