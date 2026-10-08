@@ -1,0 +1,76 @@
+#!/bin/bash
+# The emulated plug's power and serial port.
+#   plug status          on or off, network, address
+#   plug log             follow its serial output (secrets masked)
+#   plug restart         switch off and on again (a power cut)
+#   plug off | plug on   switch it off / on
+#   plug cycle N [SECS]  N quick power cycles, SECS (default 2) on each time -
+#                        Tasmota's settings reset is 7 in a row
+set -euo pipefail
+RUN=/run/s60emu
+LOG=/state/logs/uart.log
+
+kill_qemu() {
+    touch "$RUN/power-cut"   # tells the supervisor this was not the plug restarting itself
+    [ -f "$RUN/qemu.pid" ] && kill "$(cat "$RUN/qemu.pid")" 2>/dev/null || true
+}
+
+current_pid() { cat "$RUN/qemu.pid" 2>/dev/null || true; }
+
+# Wait until a QEMU other than $1 (if given) is running.
+wait_running() {
+    for _ in $(seq 100); do
+        pid=$(current_pid)
+        [ -n "$pid" ] && [ "$pid" != "${1:-}" ] && kill -0 "$pid" 2>/dev/null && return 0
+        sleep 0.1
+    done
+    echo "the plug did not start - see: plug log" >&2
+    return 1
+}
+
+case "${1:-status}" in
+status)
+    if [ -f "$RUN/qemu.pid" ] && kill -0 "$(cat "$RUN/qemu.pid")" 2>/dev/null; then state=on; else state=off; fi
+    echo "Power:    $state"
+    softap=$(cat "$RUN/softap" 2>/dev/null || true)
+    echo "Its own network: ${softap:-(none)}"
+    lease=$(awk '{print $3}' "$RUN/leases" 2>/dev/null | head -1)
+    echo "Address on the home network: ${lease:-(none yet)}"
+    ;;
+log)
+    touch "$LOG"
+    exec tail -n 200 -F "$LOG"
+    ;;
+off)
+    echo off > "$RUN/power"
+    kill_qemu
+    echo "Plug switched off."
+    ;;
+on)
+    echo on > "$RUN/power"
+    wait_running
+    echo "Plug switched on."
+    ;;
+restart)
+    echo on > "$RUN/power"
+    kill_qemu
+    echo "Plug power-cycled."
+    ;;
+cycle)
+    n=${2:?usage: plug cycle N [SECS]}
+    secs=${3:-2}
+    echo on > "$RUN/power"
+    for i in $(seq "$n"); do
+        old=$(current_pid)
+        kill_qemu
+        wait_running "$old"
+        echo "  cycle $i/$n: on for ${secs}s"
+        sleep "$secs"
+    done
+    echo "Done; the plug stays on."
+    ;;
+*)
+    sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac

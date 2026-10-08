@@ -1,0 +1,16 @@
+diff --git a/hw/gpio/esp32c3_gpio.c b/hw/gpio/esp32c3_gpio.c
+index b9cf603..efbf556 100644
+--- a/hw/gpio/esp32c3_gpio.c
++++ b/hw/gpio/esp32c3_gpio.c
+@@ -167,6 +167,11 @@ static void esp32c3_gpio_init(Object *obj)
+     ESP32C3GPIOState *s = ESP32C3_GPIO(obj);
+     /* Set the default value for the property */
+     object_property_set_int(obj, "strap_mode", ESP32C3_STRAP_MODE_FLASH_BOOT, &error_fatal);
++    /* S60 emulation: nothing drives the pins when run standalone (PICSimLab
++     * normally does), so let inputs idle high, as with pull-ups. Otherwise an
++     * active-low button (Tasmota's Button1) reads as held, and holding it for
++     * 40 s resets Tasmota to its defaults. */
++    s->parent.gpio_in = 0x003FFFFF;   /* GPIO0..21 */
+ 
+     memory_region_init_io(&s->parent.iomem, obj, &gpio_ops, s, TYPE_ESP32C3_GPIO,
+                           0x1000);

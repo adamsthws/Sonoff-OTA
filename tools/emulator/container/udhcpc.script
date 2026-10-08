@@ -1,0 +1,15 @@
+#!/bin/sh
+# udhcpc hook for joining the plug's own network: take the address, keep the
+# container's own routes (the plug's network has no internet anyway).
+RUN=/run/s60emu
+case "$1" in
+deconfig)
+    ip address flush dev "$interface"
+    ;;
+bound|renew)
+    ip address flush dev "$interface"
+    ip address add "$ip/${mask:-24}" dev "$interface"
+    echo "${router%% *}" > "$RUN/gateway"
+    ;;
+esac
+exit 0

@@ -1,0 +1,13 @@
+#!/bin/bash
+# Stand-in for NetworkManager's nmcli, just enough for the conversion tool's
+# Wi-Fi scan (`nmcli -t -f SSID device wifi list`). The emulated "air" holds
+# the fork's fixed access points and, while it is broadcasting one, the
+# plug's own network (reported by our QEMU patch).
+RUN=/run/s60emu
+if [[ " $* " != *" device wifi list"* && " $* " != *" dev wifi list"* && " $* " != *" d wifi list"* ]]; then
+    echo "nmcli (S60 emulator stand-in): only 'device wifi list' is supported" >&2
+    exit 2
+fi
+softap=$(cat "$RUN/softap" 2>/dev/null || true)
+[ -n "$softap" ] && echo "$softap"
+printf '%s\n' PICSimLabWifi Espressif MasseyWifi

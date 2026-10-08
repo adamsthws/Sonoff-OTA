@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Let your browser reach the emulated plug: localhost:8080 -> the plug's port 80.
+
+The plug's address depends on which network this "computer" is joined to
+(the home network, or the plug's own), so each new connection goes to the
+address `wifi` last wrote to /run/s60emu/browser-target.
+
+Not a plain port forward: Tasmota answers every page but / only when the
+Referer names its own address (a guard against cross-site requests), and a
+browser at localhost:8080 names localhost. So each request's Host, Referer and
+Origin are rewritten to the plug's address, a redirect naming the plug is
+rewritten back to the address the browser used, and every request gets its own
+connection (Connection: close) so each one's headers pass through here.
+"""
+
+import asyncio
+import re
+from pathlib import Path
+
+TARGET = Path("/run/s60emu/browser-target")
+LISTEN = ("0.0.0.0", 8080)
+HEADER_END = b"\r\n\r\n"
+MAX_HEADER = 64 * 1024
+
+
+def rewrite_request(head: bytes, plug: str) -> tuple[bytes, str]:
+    """The request head with the plug as its host; also the host the browser used."""
+    lines = head.decode("latin-1").split("\r\n")
+    browser = ""
+    out = [lines[0]]
+    for line in lines[1:]:
+        name, _, value = line.partition(":")
+        key = name.strip().lower()
+        value = value.strip()
+        if key == "host":
+            browser = value
+            line = f"Host: {plug}"
+        elif key in ("referer", "origin"):
+            line = f"{name}: " + re.sub(r"^(https?://)[^/]+", rf"\g<1>{plug}", value)
+        elif key in ("connection", "keep-alive", "proxy-connection"):
+            continue
+        out.append(line)
+    out.append("Connection: close")
+    return "\r\n".join(out).encode("latin-1"), browser
+
+
+def rewrite_response(head: bytes, plug: str, browser: str) -> bytes:
+    """A redirect naming the plug sends the browser back through here."""
+    if not browser:
+        return head
+    text = head.decode("latin-1")
+    return re.sub(rf"(?im)^(Location:\s*https?://){re.escape(plug)}", rf"\g<1>{browser}", text).encode("latin-1")
+
+
+async def read_head(reader: asyncio.StreamReader) -> tuple[bytes, bytes] | None:
+    """(head without the blank line, any bytes already read after it)."""
+    data = b""
+    while HEADER_END not in data:
+        chunk = await reader.read(65536)
+        if not chunk:
+            return None
+        data += chunk
+        if len(data) > MAX_HEADER:
+            return None
+    head, _, rest = data.partition(HEADER_END)
+    return head, rest
+
+
+async def pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        while data := await reader.read(65536):
+            writer.write(data)
+            await writer.drain()
+    except (ConnectionError, OSError):
+        pass
+    finally:
+        writer.close()
+
+
+def bad_gateway(target: str) -> bytes:
+    body = (f"The emulated plug does not answer at {target} yet.\n"
+            "Check `plug status` and `wifi` in the emulator's terminal.\n").encode()
+    return (b"HTTP/1.0 502 Bad Gateway\r\nContent-Type: text/plain\r\nConnection: close\r\n"
+            b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
+
+
+async def handle(client_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter) -> None:
+    target = TARGET.read_text().strip()
+    host, _, port = target.rpartition(":")
+    plug = host if port == "80" else target
+    try:
+        request = await read_head(client_reader)
+        if request is None:
+            return
+        head, rest = request
+        head, browser = rewrite_request(head, plug)
+        try:
+            plug_reader, plug_writer = await asyncio.wait_for(asyncio.open_connection(host, int(port)), 5)
+        except (OSError, asyncio.TimeoutError):
+            client_writer.write(bad_gateway(target))
+            await client_writer.drain()
+            return
+        plug_writer.write(head + HEADER_END + rest)
+        await plug_writer.drain()
+        upload = asyncio.ensure_future(pipe(client_reader, plug_writer))  # a request body, if any
+        response = await read_head(plug_reader)
+        if response is not None:
+            reply, rest = response
+            client_writer.write(rewrite_response(reply, plug, browser) + HEADER_END + rest)
+            await client_writer.drain()
+            await pipe(plug_reader, client_writer)
+        upload.cancel()
+        plug_writer.close()
+    except (ConnectionError, OSError):
+        pass
+    finally:
+        client_writer.close()
+
+
+async def main() -> None:
+    server = await asyncio.start_server(handle, *LISTEN)
+    async with server:
+        await server.serve_forever()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,0 +1,18 @@
+
+  ┌─ S60 emulator ──────────────────────────────────────────────────────────┐
+  │ This terminal is your simulated computer, joined to the simulated home Wi-Fi: PICSimLabWifi  │
+  │ (open network - no password; this computer is 192.168.60.1). The plug   │
+  │ is the emulated stock Sonoff 1.2.0, already paired with your account.   │
+  │                                                                         │
+  │ Run the conversion exactly as on a real plug:                           │
+  │     run            (short for: python tools/s60_autoflash.py run)       │
+  │                                                                         │
+  │ When it asks you to do something to the plug or your Wi-Fi:             │
+  │     plug restart | plug off | plug on | plug cycle 7    (power)         │
+  │     wifi | wifi join NAME | wifi home                   (Wi-Fi menu)    │
+  │ If it asks for your home Wi-Fi: PICSimLabWifi, empty password.          │
+  │                                                                         │
+  │ Plug serial log: window "plug" (Ctrl-b n / Ctrl-b p to switch windows). │
+  │ Plug web page in your browser: http://localhost:8080                    │
+  │ Leave: exit every window, or Ctrl-b d. The plug's flash is kept.        │
+  └─────────────────────────────────────────────────────────────────────────┘

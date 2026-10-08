@@ -1,0 +1,49 @@
+#!/bin/bash
+# This computer's Wi-Fi, emulated. Stands in for your desktop's Wi-Fi menu.
+#   wifi                 what we are joined to, and what we can see
+#   wifi join NAME       join a network (the home one, or the plug's own)
+#   wifi home            back to the home network
+set -euo pipefail
+RUN=/run/s60emu
+HOME_SSID=PICSimLabWifi
+
+case "${1:-status}" in
+status)
+    echo "Joined:   $(cat "$RUN/network")"
+    echo "Visible:"
+    nmcli -t -f SSID device wifi list | sed 's/^/          /'
+    ;;
+home)
+    exec "$0" join "$HOME_SSID"
+    ;;
+join)
+    name=${2:?usage: wifi join NAME}
+    if [ "$name" = "$HOME_SSID" ]; then
+        sudo /opt/s60emu/bin/wifi-root home
+        echo "Joined $HOME_SSID (this computer is 192.168.60.1)."
+        exit 0
+    fi
+    if ! nmcli -t -f SSID device wifi list | grep -qxF -- "$name"; then
+        echo "No network called '$name' is visible. Visible now:" >&2
+        nmcli -t -f SSID device wifi list | sed 's/^/    /' >&2
+        exit 1
+    fi
+    case "$name" in
+    S60-OTA-Bridge-*)
+        echo "Note: the bridge's network uses WPA2, which the emulator cannot join" >&2
+        echo "(its emulated Wi-Fi is open networks only). Trying anyway..." >&2
+        ;;
+    esac
+    echo "Joining $name..."
+    if sudo /opt/s60emu/bin/wifi-root join "$name"; then
+        echo "Joined $name; the plug is at $(cat "$RUN/gateway"). Back home: wifi home"
+    else
+        echo "Could not get an address from $name. Back home: wifi home" >&2
+        exit 1
+    fi
+    ;;
+*)
+    sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac

@@ -1,0 +1,65 @@
+#!/bin/bash
+# Root half of `wifi`: puts this "computer" on one network or the other.
+#   wifi-root home         the emulated home Wi-Fi: we are its router (DHCP, DNS)
+#   wifi-root join SSID    the plug's own network: we are a client of the plug
+set -euo pipefail
+RUN=/run/s60emu
+. "$RUN/env"
+HOME_SSID=PICSimLabWifi
+NET=192.168.60
+PLUG_IP=$NET.50
+
+stop_all() {
+    [ -f "$RUN/dnsmasq.pid" ] && kill "$(cat "$RUN/dnsmasq.pid")" 2>/dev/null || true
+    rm -f "$RUN/dnsmasq.pid"
+    pkill -x udhcpc 2>/dev/null || true
+    ip address flush dev tap0
+}
+
+# tap0's own MAC, kept so `home` can put it back after joining the plug's network
+[ -f "$RUN/tap-mac" ] || cat /sys/class/net/tap0/address > "$RUN/tap-mac"
+
+set_mac() {
+    ip link set tap0 down
+    ip link set tap0 address "$1" || echo "could not take MAC $1" >&2
+    ip link set tap0 up   # whatever happened, never leave the network down
+}
+
+case "${1:-}" in
+home)
+    stop_all
+    [ "$(cat /sys/class/net/tap0/address)" = "$(cat "$RUN/tap-mac")" ] || set_mac "$(cat "$RUN/tap-mac")"
+    ip address add "$NET.1/24" dev tap0
+    ip route replace 224.0.0.0/4 dev tap0   # mDNS discovery goes to the plug's network
+    if [ "$CLOUD" = 1 ]; then dns=(--resolv-file=/etc/resolv.conf); else dns=(--no-resolv); fi
+    dnsmasq --interface=tap0 --bind-interfaces --except-interface=lo \
+        --dhcp-range="$NET.100,$NET.199,255.255.255.0,1h" \
+        --dhcp-host="$PLUG_MAC,$PLUG_IP" \
+        --dhcp-option=option:router,"$NET.1" --dhcp-option=option:dns-server,"$NET.1" \
+        --dhcp-leasefile="$RUN/leases" --pid-file="$RUN/dnsmasq.pid" \
+        --log-dhcp --log-facility="$RUN/dnsmasq.log" "${dns[@]}"
+    echo "$HOME_SSID" > "$RUN/network"
+    echo "$PLUG_IP:80" > "$RUN/browser-target"
+    ;;
+join)
+    ssid=${2:?which network}
+    stop_all
+    # The emulated Wi-Fi associates with the plug's network as one virtual
+    # station; this side of the tap has to be that station.
+    station=$(cat "$RUN/softap.station" 2>/dev/null || true)
+    if [ -n "$station" ] && [ "$station" != 00:00:00:00:00:00 ]; then set_mac "$station"; fi
+    ip route replace 224.0.0.0/4 dev tap0
+    echo "$ssid" > "$RUN/network"
+    if udhcpc -i tap0 -q -n -t 8 -T 2 -s /opt/s60emu/udhcpc.script >"$RUN/udhcpc.log" 2>&1; then
+        echo "$(cat "$RUN/gateway"):80" > "$RUN/browser-target"
+    else
+        echo "no address from $ssid" >&2
+        exit 1
+    fi
+    ;;
+*)
+    echo "usage: wifi-root home | join SSID" >&2
+    exit 2
+    ;;
+esac
+chown -R "$(stat -c %u "$RUN/env"):$(stat -c %g "$RUN/env")" "$RUN" 2>/dev/null || true

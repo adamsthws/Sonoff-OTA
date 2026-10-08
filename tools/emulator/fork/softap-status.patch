@@ -1,0 +1,45 @@
+diff --git a/hw/misc/esp32_wifi_ap.c b/hw/misc/esp32_wifi_ap.c
+index 6686115..0c17272 100644
+--- a/hw/misc/esp32_wifi_ap.c
++++ b/hw/misc/esp32_wifi_ap.c
+@@ -70,6 +70,21 @@ access_point_info access_points[]={
+ 
+ int nb_aps=sizeof(access_points)/sizeof(access_point_info);
+ 
++/* S60 emulation: tell the container which network the guest broadcasts as a
++ * SoftAP (empty: none), so its stand-in `nmcli` can list it. */
++static void esp32_wifi_report_softap(const char *ssid)
++{
++    const char *path = getenv("ESP32_WIFI_SOFTAP_FILE");
++    if (!path) {
++        return;
++    }
++    FILE *f = fopen(path, "w");
++    if (f) {
++        fputs(ssid ? ssid : "", f);
++        fclose(f);
++    }
++}
++
+ static void Esp32_WLAN_beacon_timer(void *opaque)
+ { 
+     struct mac80211_frame *frame;
+@@ -510,6 +525,7 @@ static NetClientInfo net_info = {
+ };
+ 
+ void Esp32_WLAN_reset_ap(Esp32WifiState *s) {
++    esp32_wifi_report_softap(NULL);
+     esp32_wifi_channel = 0;
+     s->ap_state = Esp32_WLAN__STATE_NOT_AUTHENTICATED;
+     s->beacon_ap=0;
+@@ -593,7 +609,9 @@ void Esp32_WLAN_handle_frame(Esp32WifiState *s, struct mac80211_frame *frame)
+         switch(frame->frame_control.sub_type) {
+             case IEEE80211_TYPE_MGT_SUBTYPE_BEACON:
+                 if(s->ap_state==Esp32_WLAN__STATE_NOT_AUTHENTICATED || s->ap_state==Esp32_WLAN__STATE_AUTHENTICATED) {
+-                    strncpy(ssid,(char *)frame->data_and_fcs+14,frame->data_and_fcs[13]);
++                    memset(ssid,0,sizeof(ssid));
++                    strncpy(ssid,(char *)frame->data_and_fcs+14,MIN(frame->data_and_fcs[13],32));
++                    esp32_wifi_report_softap(ssid);
+                     if(DEBUG) printf("beacon from %s\n",ssid);
+                     dummy_ap.ssid=ssid;
+                     dummy_ap.channel = esp32_wifi_channel;
