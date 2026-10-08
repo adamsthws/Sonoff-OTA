@@ -1153,3 +1153,32 @@ class TemplateNameTests(unittest.TestCase):
             '{"NAME":"Sonoff S60TPG","GPIO":[1,1,1,1,224,544,1,3104,1,32,1,0,0,0,0,0,0,0,'
             '1,1,1,1],"FLAG":0,"BASE":1}',
         )
+
+
+class BridgeEvidenceTests(unittest.TestCase):
+    """Bridge v6 raises its own network only when the home one fails."""
+
+    def test_bridge_on_the_home_network_counts(self):
+        from unittest import mock
+        from tools import s60_autoflash
+        with mock.patch.object(s60_autoflash, "bridge_on_home_network", return_value="192.168.0.50"), \
+             mock.patch.object(s60_autoflash, "find_ssid", return_value=None):
+            installed, reason = s60_autoflash.evidence_bridge_installed(mock.Mock())
+        self.assertTrue(installed)
+        self.assertIn("192.168.0.50", reason)
+
+    def test_its_own_network_still_counts(self):
+        from unittest import mock
+        from tools import s60_autoflash
+        with mock.patch.object(s60_autoflash, "bridge_on_home_network", return_value=None), \
+             mock.patch.object(s60_autoflash, "find_ssid", return_value="S60-OTA-Bridge-A04D"):
+            installed, _ = s60_autoflash.evidence_bridge_installed(mock.Mock())
+        self.assertTrue(installed)
+
+    def test_neither_is_not_proof_of_failure(self):
+        from unittest import mock
+        from tools import s60_autoflash
+        with mock.patch.object(s60_autoflash, "bridge_on_home_network", return_value=None), \
+             mock.patch.object(s60_autoflash, "find_ssid", return_value=None):
+            installed, _ = s60_autoflash.evidence_bridge_installed(mock.Mock())
+        self.assertIsNone(installed)

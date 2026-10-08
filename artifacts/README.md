@@ -6,10 +6,11 @@ directory, never here.
 
 | File | Purpose | SHA-256 |
 |---|---|---|
+| `s60-ota-bridge-4.4.1.ota` | Wrapped one-shot bridge the run installs; joins the home Wi-Fi stock was on, raising its own network only if that fails, and gives Tasmota its settings | `c77ca1f3cde6de0d37f408cb59cb36c75fa5a6b1c6c1f4435a861e043b9bc6b5` |
 | `s60-ota-bridge-v3-1.2.1.ota` | The previous bridge (its own network only); kept for the archived guides | `10d79d33856bb842b26f0a1b6748751c091ec9738a72dd4de2033fbd0c329ff7` |
 | `tasmota32c3-bluetooth.bin` | Berry-capable Tasmota used temporarily on the original partition layout | `a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708` |
 | `s60-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `aa32fafa4a9470152d5f8826fc6aedf94387575332353b50b8ce454ec1f9d364` |
-| `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for bridge v5 to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
+| `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
 
 The Bluetooth image is the exact file used by the successful migrations. It
 was retrieved from Tasmota's official moving `install/firmware` branch at
@@ -42,11 +43,16 @@ The imprintable Safeboot contains reserved placeholder bytes instead of real
 Wi-Fi credentials. It **must not be flashed as published**: the private
 bundle-preparation path must imprint and validate a per-device copy first.
 
-The bridge is wrapped as version `9.9.9`, well above any Sonoff release so far.
-The stock 1.2.0 updater does not compare versions - the upgrade command decides
-what is installed - but a later Sonoff firmware might refuse anything older than
-itself, and a high version keeps working if it does. It begins with `9` so it
-also comes out higher if versions are compared as text rather than numbers. The
-version field holds at most seven characters. Only the version and the two
-wrapper checksums differ from the 1.2.1 file; the bridge inside is byte for byte
-the same.
+From 4.4.1 on, a bridge is named by one version: the one the stock updater is
+given, the one in its app description, and the one its status page reports
+(`bridge 4.4.1`). `tools/build_vendor_ota.py` takes it from the image and
+refuses any other. The next bridge is 4.4.2. 4.4.1 has the Wi-Fi behaviour tried on a
+stock plug as "v6" on 8 October 2026; beyond that only its version, its name
+and a larger buffer for the status reply differ. 4.4.1 itself is first tried
+on hardware by the next run.
+
+The version is well above any Sonoff release so far (1.2.0). The stock 1.2.0
+updater does not compare versions - the upgrade command decides what is
+installed, and a plug on 1.2.0 took bridge v5 wrapped as `9.9.9` - but a later
+Sonoff firmware might refuse anything older than itself, so it has to stay
+higher than Sonoff's. The version field holds at most seven characters.

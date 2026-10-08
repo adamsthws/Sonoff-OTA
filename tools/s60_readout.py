@@ -53,18 +53,17 @@ from tools.s60_autoflash import (  # noqa: E402
 )
 from tools.serve_tasmota_ota import S60_DEVICE_MODEL  # noqa: E402
 
-# Wrapped as 9.9.9, as the conversion bridge is.
-READOUT_OTA = Path("captures/flash-readout/s60-ota-bridge-v5-flash-readout-9.9.9.ota")
-# --control: a published bridge, only to see whether it starts on this plug.
-# 9.9.9 is the one the conversion sends; 1.2.1 the one the first hardware
-# runs used.  Pinned as in SHA256SUMS.
+# The readout build of the conversion bridge, at the same version.
+READOUT_OTA = Path("captures/flash-readout/s60-ota-bridge-flash-readout-4.4.1.ota")
+# --control: a conversion bridge, only to see whether it starts on this plug.
+# 4.4.1 is the one the conversion sends.  Pinned as in SHA256SUMS.
 CONTROL_FILES = {
-    "9.9.9": (Path("artifacts/s60-ota-bridge-v5-9.9.9.ota"),
-              "ff0a7a13c155ed956dee16f221120ea7d1cac6a96b017c112c518a993ab33e92"),
-    "1.2.1": (Path("artifacts/s60-ota-bridge-v5-1.2.1.ota"),
-              "6eb9fd3b1344904099b1bd08bb529aa2e93d0d6c5f31cf9c6eb1d115ea199c81"),
+    "4.4.1": (Path("artifacts/s60-ota-bridge-4.4.1.ota"),
+              "c77ca1f3cde6de0d37f408cb59cb36c75fa5a6b1c6c1f4435a861e043b9bc6b5"),
 }
 CONFIRM_WORD = "readout"
+# How a bridge names itself: "bridge v5" up to v5, "bridge 4.4.1" from then on.
+BRIDGE_ID = rb"bridge (?:v\d+|\d+\.\d+\.\d+)"
 BRIDGE_AP_HOST = "192.168.4.1"
 STAGES = 6
 STOCK_LAN_PORT = 8081
@@ -78,22 +77,30 @@ def stage(number: int, title: str) -> None:
     print(f"\n[{number}/{STAGES}] {title}")
 
 
-def check_readout_file(path: Path) -> None:
-    """The readout bridge is built locally, so it is checked here, not pinned."""
+def check_bridge_image(path: Path, marker: bytes) -> None:
+    """A locally built bridge is checked as an image here, not pinned."""
     try:
-        report = analyze(path.read_bytes())
+        data = path.read_bytes()
+        report = analyze(data)
     except (OSError, ValueError) as exc:
-        raise Stop(f"the readout firmware {path} cannot be used: {exc}. "
+        raise Stop(f"the firmware {path} cannot be used: {exc}. "
                    "Build it as archive/bridge/README.md describes") from exc
     wrapper, esp = report["wrapper"], report["esp_image"]
     if not (wrapper["payload_crc32_valid"] and wrapper["record_crc32_valid"]
             and esp["chip_is_esp32_c3"] and esp["checksum_valid"] and esp["sha256_valid"] is not False):
         raise Stop(f"{path} failed its integrity checks; rebuild it")
-    if b"bridge v5 flash readout" not in path.read_bytes():
-        raise Stop(f"{path} is not the flash-readout build")
+    if not re.search(marker, data):
+        raise Stop(f"{path} is not the expected bridge build")
 
 
-def check_control_file(path: Path, expected: str) -> None:
+def check_readout_file(path: Path) -> None:
+    check_bridge_image(path, BRIDGE_ID + rb" flash readout")
+
+
+def check_control_file(path: Path, expected: str | None) -> None:
+    if expected is None:
+        check_bridge_image(path, BRIDGE_ID + rb"\n")
+        return
     try:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError as exc:
@@ -103,12 +110,12 @@ def check_control_file(path: Path, expected: str) -> None:
 
 
 def is_any_bridge(host: str) -> bool:
-    """True when `host` answers as any bridge v5 build."""
+    """True when `host` answers as any bridge: "bridge v5" or "bridge 4.4.1" on."""
     try:
         status, _ = fetch(host, "/status", timeout=5)
     except OSError:
         return False
-    return status.startswith(b"bridge v5")
+    return re.match(BRIDGE_ID, status) is not None
 
 
 def choose_plug(plug_ip: str | None) -> str:
@@ -168,9 +175,9 @@ def query_plug(plug_ip: str, email: str, env: dict[str, str], work: Path) -> str
 def confirmed(version: str, control: bool = False) -> bool:
     if control:
         opening = [
-            "This replaces the plug's spare app slot with the published conversion",
-            "bridge, only to see whether it starts. Nothing is read, and nothing is",
-            "installed after it. The",
+            "This replaces the plug's spare app slot with a conversion bridge, only",
+            "to see whether it starts. Nothing is read, and nothing is installed",
+            "after it. The",
         ]
     else:
         opening = ["This replaces the plug's spare app slot with a read-only firmware. The"]
@@ -316,7 +323,8 @@ def run(args: argparse.Namespace) -> int:
     stage(1, "Checking this computer")
     if args.control:
         firmware, expected = CONTROL_FILES[args.control]
-        probe, name = is_any_bridge, f"the published bridge ({args.control})"
+        probe = is_any_bridge
+        name = f"the published bridge ({args.control})"
         check_control_file(ROOT / firmware, expected)
     else:
         firmware, probe, name = Path(args.firmware), is_readout_bridge, "the readout firmware"
@@ -359,7 +367,7 @@ def run(args: argparse.Namespace) -> int:
         if code == 2:
             raise Stop("the sender refused before contacting the plug; nothing was sent")
 
-        stage(5, "Checking the published bridge started" if args.control else "Reading the plug's memory")
+        stage(5, f"Checking {name} started" if args.control else "Reading the plug's memory")
         print(f"Waiting for {name} to start and join your Wi-Fi...")
         host = find_bridge(plug_ip, mac, probe=probe)
         while host is None:
@@ -419,9 +427,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--listen-ip", help="this computer's address as the plug sees it")
     parser.add_argument("--label", help="name for the saved dump (default: stock-<version>)")
     parser.add_argument("--firmware", default=str(READOUT_OTA), help=argparse.SUPPRESS)
-    parser.add_argument("--control", nargs="?", const="9.9.9", choices=sorted(CONTROL_FILES),
-                        help="send a published conversion bridge instead (default 9.9.9, the one "
-                             "the conversion sends), only to see whether it starts (nothing is read)")
+    parser.add_argument("--control", nargs="?", const="4.4.1", choices=sorted(CONTROL_FILES),
+                        help="send a conversion bridge instead, only to see whether it starts "
+                             "(nothing is read): 4.4.1, the one the conversion sends")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="also show the cloud's messages while the firmware is delivered")
     args = parser.parse_args(argv)

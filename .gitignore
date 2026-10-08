@@ -24,6 +24,7 @@ __pycache__/
 *.bin.*
 *.img
 *.ota
+!artifacts/s60-ota-bridge-4.4.1.ota
 !artifacts/s60-ota-bridge-v3-1.2.1.ota
 !artifacts/tasmota-settings-template-15.6.0.0.bin
 !artifacts/s60-recovery-safeboot-imprintable.bin

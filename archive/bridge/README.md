@@ -14,13 +14,23 @@ The remaining irreducible risk is failure before `app_main` executes. The stock
 1.2.0 bootloader was built without ESP-IDF application rollback, so no software
 running in an app partition can eliminate that risk.
 
-Bridge v5, the one the run installs, adds two things. It reads the Wi-Fi the
-stock firmware saved and joins that network as well as raising its own, so the
-run finds it where the plug was. And it takes Tasmota's settings template,
-fills in the Wi-Fi it joined with, and saves it where Tasmota reads its
-settings, so Tasmota joins by itself. The password never leaves the plug.
-Where stock saved no Wi-Fi, or the network cannot be joined, it behaves
-exactly as v3 does.
+Bridge v5 added two things. It reads the Wi-Fi the stock firmware saved and
+joins that network, so the run finds it where the plug was. And it takes
+Tasmota's settings template, fills in the Wi-Fi it joined with, and saves it
+where Tasmota reads its settings, so Tasmota joins by itself. The password
+never leaves the plug.
+
+Bridge 4.4.1, the one the run installs, joins the stock network alone and
+raises its own network only if it has had no address there for 45 seconds, at
+start-up or later. v5 ran both at once on one radio, and on a plug the joined
+network dropped out for seconds at a time while its own was up; tried on the
+same plug, 4.4.1 (then called "v6") stayed on for ten minutes without one.
+Where stock saved no Wi-Fi it raises its own network at once, as v3 did.
+
+From 4.4.1 on, a bridge is named by one version: `BRIDGE_VERSION` in
+`main/main.c` and `PROJECT_VER` in `CMakeLists.txt` (a test keeps them equal)
+are the version the stock updater is given and the one `/status` reports.
+Change both for the next bridge, 4.4.2.
 
 `sdkconfig.defaults` holds the settings v3 was built with; with them a rebuild
 matches the published v3 except for the build time, date and ELF hash. Keep
@@ -38,8 +48,9 @@ Build with PlatformIO from a path without spaces (the ESP-IDF builder used here
 does not correctly quote every generated CMake path):
 
 ```sh
-cp -a bridge /tmp/s60-bridge-build
-pio run -d /tmp/s60-bridge-build
+cp -a archive/bridge /tmp/s60-bridge-build
+rm -f /tmp/s60-bridge-build/sdkconfig.s60-ota-bridge*
+pio run -d /tmp/s60-bridge-build -e s60-ota-bridge
 ```
 
 The application image is then:
@@ -48,17 +59,18 @@ The application image is then:
 /tmp/s60-bridge-build/.pio/build/s60-ota-bridge/firmware.bin
 ```
 
-Wrap the application for the stock updater and validate it:
+Wrap the application for the stock updater - the version comes from the
+image - and validate it:
 
 ```sh
 python3 tools/build_vendor_ota.py \
   /tmp/s60-bridge-build/.pio/build/s60-ota-bridge/firmware.bin \
-  artifacts/s60-ota-bridge-v5-9.9.9.ota --version 9.9.9
-python3 tools/analyze_vendor_ota.py artifacts/s60-ota-bridge-v5-9.9.9.ota
+  artifacts/s60-ota-bridge-4.4.1.ota
+python3 tools/analyze_vendor_ota.py artifacts/s60-ota-bridge-4.4.1.ota
 ```
 
-On a successful first boot it creates `S60-OTA-Bridge-XXXX`, protected with
-`s60-ota-bridge`. Browse to `http://192.168.4.1/` to upload a native ESP32-C3
+When it cannot join the stock network, or stock saved none, it creates
+`S60-OTA-Bridge-XXXX`, protected with `s60-ota-bridge`. Browse to `http://192.168.4.1/` to upload a native ESP32-C3
 application image. The browser sends the selected file as a raw request body;
 JavaScript must be enabled.
 
@@ -70,8 +82,7 @@ power cycle. The stock updater writes it over the inactive slot, so whatever
 was there (often the previous Sonoff version) is lost; the running stock
 version, bootloader, partition table and NVS are kept. Build it with
 `pio run -e s60-ota-bridge-flash-readout`, wrap it as above into
-`captures/flash-readout/s60-ota-bridge-v5-flash-readout-1.2.1.ota` (with
-`--version 1.2.1`, as the hardware-proven bridge was), then run
+`captures/flash-readout/s60-ota-bridge-flash-readout-4.4.1.ota`, then run
 `tools/s60_readout.py`: it installs it, reads and checks the dump, and walks
 you through putting the plug back to stock.
 

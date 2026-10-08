@@ -24,11 +24,28 @@ class PublishedArtifactTests(unittest.TestCase):
             image,
         )
 
-    def test_the_run_installs_the_pinned_bridge_v5(self):
+    def test_the_run_installs_the_pinned_bridge(self):
         from tools.s60_autoflash import BRIDGE_OTA, ROOT
-        self.assertIn("-v5-", BRIDGE_OTA.name)
+        self.assertEqual(BRIDGE_OTA.name, "s60-ota-bridge-4.4.1.ota")
         line = f"{sha256_bytes((ROOT / BRIDGE_OTA).read_bytes())}  {BRIDGE_OTA.as_posix()}"
         self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
+
+    def test_the_bridge_carries_one_version_everywhere(self):
+        import re
+        from tools.analyze_vendor_ota import analyze
+        from tools.build_vendor_ota import app_version
+        from tools.s60_autoflash import BRIDGE_OTA, ROOT
+        source = (ROOT / "archive/bridge/main/main.c").read_text()
+        project = (ROOT / "archive/bridge/CMakeLists.txt").read_text()
+        version = re.search(r'#define BRIDGE_VERSION "([^"]+)"', source).group(1)
+        self.assertEqual(re.search(r'set\(PROJECT_VER "([^"]+)"\)', project).group(1), version)
+        self.assertIn(f"-{version}.ota", BRIDGE_OTA.name)
+        wrapped = (ROOT / BRIDGE_OTA).read_bytes()
+        report = analyze(wrapped)
+        self.assertEqual(report["wrapper"]["header_version"], version)
+        self.assertEqual(report["wrapper"]["record_version"], version)
+        self.assertEqual(app_version(wrapped[100:]), version)
+        self.assertIn(f"bridge {version}\n".encode(), wrapped)
 
     def test_the_published_startup_firmware_saves_the_wifi(self):
         from tools.safeboot_migration import PUBLISHED_RECOVERY_FILE, PUBLISHED_RECOVERY_SHA256

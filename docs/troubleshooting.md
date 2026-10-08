@@ -147,7 +147,7 @@ The tool already does this.
 
 **Tasmota never appears after the installer gave it your Wi-Fi**
 
-With bridge v5 and a captured settings template, Tasmota starts with the Wi-Fi
+With the bridge and a captured settings template, Tasmota starts with the Wi-Fi
 details the installer had just joined with, and joins by itself. If the details
 stop working (say the router restarted onto another channel and refuses the
 plug), Tasmota keeps retrying them and never opens its setup network.

@@ -43,7 +43,8 @@ APP_DESC_MAGIC = 0xABCD5432
 APP_DESC_OFFSET = 32
 OTA_SECTOR = 0x1000
 OTA_STATES_REJECTED = {3, 4}  # ESP_OTA_IMG_INVALID, ESP_OTA_IMG_ABORTED
-READOUT_STATUS = "bridge v5 flash readout"
+# "bridge v5 flash readout" or "bridge 4.4.1 flash readout".
+READOUT_STATUS = "flash readout"
 
 
 def parse_partition_table(flash: bytes) -> tuple[list[dict[str, Any]], bool]:

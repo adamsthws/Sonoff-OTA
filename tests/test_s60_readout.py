@@ -71,8 +71,10 @@ class DeliverTests(unittest.TestCase):
             self.assertTrue((root / "RECOVERY_LOCK").exists())
             self.assertIn("went offline", (root / "sender.log").read_text())
 
-    def test_the_readout_file_is_wrapped_like_the_conversion_bridge(self):
-        self.assertTrue(str(s60_readout.READOUT_OTA).endswith("-9.9.9.ota"))
+    def test_the_readout_file_is_the_conversion_bridge_version(self):
+        from tools import s60_autoflash
+        self.assertEqual(s60_readout.READOUT_OTA.name.rsplit("-", 1)[1],
+                         s60_autoflash.BRIDGE_OTA.name.rsplit("-", 1)[1])
 
 
 class CloudChatterTests(unittest.TestCase):
@@ -138,7 +140,7 @@ class ControlTests(unittest.TestCase):
 
     def test_the_default_control_is_what_the_conversion_sends(self):
         from tools import s60_autoflash
-        self.assertEqual(s60_readout.CONTROL_FILES["9.9.9"][0], s60_autoflash.BRIDGE_OTA)
+        self.assertEqual(s60_readout.CONTROL_FILES["4.4.1"][0], s60_autoflash.BRIDGE_OTA)
 
     def test_a_changed_file_is_refused(self):
         with tempfile.NamedTemporaryFile() as handle:
@@ -146,6 +148,15 @@ class ControlTests(unittest.TestCase):
             handle.flush()
             with self.assertRaises(s60_readout.Stop):
                 s60_readout.check_control_file(Path(handle.name), "0" * 64)
+
+
+class BridgeIdTests(unittest.TestCase):
+    def test_old_and_new_names_are_both_bridges(self):
+        import re
+        for status in (b"bridge v5\nhome network: joined", b"bridge 4.4.1\nhome network: joined",
+                       b"bridge 4.4.12 flash readout\n"):
+            self.assertIsNotNone(re.match(s60_readout.BRIDGE_ID, status), status)
+        self.assertIsNone(re.match(s60_readout.BRIDGE_ID, b"tasmota"))
 
 
 class ConfirmTests(unittest.TestCase):

@@ -27,6 +27,13 @@
  * home network on its first boot instead of making a setup network.  Only
  * done once the bridge has joined with those details, so they are known good.
  *
+ * 4.4.1 (tried as "v6"): from here the bridge is named by the version the
+ * updater is given, and the next is 4.4.2.  With the stock Wi-Fi details it
+ * joins that network alone and raises its own only if it has had no address
+ * there for STA_WINDOW_MS, at start-up or later.  v5 ran both at once, and on a plug the joined network
+ * dropped out for seconds at a time while the bridge's own was up.  Without
+ * stock details it raises its own network at once, as before.
+ *
  * BRIDGE_FLASH_READOUT (research build, never shipped): GET /flash streams the
  * whole flash chip from address 0 and GET /efuse the eFuse read registers, so a
  * stock plug can be imaged without opening it.  This build registers neither
@@ -66,10 +73,13 @@
 #define BRIDGE_HOSTNAME "s60-ota-bridge"
 /* How long to try the home network before keeping to the bridge's own. */
 #define STA_WINDOW_MS 45000
+/* The one version: the wrapper the updater is given and the app description
+ * (PROJECT_VER in ../CMakeLists.txt) carry the same; a test keeps them equal. */
+#define BRIDGE_VERSION "4.4.1"
 #ifdef BRIDGE_FLASH_READOUT
-#define BRIDGE_NAME "bridge v5 flash readout"
+#define BRIDGE_NAME "bridge " BRIDGE_VERSION " flash readout"
 #else
-#define BRIDGE_NAME "bridge v5"
+#define BRIDGE_NAME "bridge " BRIDGE_VERSION
 #endif
 
 static const char *TAG = "s60_bridge";
@@ -78,6 +88,8 @@ static const esp_partition_t *s_peer;
 static volatile bool s_sta_trying;
 static volatile uint32_t s_sta_ip; /* network byte order; 0 until joined */
 static volatile bool s_tasmota_settings_saved;
+/* The bridge's own network, raised only when the home network fails. */
+static wifi_config_t s_ap_config;
 #define TASMOTA_SETTINGS_SIZE 4096
 static uint8_t s_settings[TASMOTA_SETTINGS_SIZE];
 /* Keep the flash buffer out of the HTTP server task's relatively small stack.
@@ -192,7 +204,7 @@ static esp_err_t efuse_handler(httpd_req_t *req)
 /* Plain-text state for the host: which networks the bridge is on. */
 static esp_err_t status_handler(httpd_req_t *req)
 {
-    char body[96];
+    char body[128];
     uint32_t ip = s_sta_ip;
     if (ip != 0) {
         snprintf(body, sizeof(body), BRIDGE_NAME "\nhome network: joined " IPSTR "\n%s",
@@ -426,18 +438,23 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
     }
 }
 
-/* Give up on the home network if it has not worked in time, so the bridge's
- * own network is steady for the operator to join instead. */
-static void station_window(void *unused)
+/* Raise the bridge's own network once the home network has given the bridge
+ * no address for STA_WINDOW_MS - at start-up, or after losing it - so there
+ * is always a way in.  It then keeps to its own network, as v5 did. */
+static void station_watch(void *unused)
 {
     (void)unused;
-    vTaskDelay(pdMS_TO_TICKS(STA_WINDOW_MS));
-    if (s_sta_ip == 0) {
-        ESP_LOGW(TAG, "home network not joined; keeping to the bridge's own");
-        s_sta_trying = false;
-        esp_wifi_disconnect();
-        esp_wifi_set_mode(WIFI_MODE_AP);
+    TickType_t without = 0;
+    while (without < pdMS_TO_TICKS(STA_WINDOW_MS)) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        without = s_sta_ip != 0 ? 0 : without + pdMS_TO_TICKS(1000);
     }
+    ESP_LOGW(TAG, "no address on the home network; raising the bridge's own");
+    s_sta_trying = false;
+    esp_wifi_disconnect();
+    esp_wifi_set_mode(WIFI_MODE_AP);
+    esp_wifi_set_config(WIFI_IF_AP, &s_ap_config);
+    ESP_LOGI(TAG, "AP ready: %s", s_ap_config.ap.ssid);
     vTaskDelete(NULL);
 }
 
@@ -464,33 +481,35 @@ static esp_err_t start_access_point(void)
 
     uint8_t mac[6];
     ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP));
-    wifi_config_t config = {0};
-    snprintf((char *)config.ap.ssid, sizeof(config.ap.ssid),
+    wifi_config_t *config = &s_ap_config;
+    snprintf((char *)config->ap.ssid, sizeof(config->ap.ssid),
              "S60-OTA-Bridge-%02X%02X", mac[4], mac[5]);
-    config.ap.ssid_len = strlen((char *)config.ap.ssid);
-    strlcpy((char *)config.ap.password, BRIDGE_AP_PASSWORD,
-            sizeof(config.ap.password));
-    config.ap.channel = 1;
-    config.ap.max_connection = 2;
-    config.ap.authmode = WIFI_AUTH_WPA2_PSK;
-    config.ap.pmf_cfg.capable = true;
-    config.ap.pmf_cfg.required = false;
+    config->ap.ssid_len = strlen((char *)config->ap.ssid);
+    strlcpy((char *)config->ap.password, BRIDGE_AP_PASSWORD,
+            sizeof(config->ap.password));
+    config->ap.channel = 1;
+    config->ap.max_connection = 2;
+    config->ap.authmode = WIFI_AUTH_WPA2_PSK;
+    config->ap.pmf_cfg.capable = true;
+    config->ap.pmf_cfg.required = false;
 
     if (sta_netif != NULL) {
         station.sta.pmf_cfg.capable = true;
         station.sta.pmf_cfg.required = false;
         s_sta_trying = true;
-        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &station));
     } else {
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, config));
     }
     memset(&station, 0, sizeof(station));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &config));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "AP ready: %s", config.ap.ssid);
     if (sta_netif != NULL) {
-        xTaskCreate(station_window, "sta_window", 2048, NULL, 5, NULL);
+        ESP_LOGI(TAG, "joining the home network; own network only if that fails");
+        xTaskCreate(station_watch, "sta_watch", 2048, NULL, 5, NULL);
+    } else {
+        ESP_LOGI(TAG, "AP ready: %s", config->ap.ssid);
     }
     return ESP_OK;
 }

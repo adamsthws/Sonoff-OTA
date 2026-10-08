@@ -95,9 +95,10 @@ WEAK_SIGNAL_DBM = -75
 BRIDGE_AP_PREFIX = "S60-OTA-Bridge"
 # Fixed in the published bridge firmware; not a secret.
 BRIDGE_PASSWORD = "s60-ota-bridge"
-# v5: joins the home network the stock firmware was on, and gives Tasmota
-# its Wi-Fi at D1.  Where it cannot, it behaves exactly as v3 did.
-BRIDGE_OTA = Path("artifacts/s60-ota-bridge-v5-9.9.9.ota")
+# 4.4.1: joins the home network the stock firmware was on, raising its own
+# only if that fails, and gives Tasmota its Wi-Fi at D1.  Named, like every
+# bridge from now on, by the version the stock updater is given.
+BRIDGE_OTA = Path("artifacts/s60-ota-bridge-4.4.1.ota")
 # Ports the migration phase servers (serve_safeboot_migration.py) may listen
 # on, in order of preference.  Nothing on the plug keeps the port: each phase
 # starts its own server and sends the plug a loader URL that names it.
@@ -1184,8 +1185,8 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
 def bridge_on_home_network(ctx: Context, *, timeout: float = 60.0) -> str | None:
     """The bridge's address on the home network, if it joined it.
 
-    Bridge v4 joins the network the stock firmware was using.  It has the
-    plug's own hardware address there, so it is found where the plug was.
+    Bridge v4 and later join the network the stock firmware was using.  It has
+    the plug's own hardware address there, so it is found where the plug was.
     """
     started = time.monotonic()
     while time.monotonic() - started < timeout:
@@ -1841,7 +1842,17 @@ PLAIN_DESCRIPTION = {
 
 
 def evidence_bridge_installed(ctx: "Context") -> tuple[bool | None, str]:
-    """Only the bridge firmware broadcasts that network."""
+    """Only the bridge serves its page, and only it broadcasts that network.
+
+    Bridge 4.4.1 raises its own network only when it cannot join the home one,
+    so it is looked for on the home network first.
+    """
+    address = bridge_on_home_network(ctx, timeout=60.0)
+    if address:
+        return True, (
+            f"The installer firmware is answering on your network at {address},\n"
+            "  so this step did finish."
+        )
     bridge = find_ssid(BRIDGE_AP_PREFIX)
     if bridge:
         return True, (

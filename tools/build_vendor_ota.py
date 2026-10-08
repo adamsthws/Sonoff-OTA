@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import struct
 import zlib
 from pathlib import Path
@@ -21,6 +22,10 @@ except ModuleNotFoundError:
 
 
 DEFAULT_MODEL = "FWSW-E32S60-S60-ESP32C3FN4"
+APP_DESC_MAGIC = 0xABCD5432
+# esp_app_desc_t follows the image header (24) and first segment header (8).
+APP_DESC_OFFSET = 32
+DOTTED_VERSION = re.compile(r"\d+\.\d+\.\d+")
 DEFAULT_MAX_PAYLOAD_SIZE = 0x1F0000
 
 
@@ -78,19 +83,47 @@ def build_wrapper(
     return bytes(wrapper) + payload
 
 
+def app_version(payload: bytes) -> str | None:
+    """The version in the image's app description, when it is an x.y.z one.
+
+    From bridge 4.4.1 on, that is also the version the updater is given.
+    """
+    if len(payload) < APP_DESC_OFFSET + 48:
+        return None
+    if struct.unpack_from("<I", payload, APP_DESC_OFFSET)[0] != APP_DESC_MAGIC:
+        return None
+    field = payload[APP_DESC_OFFSET + 16 : APP_DESC_OFFSET + 48].split(b"\0", 1)[0]
+    version = field.decode("ascii", "replace")
+    return version if DOTTED_VERSION.fullmatch(version) else None
+
+
+def wrapper_version(payload: bytes, requested: str | None) -> str:
+    """The version to wrap with: the image's own, which `requested` must match."""
+    own = app_version(payload)
+    if requested is None:
+        if own is None:
+            raise ValueError("the image carries no x.y.z version; give --version")
+        return own
+    if own is not None and requested != own:
+        raise ValueError(f"--version {requested} differs from the image's own version {own}")
+    return requested
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("payload", type=Path, help="ESP32-C3 application .bin")
     parser.add_argument("output", type=Path, help="output .ota file")
-    parser.add_argument("--version", required=True, help="version presented to stock updater")
+    parser.add_argument("--version", help="version presented to stock updater "
+                        "(default, and required to match: the image's own x.y.z version)")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--max-payload-size", type=lambda value: int(value, 0), default=DEFAULT_MAX_PAYLOAD_SIZE)
     args = parser.parse_args()
 
     try:
+        payload = args.payload.read_bytes()
         result = build_wrapper(
-            args.payload.read_bytes(),
-            version=args.version,
+            payload,
+            version=wrapper_version(payload, args.version),
             model=args.model,
             max_payload_size=args.max_payload_size,
         )

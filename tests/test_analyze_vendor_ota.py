@@ -62,3 +62,24 @@ class VendorOtaAnalysisTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WrapperVersionTests(unittest.TestCase):
+    def image_with_version(self, version: bytes) -> bytes:
+        # Only the app description after the two headers matters here.
+        return bytes(32) + struct.pack("<I", 0xABCD5432) + bytes(12) + version.ljust(32, b"\0")
+
+    def test_the_image_version_is_used_and_must_match(self):
+        from tools.build_vendor_ota import wrapper_version
+        image = self.image_with_version(b"4.4.1")
+        self.assertEqual(wrapper_version(image, None), "4.4.1")
+        self.assertEqual(wrapper_version(image, "4.4.1"), "4.4.1")
+        with self.assertRaises(ValueError):
+            wrapper_version(image, "9.9.9")
+
+    def test_images_without_a_dotted_version_need_one_given(self):
+        from tools.build_vendor_ota import wrapper_version
+        image = self.image_with_version(b"1")
+        self.assertEqual(wrapper_version(image, "1.2.1"), "1.2.1")
+        with self.assertRaises(ValueError):
+            wrapper_version(image, None)
