@@ -16,13 +16,14 @@ device at home; these deal with traffic leaving a device at home).
 
 ## How a Sonoff update reaches the plug
 
-What is known, from the reverse engineering in
-[ota-findings.md](../archive/docs/reference/ota-findings.md) and a watch of a
-stock plug on 1.2.0 with `tools/watch_sonoff_updates.py` (October 2026):
+What is known, from the reverse engineering and an 18-hour watch of a stock
+plug on 1.2.0, both recorded in
+[ota-findings.md](../archive/docs/reference/ota-findings.md):
 
 - The plug keeps one encrypted connection open to eWeLink's servers and sends a
-  tiny heartbeat on it every 145 seconds. In the hours watched, nothing else
-  happened unless someone used the plug or had its page open in the app.
+  tiny heartbeat on it every 145 seconds. Over 18 hours nothing else happened,
+  apart from a nightly energy-statistics sync, unless someone used the plug or
+  had its page open in the app.
 - When it connects (at power-on, or after losing Wi-Fi) it reports its firmware
   version. Whether to offer an update is decided by Sonoff's cloud, not the
   plug. A power cycle showed no download and no plain-HTTP traffic at all.
@@ -33,7 +34,7 @@ stock plug on 1.2.0 with `tools/watch_sonoff_updates.py` (October 2026):
 What is **not** known yet: whether Sonoff ever sends that command by itself,
 without anyone tapping Update in the app. The watched plug had no update on
 offer, so it could not show this. Watching a plug that Sonoff *is* offering an
-update to would.
+update to would - a stock 1.1.1 plug is offered 1.2.0.
 
 ## Blocking Sonoff updates
 

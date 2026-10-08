@@ -337,3 +337,102 @@ The bridge cannot protect against a bootloader rejection or a failure before
 stock 1.1.1 during a second clean hardware run. The reviewed trial Tasmota then
 selected the retained bridge as its next-boot fallback before the final image
 was installed and verified.
+
+## How stock 1.2.0 behaves on the network: an 18-hour watch
+
+Recorded October 2026, to answer whether, and how often, a stock plug checks
+for or installs Sonoff updates by itself.
+
+One UK S60TPG on stock 1.2.0 was watched for 18.2 hours, from 13:15 on
+7 October 2026 to 07:26 the next morning, with
+`tools/watch_sonoff_updates.py`. The watcher is read-only and sends the plug
+nothing. It watched from two sides at once:
+
+- **the router** (OPNsense, `tcpdump -p` over SSH, filtered to the plug's MAC
+  address): every DNS, NTP and DHCP packet and every TCP packet. Plain HTTP,
+  which Sonoff's firmware downloads use, was read whole; the encrypted cloud
+  connection only by timing and size;
+- **the owner's eWeLink account:** every app-WebSocket message about the plug,
+  and every 15 minutes the firmware version the plug reported and the OTA
+  query's offer.
+
+All 73 checks found the plug online, on 1.2.0, with **no update on offer**.
+
+### The cloud connection
+
+The plug holds one TLS connection on port 443 to an eWeLink server. Left
+alone, it sends a **35-byte heartbeat every 145 seconds** and the server
+answers with 31 bytes. After the hands-on tests, 443 of the 445 gaps between
+the plug's own messages were exactly 145 seconds; the two exceptions sat next
+to the other traffic described below.
+
+The server is not fixed. At power-on the plug asks `eu-dispd.coolkit.cc`
+which server to use, and after a power cycle it was on a different address
+from before. Do not pin these addresses.
+
+### Power-on
+
+Power-cycling the plug gave this sequence, all within about five seconds:
+
+1. DHCP, then a DNS lookup of `eu-dispd.coolkit.cc`;
+2. a short HTTPS exchange with that host (about 1 KB back, apparently naming
+   the server to use);
+3. the long-lived TLS connection to the assigned server, on which the plug
+   registers: the app WebSocket then showed it online, reporting `fwVersion`
+   1.2.0, its Wi-Fi network and access point, and its startup, pulse and
+   overload settings.
+
+There was no connection to port 8088, no plain HTTP, and no exchange that
+looked like an update check. The plug reports its version; whether to offer
+an update is the cloud's decision.
+
+### What makes the cloud talk to the plug
+
+| Action | Seen on the network |
+|---|---|
+| Relay switched in the app, phone on the same Wi-Fi | No message from the cloud first: the app controls the plug directly over the local network, which never passes the router. The plug then reports its new state to the cloud (about 365 bytes). |
+| Button pressed on the plug | The plug reports the change (about 277 bytes); the cloud acknowledges (about 128). |
+| The plug's page open in the app | The cloud sends 194 bytes every 50 seconds (`uiActive: 60` in the app WebSocket); the plug replies with live power readings. |
+| The app's current and latest firmware screens | Nothing reaches the plug: the app reads the version from the cloud's record. |
+| Listing the account's devices through the eWeLink API | Nothing reaches the plug. |
+| Overnight, at 00:22 | Unprompted, 216 bytes from the cloud: a `getHoursKwh` request for hours 0 to 743, that is 31 days of hourly energy readings, from eWeLink's own server. The plug answered with about 2.4 KB. An energy-statistics sync, not firmware. |
+| 12 hours after the plug started | The plug sent 159 bytes and the cloud answered 164, with nothing shown in the app, then the plug renewed its DHCP lease. The connection carried on unbroken: no reboot or reconnect. |
+
+Apart from those, in the whole night there was no message from the cloud, no
+DNS lookup, no new connection, no plain HTTP and no firmware download.
+
+### eWeLink's record of the plug
+
+The account's device record gives `productModel` `S60TPG`, `extra.model`
+`SN-ESP32C3-S60-01` (the firmware family the tool checks) and `brandName`
+`SONOFF`. The tool names the Tasmota template from `productModel`.
+
+### What it shows, and what it does not
+
+- The plug **does not poll for updates**. It reports its firmware version when
+  it connects, and Sonoff's cloud decides whether to offer anything.
+- It **downloads firmware only when sent an upgrade command**. None arrived in
+  18 hours with nothing on offer.
+- **Not yet known:** whether Sonoff sends an upgrade command by itself, with no
+  one tapping Update, when an update *is* on offer. This plug had nothing on
+  offer, so the watch could not show it. The next experiment is the same watch
+  on a plug that is offered one - a stock 1.1.1 plug is offered 1.2.0.
+- None of this affects the conversion: the owner's upgrade command decides
+  what is installed, whether or not Sonoff is offering an update.
+
+### Repeating the watch
+
+The router needs SSH with key login for root, and the plug's MAC address from
+its DHCP leases. Then, from the repository:
+
+```sh
+python tools/watch_sonoff_updates.py --opnsense <ssh-host> --interface <lan-interface> \
+    --plug-mac <plug-mac> --device-id <ewelink-device-id> --email <ewelink-email>
+```
+
+`--hours` sets the length (24 by default), `--no-cloud` skips the account
+side, and `--device-id` is only needed when the account has more than one
+S60. The capture runs with `-p`, so the router's interface is never put into
+promiscuous mode, under a time limit, and writes nothing on the router; it
+stops on every exit path. The logs go to `captures/update-watch/<start time>/`
+(`summary.txt`, `events.jsonl` and the raw `tcpdump.txt`), which git ignores.

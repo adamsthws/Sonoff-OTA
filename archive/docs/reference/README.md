@@ -11,7 +11,9 @@ here so the work can be checked, argued with and built on.
   you want to understand a step, or do it yourself.
 - **[ota-findings.md](ota-findings.md)**: how the stock update mechanism and
   its firmware wrapper were decoded: the header, the three CRCs, the manifest
-  digest, and what the updater does and does not enforce.
+  digest, and what the updater does and does not enforce; and an 18-hour
+  watch of a stock plug on the network, showing it never checks for updates
+  by itself.
 - **[HOWTO-S60TPG-OTA-TASMOTA.md](HOWTO-S60TPG-OTA-TASMOTA.md)**: the complete
   technical procedure in full detail.
 - **[early-walkthrough.md](early-walkthrough.md)**: an earlier narrative
