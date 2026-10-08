@@ -367,24 +367,33 @@ class ReportTests(OutputTestCase):
     def test_the_report_is_filled_in_from_the_run(self):
         import tools.s60_autoflash as af
         fields = dict(af.report_fields(self.ctx(), 441, False))
-        self.assertEqual(fields["Result"], "converted")
+        self.assertEqual(fields["Result"], "Converted")
         self.assertEqual(fields["Plug model"], "S60TPG")
         self.assertEqual(fields["Plug type / region"], "UK (Type G)")
         self.assertEqual(fields["Stock firmware"], "1.2.0")
         self.assertIn("Python ", fields["Computer"])
         self.assertEqual(fields["Time taken"], "7m 21s")
-        self.assertEqual(fields["Typed the Wi-Fi"], "no")
-        self.assertEqual(fields["Joined setup network"], "no")
+        self.assertEqual(fields["Typed the Wi-Fi"], "No")
+        self.assertEqual(fields["Joined setup network"], "No")
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60TPG")
 
     def test_hardware_that_was_not_checked_says_so(self):
         import tools.s60_autoflash as af
         fields = dict(af.report_fields(self.ctx(), 441, False))
-        self.assertEqual(fields["Relay"], "not checked")
-        self.assertEqual(fields["Mains voltage"], "not checked")
-        self.assertEqual(fields["Power meter"], "not checked")
+        self.assertEqual(fields["Relay"], "Not checked")
+        self.assertNotIn("Mains voltage", fields)
+        self.assertEqual(fields["Power meter"], "Not checked")
         self.assertNotIn("System prompts", fields)
         self.assertNotIn("__", fields.values())
+
+    def test_every_answer_starts_with_a_capital_and_only_that_changes(self):
+        import tools.s60_autoflash as af
+        fields = dict(af.report_fields(self.ctx(), 441, False,
+                                       {"Relay": "switches (seen on the meter)",
+                                        "Power meter": "on: 239 V, 0 W; off: 0 V, 0 W"}))
+        self.assertEqual(fields["Relay"], "Switches (seen on the meter)")
+        self.assertEqual(fields["Power meter"], "On: 239 V, 0 W; off: 0 V, 0 W")
+        self.assertEqual(fields["Plug model"], "S60TPG")
 
     def test_the_plug_page_is_the_plug_or_the_emulators_forward(self):
         import tools.s60_autoflash as af
@@ -407,8 +416,8 @@ class ReportTests(OutputTestCase):
         ctx.state.capture("F4.wifi_route", "setup network")
         fields = dict(af.report_fields(ctx, 60, True))
         self.assertEqual(fields["Plug model"], "__")
-        self.assertEqual(fields["Typed the Wi-Fi"], "yes")
-        self.assertEqual(fields["Joined setup network"], "yes")
+        self.assertEqual(fields["Typed the Wi-Fi"], "Yes")
+        self.assertEqual(fields["Joined setup network"], "Yes")
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60")
         self.assertIn("(this session; the run was resumed)", fields["Time taken"])
 
@@ -424,12 +433,12 @@ class ReportTests(OutputTestCase):
         self.assertIn(af.REPORTS_URL, screen)
         self.assertIn("adamsthws/Sonoff-OTA/discussions", af.REPORTS_URL)
         self.assertIn("Please share how it went", screen)
-        self.assertIn("Throw a dev a biscuit:", screen)
+        self.assertIn("Throw your friendly neighbourhood dev a biscuit:", screen)
         self.assertGreater(screen.index(af.DONATE_URL), screen.index("Plug model"))  # after the report
         self.assertNotIn("**", screen)                       # the terminal shows no Markdown
         self.assertRegex(screen, r"Plug model: +S60TPG")
         self.assertIn("**Plug model:** S60TPG", copied[0])   # the thread gets bold labels
-        self.assertIn("**Relay:** switches (seen on the meter)", copied[0])
+        self.assertIn("**Relay:** Switches (seen on the meter)", copied[0])
 
 
 

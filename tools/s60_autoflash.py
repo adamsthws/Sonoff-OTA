@@ -268,6 +268,9 @@ def resolve_run_name(
         return chosen.name
 
     while unfinished:
+        # The menu leaves the screen once answered; after a removal it is
+        # shown again, not stacked under the old one.
+        output.transient_begin(before_start=True)
         any_past = any(RunState.open(d).is_done(POINT_OF_NO_RETURN) for d in unfinished)
         keep = ("the unfinished one stays" if len(unfinished) == 1
                 else "the unfinished ones stay")
@@ -285,9 +288,11 @@ def resolve_run_name(
             ),
         )
         if chosen < len(unfinished):
+            output.transient_end()
             remember_current(unfinished[chosen].name)
             return unfinished[chosen].name
         if chosen == len(unfinished):
+            output.transient_end()
             return start_new_run(plug_ip)
         target = unfinished[0] if len(unfinished) == 1 else unfinished[ask_choice(
             "Which run should be removed",
@@ -295,6 +300,7 @@ def resolve_run_name(
         )]
         if remove_run(target):
             unfinished.remove(target)
+        output.transient_end()  # the menu and the removal: shown again, or gone
     return start_new_run(plug_ip)
 
 
@@ -377,6 +383,7 @@ class Context:
                 self.state.set_input("wifi_typed", False)
         if self._wifi is not None:
             return self._wifi
+        output.transient_begin()  # until they are accepted, however many tries
         section("Your Wi-Fi details are needed", [
             *(["You chose to type them (--wifi)."] if forced else why or [
                 "They could not be read off the plug (the reason is above).",
@@ -405,6 +412,7 @@ class Context:
                 ])
                 if choice == 1:
                     self.adopt_wifi(*ask_credentials())
+        output.transient_end()
         self.state.set_input("wifi_typed", True)
         return self._wifi
 
@@ -929,6 +937,7 @@ def upload_or_prompt(ctx: "Context", path: Path, what: str) -> str:
         say(f"{what} uploaded in {seconds}s")
         return f"http:{seconds}s"
     except Exception as exc:  # noqa: BLE001 - any failure falls back to the operator
+        output.transient_begin()
         tell(f"    Automatic upload failed: {exc}")
         say("")
         tell(f"    Upload it by hand instead - the file is identical:")
@@ -936,6 +945,7 @@ def upload_or_prompt(ctx: "Context", path: Path, what: str) -> str:
         tell(f"        {path}")
         if not confirm(f"{what} uploaded through the web UI?"):
             raise Abort(f"{what} was not uploaded")
+        output.transient_end()
         return "manual"
 
 
@@ -1068,6 +1078,7 @@ def check_plug_network(ctx: Context) -> dict[str, Any]:
             "the plug did not say which Wi-Fi network it is on, so the bundle's "
             "network cannot be checked. Nothing was written"
         )
+    output.transient_begin()
     while connected != wanted:
         section("The bundle is set up for a different Wi-Fi network", [
             f"The plug is connected to        '{connected}'",
@@ -1083,9 +1094,11 @@ def check_plug_network(ctx: Context) -> dict[str, Any]:
             raise Abort(f"the plug is on '{connected}' but the bundle is set up for '{wanted}'")
         ctx.adopt_wifi(connected, ask_password(connected))
         wanted = bundle_ssid(ctx.manifest_path)
+    output.transient_end()
     say(f"Network check: the plug is on '{connected}', the network the startup "
         f"firmware will join (signal {signal} dBm).")
     if isinstance(signal, int) and signal < WEAK_SIGNAL_DBM:
+        output.transient_begin()
         section("The plug's Wi-Fi signal is weak", [
             f"It reports {signal} dBm. After the next stage the startup firmware has",
             "to rejoin on its own, and a weak signal makes that less certain.",
@@ -1093,6 +1106,7 @@ def check_plug_network(ctx: Context) -> dict[str, Any]:
         ])
         if not ask_yes_no("Carry on anyway", default=False):
             raise Abort("stopped for a weak Wi-Fi signal; nothing was written")
+        output.transient_end()
     return {"network": connected, "signal_dbm": signal}
 
 
@@ -2089,8 +2103,8 @@ STAGE_NAMES = {
     "A5": "Validating local files",
     "A1": "Discovering the plug",
     "A2": "Querying Sonoff firmware",
-    "C2": "Installing Bridge firmware",
-    "D1": "Installing interim Tasmota",
+    "C2": "Installing bridge firmware",
+    "D1": "Installing interim firmware",
     "D4": "Preparing the plug's memory",
     "E1": "Verifying the memory layout",
     "E2": "Staging the startup firmware",
@@ -2247,6 +2261,7 @@ def run_steps(ctx: Context) -> int:
                 # The plug itself shows the step completed: nothing to decide.
                 ctx.state.mark(step, DONE, note="the plug showed it had completed")
                 continue
+            output.transient_begin()
             section("The last step was interrupted", [
                 f"The step that {PLAIN_DESCRIPTION.get(step, title.lower())} was",
                 "stopped part way through, and the plug does not show whether it",
@@ -2258,6 +2273,7 @@ def run_steps(ctx: Context) -> int:
                 "It did finish - move on to the next step",
             ]
             choice = ask_choice("What would you like to do", options)
+            output.transient_end()
             if choice == 1:
                 ctx.state.mark(step, DONE, note="operator confirmed it completed")
                 tell(f"{step} marked done on your say-so.")
@@ -2288,7 +2304,7 @@ def run_steps(ctx: Context) -> int:
     say("")
     close_firewall_rules(ctx)
     tell("")
-    tell("Conversion complete.")
+    output.show("Conversion complete!", output.GREEN)
     tell("The plug is running official Tasmota:")
     url = plug_page_url(ctx.state.input("plug_ip"))
     if url:
@@ -2345,7 +2361,7 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
               or (captures.get("D1.upload_route") == "home network" and captures.get("D1.wifi") != "preset")
               or captures.get("F4.wifi_route") == "setup network")
     took = output.elapsed(seconds) + (" (this session; the run was resumed)" if resumed else "")
-    return [
+    fields = [
         ("Result", "converted"),
         ("Plug model", model or "__"),
         ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),
@@ -2356,9 +2372,11 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Joined setup network", "yes" if joined else "no"),
         ("Name in Tasmota", json.loads(s60_template(product))["NAME"]),
         ("Relay", hardware.get("Relay", "not checked")),
-        ("Mains voltage", hardware.get("Mains voltage", "not checked")),
         ("Power meter", hardware.get("Power meter", "not checked")),
     ]
+    # Each answer starts with a capital: "No", "Converted".  Only the first
+    # letter, so "S60TPG" and "6m 32s" stay as they are.
+    return [(label, value[:1].upper() + value[1:]) for label, value in fields]
 
 
 def report_markdown(fields: list[tuple[str, str]]) -> str:
@@ -2380,7 +2398,7 @@ LOAD_WATTS, IDLE_WATTS = 1.0, 0.5
 
 def describe_hardware(switched: bool, restored: bool,
                       on: dict[str, Any] | None, off: dict[str, Any] | None) -> dict[str, str]:
-    """The report's Relay, Mains voltage and Power meter lines, from the relay's
+    """The report's Relay and Power meter lines, from the relay's
     replies and the meter read with it on and with it off.
 
     The relay answering both commands proves the firmware drives it; a reading
@@ -2411,7 +2429,6 @@ def describe_hardware(switched: bool, restored: bool,
         relay = "switches on command (no change on the meter)"
     return {
         "Relay": relay,
-        "Mains voltage": f"{v_on:g} V" if v_on is not None else "no reading",
         "Power meter": "no readings" if on is None and off is None
                        else f"on: {reading(on)}; off: {reading(off)}",
     }
@@ -2446,7 +2463,7 @@ def check_hardware(ctx: Context) -> dict[str, str]:
         second = meter()
     except (DeviceError, OSError, ValueError) as exc:
         say(f"    The plug did not answer the check: {exc}")
-        return {key: "could not be checked" for key in ("Relay", "Mains voltage", "Power meter")}
+        return {key: "could not be checked" for key in ("Relay", "Power meter")}
     on, off = (second, first) if was_on else (first, second)
     result = describe_hardware(switched, restored, on, off)
     for label, value in result.items():
@@ -2459,7 +2476,7 @@ def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     fields = report_fields(ctx, seconds, resumed, check_hardware(ctx))
     copied = hostsys.copy_to_clipboard(report_markdown(fields))
     tell("")
-    tell("Please share how it went!")
+    output.show("Please share how it went!", output.GREEN)
     tell("Copy/paste your results below into the Test-Reports discussion thread:")
     output.show_link(REPORTS_URL)
     tell("")
@@ -2469,10 +2486,9 @@ def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
         tell("")
         tell("Fill in the blanks (__) if you know them.")
     tell("")
-    tell("And finally, you've reached the bit where I hold out my hat.")
-    tell("Free software, not free biscuits... Throw a dev a biscuit:")
+    output.show("And finally, you've reached the bit where I hold out my hat!", output.GREEN)
+    tell("Free software, not free biscuits... Throw your friendly neighbourhood dev a biscuit:")
     output.show_link(DONATE_URL)
-    tell("")
 
 
 def display_path(path: Path) -> str:

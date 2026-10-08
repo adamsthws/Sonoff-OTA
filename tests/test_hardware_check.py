@@ -11,7 +11,7 @@ class DescribeHardwareTests(unittest.TestCase):
         result = af.describe_hardware(True, True, {"Voltage": 239, "Power": 0}, {"Voltage": 0, "Power": 0})
         self.assertEqual(result["Relay"], "switches (seen on the meter)")
         self.assertEqual(result["Power meter"], "on: 239 V, 0 W; off: 0 V, 0 W")
-        self.assertEqual(result["Mains voltage"], "239 V")
+        self.assertNotIn("Mains voltage", result)  # the power meter line shows it
 
     def test_a_load_losing_power_proves_it_switches(self):
         result = af.describe_hardware(True, True, {"Voltage": 238, "Power": 41.5}, {"Voltage": 238, "Power": 0})
@@ -25,7 +25,7 @@ class DescribeHardwareTests(unittest.TestCase):
         result = af.describe_hardware(True, False, None, None)
         self.assertEqual(result["Relay"], "did not switch on command")
         self.assertEqual(result["Power meter"], "no readings")
-        self.assertEqual(result["Mains voltage"], "no reading")
+        self.assertNotIn("Mains voltage", result)  # the power meter line shows it
 
 
 class CheckHardwareTests(unittest.TestCase):
@@ -58,14 +58,14 @@ class CheckHardwareTests(unittest.TestCase):
         self.assertEqual([c for c in sent if c.startswith("Power ")], ["Power ON", "Power OFF"])
         self.assertEqual(state["power"], "OFF")
         self.assertEqual(result["Relay"], "switches (seen on the meter)")
-        self.assertEqual(result["Mains voltage"], "240 V")
+        self.assertNotIn("Mains voltage", result)  # the power meter line shows it
 
     def test_a_plug_that_was_on_goes_off_then_back_on(self):
         ctx, sent, state = self.ctx({"ON": {"Voltage": 231.5, "Power": 40}, "OFF": {"Voltage": 231.5, "Power": 0}})
         result = self.run_check(ctx)
         self.assertEqual([c for c in sent if c.startswith("Power ")], ["Power OFF", "Power ON"])
         self.assertEqual(state["power"], "ON")
-        self.assertEqual(result["Mains voltage"], "231.5 V")
+        self.assertNotIn("Mains voltage", result)  # the power meter line shows it
         self.assertEqual(result["Power meter"], "on: 231.5 V, 40 W; off: 231.5 V, 0 W")
 
     def test_nothing_is_asked(self):
@@ -78,7 +78,7 @@ class CheckHardwareTests(unittest.TestCase):
         ctx = SimpleNamespace(device=SimpleNamespace(command=mock.Mock(side_effect=OSError("refused"))))
         result = self.run_check(ctx)
         self.assertEqual(result["Relay"], "could not be checked")
-        self.assertEqual(result["Mains voltage"], "could not be checked")
+        self.assertNotIn("Mains voltage", result)  # the power meter line shows it
 
 
 if __name__ == "__main__":

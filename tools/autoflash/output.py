@@ -222,12 +222,16 @@ def answered(answer: str) -> None:
 # ------------------------------------------------------- answered questions
 
 
-def transient_begin() -> None:
+def transient_begin(*, before_start: bool = False) -> None:
     """Start a block - a note and its question - to take off the screen once
     answered, so a finished stage leaves just its line.  Only on a terminal
-    that can move the cursor back up; the log keeps everything regardless."""
+    that can move the cursor back up; the log keeps everything regardless.
+
+    `before_start`: a question asked before start(), which has no log yet and
+    does not know whether the run will be verbose.
+    """
     with _lock:
-        if not (_s.concise and sys.stdout.isatty() and colour_ok()):
+        if not ((_s.concise or before_start) and sys.stdout.isatty() and colour_ok()):
             return
         _s.transient_rows = 0
         _break()  # the stage line, if drawn, is taken away and drawn again too

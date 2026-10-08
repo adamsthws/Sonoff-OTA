@@ -491,7 +491,11 @@ def wait_or_ask(
 ) -> str:
     """Wait for `address`; if it never answers, offer the sensible ways out."""
     while True:
+        # "No answer" and the question leave the screen once answered, so
+        # keeping on waiting does not stack another copy of them.
+        output.transient_begin()
         if wait_for_host(address, what=what, timeout=timeout):
+            output.transient_end()
             return address
         choice = ask_choice(
             "What would you like to do",
@@ -505,9 +509,12 @@ def wait_or_ask(
             ],
         )
         if choice == 0:
+            output.transient_end()
             continue
         if choice == 1:
-            return ask_ipv4(f"What address is {what} on now", must_respond=True)
+            found = ask_ipv4(f"What address is {what} on now", must_respond=True)
+            output.transient_end()
+            return found
         raise QuitRun(f"{what} did not come back")
 
 
