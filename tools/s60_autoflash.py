@@ -88,8 +88,6 @@ S60_PRODUCT = re.compile(r"S60TP[A-Z]")
 CONSENT_WORD = "proceed"
 # After this step the plug no longer runs its Sonoff firmware.
 POINT_OF_NO_RETURN = "C2"
-# Seconds to stop with Ctrl-C before the partition table is rewritten.
-COMMIT_COUNTDOWN = 10
 # Below this the startup firmware may struggle to rejoin on its own after E3.
 WEAK_SIGNAL_DBM = -75
 BRIDGE_AP_PREFIX = "S60-OTA-Bridge"
@@ -431,7 +429,10 @@ class Context:
         which serve_tasmota_ota.py already supported.
         """
         if self._ewelink_password is None:
-            self._ewelink_password = ask_secret(f"eWeLink password for {self.email()}: ")
+            email = self.email()
+            output.transient_begin()
+            self._ewelink_password = ask_secret(f"eWeLink password for {email}: ")
+            output.transient_end()
         return {**os.environ, "EWELINK_PASSWORD": self._ewelink_password}
 
     def email(self) -> str:
@@ -442,6 +443,7 @@ class Context:
         """
         email = self.state.input("email")
         if not email:
+            output.transient_begin()
             last = load_settings().get("ewelink_email")
             if last and ask_choice("Which eWeLink account is this plug in", [
                 f"The one used last time: {last}",
@@ -455,6 +457,7 @@ class Context:
                         ("@" in answer, "That does not look like an email address.")
                     ),
                 )
+            output.transient_end()
         self.remember_email(email)
         return email
 
@@ -837,11 +840,11 @@ def upload_or_prompt(ctx: "Context", path: Path, what: str) -> str:
         say(f"{what} uploaded in {seconds}s")
         return f"http:{seconds}s"
     except Exception as exc:  # noqa: BLE001 - any failure falls back to the operator
-        tell(f"Automatic upload failed: {exc}")
+        tell(f"    Automatic upload failed: {exc}")
         say("")
-        tell(f"Upload it by hand instead - the file is identical:")
-        tell(f"  open http://{device.host}/  ->  Firmware Upgrade  ->  choose file")
-        tell(f"  {path}")
+        tell(f"    Upload it by hand instead - the file is identical:")
+        tell(f"        open http://{device.host}/  ->  Firmware Upgrade  ->  choose file")
+        tell(f"        {path}")
         if not confirm(f"{what} uploaded through the web UI?"):
             raise Abort(f"{what} was not uploaded")
         return "manual"
@@ -852,6 +855,7 @@ def step_prerequisites(ctx: Context) -> dict[str, Any]:
     """A0 - what has to be in place first, for anyone who skipped the README."""
     if any(ctx.state.is_done(step) for step, _, _ in STEPS if step != "A0"):
         return {"shown": False}  # a run from before this step existed
+    output.transient_begin()
     section("Before you start", [
         "- The eWeLink app on your phone, signed in to an eWeLink account",
         "  (free - a throwaway account is fine).",
@@ -864,6 +868,7 @@ def step_prerequisites(ctx: Context) -> dict[str, Any]:
         "point of no return - you will be asked then.",
     ])
     wait_for_key()
+    output.transient_end()  # read: the list leaves the screen, the stage line stays
     return {"shown": True}
 
 
@@ -1141,6 +1146,7 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
     ensure_firewall(ctx)
     env = ctx.ewelink_env()
 
+    output.transient_begin()
     warning_box("Before going on", [
         "From here the plug's Sonoff firmware is replaced, so the eWeLink app",
         "will no longer control it. Later its memory layout is rewritten; losing",
@@ -1149,6 +1155,7 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
     ])
     if not require_word(CONSENT_WORD):
         raise Abort("not confirmed - nothing has been written to the plug")
+    output.transient_end()  # agreed: the note and the question have done their job
 
     lock = ROOT / "RECOVERY_LOCK"
     moved = ROOT / "RECOVERY_LOCK.owner-authorized"
@@ -1415,7 +1422,7 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         for step in ("E1", "E2"):
             ctx.state.mark(step, FAILED, error="redo: bundle or network changed before E3")
         raise
-    section("Rewriting the plug's memory layout", [
+    section("Rewriting the plug's memory layout", quiet=True, body=[
         "Both checks above passed. This rewrites the one small area of memory",
         "that tells the plug where its firmware lives - the step you agreed to",
         "at the start. It takes about a minute.",
@@ -1425,17 +1432,8 @@ def step_commit(ctx: Context) -> dict[str, Any]:
     ])
 
     def gate(_: str) -> bool:
-        # Consent was given once, before the first write; this is the last
-        # chance to stop, not another question.
-        try:
-            for remaining in range(COMMIT_COUNTDOWN, 0, -1):
-                output.progress(f"starting in {remaining}s - press Ctrl-C to stop")
-                time.sleep(1)
-        except KeyboardInterrupt:
-            output.progress_clear()
-            tell("    Stopped before anything was written.")
-            return False  # the runner shuts its server down cleanly
-        output.progress_clear()
+        # The commit phase insists on an explicit go-ahead.  It was given once,
+        # by typing PROCEED before the first write (C2), and covers this step.
         return True
 
     lock = ROOT / "REPARTITION_LOCK"
@@ -1452,8 +1450,7 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         say("REPARTITION_LOCK restored")
     if code != 0:
         raise Abort(f"commit did not pass (exit {code})")
-    tell("The new layout is written. Leave the plug in - it restarts by itself,")
-    tell("and the run carries on.")
+    say("The new layout is written. The plug restarts by itself, and the run carries on.")
     return {"exit": code}
 
 
@@ -1578,8 +1575,8 @@ def step_configure(ctx: Context) -> dict[str, Any]:
         setup = find_ssid(TASMOTA_AP_PREFIX, timeout=15)
         if setup:
             route = "setup network"
-            tell("Official Tasmota did not join your Wi-Fi by itself, so it is set up")
-            tell("through its own network instead.")
+            tell("    Official Tasmota did not join your Wi-Fi by itself, so it is set up")
+            tell("    through its own network instead.")
             configure_plug_wifi(ctx, setup)
         else:
             route = "located"
@@ -1621,8 +1618,8 @@ def step_restore(ctx: Context) -> dict[str, Any]:
         if matches:
             say("  Checked first: the plug is running the official Tasmota, unmodified.")
             return True
-        tell(f"  Stopping: {problem}. Swapping the startup firmware is only safe")
-        tell("  under the official Tasmota, so nothing was written.")
+        tell(f"    Stopping: {problem}. Swapping the startup firmware is only safe")
+        tell("    under the official Tasmota, so nothing was written.")
         return False
 
     code, _ = runner.run(
@@ -1762,9 +1759,14 @@ DESTRUCTIVE_STEPS = {"C2", "E2", "E3", "F2", "G1"}
 
 
 
+def stage_name(step: str) -> str:
+    return STAGE_NAMES.get(step, STEP_INDEX[step][0])
+
+
 def begin_stage(step: str) -> None:
     number = next(index for index, (name, _, _) in enumerate(STEPS, 1) if name == step)
-    output.stage_begin(number, len(STEPS), STAGE_NAMES.get(step, STEP_INDEX[step][0]))
+    output.set_stage_width(max(len(stage_name(name)) for name, _, _ in STEPS))
+    output.stage_begin(number, len(STEPS), stage_name(step))
 
 
 def execute(ctx: Context, step: str) -> int:
@@ -1810,20 +1812,20 @@ def cmd_step(ctx: Context, step: str) -> int:
 # Each step's name on its stage line, in words that need no knowledge of the
 # internals.
 STAGE_NAMES = {
-    "A0": "Checking you have everything",
-    "A5": "Checking the files on this computer",
-    "A1": "Finding the plug on your network",
-    "A2": "Asking the plug about its firmware",
-    "C2": "Installing the installer firmware",
-    "D1": "Installing Tasmota",
-    "D4": "Making room in the plug's memory",
-    "E1": "Checking the plug's memory layout",
-    "E2": "Copying the new startup firmware",
-    "E3": "Rewriting the memory layout - leave the plug in",
-    "F2": "Installing official Tasmota",
-    "F4": "Setting up Wi-Fi and the plug's settings",
-    "G1": "Installing the official startup firmware",
-    "H1": "Checking the finished plug",
+    "A0": "Confirming prerequisites",
+    "A5": "Validating local files",
+    "A1": "Discovering the plug",
+    "A2": "Querying Sonoff firmware",
+    "C2": "Installing Bridge firmware",
+    "D1": "Installing interim Tasmota",
+    "D4": "Preparing the plug's memory",
+    "E1": "Verifying the memory layout",
+    "E2": "Staging the startup firmware",
+    "E3": "Committing the new memory layout",
+    "F2": "Installing final Tasmota",
+    "F4": "Configuring Wi-Fi and settings",
+    "G1": "Installing official Safeboot",
+    "H1": "Verifying the conversion",
 }
 
 
@@ -1950,8 +1952,6 @@ def run_steps(ctx: Context) -> int:
     tell("Converting a plug usually takes under 10 minutes. Some stages take a")
     tell("minute or two with little to see - that's normal. Keep the plug plugged")
     tell("in, and this computer awake, until the last stage says complete.")
-    if output.concise() and output.log_path():
-        tell(f"Full details go to {display_path(output.log_path())}; add --verbose to see them here.")
     tell("")
     for step, title, _ in STEPS:
         if ctx.state.is_done(step):
@@ -1969,7 +1969,7 @@ def run_steps(ctx: Context) -> int:
                     finished, reason = evidence(ctx)
                 except (DeviceError, Abort, OSError, ValueError) as exc:
                     finished, reason = None, f"The check itself could not run: {exc}"
-                tell(f"  {reason}")
+                tell(f"    {reason}")
             if finished is True:
                 # The plug itself shows the step completed: nothing to decide.
                 ctx.state.mark(step, DONE, note="the plug showed it had completed")
@@ -2005,10 +2005,10 @@ def run_steps(ctx: Context) -> int:
         if code != 0:
             tell("")
             tell(f"Stopped at {step}. Fix the cause, then resume with:")
-            tell("  python3 tools/s60_autoflash.py run")
+            tell("    python3 tools/s60_autoflash.py run")
             if recorded_rules(ctx):
                 tell("To abandon this plug instead and remove the temporary firewall rule:")
-                tell("  python3 tools/s60_autoflash.py cleanup")
+                tell("    python3 tools/s60_autoflash.py cleanup")
             if output.log_path():
                 tell(f"What happened, in full: {display_path(output.log_path())}")
             tell("Stuck? Ask in the Test reports thread:")

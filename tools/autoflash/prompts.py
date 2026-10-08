@@ -55,7 +55,7 @@ def warning_box(title: str, body: Sequence[str]) -> None:
     output.show("")
     output.show(f"! {title}", output.BOLD, output.YELLOW)
     for line in body:
-        output.show(f"  {line}")
+        output.show(f"{BULLET}{line}")
 
 
 def section(title: str, body: Sequence[str] = (), *, quiet: bool = False) -> None:
@@ -128,10 +128,14 @@ def ask_secret(prompt: str, reveal_seconds: float = 1.0) -> str:
     """
     prompt = prompt.rstrip().rstrip(":") + QUIT_HINT + ": "
     output.before_input(prompt)  # the question is logged; the answer never is
+    value = ""
     try:
         value = _read_secret(prompt, reveal_seconds)
     finally:
-        output.after_input()
+        # What the screen holds: the prompt, then one asterisk a character -
+        # on a row of their own when the prompt was too long to share one.
+        stars = "*" * len(value)
+        output.after_secret(("\n> " + stars) if _secret_field_below(prompt) else stars)
     # Real passwords here are at least eight characters, so a lone q cannot
     # be one.
     if value.strip().lower() in QUIT_WORDS:
@@ -139,12 +143,17 @@ def ask_secret(prompt: str, reveal_seconds: float = 1.0) -> str:
     return value
 
 
+def _secret_field_below(prompt: str) -> bool:
+    """Whether the password field goes on the row below its prompt, so the
+    whole field fits on one row and a carriage return can redraw it."""
+    return len(prompt) + 65 >= shutil.get_terminal_size().columns
+
+
 def _read_secret(prompt: str, reveal_seconds: float) -> str:
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return getpass.getpass(prompt)
     out = sys.stdout
-    # Keep the whole field on one row so a carriage return can redraw it.
-    if len(prompt) + 65 >= shutil.get_terminal_size().columns:
+    if _secret_field_below(prompt):
         out.write(prompt.rstrip() + "\n")
         prompt = "> "
     if hostsys.IS_WINDOWS:

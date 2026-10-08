@@ -48,8 +48,8 @@ class ConciseTests(OutputTestCase):
 
     def test_piped_output_gets_one_line_per_change(self):
         screen, log = self.run_with(io.StringIO(), False, self.stages)
-        self.assertIn("Stage 1 of 2 - Checking the files - underway", screen)
-        self.assertIn("Stage 1 of 2 - Checking the files - complete (0s)", screen)
+        self.assertIn("Stage 1 of 2 - Checking the files - Underway", screen)
+        self.assertIn("Stage 1 of 2 - Checking the files - Complete (0s)", screen)
         self.assertIn("Join the bridge's Wi-Fi network", screen)
         self.assertNotIn("bundle and pinned artifacts", screen)
         self.assertIn("bundle and pinned artifacts: OK", log)
@@ -61,8 +61,62 @@ class ConciseTests(OutputTestCase):
             output.stage_end("complete")
         screen, _ = self.run_with(FakeTerminal(), False, body)
         drawn = screen.split("\n")[0]
-        self.assertIn("Checking the files - underway", drawn)
-        self.assertTrue(drawn.split("\r")[-1].startswith("Stage 1 of 1 - Checking the files - complete"))
+        self.assertIn("Checking the files - Underway", drawn)
+        self.assertTrue(drawn.split("\r")[-1].startswith("Stage 1 of 1 - Checking the files - Complete"))
+
+    def test_stage_lines_line_up_in_columns(self):
+        def body():
+            output.set_stage_width(len("Installing official Tasmota"))
+            for number, name in ((1, "Checking you have everything"[:20]), (10, "Installing official Tasmota")):
+                output.stage_begin(number, 14, name)
+                output.stage_end("complete")
+        screen, log = self.run_with(io.StringIO(), False, body)
+        done = [line for line in screen.splitlines() if line.endswith("Complete (0s)")]
+        self.assertEqual(len(done), 2)
+        self.assertEqual(done[0].index(" - Complete"), done[1].index(" - Complete"))
+        self.assertEqual(done[0].index(" - Checking"), done[1].index(" - Installing"))
+        self.assertTrue(done[0].startswith("Stage  1 of 14 - "))
+        self.assertIn("Stage 1 of 14 - Checking you have ev - complete", log)  # the log is not padded
+
+    def test_an_answered_question_is_taken_off_the_screen(self):
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True), \
+                 mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 24))):
+                output.stage_begin(5, 14, "Installing the installer firmware")
+                output.transient_begin()          # the underway line: 1 row
+                prompts.warning_box("Before going on", ["One line."])  # 3 rows
+                output.before_input("Type PROCEED to go ahead: ")
+                output.answered("proceed")        # prompt and answer: 1 row
+                output.transient_end()
+                output.stage_end("complete")
+        screen, log = self.run_with(FakeTerminal(), False, body)
+        self.assertIn("\x1b[1F\x1b[2K" * 5, screen)
+        self.assertNotIn("\x1b[1F\x1b[2K" * 6, screen)
+        self.assertNotIn("\x1b[J", screen)   # never an erase that could clear the whole screen
+        self.assertIn("Before going on", log)
+        self.assertIn("-> proceed", log)
+
+    def test_success_is_green_and_underway_is_bold(self):
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True):
+                output.stage_begin(1, 1, "Checking the files")
+                output.stage_end("complete")
+        screen, log = self.run_with(FakeTerminal(), False, body)
+        self.assertIn(f"{output.BOLD}Underway{output.RESET}", screen)
+        self.assertIn(f"{output.GREEN}Stage 1 of 1{output.RESET} - Checking the files - "
+                      f"{output.GREEN}Complete{output.RESET} (0s)", screen)
+        self.assertIn("Stage 1 of 1 - Checking the files - complete (0s)", log)
+
+    def test_without_cursor_control_the_question_stays(self):
+        def body():
+            output.stage_begin(5, 14, "Installing the installer firmware")
+            output.transient_begin()
+            prompts.warning_box("Before going on", ["One line."])
+            output.transient_end()
+            output.stage_end("complete")
+        screen, _ = self.run_with(FakeTerminal(), False, body)   # NO_COLOR is set
+        self.assertNotIn("\x1b[", screen)
+        self.assertIn("Before going on", screen)
 
     def test_a_message_mid_stage_starts_on_its_own_line(self):
         def body():
@@ -72,16 +126,18 @@ class ConciseTests(OutputTestCase):
         screen, _ = self.run_with(FakeTerminal(), False, body)
         lines = [line.split("\r")[-1] for line in screen.split("\n")]
         self.assertIn("Join the bridge's Wi-Fi network", lines)
-        self.assertTrue(any(line.startswith("Stage 1 of 1 - Installing Tasmota - complete") for line in lines))
+        self.assertTrue(any(line.startswith("Stage 1 of 1 - Installing Tasmota - Complete") for line in lines))
 
-    def test_progress_rides_on_the_stage_line_and_is_not_logged(self):
+    def test_progress_stays_off_the_concise_screen_and_the_log(self):
         def body():
             output.stage_begin(1, 1, "Installing Tasmota")
             output.progress("looking for the installer on your network... 12s")
+            output.progress_clear()
             output.stage_end("complete")
         screen, log = self.run_with(FakeTerminal(), False, body)
-        self.assertIn("Installing Tasmota - underway 0s - looking for the installer", screen)
+        self.assertNotIn("looking for the installer", screen)
         self.assertNotIn("looking for the installer", log)
+        self.assertIn("Installing Tasmota - Underway 0s", screen)
 
     def test_a_stage_begun_twice_keeps_one_line(self):
         def body():
@@ -89,8 +145,8 @@ class ConciseTests(OutputTestCase):
             output.stage_begin(1, 1, "Installing Tasmota")
             output.stage_end("already done")
         screen, _ = self.run_with(io.StringIO(), False, body)
-        self.assertEqual(screen.count("underway"), 1)
-        self.assertIn("Installing Tasmota - already done", screen)
+        self.assertEqual(screen.count("Underway"), 1)
+        self.assertIn("Installing Tasmota - Already done", screen)
 
     def test_quiet_sections_are_logged_only(self):
         def body():
@@ -104,8 +160,13 @@ class ConciseTests(OutputTestCase):
     def test_the_warning_is_a_short_note(self):
         screen, _ = self.run_with(io.StringIO(), False,
                                   lambda: prompts.warning_box("Before going on", ["One line."]))
-        self.assertEqual(screen.strip().splitlines(), ["! Before going on", "  One line."])
+        self.assertEqual(screen.strip().splitlines(), ["! Before going on", "    One line."])
         self.assertNotIn("!!", screen)
+
+    def test_block_counters_stay_off_the_concise_screen(self):
+        counter = "\r    Copying the startup firmware: block 3/198"
+        screen, _ = self.run_with(io.StringIO(), False, lambda: output.raw_progress(counter))
+        self.assertNotIn("block 3", screen)
 
 
 class VerboseTests(OutputTestCase):
@@ -175,14 +236,15 @@ class InputTests(OutputTestCase):
 
 
 class NarrowTerminalTests(OutputTestCase):
-    def test_what_it_is_doing_and_its_counter_stay_visible(self):
+    def test_a_stage_line_too_long_for_the_terminal_is_cut_short(self):
         def body():
-            with mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 24))):
-                output.stage_begin(6, 14, "Installing Tasmota")
-                output.progress("waiting for this computer to join tasmota-5A3C1F-7340... 9s")
+            with mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((40, 24))):
+                output.stage_begin(6, 14, "Installing the official startup firmware")
                 output.stage_end("complete")
         screen, _ = self.run_with(FakeTerminal(), False, body)
-        self.assertIn("Stage 6/14 - 0s - waiting for this computer to join tasmota-5A3C1F-7340... 9s", screen)
+        drawn = screen.split("\r")[1]
+        self.assertTrue(drawn.endswith("..."))
+        self.assertLessEqual(len(drawn), 39)
 
 
 class FallbackScreenTests(OutputTestCase):

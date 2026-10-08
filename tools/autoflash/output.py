@@ -34,6 +34,9 @@ GREEN, RED, YELLOW, BOLD, RESET = "\x1b[32m", "\x1b[31m", "\x1b[33m", "\x1b[1m",
 
 _lock = threading.RLock()
 
+# Colour and hyperlink sequences, which take no room on screen.
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\]8;;[^\x1b]*\x1b\\\\")
+
 # Words that mark a helper tool's line as the reason it failed.
 PROBLEM_RE = re.compile(r"error|refus|fail|warning|interrupted|did not|denied|invalid|unable|timed? ?out",
                         re.IGNORECASE)
@@ -43,10 +46,14 @@ class _State:
     log: IO[str] | None = None
     log_path: Path | None = None
     concise = False
-    stage: str | None = None          # "Stage 5 of 14 - Installing Tasmota"
-    stage_short = ""                  # "Stage 5/14", when the line is too narrow
+    stage: str | None = None          # "Stage 5 of 14 - Installing Tasmota", as logged
+    stage_prefix = ""                 # "Stage  5 of 14", coloured with the outcome
+    stage_screen = ""                 # the same, numbers and name padded into columns
+    name_width = 0                    # the longest stage name, so the columns line up
+    transient_rows: int | None = None  # rows on screen since transient_begin()
+    pending_prompt: str | None = None  # a question on screen, waiting for its answer
+    pending_answer = ""
     stage_started = 0.0
-    detail = ""                       # what the stage line says it is doing
     live = 0                          # characters of an unfinished line on screen
     live_is_stage = False
     paused = False                    # waiting for the keyboard: draw nothing
@@ -92,6 +99,8 @@ def finish() -> None:
         _s.log = _s.log_path = None
         _s.concise = False
         _s.stage = None
+        _s.transient_rows = None
+        _s.name_width = 0
 
 
 def log_path() -> Path | None:
@@ -140,7 +149,7 @@ def hyperlink(url: str) -> str:
     return f"\x1b]8;;{url}\x1b\\{url}\x1b]8;;\x1b\\"
 
 
-def show_link(url: str, indent: str = "  ") -> None:
+def show_link(url: str, indent: str = "    ") -> None:
     """A link on a line of its own: clickable on screen, plain in the log."""
     with _lock:
         _write_log(indent + url)
@@ -179,6 +188,7 @@ def before_input(prompt: str = "") -> None:
     with _lock:
         _break()
         _s.paused = True
+        _s.pending_prompt, _s.pending_answer = prompt, ""
         if prompt:
             _write_log(f"? {prompt.strip()}")
 
@@ -186,16 +196,66 @@ def before_input(prompt: str = "") -> None:
 def after_input() -> None:
     """The keyboard has been read: the stage line may be drawn again."""
     with _lock:
+        if _s.transient_rows is not None and _s.pending_prompt is not None:
+            # The question and the answer echoed after it, then Enter.
+            _s.transient_rows += _rows(_s.pending_prompt + _s.pending_answer)
+        _s.pending_prompt, _s.pending_answer = None, ""
         _s.paused = False
+
+
+def after_secret(shown: str) -> None:
+    """after_input() for a password: `shown` is what the screen holds after
+    the prompt - asterisks only, never the password."""
+    _s.pending_answer = shown
+    after_input()
 
 
 def answered(answer: str) -> None:
     """Record a non-secret answer in the log."""
+    _s.pending_answer = answer
     after_input()
     log_only(f"  -> {answer}")
 
 
+# ------------------------------------------------------- answered questions
+
+
+def transient_begin() -> None:
+    """Start a block - a note and its question - to take off the screen once
+    answered, so a finished stage leaves just its line.  Only on a terminal
+    that can move the cursor back up; the log keeps everything regardless."""
+    with _lock:
+        if not (_s.concise and sys.stdout.isatty() and colour_ok()):
+            return
+        _s.transient_rows = 0
+        _break()  # the stage line, if drawn, is taken away and drawn again too
+
+
+def transient_end() -> None:
+    """Take the block since transient_begin() off the screen."""
+    with _lock:
+        rows, _s.transient_rows = _s.transient_rows, None
+        if rows is None:
+            return
+        if _s.live:
+            sys.stdout.write("\r\x1b[K")  # a stage line redrawn after the answer
+            _s.live = 0
+        # Up a row and erase it, row by row.  Not one erase-to-end from the top:
+        # when the block starts on the screen's first row that clears the whole
+        # screen, which tmux (scroll-on-clear) and some terminals first copy
+        # into the scrollback - the block would stay there.
+        sys.stdout.write("\x1b[1F\x1b[2K" * rows)
+        sys.stdout.flush()
+        if _s.stage is not None and not _s.paused:
+            _draw_stage()
+
+
 # ------------------------------------------------------------------- stages
+
+
+def set_stage_width(width: int) -> None:
+    """The longest stage name in the run, so every stage line's status lines up."""
+    _s.name_width = width
 
 
 def stage_begin(number: int, total: int, name: str) -> None:
@@ -204,16 +264,17 @@ def stage_begin(number: int, total: int, name: str) -> None:
         if _s.stage == label:
             return  # already begun: keep its line and its clock
         _break()
+        digits = len(str(total))
         _s.stage = label
-        _s.stage_short = f"Stage {number}/{total}"
+        _s.stage_prefix = f"Stage {number:>{digits}} of {total}"
+        _s.stage_screen = f"{_s.stage_prefix} - {name:<{_s.name_width}}"
         _s.stage_started = time.monotonic()
-        _s.detail = ""
         _write_log(f"--- {_s.stage}")
         if _s.concise:
             if sys.stdout.isatty():
                 _draw_stage()
             else:
-                _print(f"{_s.stage} - underway")
+                _print(f"{_s.stage_screen} - Underway")
         else:
             _print("")
             _print(f"== {_s.stage}")
@@ -230,10 +291,14 @@ def stage_end(outcome: str) -> None:
         _write_log(line)
         if _s.concise:
             colour = {"complete": GREEN, "stopped": RED}.get(outcome)
-            text = f"{_s.stage} - {styled(outcome, colour) if colour else outcome}{timing}"
+            word = outcome.capitalize()
+            plain = f"{_s.stage_screen} - {word}{timing}"
+            text = plain if not colour else (
+                styled(_s.stage_prefix, colour) + _s.stage_screen[len(_s.stage_prefix):]
+                + " - " + styled(word, colour) + timing)
             if _s.live and _s.live_is_stage:
                 # Replace the "underway" line in place.
-                sys.stdout.write("\r" + text + " " * max(0, _s.live - len(line)) + "\n")
+                sys.stdout.write("\r" + text + " " * max(0, _s.live - len(plain)) + "\n")
                 sys.stdout.flush()
                 _s.live = 0
             else:
@@ -242,12 +307,13 @@ def stage_end(outcome: str) -> None:
 
 
 def progress(text: str = "") -> None:
-    """What a stage is doing right now, redrawn in place; never logged."""
+    """What a stage is doing right now, redrawn in place; never logged.
+
+    Verbose mode only: in concise mode the stage line and its clock already
+    say the stage is under way, and anything to act on is shown in full.
+    """
     with _lock:
         if _s.concise:
-            _s.detail = text
-            if _s.stage is not None and not _s.paused and sys.stdout.isatty():
-                _draw_stage()
             return
         if not sys.stdout.isatty():
             return
@@ -263,9 +329,6 @@ def progress_clear() -> None:
     """The waiting is over: take the progress text away."""
     with _lock:
         if _s.concise:
-            _s.detail = ""
-            if _s.stage is not None and _s.live and _s.live_is_stage:
-                _draw_stage()
             return
         if _s.live and not _s.live_is_stage:
             sys.stdout.write("\r" + " " * _s.live + "\r")
@@ -295,6 +358,8 @@ def raw_progress(text: str) -> None:
         progress_keep()
     elif text.startswith("\r"):
         progress(text.strip())
+
+
 
 
 # ------------------------------------------------------------- subprocesses
@@ -375,19 +440,23 @@ def _tick_forever() -> None:
 
 def _draw_stage() -> None:
     clock = _elapsed(time.monotonic() - _s.stage_started)
-    detail = f" - {_s.detail}" if _s.detail else ""
     width = shutil.get_terminal_size((100, 20)).columns - 1
-    line = f"{_s.stage} - underway {clock}{detail}"
-    if len(line) > width and detail:
-        # Too narrow for the name as well: what it is doing, and its clock, matter more.
-        line = f"{_s.stage_short} - {clock}{detail}"
+    line = f"{_s.stage_screen} - Underway {clock}"
+    shown = f"{_s.stage_screen} - {styled('Underway', BOLD)} {clock}"
     if len(line) > width:
-        line = line[: width - 3] + "..."
+        line = shown = line[: width - 3] + "..."
     if _s.live and not _s.live_is_stage:
         _break()
-    sys.stdout.write("\r" + line + " " * max(0, _s.live - len(line)))
+    sys.stdout.write("\r" + shown + " " * max(0, _s.live - len(line)))
     sys.stdout.flush()
     _s.live, _s.live_is_stage = len(line), True
+
+
+def _rows(text: str) -> int:
+    """Screen rows `text` takes once printed, long lines wrapping."""
+    width = max(1, shutil.get_terminal_size((100, 20)).columns)
+    plain = ANSI_RE.sub("", text)
+    return sum(max(1, -(-len(line) // width)) for line in plain.split("\n"))
 
 
 def _break() -> None:
@@ -395,6 +464,8 @@ def _break() -> None:
     if _s.live:
         if _s.live_is_stage:
             sys.stdout.write("\n")            # the underway line stays as it was
+            if _s.transient_rows is not None:
+                _s.transient_rows += 1
         else:
             sys.stdout.write("\r" + " " * _s.live + "\r")
         sys.stdout.flush()
@@ -404,6 +475,8 @@ def _break() -> None:
 def _print(text: str) -> None:
     _break()
     print(text, flush=True)
+    if _s.transient_rows is not None:
+        _s.transient_rows += _rows(text)
 
 
 def _write_log(text: str) -> None:
