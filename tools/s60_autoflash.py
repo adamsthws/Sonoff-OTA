@@ -362,8 +362,14 @@ class Context:
         # from them.  Neither is ever written to disk.
         self._wifi: tuple[str, str] | None = None
         self._recovery: bytes | None = None
+        try:
+            output.private(bundle_ssid(self.manifest_path), "wifi-name")
+        except (BundleError, OSError, ValueError):
+            pass  # no bundle yet: its network is kept out of the log once known
 
     def remember_wifi(self, ssid: str, password: str, image: bytes) -> None:
+        output.private(ssid, "wifi-name")
+        output.private(password, "wifi-password")
         self._wifi, self._recovery = (ssid, password), image
 
     def wifi(self, why: list[str] | None = None) -> tuple[str, str]:
@@ -460,7 +466,9 @@ class Context:
             self.ewelink_env()
             try:
                 region, token = login(self.email(), self._ewelink_password or "", "+44", "eu")
-                return get_devices(region, token)
+                devices = get_devices(region, token)
+                keep_account_private(devices)
+                return devices
             except EwelinkError as exc:
                 if "login failed" not in str(exc):
                     tell(f"    Could not reach eWeLink ({exc}), so every plug that answers is listed.")
@@ -1044,6 +1052,9 @@ def read_wifi_from_plug(ctx: "Context") -> tuple[str, str] | None:
             return unreadable("its settings backup is not in the expected format")
         ssid = tasmota_settings.text(record, tasmota_settings.SET_STASSID1)
         password = tasmota_settings.text(record, tasmota_settings.SET_STAPWD1)
+        output.private(connected, "wifi-name")
+        output.private(ssid, "wifi-name")
+        output.private(password, "wifi-password")
     except (Abort, DeviceError, ValueError, OSError) as exc:
         return unreadable(f"it did not answer as Tasmota ({exc})")
     if ssid != connected:
@@ -1073,6 +1084,8 @@ def check_plug_network(ctx: Context) -> dict[str, Any]:
     wifi = status.get("StatusSTS", {}).get("Wifi", {}) if isinstance(status, dict) else {}
     connected = wifi.get("SSId")
     signal = wifi.get("Signal")
+    output.private(wanted, "wifi-name")
+    output.private(connected, "wifi-name")
     if not connected:
         raise Abort(
             "the plug did not say which Wi-Fi network it is on, so the bundle's "
@@ -1144,6 +1157,21 @@ class Sighting:
     plug: AccountPlug
     ip: str | None
     answering: bool
+
+
+def keep_account_private(devices: list[dict[str, Any]]) -> None:
+    """Keep what the account says about each device out of the log: its id,
+    the name it was given, its hardware address and its network."""
+    for device in devices:
+        params = device.get("params") or {}
+        output.private(device.get("deviceid"), "device-id")
+        name = str(device.get("name") or "")
+        generic = {"sonoff", "s60", "plug", "smart", "socket",
+                   str(device.get("productModel") or "").lower()}
+        if not set(name.lower().split()) <= generic:  # "Sonoff S60" names nobody
+            output.private(name, "plug-name")
+        output.private(params.get("staMac"), "mac")
+        output.private(params.get("ssid"), "wifi-name")
 
 
 def account_plug(device: dict[str, Any]) -> AccountPlug | None:

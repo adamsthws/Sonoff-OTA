@@ -69,10 +69,12 @@ def section(title: str, body: Sequence[str] = (), *, quiet: bool = False) -> Non
         say(f"{BULLET}{line}")
 
 
-def _raw(question: str, default: str | None) -> str:
+def _raw(question: str, default: str | None, private: str | None = None) -> str:
     suffix = f" [{default}]" if default else ""
     output.before_input(f"{question}{suffix}")
     answer = input(f"{question}{suffix}: ").strip()
+    if private:
+        output.private(answer, private)
     output.answered(answer)
     if answer.lower() in QUIT_WORDS:
         raise QuitRun("stopped at an operator prompt")
@@ -341,13 +343,15 @@ def ask_text(
     example: str | None = None,
     validate: Callable[[str], tuple[bool, str]] | None = None,
     quit_hint: bool = True,
+    private: str | None = None,
 ) -> str:
+    """`private`: the answer is kept out of the log, written as <private>."""
     if help_lines:
         _emit(help_lines)
     if example:
         _emit([f"Example: {example}"])
     while True:
-        answer = _raw(question + (QUIT_HINT if quit_hint else ""), default)
+        answer = _raw(question + (QUIT_HINT if quit_hint else ""), default, private)
         if not answer:
             _emit(["An answer is needed here. Type quit to stop."])
             continue

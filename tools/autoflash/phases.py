@@ -236,7 +236,7 @@ class PhaseRunner:
             for line in process.stdout:
                 captured.append(line.rstrip("\n"))
                 if not log_file.closed:
-                    log_file.write(line)
+                    log_file.write(output.scrub(line))
                     log_file.flush()
                 if not MANUAL_INSTRUCTION_RE.search(line):
                     display.feed(line)

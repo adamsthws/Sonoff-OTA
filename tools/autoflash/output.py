@@ -18,6 +18,7 @@ import codecs
 import collections
 import contextlib
 import datetime
+import ipaddress
 import os
 import platform
 import re
@@ -65,6 +66,61 @@ class _State:
 
 
 _s = _State()
+
+
+# ------------------------------------------------------------------ privacy
+# The log is meant to be shared when asking for help, so what identifies the
+# person, their network or their plug is replaced before it is written: the
+# values the run learns (private()), and anything shaped like one of them
+# (_PATTERNS) - a helper's output can carry them before the run knows them.
+# The screen is left alone: it is theirs.  Addresses on the home network stay,
+# as they are needed to follow a run and identify nobody.
+
+_private: dict[str, str] = {}         # value -> the label it is replaced with
+
+_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # Secrets in JSON, whatever else is in the line.
+    (re.compile(r'("(?:apikey|devicekey|at|rt|token|password|pass|pwd)"\s*:\s*)"[^"]*"', re.I),
+     r'\1"<redacted>"'),
+    (re.compile(r"\bsign=[0-9a-fA-F]+"), "sign=<signature>"),
+    (re.compile(r"[\w.%+-]+@[\w-]+(?:\.[\w-]+)+"), "<email>"),
+    (re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"), "<mac>"),
+    # An eWeLink device id, and Tasmota's default name, which ends with the MAC's.
+    (re.compile(r"\b100[0-9a-f]{7}\b"), "<device-id>"),
+    (re.compile(r"\btasmota-[0-9A-Fa-f]{6}-\d{4}\b"), "<device-name>"),
+    (re.compile(r"(\[sudo\] password for )\S+?(:)"), r"\1<user>\2"),
+]
+_IPV4 = re.compile(r"(?<![\w.-])\d{1,3}(?:\.\d{1,3}){3}(?![\w.(-])")
+
+
+def private(value: object, label: str) -> None:
+    """Keep `value` out of the log from now on, written as <label> instead."""
+    text = str(value or "").strip()
+    if len(text) < 3:  # too short to replace without mangling ordinary words
+        return
+    with _lock:
+        _private[text] = label
+
+
+def scrub(text: str) -> str:
+    """`text` as the log may hold it: see private()."""
+    for value in sorted(_private, key=len, reverse=True):
+        text = text.replace(value, f"<{_private[value]}>")
+    for pattern, replacement in _PATTERNS:
+        text = pattern.sub(replacement, text)
+    text = _IPV4.sub(_public_ip, text)
+    home = str(Path.home())
+    if len(home) > 1:
+        text = text.replace(home, "~")
+    return text
+
+
+def _public_ip(match: re.Match[str]) -> str:
+    try:
+        address = ipaddress.ip_address(match.group(0))
+    except ValueError:
+        return match.group(0)
+    return "<public-ip>" if address.is_global else match.group(0)
 
 
 # --------------------------------------------------------------------- setup
@@ -503,6 +559,6 @@ def _write_log(text: str) -> None:
     if _s.log is None:
         return
     stamp = datetime.datetime.now().strftime("%H:%M:%S")
-    for line in str(text).split("\n"):
+    for line in scrub(str(text)).split("\n"):
         _s.log.write(f"[{stamp}] {line}\n")
     _s.log.flush()

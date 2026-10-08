@@ -14,6 +14,8 @@ import secrets
 from pathlib import Path
 from typing import Any
 
+from tools.autoflash import output
+
 SCHEMA = 1
 
 PENDING = "pending"
@@ -21,6 +23,11 @@ ATTEMPTED = "attempted"
 DONE = "done"
 FAILED = "failed"
 SKIPPED = "skipped"
+
+# Inputs that identify the person, their plug or their network, kept out of
+# the run's log (output.private) under these labels.
+PRIVATE_INPUTS = {"email": "email", "plug_mac": "mac", "device_name": "device-name",
+                  "web_user": "web-user"}
 
 
 def utc_now() -> str:
@@ -52,6 +59,8 @@ class RunState:
         if loaded.get("schema") != SCHEMA:
             raise ValueError(f"unsupported run-state schema in {self.path}")
         self.data = loaded
+        for key, value in self.data["inputs"].items():
+            self._keep_private(key, value)
 
     def save(self) -> None:
         self.data["updated_utc"] = utc_now()
@@ -71,8 +80,14 @@ class RunState:
     # -- inputs -------------------------------------------------------------
 
     def set_input(self, key: str, value: Any) -> None:
+        self._keep_private(key, value)
         self.data["inputs"][key] = value
         self.save()
+
+    @staticmethod
+    def _keep_private(key: str, value: Any) -> None:
+        if key in PRIVATE_INPUTS and isinstance(value, str):
+            output.private(value, PRIVATE_INPUTS[key])
 
     def input(self, key: str, default: Any = None) -> Any:
         return self.data["inputs"].get(key, default)

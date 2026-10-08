@@ -363,7 +363,7 @@ def forget_stored_password(manifest_path: Path) -> bool:
 
 def ask_credentials() -> tuple[str, str]:
     """The network name and password, the password typed twice and never stored."""
-    ssid = ask_text("Wi-Fi network name (2.4 GHz, exactly as it appears)")
+    ssid = ask_text("Wi-Fi network name (2.4 GHz, exactly as it appears)", private="wifi-name")
     return ssid, ask_password()
 
 

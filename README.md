@@ -150,7 +150,10 @@ If something clearly needs fixing in the code, an
 it from your report so the thread stays complete.
 
 The run's log, `captures/<run>/run.log`, has the full detail if you are asked
-for it.
+for it. It is safe to share: your eWeLink email, Wi-Fi name and password, the
+plug's device id, name and hardware address, public IP addresses and your
+home folder are written as `<email>`, `<wifi-name>` and so on. Addresses on
+your home network stay, as they are needed to follow the run.
 
 ## Doing it
 

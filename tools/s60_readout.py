@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tools.analyze_vendor_ota import analyze  # noqa: E402
-from tools.autoflash import hostsys  # noqa: E402
+from tools.autoflash import hostsys, output  # noqa: E402
 from tools.autoflash.output import PROBLEM_RE  # noqa: E402
 from tools.autoflash.prompts import (  # noqa: E402
     QuitRun,
@@ -219,7 +219,7 @@ def deliver(plug_ip: str, listen_ip: str, port: int, email: str, version: str,
         progress = SenderProgress(total)
         with open(work / "sender.log", "w", encoding="utf-8") as log:
             for line in process.stdout:
-                log.write(line)
+                log.write(output.scrub(line))  # kept shareable, as the run's log is
                 if verbose:
                     print(line, end="")
                     continue
