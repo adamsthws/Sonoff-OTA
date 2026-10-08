@@ -107,6 +107,40 @@ The small temporary firmware that runs after the rebuild saves your Wi-Fi again,
 If any of that does not work, the tool falls back to asking you to
 join the plug's own setup network.
 
+## The run, step by step
+
+This is what `python3 tools/s60_autoflash.py run` does, in order:
+
+1. **List what has to be in place first** - the eWeLink app and account, the
+   plug added with LAN Control on - and wait for a key press.
+2. **Download the firmware it needs**, on the first run only, and check every
+   file against a known fingerprint.
+3. **Find the plug on your network.** It must already be in the eWeLink app
+   with LAN Control on. If several Sonoff devices answer, it asks which.
+4. **Ask the plug what firmware it has** and where it downloads updates from.
+   It stops here, before anything is written, unless the device is an S60.
+5. **Replace the Sonoff firmware** with a small installer of ours. *This is the
+   point of no return,* and the one place it asks you to confirm: after a
+   short warning you type PROCEED, which covers the whole conversion,
+   including the rewrite in step 7. If the computer's firewall is on, it adds
+   a temporary rule for the plug first.
+6. **Install a first Tasmota through the installer**, which has joined your
+   Wi-Fi by itself, and give it your Wi-Fi details so it joins too. If the
+   installer could not join, or Tasmota does not appear, it asks you to join
+   the plug's own network instead, names it, does the rest itself, and tells
+   you when to switch back.
+7. **Rebuild the plug's memory layout** to match the official Tasmota one. It
+   counts down ten seconds first - Ctrl-C stops it - before the minute in
+   which the power must stay on.
+8. **Install official Tasmota**, which joins your Wi-Fi by itself, apply the
+   S60 settings, and check the result. Only if it does not appear on your
+   network are you asked to join its setup network.
+
+At the end it checks the finished plug against the official Tasmota release,
+tells you whether every byte matches, and removes the temporary firewall rule
+- which needs administrator rights again, so it says why before the system
+asks.
+
 ## At the end
 
 The tool reads back three parts of the plug's memory, calculates a fingerprint
