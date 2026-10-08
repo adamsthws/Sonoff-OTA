@@ -10,7 +10,7 @@ the device id, encryption flag and JSON state blob.
 
 Rather than depending on a library such as ``zeroconf``, this script speaks
 just enough of the DNS wire format (RFC 1035, plus the mDNS extensions in
-RFC 6762) to send one PTR query and decode the replies. "Unprivileged" in the
+RFC 6762) to send a PTR query and decode the replies. "Unprivileged" in the
 docstring refers to the fallback in :func:`discover`: binding UDP port 5353 is
 often impossible (another responder such as avahi/Bonjour already owns it, or
 the process lacks the privilege), so the script falls back to an ephemeral
@@ -19,7 +19,9 @@ port and asks for unicast replies instead.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
+import select
 import socket
 import struct
 import sys
@@ -185,6 +187,16 @@ def parse_packet(packet: bytes) -> list[dict[str, Any]]:
     return records
 
 
+def is_response(packet: bytes) -> bool:
+    """Whether the message is an answer (the header's QR bit), not a question.
+
+    The eWeLink app asks the same question this tool does, and lists the
+    devices it already knows among its known answers, so a phone running it
+    mentions eWeLink too. Only a device answering is one.
+    """
+    return len(packet) >= 4 and bool(struct.unpack_from("!H", packet, 2)[0] & 0x8000)
+
+
 def make_query(service: str = SERVICE, unicast: bool = True) -> bytes:
     """Build the single-question mDNS query packet asking who offers ``service``."""
     # ID=0, standard mDNS query, one PTR question. With ``unicast`` set, the
@@ -199,8 +211,68 @@ def make_query(service: str = SERVICE, unicast: bool = True) -> bytes:
     return struct.pack("!HHHHHH", 0, 0, 1, 0, 0, 0) + encode_name(service) + struct.pack("!HH", 12, qclass)
 
 
-def discover(timeout: float, interface: str | None = None, target: str | None = None) -> dict[str, Any]:
-    """Send one query and collect eWeLink-related replies for ``timeout`` seconds.
+# How often the questions are asked again while listening.
+MULTICAST_EVERY = 1.0
+DIRECT_EVERY = 3.0
+# When nothing wanted has answered by then, every address is asked, once.
+SWEEP_AFTER = 2.0
+
+
+def local_ipv4(interface: str | None = None) -> str | None:
+    """This computer's address on the home network: ``interface`` if given,
+    else the one the mDNS group is reached through - where the question goes,
+    so where the devices answering it are.  Not the default route's: that can
+    be a VPN, or Docker's network inside the emulator.  Sends nothing."""
+    if interface:
+        return interface
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect((MDNS_GROUP, MDNS_PORT))  # only picks the route
+        return probe.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        probe.close()
+
+
+def sweep_targets(interface: str | None = None) -> list[str]:
+    """Every other address in this computer's /24, the range ``hostsys.sweep``
+    pings too."""
+    local = local_ipv4(interface)
+    if not local:
+        return []
+    network = ipaddress.ip_network(f"{local}/24", strict=False)
+    return [str(host) for host in network.hosts() if str(host) != local]
+
+
+def answered_ids(packets: list[dict[str, Any]]) -> set[str]:
+    """The eWeLink device ids in the answers so far (their TXT ``id=``)."""
+    return {
+        str(value)[3:]
+        for packet in packets
+        for record in packet.get("records", [])
+        if record.get("type") == "TXT"
+        for value in record.get("value") or []
+        if str(value).startswith("id=")
+    }
+
+
+def discover(timeout: float, interface: str | None = None, target: str | None = None, *,
+             hints: list[str] | tuple[str, ...] = (),
+             wanted: set[str] | None = None) -> dict[str, Any]:
+    """Ask who offers the eWeLink service, and collect answers for ``timeout`` seconds.
+
+    A device in Wi-Fi power save can miss most multicast - a stock S60 has
+    been seen answering 2 of 30 questions sent to the mDNS group and 20 of 20
+    sent to its own address.  So the question goes to the group every second
+    and, from a second socket on an ordinary port, straight to devices too; a
+    device answers that one to the port it came from (RFC 6762 §6.7):
+
+    - ``target``, or the ``hints`` (addresses this computer already knows),
+      every few seconds;
+    - without a ``target``, every address in this computer's /24, once, if
+      after a couple of seconds the ``wanted`` device ids (or, without them,
+      any device at all) have not answered.
 
     ``interface`` is the local IPv4 address to send multicast from (useful on
     hosts with several NICs/VPNs, where the default route is the wrong one).
@@ -227,41 +299,85 @@ def discover(timeout: float, interface: str | None = None, target: str | None = 
     if interface:
         # Pin outgoing multicast to the chosen interface.
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, interface_bytes)
-    # Short per-recv timeout so the loop below can re-check the overall deadline
-    # rather than blocking for the full duration on a quiet network.
-    sock.settimeout(min(timeout, 0.5))
     # When 5353 is shared with avahi/Bonjour (SO_REUSEADDR), the kernel hands a
     # unicast reply to only one of the sockets on that port - usually the system
     # responder's - so ask for a multicast reply, which every socket receives.
-    sock.sendto(make_query(unicast=bind_port != MDNS_PORT), (MDNS_GROUP, MDNS_PORT))
+    group_query = make_query(unicast=bind_port != MDNS_PORT)
+    # Direct questions come from a port of their own, so their answers come
+    # back to it alone, whoever else shares 5353.
+    direct = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    direct.bind((interface or "", 0))
+    direct_query = make_query(unicast=True)
+    addresses = [target] if target else list(dict.fromkeys(hints))
+
     packets: list[dict[str, Any]] = []
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            payload, source = sock.recvfrom(64 * 1024)
-        except socket.timeout:
-            # Nothing this interval; keep listening until the deadline.
-            continue
-        if target and source[0] != target:
-            continue
-        try:
-            records = parse_packet(payload)
-        except ValueError as exc:
-            # Keep a note of unparseable traffic rather than dropping it, so a
-            # failed discovery run is still diagnosable.
-            packets.append({"source": source[0], "parse_error": str(exc)})
-            continue
-        # The socket also sees unrelated mDNS chatter (printers, AirPlay, …);
-        # keep only packets that mention eWeLink anywhere in their decoded form.
-        if any("ewelink" in json.dumps(record).lower() for record in records):
-            packets.append({"source": source[0], "records": records})
-    sock.close()
+    started = time.monotonic()
+    deadline = started + timeout
+    next_group = next_direct = started
+    sweep_at = None if target else started + SWEEP_AFTER
+    try:
+        while (now := time.monotonic()) < deadline:
+            if now >= next_group:
+                _send(sock, group_query, MDNS_GROUP)
+                next_group = now + MULTICAST_EVERY
+            if now >= next_direct:
+                for address in addresses:
+                    _send(direct, direct_query, address)
+                next_direct = now + DIRECT_EVERY
+            if sweep_at is not None and now >= sweep_at:
+                sweep_at = None
+                found = answered_ids(packets)
+                if (wanted is not None and not wanted <= found) or (wanted is None and not found):
+                    for address in sweep_targets(interface):
+                        _send(direct, direct_query, address)
+            # Wake for whichever comes first: a packet, a question due or the end.
+            due = [next_group, next_direct, deadline] + ([sweep_at] if sweep_at is not None else [])
+            wait = max(0.0, min(due) - time.monotonic())
+            ready, _, _ = select.select([sock, direct], [], [], wait)
+            for receiver in ready:
+                try:
+                    payload, source = receiver.recvfrom(64 * 1024)
+                except OSError:
+                    continue
+                packet = _keep(payload, source[0], target)
+                if packet is not None:
+                    packets.append(packet)
+    finally:
+        sock.close()
+        direct.close()
     return {
         "service": SERVICE,
         "target_filter": target,
         "interface": interface,
         "packets": packets,
     }
+
+
+def _send(sock: socket.socket, query: bytes, address: str) -> None:
+    try:
+        sock.sendto(query, (address, MDNS_PORT))
+    except OSError:
+        pass  # an unreachable address, or no route right now: the others still count
+
+
+def _keep(payload: bytes, source: str, target: str | None) -> dict[str, Any] | None:
+    """The packet as reported, if it is a device answering about eWeLink."""
+    if target and source != target:
+        return None
+    if not is_response(payload):
+        # A question - ours, or the eWeLink app's on a phone - not a device.
+        return None
+    try:
+        records = parse_packet(payload)
+    except ValueError as exc:
+        # Keep a note of unparseable traffic rather than dropping it, so a
+        # failed discovery run is still diagnosable.
+        return {"source": source, "parse_error": str(exc)}
+    # The socket also sees unrelated mDNS chatter (printers, AirPlay, …);
+    # keep only packets that mention eWeLink anywhere in their decoded form.
+    if any("ewelink" in json.dumps(record).lower() for record in records):
+        return {"source": source, "records": records}
+    return None
 
 
 def main() -> int:

@@ -16,6 +16,7 @@ import argparse
 import ipaddress
 import json
 import os
+from dataclasses import dataclass
 import platform
 import re
 import shutil
@@ -50,6 +51,7 @@ from tools.autoflash.prompts import (  # noqa: E402
 )
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED, RunState  # noqa: E402
 from tools.discover_ewelink import discover  # noqa: E402
+from tools.get_device_key import EwelinkError, get_devices, login  # noqa: E402
 from tools.prepare_imprinted_bundle import (  # noqa: E402
     BundleError,
     ask_credentials,
@@ -436,6 +438,35 @@ class Context:
             self._ewelink_password = ask_secret(f"eWeLink password for {email}: ")
             output.transient_end()
         return {**os.environ, "EWELINK_PASSWORD": self._ewelink_password}
+
+    def account_devices(self) -> list[dict[str, Any]] | None:
+        """The devices in the owner's eWeLink account, or None when eWeLink
+        cannot be reached.  A wrong password is asked again; the list, which
+        holds each device's LAN key, stays in memory and is never logged."""
+        while True:
+            self.ewelink_env()
+            try:
+                region, token = login(self.email(), self._ewelink_password or "", "+44", "eu")
+                return get_devices(region, token)
+            except EwelinkError as exc:
+                if "login failed" not in str(exc):
+                    tell(f"    Could not reach eWeLink ({exc}), so every plug that answers is listed.")
+                    return None
+                self._ewelink_password = None
+                output.transient_begin()
+                tell(f"    {exc}.")
+                choice = ask_choice("What now", [
+                    "Type the password again",
+                    "Use a different eWeLink account",
+                ])
+                output.transient_end()
+                if choice == 1:
+                    self.forget_account()
+
+    def forget_account(self) -> None:
+        """Ask again which eWeLink account, and its password."""
+        self.state.set_input("email", None)
+        self._ewelink_password = None
 
     def email(self) -> str:
         """The eWeLink account email, chosen once per run.
@@ -1011,8 +1042,184 @@ def check_plug_network(ctx: Context) -> dict[str, Any]:
 
 
 def step_pair(ctx: Context) -> dict[str, Any]:
-    """A1 - find the plug on the network, asking only when it is ambiguous."""
+    """A1 - find the plug: an S60 in the owner's eWeLink account, answering
+    on this network, asking only when there is a choice to make."""
     ip = ctx.state.input("plug_ip")
+    if not ip:
+        say("Signing in to eWeLink to see which S60 plugs are in the account...")
+        devices = ctx.account_devices()
+        ip = find_any_plug() if devices is None else find_account_plug(ctx, devices)
+    ctx.state.set_input("plug_ip", ip)
+    mac = hostsys.mac_of(ip)
+    if mac:
+        ctx.state.set_input("plug_mac", mac)
+    return {"plug_ip": ip, "plug_mac": mac}
+
+
+@dataclass(frozen=True)
+class AccountPlug:
+    """An S60 in the owner's eWeLink account: what the account says about it."""
+    device_id: str
+    name: str
+    model: str
+    online: bool | None
+    mac: str | None
+    ssid: str | None
+
+
+@dataclass(frozen=True)
+class Sighting:
+    """Where an account's S60 was seen: answering eWeLink's local discovery
+    at `ip`, or only by its hardware address there (LAN Control off)."""
+    plug: AccountPlug
+    ip: str | None
+    answering: bool
+
+
+def account_plug(device: dict[str, Any]) -> AccountPlug | None:
+    """The account's record of a device, if it is an S60; its LAN key is left out."""
+    product = str(device.get("productModel") or "").strip().upper()
+    family = str((device.get("extra") or {}).get("model") or "")
+    if not (S60_PRODUCT.fullmatch(product) or family == S60_DEVICE_MODEL):
+        return None
+    params = device.get("params") or {}
+    mac = params.get("staMac")
+    online = device.get("online")
+    return AccountPlug(
+        device_id=str(device.get("deviceid") or ""),
+        name=str(device.get("name") or "").strip() or "Sonoff S60",
+        model=product or "S60",
+        online=online if isinstance(online, bool) else None,
+        mac=hostsys.normalise_mac(str(mac)) if mac else None,
+        ssid=str(params.get("ssid") or "") or None,
+    )
+
+
+def match_plugs(plugs: list[AccountPlug], answers: dict[str, str],
+                neighbours: dict[str, str]) -> list[Sighting]:
+    """Each account plug against the network.
+
+    `answers` is {device id: address} from eWeLink's local discovery - the id
+    in each answer is the account's, so nothing else can be mistaken for the
+    plug.  `neighbours` is {address: hardware address}, which finds a plug
+    that is on the network but not answering.
+    """
+    by_mac = {mac: address for address, mac in neighbours.items()}
+    sightings = []
+    for plug in plugs:
+        if plug.device_id in answers:
+            sightings.append(Sighting(plug, answers[plug.device_id], True))
+        else:
+            sightings.append(Sighting(plug, by_mac.get(plug.mac or ""), False))
+    return sightings
+
+
+def describe_plug(plug: AccountPlug) -> str:
+    """Its name in the app, and its model unless that is the name already."""
+    if plug.name.upper() == plug.model.upper():
+        return f"'{plug.name}'"
+    return f"'{plug.name}' ({plug.model})"
+
+
+def why_not_found(sighting: Sighting) -> str:
+    """What to do about an account plug that is not answering here."""
+    plug = sighting.plug
+    if plug.online is False:
+        return (f"{describe_plug(plug)}: eWeLink shows it offline - check it is switched "
+                "on at the wall and on your Wi-Fi.")
+    if sighting.ip:
+        return (f"{describe_plug(plug)} is at {sighting.ip} but does not answer on the "
+                "network - turn on LAN Control in its settings in the eWeLink app.")
+    network = f" (it is on '{plug.ssid}')" if plug.ssid else ""
+    return (f"{describe_plug(plug)} is online in eWeLink but was not seen on this "
+            f"computer's network{network} - this computer must be on the same Wi-Fi "
+            "network, on the same router.")
+
+
+def sight_plugs(plugs: list[AccountPlug]) -> list[Sighting]:
+    """Look for the account's S60s on this network."""
+    macs = {plug.mac for plug in plugs if plug.mac}
+    # Where this computer has already seen them: asked straight away.
+    hints = [address for address, mac in hostsys.neighbour_table().items() if mac in macs]
+    try:
+        report = discover(6.0, hints=hints, wanted={plug.device_id for plug in plugs
+                                                    if plug.online is not False})
+    except OSError:
+        report = {"packets": []}
+    answers: dict[str, str] = {}
+    for packet in report.get("packets", []):
+        for record in packet.get("records", []):
+            if record.get("type") == "TXT":
+                for value in record.get("value") or []:
+                    if str(value).startswith("id="):
+                        answers.setdefault(str(value)[3:], packet["source"])
+    # Asking every address filled the neighbour table: read it again.
+    return match_plugs(plugs, answers, hostsys.neighbour_table())
+
+
+def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
+    """The address of the S60 to convert, from the account's S60s that answer here."""
+    while True:
+        plugs = [plug for plug in map(account_plug, devices) if plug is not None]
+        if not plugs:
+            output.transient_begin()
+            others = [f"- '{str(d.get('name') or '').strip() or d.get('deviceid')}' "
+                      f"({d.get('productModel') or 'unknown model'})" for d in devices]
+            section(f"No Sonoff S60 in the eWeLink account {ctx.email()}", [
+                *(["It has:", *others] if others else ["It has no devices."]),
+                "",
+                "Add the S60 in the eWeLink app, or use the account it is in.",
+            ])
+            choice = ask_choice("What now", [
+                "Look again",
+                "Use a different eWeLink account",
+                "Type the plug's address myself",
+            ])
+            output.transient_end()
+        else:
+            say("Looking for it on your network...")
+            sightings = sight_plugs(plugs)
+            ready = [sighting for sighting in sightings if sighting.answering]
+            if len(ready) == 1:
+                # The stage line completing says it all; the log keeps which plug.
+                say(f"    Found {describe_plug(ready[0].plug)} at {ready[0].ip}.")
+                return str(ready[0].ip)
+            if ready:
+                output.transient_begin()
+                choice = ask_choice(
+                    "More than one S60 in the account answered. Which one is this run for",
+                    [f"{describe_plug(sighting.plug)} at {sighting.ip}" for sighting in ready],
+                )
+                output.transient_end()
+                return str(ready[choice].ip)
+            output.transient_begin()
+            section("Your S60 did not answer on this network", [
+                f"- {why_not_found(sighting)}" for sighting in sightings
+            ])
+            choice = ask_choice("What now", [
+                "Look again",
+                "Use a different eWeLink account",
+                "Type the plug's address myself",
+            ])
+            output.transient_end()
+        if choice == 2:
+            return ask_ipv4(
+                "The plug's address",
+                help_lines=["It is in your router's device list, and in eWeLink's device information."],
+                must_respond=True,
+            )
+        if choice == 1:
+            ctx.forget_account()
+        refreshed = ctx.account_devices()  # its online status may have changed
+        if refreshed is None:
+            return find_any_plug()
+        devices = refreshed
+
+
+def find_any_plug() -> str:
+    """Without eWeLink: any plug answering on the network, asking only when
+    it is ambiguous."""
+    ip = None
     while not ip:
         say("Looking for Sonoff plugs on your network...")
         plugs = find_ewelink_plugs()
@@ -1020,12 +1227,17 @@ def step_pair(ctx: Context) -> dict[str, Any]:
             ip, name = plugs[0]
             say(f"Found {name} at {ip}.")
         elif plugs:
+            output.transient_begin()
             choice = ask_choice(
                 "More than one Sonoff plug answered. Which one is this run for",
                 [f"{name} at {address}" for address, name in plugs],
             )
+            output.transient_end()
             ip = plugs[choice][0]
         else:
+            # Taken off the screen once answered, so looking again does not
+            # stack another copy under the stage line.
+            output.transient_begin()
             section("No Sonoff plug answered on this network", [
                 "Check, in the eWeLink app:",
                 "- the S60 is added, on the same 2.4 GHz Wi-Fi network as this",
@@ -1043,11 +1255,8 @@ def step_pair(ctx: Context) -> dict[str, Any]:
                     help_lines=["It is in your router's device list, and in eWeLink's device information."],
                     must_respond=True,
                 )
-    ctx.state.set_input("plug_ip", ip)
-    mac = hostsys.mac_of(ip)
-    if mac:
-        ctx.state.set_input("plug_mac", mac)
-    return {"plug_ip": ip, "plug_mac": mac}
+            output.transient_end()
+    return ip
 
 
 def find_ewelink_plugs(timeout: float = 6.0) -> list[tuple[str, str]]:

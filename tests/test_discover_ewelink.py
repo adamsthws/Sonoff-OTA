@@ -2,7 +2,10 @@ import socket
 import struct
 import unittest
 
-from tools.discover_ewelink import encode_name, make_query, parse_packet, read_name
+from unittest import mock
+
+from tools import discover_ewelink
+from tools.discover_ewelink import _keep, answered_ids, encode_name, sweep_targets, is_response, make_query, parse_packet, read_name
 
 
 class MdnsTests(unittest.TestCase):
@@ -39,6 +42,53 @@ class MdnsTests(unittest.TestCase):
         self.assertEqual(records[0]["value"], "eWeLink_test._ewelink._tcp.local")
         self.assertEqual(records[1]["value"]["port"], 8081)
         self.assertEqual(records[2]["value"], "192.168.1.96")
+
+    def test_only_answers_count_as_devices(self):
+        # The eWeLink app on a phone asks for devices, listing the plug it
+        # already knows as a known answer: a question that mentions eWeLink.
+        service = encode_name("_ewelink._tcp.local")
+        instance = encode_name("eWeLink_10000abcde._ewelink._tcp.local")
+        known = service + struct.pack("!HHIH", 12, 1, 4500, len(instance)) + instance
+        question = service + struct.pack("!HH", 12, 1)
+        from_the_app = struct.pack("!HHHHHH", 0, 0x0000, 1, 1, 0, 0) + question + known
+        from_a_plug = struct.pack("!HHHHHH", 0, 0x8400, 0, 1, 0, 0) + known
+        self.assertFalse(is_response(from_the_app))
+        self.assertFalse(is_response(make_query()))
+        self.assertTrue(is_response(from_a_plug))
+        self.assertFalse(is_response(b"\x00"))
+
+
+    def test_a_question_mentioning_ewelink_is_not_kept(self):
+        service = encode_name("_ewelink._tcp.local")
+        instance = encode_name("eWeLink_10000abcde._ewelink._tcp.local")
+        known = service + struct.pack("!HHIH", 12, 1, 4500, len(instance)) + instance
+        question = struct.pack("!HHHHHH", 0, 0x0000, 0, 1, 0, 0) + known
+        answer = struct.pack("!HHHHHH", 0, 0x8400, 0, 1, 0, 0) + known
+        self.assertIsNone(_keep(question, "192.168.0.194", None))
+        self.assertEqual(_keep(answer, "192.168.0.50", None)["source"], "192.168.0.50")
+        self.assertIsNone(_keep(answer, "192.168.0.50", "192.168.0.51"))  # not the target
+
+
+class SweepTests(unittest.TestCase):
+    def test_every_other_address_on_this_computers_slash_24(self):
+        with mock.patch.object(discover_ewelink, "local_ipv4", return_value="192.168.0.10"):
+            addresses = sweep_targets()
+        self.assertEqual(len(addresses), 253)
+        self.assertNotIn("192.168.0.10", addresses)
+        self.assertIn("192.168.0.50", addresses)
+        self.assertNotIn("192.168.0.255", addresses)
+
+    def test_no_network_means_no_sweep(self):
+        with mock.patch.object(discover_ewelink, "local_ipv4", return_value=None):
+            self.assertEqual(sweep_targets(), [])
+
+    def test_the_ids_that_answered(self):
+        packets = [
+            {"source": "192.168.0.50", "records": [{"type": "TXT", "value": ["type=plug", "id=10000abcde"]}]},
+            {"source": "192.168.0.51", "records": [{"type": "PTR", "value": "x"}]},
+            {"source": "192.168.0.52", "parse_error": "truncated"},
+        ]
+        self.assertEqual(answered_ids(packets), {"10000abcde"})
 
 
 if __name__ == "__main__":

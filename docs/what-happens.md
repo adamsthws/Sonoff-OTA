@@ -115,8 +115,12 @@ This is what `python3 tools/s60_autoflash.py run` does, in order:
    plug added with LAN Control on - and wait for a key press.
 2. **Download the firmware it needs**, on the first run only, and check every
    file against a known fingerprint.
-3. **Find the plug on your network.** It must already be in the eWeLink app
-   with LAN Control on. If several Sonoff devices answer, it asks which.
+3. **Find the plug on your network.** It signs in to your eWeLink account
+   (your email and password are asked here, once for the whole run) and
+   looks on your network for the S60s in it, matched by their eWeLink id, so
+   no other device can be mistaken for yours. With one S60 it carries on by
+   itself; with several it asks which. If yours does not answer, it says why:
+   offline in eWeLink, LAN Control off, or on a different network.
 4. **Ask the plug what firmware it has** and where it downloads updates from.
    It stops here, before anything is written, unless the device is an S60.
 5. **Replace the Sonoff firmware** with a small installer of ours. *This is the

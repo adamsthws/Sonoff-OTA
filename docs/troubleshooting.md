@@ -110,6 +110,32 @@ include. Reports from other regions are very welcome.
 
 ## The plug can't be found
 
+**"Your S60 did not answer on this network"**
+
+The tool lists each S60 in your eWeLink account with what it found:
+
+- **"eWeLink shows it offline"** - the plug is switched off at the wall, or
+  not on Wi-Fi. Switch it on and wait for the app to show it online.
+- **"is at ... but does not answer on the network"** - the plug is on your
+  network but LAN Control is off. Turn it on in the plug's settings in the
+  eWeLink app, then choose *Look again*.
+- **"is online in eWeLink but was not seen on this computer's network"** -
+  this computer is on a different network from the plug, such as the 5 GHz
+  or guest Wi-Fi, a different router, or a VPN. The message names the network
+  the plug is on.
+
+**"No Sonoff S60 in the eWeLink account ..."**
+
+The plug is in a different eWeLink account. The message lists what the
+account does have; choose *Use a different eWeLink account*.
+
+**"Could not reach eWeLink"**
+
+The tool could not sign in to see your account, so it lists every Sonoff plug
+that answers on the network instead. The next stage needs eWeLink too, and
+checks there that the plug you chose is an S60, so check this computer's
+internet connection first.
+
 **"did not answer within 180s"**
 
 - Check it is actually powered on. This has caught everyone at least once.

@@ -659,10 +659,11 @@ class StartChoiceTests(unittest.TestCase):
         credentials.assert_not_called()
         secret.assert_not_called()
 
-    def test_no_plug_found_offers_to_look_again(self):
+    def test_without_ewelink_no_plug_found_offers_to_look_again(self):
         from unittest import mock
         import tools.s60_autoflash as autoflash
         ctx = self.ctx()
+        ctx.account_devices = lambda: None  # eWeLink could not be reached
         with mock.patch.object(autoflash, "find_ewelink_plugs",
                                side_effect=[[], [("10.0.0.5", "eWeLink device abc")]]), \
              mock.patch.object(autoflash, "ask_choice", return_value=0), \
