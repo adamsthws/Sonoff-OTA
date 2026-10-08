@@ -366,9 +366,10 @@ class Context:
             found = read_wifi_from_plug(self)
             if found is not None:
                 self.adopt_wifi(*found)
+                # A run stopped at the question earlier must not report it as typed.
+                self.state.set_input("wifi_typed", False)
         if self._wifi is not None:
             return self._wifi
-        self.state.set_input("wifi_typed", True)
         section("Your Wi-Fi details are needed", [
             *(["You chose to type them (--wifi)."] if forced else why or [
                 "They could not be read off the plug (the reason is above).",
@@ -397,6 +398,7 @@ class Context:
                 ])
                 if choice == 1:
                     self.adopt_wifi(*ask_credentials())
+        self.state.set_input("wifi_typed", True)
         return self._wifi
 
     def adopt_wifi(self, ssid: str, password: str) -> None:
@@ -943,7 +945,10 @@ def read_wifi_from_plug(ctx: "Context") -> tuple[str, str] | None:
     if ssid != connected:
         return unreadable(f"it is on '{connected}', not the network in its first slot")
     if not password:
-        return unreadable(f"'{connected}' has no password to read")
+        # Tasmota joins with exactly its first slot's details, and it is on
+        # that network now - so an empty password means an open network.
+        say(f"    The plug is on '{ssid}', an open network (no password) - none to type.")
+        return ssid, ""
     say(f"    Read the Wi-Fi details the plug is connected with ('{ssid}') - none to type.")
     return ssid, password
 

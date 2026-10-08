@@ -848,9 +848,15 @@ class WifiFromPlugTests(unittest.TestCase):
                        {"backup": b"not a settings record"}):
             self.assertIsNone(self.read(**kwargs), kwargs)
 
-    def test_an_open_network_has_no_password_to_read(self):
+    def test_an_open_network_is_read_with_an_empty_password(self):
+        # Connected with its first slot's details and that slot has no
+        # password: the network is open, and there is nothing to type.
         self.record = self.ts.fill(self.ts.make_template(self.record), "Home-2G", "")
-        self.assertIsNone(self.read())
+        self.assertEqual(self.read(), ("Home-2G", ""))
+
+    def test_an_open_network_on_another_slot_is_still_not_used(self):
+        self.record = self.ts.fill(self.ts.make_template(self.record), "Home-2G", "")
+        self.assertIsNone(self.read(connected="Guest"))
 
     def test_the_flag_forces_typing_them_instead(self):
         from unittest import mock
@@ -914,6 +920,18 @@ class WifiFallbackTests(unittest.TestCase):
         rebuild.assert_not_called()
         asked.assert_not_called()
         shown.assert_not_called()
+
+    def test_details_read_off_the_plug_are_not_reported_as_typed(self):
+        # A run stopped at the question, then resumed and read off the plug,
+        # must not keep the earlier "typed" mark.
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        ctx = self.ctx(found=("Home-2G", ""))
+        recorded = {}
+        ctx.state.set_input = lambda key, value: recorded.__setitem__(key, value)
+        with mock.patch.object(autoflash, "recovery_image", return_value=b"image"):
+            self.assertEqual(autoflash.Context.wifi(ctx), ("Home-2G", ""))
+        self.assertIs(recorded.get("wifi_typed"), False)
 
     def test_when_they_cannot_be_read_the_reason_is_shown_then_both_are_asked(self):
         from unittest import mock
