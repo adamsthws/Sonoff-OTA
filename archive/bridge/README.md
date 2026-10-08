@@ -26,8 +26,13 @@ exactly as v3 does.
 matches the published v3 except for the build time, date and ELF hash. Keep
 `CONFIG_ESP_WIFI_NVS_ENABLED=n`: the bridge never initialises NVS, so with it
 on `esp_wifi_init()` fails and the bridge aborts at start-up (the plug then
-falls back to stock by itself). Delete any generated `sdkconfig.*` before
-rebuilding, or old settings are reused.
+falls back to stock by itself). Before rebuilding, delete the generated
+`sdkconfig.s60-ota-bridge*` files, or old settings are reused - but never
+`sdkconfig.defaults`: a `sdkconfig.*` wildcard removes it too, the build
+then silently turns Wi-Fi NVS back on, and the bridge downloads in full but
+never starts. Check a rebuild against the published bridge: built from the
+same source it differs only in the build time and date, the ELF hash and the
+image checksum.
 
 Build with PlatformIO from a path without spaces (the ESP-IDF builder used here
 does not correctly quote every generated CMake path):
@@ -56,6 +61,19 @@ On a successful first boot it creates `S60-OTA-Bridge-XXXX`, protected with
 `s60-ota-bridge`. Browse to `http://192.168.4.1/` to upload a native ESP32-C3
 application image. The browser sends the selected file as a raw request body;
 JavaScript must be enabled.
+
+The research env `s60-ota-bridge-flash-readout` images a stock plug without
+opening it. It adds read-only `GET /flash` (the whole chip) and `GET /efuse`,
+and leaves out `/update` and `/tasmota-settings`, so the only flash it writes
+is the startup otadata selection that returns the plug to stock on the next
+power cycle. The stock updater writes it over the inactive slot, so whatever
+was there (often the previous Sonoff version) is lost; the running stock
+version, bootloader, partition table and NVS are kept. Build it with
+`pio run -e s60-ota-bridge-flash-readout`, wrap it as above into
+`captures/flash-readout/s60-ota-bridge-v5-flash-readout-1.2.1.ota` (with
+`--version 1.2.1`, as the hardware-proven bridge was), then run
+`tools/s60_readout.py`: it installs it, reads and checks the dump, and walks
+you through putting the plug back to stock.
 
 Do not deploy this bridge until its build artifact and wrapped OTA file pass
 the offline validators and a compatible final Tasmota image has been prepared.

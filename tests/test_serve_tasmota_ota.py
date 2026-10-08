@@ -81,3 +81,29 @@ class FirmwareServerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DescribeCloudTests(unittest.TestCase):
+    def test_offline_and_online(self):
+        from tools.serve_tasmota_ota import describe_cloud
+        self.assertIn("went offline", describe_cloud({"action": "sysmsg", "params": {"online": False}}, "1"))
+        self.assertIn("back online", describe_cloud({"action": "sysmsg", "params": {"online": True}}, "1"))
+
+    def test_upgrade_reply(self):
+        from tools.serve_tasmota_ota import describe_cloud
+        self.assertEqual(describe_cloud({"error": 0, "sequence": "7"}, "7"), "Cloud: upgrade command accepted")
+        self.assertIn("error 406", describe_cloud({"error": 406, "sequence": "7"}, "7"))
+
+    def test_update_shows_state_but_never_identifiers(self):
+        from tools.serve_tasmota_ota import describe_cloud
+        line = describe_cloud({"action": "update", "deviceid": "1001234abc", "apikey": "secret",
+                               "params": {"fwVersion": "1.2.0", "ssid": "Home", "switch": "on"}}, "1")
+        self.assertIn('"fwVersion": "1.2.0"', line)
+        self.assertNotIn("1001234abc", line)
+        self.assertNotIn("secret", line)
+        self.assertNotIn("Home", line)
+
+    def test_empty_messages_stay_quiet(self):
+        from tools.serve_tasmota_ota import describe_cloud
+        self.assertIsNone(describe_cloud({"action": "update", "params": {}}, "1"))
+        self.assertIsNone(describe_cloud({"error": 0, "sequence": "other"}, "1"))

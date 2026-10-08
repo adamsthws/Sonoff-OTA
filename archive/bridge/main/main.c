@@ -26,6 +26,13 @@
  * reads its settings at boot (NVS "main"/"Settings").  Tasmota then joins the
  * home network on its first boot instead of making a setup network.  Only
  * done once the bridge has joined with those details, so they are known good.
+ *
+ * BRIDGE_FLASH_READOUT (research build, never shipped): GET /flash streams the
+ * whole flash chip from address 0 and GET /efuse the eFuse read registers, so a
+ * stock plug can be imaged without opening it.  This build registers neither
+ * /update nor /tasmota-settings: the only flash it writes is the otadata
+ * selection at startup, which returns the plug to stock on the next power
+ * cycle.
  */
 
 #include <stdio.h>
@@ -47,6 +54,11 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "tasmota_settings.h"
+#ifdef BRIDGE_FLASH_READOUT
+#include "esp_flash.h"
+#include "soc/efuse_reg.h"
+#include "soc/soc.h"
+#endif
 
 #define BRIDGE_AP_PASSWORD "s60-ota-bridge"
 #define BRIDGE_MAX_IMAGE_SIZE 0x1f0000
@@ -54,6 +66,11 @@
 #define BRIDGE_HOSTNAME "s60-ota-bridge"
 /* How long to try the home network before keeping to the bridge's own. */
 #define STA_WINDOW_MS 45000
+#ifdef BRIDGE_FLASH_READOUT
+#define BRIDGE_NAME "bridge v5 flash readout"
+#else
+#define BRIDGE_NAME "bridge v5"
+#endif
 
 static const char *TAG = "s60_bridge";
 static const esp_partition_t *s_running;
@@ -127,17 +144,62 @@ static esp_err_t nvs_handler(httpd_req_t *req)
 }
 #endif
 
+#ifdef BRIDGE_FLASH_READOUT
+/* Research build only: stream the whole flash chip, bootloader and partition
+ * table included, exactly as it reads.  Read-only. */
+static esp_err_t flash_handler(httpd_req_t *req)
+{
+    uint32_t size = 0;
+    if (esp_flash_get_size(NULL, &size) != ESP_OK || size == 0) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_sendstr(req, "Could not read the flash size.\n");
+    }
+    char size_text[12];
+    snprintf(size_text, sizeof(size_text), "%lu", (unsigned long)size);
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "X-Flash-Size", size_text);
+    for (uint32_t offset = 0; offset < size; offset += sizeof(s_upload_buffer)) {
+        uint32_t length = size - offset < sizeof(s_upload_buffer)
+                              ? size - offset
+                              : sizeof(s_upload_buffer);
+        if (esp_flash_read(NULL, s_upload_buffer, offset, length) != ESP_OK ||
+            httpd_resp_send_chunk(req, s_upload_buffer, length) != ESP_OK) {
+            /* End without the final chunk so the host sees a broken transfer. */
+            return ESP_FAIL;
+        }
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+/* Research build only: the eFuse read registers (EFUSE_RD_WR_DIS_REG to
+ * EFUSE_RD_SYS_PART2_DATA7_REG), little-endian words in register order.
+ * Reading them does not program anything. */
+static esp_err_t efuse_handler(httpd_req_t *req)
+{
+    size_t length = 0;
+    for (uint32_t reg = EFUSE_RD_WR_DIS_REG; reg <= EFUSE_RD_SYS_PART2_DATA7_REG; reg += 4) {
+        uint32_t word = REG_READ(reg);
+        memcpy(s_upload_buffer + length, &word, sizeof(word));
+        length += sizeof(word);
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, s_upload_buffer, length);
+}
+#endif
+
 /* Plain-text state for the host: which networks the bridge is on. */
 static esp_err_t status_handler(httpd_req_t *req)
 {
     char body[96];
     uint32_t ip = s_sta_ip;
     if (ip != 0) {
-        snprintf(body, sizeof(body), "bridge v5\nhome network: joined " IPSTR "\n%s",
+        snprintf(body, sizeof(body), BRIDGE_NAME "\nhome network: joined " IPSTR "\n%s",
                  IP2STR((esp_ip4_addr_t *)&ip),
                  s_tasmota_settings_saved ? "tasmota settings: saved\n" : "");
     } else {
-        snprintf(body, sizeof(body), "bridge v5\nhome network: %s\n",
+        snprintf(body, sizeof(body), BRIDGE_NAME "\nhome network: %s\n",
                  s_sta_trying ? "joining" : "not joined");
     }
     httpd_resp_set_type(req, "text/plain");
@@ -449,7 +511,9 @@ static esp_err_t start_web_server(void)
         .uri = "/update", .method = HTTP_POST, .handler = update_handler, .user_ctx = NULL,
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &root));
+#ifndef BRIDGE_FLASH_READOUT
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &update));
+#endif
     const httpd_uri_t status = {
         .uri = "/status", .method = HTTP_GET, .handler = status_handler, .user_ctx = NULL,
     };
@@ -458,12 +522,27 @@ static esp_err_t start_web_server(void)
         .uri = "/tasmota-settings", .method = HTTP_POST,
         .handler = tasmota_settings_handler, .user_ctx = NULL,
     };
+#ifndef BRIDGE_FLASH_READOUT
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &tasmota_settings));
+#endif
 #ifdef BRIDGE_NVS_READOUT
     const httpd_uri_t nvs = {
         .uri = "/nvs", .method = HTTP_GET, .handler = nvs_handler, .user_ctx = NULL,
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &nvs));
+#endif
+#ifdef BRIDGE_FLASH_READOUT
+    /* Deliberately unregistered in this build. */
+    (void)update;
+    (void)tasmota_settings;
+    const httpd_uri_t flash = {
+        .uri = "/flash", .method = HTTP_GET, .handler = flash_handler, .user_ctx = NULL,
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &flash));
+    const httpd_uri_t efuse = {
+        .uri = "/efuse", .method = HTTP_GET, .handler = efuse_handler, .user_ctx = NULL,
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &efuse));
 #endif
     return ESP_OK;
 }

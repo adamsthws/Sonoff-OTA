@@ -169,13 +169,34 @@ def parse_single_range(value: str, total: int) -> tuple[int, int]:
     return lo, hi
 
 
-def cloud_summary(message: dict[str, Any]) -> dict[str, Any]:
-    """Return diagnostic fields without printing device/account identifiers."""
-    return {
-        key: message[key]
-        for key in ("action", "error", "sequence", "msg")
-        if key in message
-    }
+# Never printed: they identify the account, the device or the network.
+CLOUD_PRIVATE_KEYS = {"apikey", "deviceid", "at", "ssid", "bssid", "ip", "mac", "staMac", "userAgent"}
+
+
+def describe_cloud(message: dict[str, Any], seq: str) -> str | None:
+    """One plain line for a cloud message during delivery, or None to stay quiet.
+
+    The upgrade reply, the plug going offline or coming back, and what the plug
+    reports about itself are what matter here; account and device identifiers
+    are never printed.
+    """
+    action = message.get("action")
+    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+    if message.get("sequence") == seq and action is None:
+        error = message.get("error", 0)
+        return "Cloud: upgrade command accepted" if error == 0 else f"Cloud: upgrade command rejected (error {error})"
+    if action == "sysmsg" and "online" in params:
+        return ("Cloud: the plug is back online" if params["online"]
+                else "Cloud: the plug went offline - expected while it restarts to install")
+    shown = {key: value for key, value in params.items()
+             if key not in CLOUD_PRIVATE_KEYS and isinstance(value, (str, int, float, bool))}
+    if action == "update":
+        return f"Cloud: the plug reported {json.dumps(shown, sort_keys=True)}" if shown else None
+    if action is None and message.get("error", 0) == 0:
+        return None  # replies to the cloud's own keep-alives
+    detail = f" {json.dumps(shown, sort_keys=True)}" if shown else ""
+    error = f" error {message['error']}" if message.get("error") else ""
+    return f"Cloud: {action or 'message'}{error}{detail}"
 
 
 def main():
@@ -315,7 +336,9 @@ def main():
                 try:
                     msg = ws.receive_json(timeout=0.5)
                     server.end_progress()
-                    print(f"  Cloud: {json.dumps(cloud_summary(msg))}")
+                    line = describe_cloud(msg, seq)
+                    if line:
+                        print(f"  {line}")
                     if msg.get("sequence") == seq and msg.get("error", 0) != 0:
                         raise EwelinkError(f"Cloud rejected upgrade command: error {msg['error']}")
                 except _sock.timeout:
