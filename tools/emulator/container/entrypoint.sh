@@ -3,20 +3,55 @@
 # hands over to you, as your own user id, in a tmux session.
 set -euo pipefail
 
-: "${HOST_UID:?}" "${HOST_GID:?}" "${PLUG_MAC:?}" "${CLOUD:=0}" "${PCAP:=0}"
+: "${HOST_UID:?}" "${HOST_GID:?}" "${PLUG_MAC:?}" "${CLOUD:=0}" "${PCAP:=0}" "${FIREWALL:=1}"
 RUN=/run/s60emu
 mkdir -p "$RUN" /state/logs
 
-# -- you, with sudo that does not ask (the tool uses sudo for a few commands) --
+# -- you, with sudo that asks for your password, as on a real computer ----------
+# The password is s60: the welcome message says so, and the conversion tool
+# says so where it warns that sudo may ask. Only the emulator's own
+# Wi-Fi switching runs without it: on a real computer that is the desktop's
+# Wi-Fi menu, which asks for nothing.
 user=$(getent passwd "$HOST_UID" | cut -d: -f1 || true)
 if [ -z "$user" ]; then
     getent group "$HOST_GID" >/dev/null || groupadd -g "$HOST_GID" you
     useradd -m -u "$HOST_UID" -g "$HOST_GID" -s /bin/bash you
     user=you
 fi
-echo "$user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/s60emu
+SUDO_PASSWORD=s60
+echo "$user:$SUDO_PASSWORD" | chpasswd
+printf '%s\n' "Defaults lecture=never" \
+    "$user ALL=(root) NOPASSWD: /opt/s60emu/bin/wifi-root" \
+    "$user ALL=(ALL) ALL" > /etc/sudoers.d/s60emu
 chmod 0440 /etc/sudoers.d/s60emu
 home=$(getent passwd "$user" | cut -d: -f6)
+
+# -- a firewall, on, as on a typical Linux desktop ---------------------------
+# ufw blocking incoming connections, so the conversion has to add its
+# temporary rule for the plug, through sudo, and remove it again. Allowed
+# here is only what the emulator itself needs: the plug's DHCP and DNS from
+# this "computer" (its router), and your browser's port 8080. Turned on
+# before the rules below, so it cannot disturb them. emu.sh --no-firewall
+# leaves it off.
+if [ "$FIREWALL" = 1 ]; then
+    # A container may not change kernel settings, and has no IPv6 here.
+    : > /etc/ufw/sysctl-none.conf
+    sed -i -e 's|^IPT_SYSCTL=.*|IPT_SYSCTL=/etc/ufw/sysctl-none.conf|' \
+           -e 's|^IPV6=.*|IPV6=no|' /etc/default/ufw
+    ufw --force reset >/dev/null
+    ufw default deny incoming >/dev/null
+    ufw default allow outgoing >/dev/null
+    ufw allow in on tap0 to any port 67 proto udp comment 'emulator: DHCP for the plug' >/dev/null
+    ufw allow in on tap0 to any port 53 comment 'emulator: DNS for the plug' >/dev/null
+    ufw allow in on eth0 to any port 8080 proto tcp comment 'emulator: your browser' >/dev/null
+    ufw logging off >/dev/null
+    ufw --force enable >/dev/null
+else
+    # The welcome message says the firewall is on: not this time.
+    on="This computer's firewall (ufw) is on, as on a typical Linux desktop."
+    off=$(printf '%-*s' "${#on}" "This computer's firewall is off (emu.sh --no-firewall).")
+    sed -i "s|$on|$off|" /opt/s60emu/motd
+fi
 
 # -- internet: only with --cloud ----------------------------------------------
 # Without it nothing in here reaches the internet - neither the plug nor the
@@ -54,11 +89,13 @@ grep -q s60emu-motd "$home/.bashrc" 2>/dev/null || cat >> "$home/.bashrc" <<'EOF
 EOF
 chown "$HOST_UID:$HOST_GID" "$home/.tmux.conf" "$home/.bashrc"
 
-as_you() { runuser -u "$user" -- env HOME="$home" PATH="$PATH" S60_EMULATOR_URL="${S60_EMULATOR_URL:-}" "$@"; }
+as_you() { runuser -u "$user" -- env HOME="$home" PATH="$PATH" S60_EMULATOR_URL="${S60_EMULATOR_URL:-}" \
+    S60_EMULATOR_SUDO_PASSWORD="$SUDO_PASSWORD" "$@"; }
 as_you /opt/s60emu/bin/plug-supervisor >/dev/null 2>&1 &
 as_you /opt/s60emu/bin/browser-forward >"$RUN/browser-forward.log" 2>&1 &
 
 cd /work
 as_you tmux new-session -d -s s60 -n conversion -c /work
 as_you tmux new-window -d -t s60 -n plug "plug log"
-exec runuser -u "$user" -- env HOME="$home" PATH="$PATH" S60_EMULATOR_URL="${S60_EMULATOR_URL:-}" tmux attach -t s60
+exec runuser -u "$user" -- env HOME="$home" PATH="$PATH" S60_EMULATOR_URL="${S60_EMULATOR_URL:-}" \
+    S60_EMULATOR_SUDO_PASSWORD="$SUDO_PASSWORD" tmux attach -t s60

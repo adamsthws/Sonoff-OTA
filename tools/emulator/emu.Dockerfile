@@ -30,7 +30,7 @@ FROM ubuntu:24.04
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         libglib2.0-0t64 libpixman-1-0 libslirp0 libgcrypt20 zlib1g \
         python3 python3-venv iproute2 iptables dnsmasq-base udhcpc iputils-ping \
-        tmux socat tcpdump curl sudo procps less ca-certificates \
+        tmux socat tcpdump curl sudo procps less ca-certificates ufw \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=qemu /opt/qemu /opt/qemu
 COPY requirements.txt /tmp/requirements.txt

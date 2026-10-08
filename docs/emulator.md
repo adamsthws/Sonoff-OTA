@@ -38,10 +38,11 @@ real plug before using `--cloud`.
 ```sh
 tools/emulator/emu.sh            # plug offline: nothing reaches the internet
 tools/emulator/emu.sh --cloud    # plug and tool online - asks you to confirm the real plug is unplugged
-tools/emulator/emu.sh --fresh    # put the plug back to stock and forget the previous run
+tools/emulator/emu.sh --fresh    # put the plug back to stock, and forget the previous run and the eWeLink account
 tools/emulator/emu.sh --pcap     # also record the plug's Wi-Fi traffic
 tools/emulator/emu.sh --rebuild  # rebuild the image first
 tools/emulator/emu.sh --detach   # start in the background; join with: docker attach s60-emu
+tools/emulator/emu.sh --no-firewall  # without the "computer's" firewall, which is on by default
 ```
 
 A conversion needs `--cloud`: the upgrade to the bridge firmware is sent
@@ -65,10 +66,13 @@ Wi-Fi:
 | Power-cycle it quickly, N times | `plug cycle N` |
 | Your desktop's Wi-Fi menu | `wifi`, `wifi join NAME`, `wifi home` |
 | Your home Wi-Fi's name and password | `PICSimLabWifi`, empty password |
+| Your computer's password, when sudo asks | `s60` |
 | The plug's web page | http://localhost:8080 |
 
 The tool knows when it runs in the emulator (`S60_EMULATOR_URL`), and its
 final link points at http://localhost:8080 instead of the plug's own address.
+Where it warns that sudo may ask for a password, it gives the emulator's
+(`S60_EMULATOR_SUDO_PASSWORD`); on a real computer it never knows one.
 
 ## How it fits together
 
@@ -101,6 +105,16 @@ final link points at http://localhost:8080 instead of the plug's own address.
   broadcasting one.
 - **The browser.** `browser-forward` takes localhost:8080 to the plug,
   wherever it is (see the Referer check below).
+- **The firewall and sudo.** As on a typical Linux desktop, ufw is on and
+  blocks incoming connections, and sudo asks for your password (`s60`). So
+  the conversion has to add its temporary rule for the plug, through sudo,
+  and remove it again, and any exit path that leaves it behind shows up. ufw
+  allows only what the emulator itself needs: the plug's DHCP and DNS, and
+  port 8080 for your browser. The tool checks for ufw with
+  `systemctl is-active ufw`; the container has no systemd, so a stand-in
+  answers from ufw's own setting. The emulator's `wifi` command needs no
+  password, as a desktop's Wi-Fi menu does not. `--no-firewall` leaves ufw
+  off.
 - **Power.** `plug-supervisor` keeps QEMU running and starts it again when it
   exits, which is how a power cut looks.
 
