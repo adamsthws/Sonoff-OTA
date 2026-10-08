@@ -40,7 +40,7 @@ tool asks for administrator rights itself, only for its firewall rule.
 
 Windows and macOS have not been through a real conversion yet, so a problem
 there may be new. Please post it in the
-[Test reports](https://github.com/adamsthws/SonoffS60OTA/discussions/1) thread - see
+[Test reports](https://github.com/adamsthws/Sonoff-OTA/discussions/1) thread - see
 [Telling us how it went](../README.md#telling-us-how-it-went) - and the fix
 will help everyone after you.
 
@@ -104,7 +104,7 @@ tool checks the plug at two points rather than assuming:
   Leave it as it is and report it rather than forcing past the check.
 
 Either way, or if it converts cleanly, please post in the
-[Test reports](https://github.com/adamsthws/SonoffS60OTA/discussions/1) thread - see
+[Test reports](https://github.com/adamsthws/Sonoff-OTA/discussions/1) thread - see
 [Telling us how it went](../README.md#telling-us-how-it-went) for what to
 include. Reports from other regions are very welcome.
 

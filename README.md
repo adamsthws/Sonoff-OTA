@@ -128,7 +128,7 @@ Security asking about Python, or the macOS firewall, and what you chose.
 ### Telling us how it went
 
 Every report goes in one place: the pinned
-[Test reports](https://github.com/adamsthws/SonoffS60OTA/discussions/1) thread in the
+[Test reports](https://github.com/adamsthws/Sonoff-OTA/discussions/1) thread in the
 repository's Discussions. The tool also offers the link, with this run's
 details ready to paste, when a conversion finishes.
 A clean conversion, a run that stopped partway, or only the read-only checks -

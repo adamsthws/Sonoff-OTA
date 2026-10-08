@@ -104,7 +104,7 @@ BRIDGE_OTA = Path("artifacts/s60-ota-bridge-v5-9.9.9.ota")
 PHASE_PORTS = (8089, *range(8100, 8110))
 SETTINGS_PATH = ROOT / "captures" / "settings.json"
 # Where people share how their conversion went: the pinned "Test reports" thread.
-REPORTS_URL = "https://github.com/adamsthws/SonoffS60OTA/discussions/1"
+REPORTS_URL = "https://github.com/adamsthws/Sonoff-OTA/discussions/1"
 TASMOTA_AP_PREFIX = "tasmota-"
 
 

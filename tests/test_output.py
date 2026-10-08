@@ -341,7 +341,7 @@ class ReportTests(OutputTestCase):
                 af.invite_report(self.ctx(), 441, False)
         screen, _ = self.run_with(io.StringIO(), False, body)
         self.assertIn(af.REPORTS_URL, screen)
-        self.assertIn("adamsthws/SonoffS60OTA/discussions", af.REPORTS_URL)
+        self.assertIn("adamsthws/Sonoff-OTA/discussions", af.REPORTS_URL)
         self.assertIn("copied - just paste them", screen)
         self.assertNotIn("**", screen)                       # the terminal shows no Markdown
         self.assertRegex(screen, r"Plug model: +S60TPG")
@@ -350,7 +350,7 @@ class ReportTests(OutputTestCase):
 
 
 class LinkTests(OutputTestCase):
-    URL = "https://github.com/adamsthws/SonoffS60OTA/discussions/1"
+    URL = "https://github.com/adamsthws/Sonoff-OTA/discussions/1"
 
     def test_a_terminal_gets_a_clickable_link_and_the_log_the_plain_url(self):
         def body():
