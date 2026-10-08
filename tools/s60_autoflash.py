@@ -1722,6 +1722,25 @@ def step_commit(ctx: Context) -> dict[str, Any]:
 
 
 
+def recovery_firmware_up(ctx: Context, started: float, *, within: float) -> bool:
+    """Wait up to `within` seconds for the plug to answer on its recovery firmware."""
+    window = time.monotonic()
+    while True:
+        if ctx.finder.poll():
+            device = ctx.device
+            try:
+                version = device.firmware_version()
+            except (DeviceError, OSError):
+                version = ""
+            if "safeboot" in version.lower() or (not version and device.is_safeboot()):
+                say(f"    Recovery firmware is up at {device.host} "
+                    f"({version or 'safeboot'}, after {time.monotonic() - started:.0f}s).")
+                return True
+        if time.monotonic() - window >= within:
+            return False
+        time.sleep(5)
+
+
 def step_canonical(ctx: Context) -> dict[str, Any]:
     """F - first canonical boot, then the official application."""
     app = ROOT / "captures/safeboot-recovery-migration/tasmota32c3.bin"
@@ -1734,22 +1753,10 @@ def step_canonical(ctx: Context) -> dict[str, Any]:
     say("")
     say("Waiting for the plug to restart into the recovery firmware.")
     time.sleep(10)
-    waited = 0.0
     started = time.monotonic()
-    while time.monotonic() - started < 300:
-        if ctx.finder.poll():
-            device = ctx.device
-            try:
-                version = device.firmware_version()
-            except (DeviceError, OSError):
-                version = ""
-            if "safeboot" in version.lower() or (not version and device.is_safeboot()):
-                waited = time.monotonic() - started
-                say(f"    Recovery firmware is up at {device.host} "
-                    f"({version or 'safeboot'}, after {waited:.0f}s).")
-                break
-        time.sleep(5)
-    else:
+    while not recovery_firmware_up(ctx, started, within=300):
+        # Five minutes and no sign of it: keep waiting, or look elsewhere.
+        output.transient_begin()
         choice = ask_choice(
             "The recovery firmware has not appeared. What now",
             [
@@ -1763,7 +1770,8 @@ def step_canonical(ctx: Context) -> dict[str, Any]:
         )
         if choice == 1:
             ctx.set_plug_ip(ask_ipv4("What address is it on now", must_respond=True))
-        raise Abort("the recovery firmware did not appear; nothing was written")
+        output.transient_end()
+    waited = time.monotonic() - started
     device = ctx.device
     saved = startup_settings_report(device)
     if ctx.dry_run:
