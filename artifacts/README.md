@@ -7,7 +7,6 @@ directory, never here.
 | File | Purpose | SHA-256 |
 |---|---|---|
 | `s60-ota-bridge-4.4.1.ota` | Wrapped one-shot bridge the run installs; joins the home Wi-Fi stock was on, raising its own network only if that fails, and gives Tasmota its settings | `c77ca1f3cde6de0d37f408cb59cb36c75fa5a6b1c6c1f4435a861e043b9bc6b5` |
-| `s60-ota-bridge-v3-1.2.1.ota` | The previous bridge (its own network only); kept for the archived guides | `10d79d33856bb842b26f0a1b6748751c091ec9738a72dd4de2033fbd0c329ff7` |
 | `tasmota32c3-bluetooth.bin` | Berry-capable Tasmota used temporarily on the original partition layout | `a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708` |
 | `s60-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `aa32fafa4a9470152d5f8826fc6aedf94387575332353b50b8ce454ec1f9d364` |
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
@@ -56,3 +55,7 @@ updater does not compare versions - the upgrade command decides what is
 installed, and a plug on 1.2.0 took bridge v5 wrapped as `9.9.9` - but a later
 Sonoff firmware might refuse anything older than itself, so it has to stay
 higher than Sonoff's. The version field holds at most seven characters.
+
+The earlier bridge v3, wrapped as `1.2.1`, is no longer published here. It
+is in the Git history: `git log --all -- artifacts/s60-ota-bridge-v3-1.2.1.ota`
+finds the last commit that has it.

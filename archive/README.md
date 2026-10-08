@@ -41,8 +41,12 @@ the repository root.
 
 ## `artifacts/`
 
-`s60-ota-bridge-v2-idf5.3.1.elf` - debug symbols for bridge v2, 8 MB, useful
-only for decoding a crash dump from that build. The v2 firmware itself stays in
-the main `artifacts/` directory, because it was published in response to
-[issue #1](https://github.com/HG0161/SonoffS60OTA/issues/1) and someone may
-still be waiting on it.
+Firmware from earlier stages, pinned in `SHA256SUMS`: bridge v2 (published in
+response to [issue #1](https://github.com/HG0161/SonoffS60OTA/issues/1)) and
+v3's unwrapped image, and the custom Tasmota builds from `tasmota-s60/`.
+`s60-ota-bridge-v2-idf5.3.1.elf` is bridge v2's debug symbols, 8 MB, useful
+only for decoding a crash dump from that build.
+
+The wrapped bridge v3 that the guides in `docs/reference/` use,
+`artifacts/s60-ota-bridge-v3-1.2.1.ota`, is no longer published; it is in the
+Git history (`git log --all -- artifacts/s60-ota-bridge-v3-1.2.1.ota`).
