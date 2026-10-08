@@ -37,6 +37,7 @@ from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import PhaseError, PhaseRunner, PlugNeverConnected  # noqa: E402
 from tools.autoflash.prompts import (  # noqa: E402
     QuitRun,
+    ask_admin_password,
     ask_choice,
     ask_ipv4,
     ask_secret,
@@ -314,10 +315,14 @@ def remove_run(directory: Path) -> bool:
         say("It left a temporary firewall rule letting that plug connect to this")
         say("computer. Removing it needs administrator rights, so you may be asked")
         say("for this computer's password.")
+        for line in emulator_password_hint():
+            say(line)
         left = [rule for rule in rules if not hostsys.close_firewall(rule)]
+        if left:
+            output.transient_end()  # this has to stay on screen
         for rule in left:
-            say("Remove it yourself: "
-                + hostsys.display(hostsys.firewall_commands(rule.kind, rule.plug_ip, rule.ports)[1]))
+            tell("Remove it yourself: "
+                 + hostsys.display(hostsys.firewall_commands(rule.kind, rule.plug_ip, rule.ports)[1]))
     shutil.rmtree(directory)
     if read_current() == directory.name:
         CURRENT_POINTER.unlink(missing_ok=True)
@@ -635,6 +640,15 @@ def firewall_ports(ctx: Context) -> list[int]:
                    int(ctx.state.input("phase_port") or PHASE_PORTS[0])})
 
 
+def emulator_password_hint() -> list[str]:
+    """Inside the emulator (tools/emulator) only: the password sudo asks for
+    there, so nobody has to look it up.  A real computer's is never known."""
+    known = os.environ.get("S60_EMULATOR_SUDO_PASSWORD")
+    if not known or hostsys.IS_WINDOWS:
+        return []
+    return [f"In the emulator, the password is: {known}"]
+
+
 def recorded_rules(ctx: Context) -> list[FirewallRule]:
     return [FirewallRule.from_json(item) for item in ctx.state.input("firewall_rules") or []]
 
@@ -643,7 +657,8 @@ def ensure_firewall(ctx: Context) -> None:
     """Let the plug's connections through this computer's firewall, once per address.
 
     The rule admits only the plug's address on the two ports the tool listens
-    on, and is recorded so it can be removed exactly when the run finishes.
+    on, and is recorded so it can be removed when the tool exits, however it
+    exits; a resumed run adds it again.
     """
     plug_ip = ctx.state.input("plug_ip")
     ports = firewall_ports(ctx)
@@ -659,19 +674,22 @@ def ensure_firewall(ctx: Context) -> None:
         "does not need to be run as administrator; only this rule asks for it.",
         "If Windows Security then asks whether Python may use networks, choose",
         "Allow: cancelling can block the plug even with this rule in place.",
-    ] if hostsys.IS_WINDOWS else ["You may be asked for this computer's password."]
+    ] if hostsys.IS_WINDOWS else ["You may be asked for this computer's password.",
+                                  *emulator_password_hint()]
     what = ("lets Python accept incoming connections - the macOS firewall allows "
             "programs, not ports" if kind == "macos"
             else f"allows only {plug_ip} in, on TCP ports {', '.join(map(str, ports))}")
+    output.transient_begin()  # the note, and the system's password question
     section("Let the plug through this computer's firewall", [
         f"This computer's firewall ({kind}) would block the plug from fetching its",
         f"firmware. Adding one rule that {what}.",
-        "It is removed again when the conversion finishes.",
+        "This temporary rule is always removed when this tool exits (no matter how it exits).",
         *prompt_note,
     ])
     try:
         rule = hostsys.open_firewall(plug_ip, ports)
     except OSError:
+        output.transient_end()
         section("The firewall rule could not be added", [
             "Add it yourself, in another window, with:",
             f"  {hostsys.display(add)}",
@@ -679,6 +697,7 @@ def ensure_firewall(ctx: Context) -> None:
             "blocked, the next step stops and says so.",
         ])
         return
+    output.transient_end()
     if rule is not None:
         rules.append(rule)
         ctx.state.set_input("firewall_rules", [r.to_json() for r in rules])
@@ -709,14 +728,19 @@ def close_firewall_rules(ctx: Context) -> None:
         "Windows will ask for permission again"
         if hostsys.IS_WINDOWS else "you may be asked for this computer's password again"
     )
+    output.transient_begin()  # gone once the rule is
+    tell("")
     tell("Removing the temporary firewall rule added at the start, which let the")
-    tell("plug connect to this computer. Changing the firewall needs administrator")
+    tell("plug connect to this computer. Changing the firewall needs admin/sudo")
     tell(f"rights, so {permission}.")
+    for line in emulator_password_hint():
+        tell(line)
     left: list[FirewallRule] = []
     for rule in rules:
         if not hostsys.close_firewall(rule):
             left.append(rule)
     ctx.state.set_input("firewall_rules", [r.to_json() for r in left])
+    output.transient_end()
     if left:
         section("Remove the temporary firewall rules yourself", [
             hostsys.display(hostsys.firewall_commands(r.kind, r.plug_ip, r.ports)[1])
@@ -724,6 +748,38 @@ def close_firewall_rules(ctx: Context) -> None:
         ])
     else:
         say("The temporary firewall rules have been removed.")
+
+
+def release_firewall(ctx: Context) -> bool:
+    """On the way out, however the tool is leaving: remove the firewall rule.
+
+    The usual exits have removed it already; this catches Ctrl-C, being
+    stopped, and anything unexpected.  Nothing listens on its ports once the
+    tool has exited, so it has no reason to stay, and a resumed run adds it
+    again.  True when no rule is left behind.
+    """
+    try:
+        if recorded_rules(ctx):
+            close_firewall_rules(ctx)
+        return not recorded_rules(ctx)
+    except (KeyboardInterrupt, OSError) as exc:
+        # Ctrl-C at the password prompt, or no terminal left to ask on.
+        left = recorded_rules(ctx)
+        tell("")
+        tell("The temporary firewall rule was not removed"
+             + (" (stopped with Ctrl-C)." if isinstance(exc, KeyboardInterrupt) else f": {exc}."))
+        tell("Remove it yourself with:")
+        for rule in left:
+            tell("    " + hostsys.display(hostsys.firewall_commands(rule.kind, rule.plug_ip, rule.ports)[1]))
+        return False
+
+
+def say_quit(ctx: Context) -> None:
+    """The last word after the operator chose to quit, once everything is tidied:
+    the run's secrets are gone and the firewall rule is removed."""
+    if release_firewall(ctx):
+        tell("")
+        tell("Cleaned up. Nothing was left half done. Exiting.")
 
 
 # ------------------------------------------------------------ finding the plug
@@ -1990,9 +2046,7 @@ def execute(ctx: Context, step: str) -> int:
         captured = handler(ctx)
     except QuitRun:
         output.stage_end("stopped")
-        tell("")
-        tell(f"Stopped at {step}. Nothing was left half-done.")
-        return 130
+        return 130  # main() says so, once it has cleaned up
     except PlugNeverConnected as exc:
         ctx.state.mark(step, FAILED, error=str(exc))
         output.stage_end("stopped")
@@ -2212,14 +2266,12 @@ def run_steps(ctx: Context) -> int:
             close_firewall_rules(ctx)
             return 0
         if code == 130:
-            return code  # the operator chose to quit; execute() has said so
+            return code  # the operator chose to quit; main() cleans up and says so
         if code != 0:
+            close_firewall_rules(ctx)
             tell("")
-            tell(f"Stopped at {step}. Fix the cause, then resume with:")
+            tell("Fix the cause, then carry on with:")
             tell("    python3 tools/s60_autoflash.py run")
-            if recorded_rules(ctx):
-                tell("To abandon this plug instead and remove the temporary firewall rule:")
-                tell("    python3 tools/s60_autoflash.py cleanup")
             if output.log_path():
                 tell(f"What happened, in full: {display_path(output.log_path())}")
             tell("Stuck? Ask in the Test reports thread:")
@@ -2472,11 +2524,25 @@ def cmd_cleanup(ctx: Context) -> int:
 
 
 def main() -> int:
+    try:
+        return _main()
+    finally:
+        # However it ended - finished, failed, quit or Ctrl-C - leave a blank
+        # line between the last message and the shell's prompt.
+        print(flush=True)
+
+
+def _main() -> int:
+    # Asked for in this tool's own words, so every row on screen is its own.
+    hostsys.password_asker = ask_admin_password
     # Keep piping into head/less quiet rather than raising BrokenPipeError.
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-    # Being stopped must still run the cleanup in cmd_run's finally.
+    # Being stopped, or the terminal being closed, must still run the cleanup
+    # in the finally blocks: the stored secrets and the firewall rule.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, lambda *_: sys.exit(129))
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["run", "status", "step", "list", "cleanup"])
     parser.add_argument("step_id", nargs="?")
@@ -2547,24 +2613,36 @@ def main() -> int:
             say("step requires a step id")
             return 2
         output.start(ctx.dir / "run.log", verbose=args.verbose)
+        code = None
         try:
-            return cmd_step(ctx, args.step_id)
+            code = cmd_step(ctx, args.step_id)
+            return code
         finally:
+            if code == 130:
+                say_quit(ctx)
+            else:
+                release_firewall(ctx)
             output.finish()
     output.start(ctx.dir / "run.log", verbose=args.verbose)
+    code = None  # 130 only when the operator chose to quit, not for Ctrl-C
     try:
-        return cmd_run(ctx)
+        code = cmd_run(ctx)
+        return code
     except QuitRun:
-        tell("")
-        tell("Stopped. Run the same command again to pick up where it stopped.")
-        return 130
+        output.stage_end("stopped")
+        code = 130
+        return code
     except KeyboardInterrupt:
         output.stage_end("stopped")
         tell("")
-        tell("Stopped with Ctrl-C. Run the same command again to pick up where it stopped:")
-        tell("every step checks the plug first, so carrying on is safe.")
+        tell("Stopped with Ctrl-C. Run again to pick up where you left off or to start again")
+        tell("(Every step checks the plug first, so running again is safe.)")
         return 130
     finally:
+        if code == 130:
+            say_quit(ctx)
+        else:
+            release_firewall(ctx)
         output.finish()
 
 

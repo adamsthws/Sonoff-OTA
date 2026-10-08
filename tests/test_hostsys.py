@@ -172,5 +172,84 @@ class PortTests(unittest.TestCase):
             self.assertIsNone(hostsys.first_free_port("127.0.0.1", [busy]))
 
 
+class SudoPromptTests(unittest.TestCase):
+    """sudo's own question is counted on screen only when it is really asked."""
+
+    def run_elevated(self, will_ask):
+        from tools.autoflash import hostsys
+        completed = mock.Mock(returncode=0, stdout="")
+        with mock.patch.object(hostsys, "IS_WINDOWS", False), \
+             mock.patch.object(hostsys, "sudo_will_ask", return_value=will_ask), \
+             mock.patch.object(hostsys.subprocess, "run", return_value=completed) as run, \
+             mock.patch.object(hostsys.getpass, "getuser", return_value="someone"), \
+             mock.patch.object(hostsys.output, "before_input") as before, \
+             mock.patch.object(hostsys.output, "after_input") as after:
+            hostsys.elevated_output(["ufw", "status"])
+        return run.call_args.args[0], before, after
+
+    def test_a_remembered_password_puts_nothing_on_screen(self):
+        command, before, after = self.run_elevated(False)
+        before.assert_not_called()
+        after.assert_not_called()
+        self.assertEqual(command[:3], ["sudo", "-p", "[sudo] password for %u: "])
+
+    def test_the_question_is_the_one_sudo_is_told_to_ask(self):
+        _, before, after = self.run_elevated(True)
+        before.assert_called_once_with("[sudo] password for someone: ")
+        after.assert_called_once()
+
+
+class AdminPasswordTests(unittest.TestCase):
+    """With a password_asker, sudo never writes to the terminal itself."""
+
+    def run_with_asker(self, will_ask, password="s60"):
+        from tools.autoflash import hostsys
+        completed = mock.Mock(returncode=0, stdout="Rule added\n")
+        asker = mock.Mock(return_value=password)
+        with mock.patch.object(hostsys, "IS_WINDOWS", False), \
+             mock.patch.object(hostsys, "password_asker", asker), \
+             mock.patch.object(hostsys, "sudo_will_ask", return_value=will_ask), \
+             mock.patch.object(hostsys.subprocess, "run", return_value=completed) as run, \
+             mock.patch.object(hostsys.output, "before_input") as before:
+            self.assertEqual(hostsys.elevated_output(["ufw", "status"]), (0, "Rule added\n"))
+        before.assert_not_called()  # sudo's own question is never shown
+        return asker, run.call_args
+
+    def test_a_needed_password_goes_to_sudo_through_a_pipe(self):
+        asker, call = self.run_with_asker(True)
+        asker.assert_called_once()
+        self.assertEqual(call.args[0], ["sudo", "-S", "-p", "", "ufw", "status"])
+        self.assertEqual(call.kwargs["input"], "s60\n")
+        self.assertNotIn("s60", " ".join(call.args[0]))  # never on a command line
+
+    def test_a_remembered_password_is_not_asked_for(self):
+        asker, call = self.run_with_asker(False)
+        asker.assert_not_called()
+        self.assertEqual(call.args[0][:2], ["sudo", "-n"])
+
+    def test_sudo_says_whether_the_password_was_right(self):
+        from tools.autoflash import hostsys
+        with mock.patch.object(hostsys.subprocess, "run",
+                               return_value=mock.Mock(returncode=0, stderr="")):
+            self.assertIsNone(hostsys.check_sudo_password("s60"))
+        wrong = mock.Mock(returncode=1, stderr="Sorry, try again.\nsudo: 1 incorrect password attempt\n")
+        with mock.patch.object(hostsys.subprocess, "run", return_value=wrong):
+            self.assertEqual(hostsys.check_sudo_password("nope"), "wrong")
+        refused = mock.Mock(returncode=1, stderr="someone is not in the sudoers file.\n")
+        with mock.patch.object(hostsys.subprocess, "run", return_value=refused), \
+             self.assertRaisesRegex(OSError, "not in the sudoers file"):
+            hostsys.check_sudo_password("s60")
+
+    def test_three_wrong_passwords_give_up(self):
+        from tools.autoflash import hostsys, prompts
+        with mock.patch.object(prompts, "ask_secret", return_value="nope"), \
+             mock.patch.object(hostsys, "check_sudo_password", return_value="wrong") as check, \
+             mock.patch.object(prompts.output, "show") as shown, \
+             self.assertRaisesRegex(OSError, "not accepted 3 times"):
+            prompts.ask_admin_password()
+        self.assertEqual(check.call_count, 3)
+        self.assertEqual(shown.call_count, 2)  # "try again" twice, not after the last
+
+
 if __name__ == "__main__":
     unittest.main()

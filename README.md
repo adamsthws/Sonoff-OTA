@@ -200,7 +200,9 @@ It remembers which plug it was working on and what it had done. Where a step
 was interrupted, it checks the plug to work out whether that step finished,
 and only asks you if the plug cannot show it.
 
-To give up on a plug part-way and remove the temporary firewall rule:
+The temporary firewall rule is removed whenever the tool exits, however the
+run ended; a resumed run adds it again. To give up on a plug part-way, and
+remove anything a run that was killed outright left behind:
 
 ```sh
 python3 tools/s60_autoflash.py cleanup

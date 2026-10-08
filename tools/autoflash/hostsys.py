@@ -12,6 +12,7 @@ and never sees or stores a password itself.
 from __future__ import annotations
 
 import concurrent.futures
+import getpass
 import hashlib
 import ipaddress
 import platform
@@ -322,22 +323,86 @@ def elevated(command: Sequence[str]) -> int:
     return elevated_output(command)[0]
 
 
+# sudo's question, set rather than left to the system, so the screen knows how
+# wide it is (%u is sudo's own placeholder for the user name).  Only used when
+# no password_asker is set.
+SUDO_PROMPT = "[sudo] password for %u: "
+
+# Asks for this computer's password, in the tool's own words, until sudo
+# accepts it (see check_sudo_password); returns it, or raises OSError.  Set by
+# the tools that draw their own screen, so that every row on it is theirs: sudo
+# asking by itself writes to the terminal directly, a row the screen cannot
+# count - and a mistyped password adds more.
+password_asker: Callable[[], str] | None = None
+
+
+def sudo_will_ask() -> bool:
+    """Whether sudo will ask for a password now, or has one remembered.  Asks nothing."""
+    try:
+        return subprocess.run(["sudo", "-n", "true"], stdin=subprocess.DEVNULL,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0
+    except OSError:
+        return False
+
+
+def check_sudo_password(password: str) -> str | None:
+    """Try `password` with sudo, which then remembers it for a while.
+
+    None when it was accepted.  A wrong one gives "wrong"; anything else - not
+    allowed to use sudo at all, say - raises OSError with sudo's reason.  The
+    password goes through a pipe, never a command line, and is not kept.
+    """
+    try:
+        result = subprocess.run(["sudo", "-S", "-v", "-p", ""], input=password + "\n",
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except OSError as exc:
+        raise OSError(f"sudo could not be run: {exc}") from None
+    if result.returncode == 0:
+        return None
+    reason = result.stderr.lower()
+    if "incorrect password" in reason or "try again" in reason:
+        return "wrong"
+    lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+    raise OSError(lines[0] if lines else f"sudo refused (exit {result.returncode})")
+
+
 def elevated_output(command: Sequence[str]) -> tuple[int, str]:
     """Like `elevated`, also returning what the command printed.
 
-    sudo asks for the password on the terminal itself, so capturing the
-    command's output does not hide the prompt.  Windows has no capture here.
+    With a password_asker, sudo never writes to the terminal: the password,
+    when one is needed, is asked for by the tool and given to sudo through a
+    pipe for this one command.  Without one, sudo asks on the terminal itself
+    and the output module is told, so its question is counted on screen.
+    Windows has no capture here.
     """
     if IS_WINDOWS:
         return elevated(command), ""
-    output.before_input("administrator rights requested: " + " ".join(command))
+    output.log_only("administrator rights requested: " + " ".join(command))
+    asks = sudo_will_ask()
+    if password_asker is not None:
+        password = password_asker() if asks else None
+        sudo = (["sudo", "-S", "-p", ""] if password is not None else ["sudo", "-n"])
+        try:
+            result = subprocess.run([*sudo, *command], input=(password + "\n") if password is not None else None,
+                                    stdin=None if password is not None else subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        except OSError:
+            return 127, ""
+        finally:
+            password = None
+        if result.stdout:
+            output.detail(result.stdout.rstrip("\n"))
+        return result.returncode, result.stdout
+    if asks:
+        output.before_input(SUDO_PROMPT.replace("%u", getpass.getuser()))
     try:
-        result = subprocess.run(["sudo", *command], stdout=subprocess.PIPE,
+        result = subprocess.run(["sudo", "-p", SUDO_PROMPT, *command], stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True)
     except OSError:
         return 127, ""
     finally:
-        output.after_input()
+        if asks:
+            output.after_input()
     if result.stdout:
         output.detail(result.stdout.rstrip("\n"))
     return result.returncode, result.stdout

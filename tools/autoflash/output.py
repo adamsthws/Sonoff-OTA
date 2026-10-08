@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import codecs
 import collections
+import contextlib
 import datetime
 import os
 import platform
@@ -57,6 +58,7 @@ class _State:
     live = 0                          # characters of an unfinished line on screen
     live_is_stage = False
     paused = False                    # waiting for the keyboard: draw nothing
+    held = False                      # between questions that belong together: no clock
     ticker: threading.Thread | None = None
     tool_tail: collections.deque = collections.deque(maxlen=40)  # the last helper's last lines
     stop_ticker = threading.Event()
@@ -253,6 +255,20 @@ def transient_end() -> None:
 # ------------------------------------------------------------------- stages
 
 
+@contextlib.contextmanager
+def hold():
+    """No stage clock drawn meanwhile: a question, the wait while its answer is
+    checked, and the question again.  The clock would land between them, on a
+    row the block does not count."""
+    with _lock:
+        before, _s.held = _s.held, True
+    try:
+        yield
+    finally:
+        with _lock:
+            _s.held = before
+
+
 def set_stage_width(width: int) -> None:
     """The longest stage name in the run, so every stage line's status lines up."""
     _s.name_width = width
@@ -348,7 +364,7 @@ def progress_keep() -> None:
 def tick() -> None:
     """Redraw the stage line so its clock moves during a long wait."""
     with _lock:
-        if _s.concise and _s.stage is not None and not _s.paused and sys.stdout.isatty():
+        if _s.concise and _s.stage is not None and not _s.paused and not _s.held and sys.stdout.isatty():
             _draw_stage()
 
 
@@ -434,7 +450,7 @@ def _elapsed(seconds: float) -> str:
 def _tick_forever() -> None:
     while not _s.stop_ticker.wait(1.0):
         with _lock:
-            if _s.concise and _s.stage is not None and not _s.paused:
+            if _s.concise and _s.stage is not None and not _s.paused and not _s.held:
                 _draw_stage()
 
 

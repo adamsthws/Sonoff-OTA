@@ -10,6 +10,7 @@ Rules this module enforces so individual steps do not have to:
 from __future__ import annotations
 
 import codecs
+import contextlib
 import getpass
 import ipaddress
 import os
@@ -141,6 +142,45 @@ def ask_secret(prompt: str, reveal_seconds: float = 1.0) -> str:
     if value.strip().lower() in QUIT_WORDS:
         raise QuitRun("stopped at a password prompt")
     return value
+
+
+# A wrong password more often than this, and some systems lock the account
+# for a while; sudo itself stops after three.
+ADMIN_PASSWORD_TRIES = 3
+
+
+def ask_admin_password() -> str:
+    """This computer's password, asked here and checked by sudo
+    (hostsys.password_asker).  q quits; three wrong ones give up."""
+    with output.hold():
+        for attempt in range(ADMIN_PASSWORD_TRIES):
+            password = ask_secret("This computer's password (for sudo): ")
+            with _echo_off():  # sudo takes a moment over a wrong one; typing ahead waits unseen
+                accepted = hostsys.check_sudo_password(password) is None
+            if accepted:
+                return password
+            if attempt + 1 < ADMIN_PASSWORD_TRIES:
+                output.show(f"{BULLET}That password was not accepted - try again.")
+    raise OSError(f"this computer's password was not accepted {ADMIN_PASSWORD_TRIES} times")
+
+
+@contextlib.contextmanager
+def _echo_off():
+    """The terminal shows nothing typed meanwhile; it is kept for the next read."""
+    if hostsys.IS_WINDOWS or not sys.stdin.isatty():
+        yield
+        return
+    import termios
+
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+    quiet = list(saved)
+    quiet[3] &= ~termios.ECHO
+    termios.tcsetattr(fd, termios.TCSANOW, quiet)
+    try:
+        yield
+    finally:
+        termios.tcsetattr(fd, termios.TCSANOW, saved)
 
 
 def _secret_field_below(prompt: str) -> bool:
