@@ -107,6 +107,10 @@ PHASE_PORTS = (8089, *range(8100, 8110))
 SETTINGS_PATH = ROOT / "captures" / "settings.json"
 # Where people share how their conversion went: the pinned "Test reports" thread.
 REPORTS_URL = "https://github.com/adamsthws/Sonoff-OTA/discussions/1"
+# Where people ask for help: a discussion or issue of their own, so the
+# reports thread stays a record of runs.
+DISCUSSIONS_URL = "https://github.com/adamsthws/Sonoff-OTA/discussions/new/choose"
+ISSUES_URL = "https://github.com/adamsthws/Sonoff-OTA/issues/new"
 # Shown once a conversion has succeeded, after the report.
 DONATE_URL = "https://www.paypal.com/biz/profile/adamsthws"
 TASMOTA_AP_PREFIX = "tasmota-"
@@ -2326,8 +2330,9 @@ def run_steps(ctx: Context) -> int:
             tell("    python3 tools/s60_autoflash.py run")
             if output.log_path():
                 tell(f"What happened, in full: {display_path(output.log_path())}")
-            tell("Stuck? Ask in the Test reports thread:")
-            output.show_link(REPORTS_URL)
+            tell("Stuck? Start a discussion or open an issue:")
+            output.show_link(DISCUSSIONS_URL)
+            output.show_link(ISSUES_URL)
             return code
     say("")
     close_firewall_rules(ctx)

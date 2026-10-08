@@ -145,9 +145,11 @@ Please include:
   button, LED and power readings behave;
 - **if it stopped:** the on-screen messages around where it stopped.
 
-If something clearly needs fixing in the code, an
-[issue](https://github.com/adamsthws/Sonoff-OTA/issues) is welcome too - link
-it from your report so the thread stays complete.
+The thread is for reports, not for asking for help. If you are stuck, start a
+[discussion](https://github.com/adamsthws/Sonoff-OTA/discussions/new/choose)
+of your own, or open an [issue](https://github.com/adamsthws/Sonoff-OTA/issues)
+if something clearly needs fixing in the code - and link it from your report
+so the thread stays complete.
 
 The run's log, `captures/<run>/run.log`, has the full detail if you are asked
 for it. It is safe to share: your eWeLink email, Wi-Fi name and password, the

@@ -44,7 +44,10 @@ Windows and macOS have not been through a real conversion yet, so a problem
 there may be new. Please post it in the
 [Test reports](https://github.com/adamsthws/Sonoff-OTA/discussions/1) thread - see
 [Reporting how it went](../README.md#reporting-how-it-went) - and the fix
-will help everyone after you.
+will help everyone after you. To ask for help, start a
+[discussion](https://github.com/adamsthws/Sonoff-OTA/discussions/new/choose)
+of your own or open an [issue](https://github.com/adamsthws/Sonoff-OTA/issues)
+rather than asking in the thread.
 
 On Linux, blocked connections show in the kernel log:
 
