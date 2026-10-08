@@ -104,6 +104,8 @@ PHASE_PORTS = (8089, *range(8100, 8110))
 SETTINGS_PATH = ROOT / "captures" / "settings.json"
 # Where people share how their conversion went: the pinned "Test reports" thread.
 REPORTS_URL = "https://github.com/adamsthws/Sonoff-OTA/discussions/1"
+# Shown once a conversion has succeeded, after the report.
+DONATE_URL = "https://www.paypal.com/biz/profile/adamsthws"
 TASMOTA_AP_PREFIX = "tasmota-"
 
 
@@ -2197,6 +2199,10 @@ def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     if any(value == "__" for _, value in fields):
         tell("")
         tell("Fill in the blanks (__) if you know them.")
+    tell("")
+    tell("And finally, you've reached the bit where I hold out my hat.")
+    tell("Free software, not free biscuits... Throw a dev a biscuit:")
+    output.show_link(DONATE_URL)
     tell("")
 
 

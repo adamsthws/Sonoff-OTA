@@ -424,6 +424,8 @@ class ReportTests(OutputTestCase):
         self.assertIn(af.REPORTS_URL, screen)
         self.assertIn("adamsthws/Sonoff-OTA/discussions", af.REPORTS_URL)
         self.assertIn("Please share how it went", screen)
+        self.assertIn("Throw a dev a biscuit:", screen)
+        self.assertGreater(screen.index(af.DONATE_URL), screen.index("Plug model"))  # after the report
         self.assertNotIn("**", screen)                       # the terminal shows no Markdown
         self.assertRegex(screen, r"Plug model: +S60TPG")
         self.assertIn("**Plug model:** S60TPG", copied[0])   # the thread gets bold labels
