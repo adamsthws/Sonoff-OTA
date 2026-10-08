@@ -2017,11 +2017,25 @@ def run_steps(ctx: Context) -> int:
     say("")
     close_firewall_rules(ctx)
     tell("")
-    tell("Conversion complete. The plug is running official Tasmota.")
-    if output.log_path():
-        tell(f"The full log is in {display_path(output.log_path())}.")
+    tell("Conversion complete.")
+    tell("The plug is running official Tasmota:")
+    url = plug_page_url(ctx.state.input("plug_ip"))
+    if url:
+        output.show_link(url)
     invite_report(ctx, time.monotonic() - started, resumed)
     return 0
+
+
+def plug_page_url(plug_ip: str | None) -> str | None:
+    """The address to open the converted plug's Tasmota page at.
+
+    Inside the emulator (tools/emulator) the plug's address only exists in its
+    container; the emulator says where your browser reaches it instead.
+    """
+    emulated = os.environ.get("S60_EMULATOR_URL")
+    if emulated:
+        return emulated
+    return f"http://{plug_ip}/" if plug_ip else None
 
 
 def computer_description() -> str:
@@ -2043,13 +2057,15 @@ def computer_description() -> str:
 REGIONS = {"G": "UK (Type G)", "F": "Europe (Type E/F)"}
 
 
-def report_fields(ctx: Context, seconds: float, resumed: bool) -> list[tuple[str, str]]:
+def report_fields(ctx: Context, seconds: float, resumed: bool,
+                  hardware: dict[str, str] | None = None) -> list[tuple[str, str]]:
     """This run's answers for a Test reports post, as (label, value) - nothing private.
 
     No addresses, Wi-Fi name, account or device id: only what is useful to
-    someone deciding whether the tool will work for them.  "__" marks what
-    only the person can add.
+    someone deciding whether the tool will work for them.  `hardware` is what
+    check_hardware() measured.  "__" marks what the run could not tell.
     """
+    hardware = hardware or {}
     product = str(ctx.state.input("product_model") or "").strip().upper()
     model = product if S60_PRODUCT.fullmatch(product) else ""
     captures = ctx.state.data.get("captures", {})
@@ -2068,8 +2084,9 @@ def report_fields(ctx: Context, seconds: float, resumed: bool) -> list[tuple[str
         ("Typed the Wi-Fi", "yes" if ctx.state.input("wifi_typed") else "no"),
         ("Joined setup network", "yes" if joined else "no"),
         ("Name in Tasmota", json.loads(s60_template(product))["NAME"]),
-        ("Relay/button/LED/power OK", "__"),
-        ("System prompts", "__"),
+        ("Relay", hardware.get("Relay", "not checked")),
+        ("Mains voltage", hardware.get("Mains voltage", "not checked")),
+        ("Power meter", hardware.get("Power meter", "not checked")),
     ]
 
 
@@ -2081,27 +2098,106 @@ def report_markdown(fields: list[tuple[str, str]]) -> str:
 def report_screen(fields: list[tuple[str, str]]) -> list[str]:
     """For the terminal, which shows Markdown as typed: plain labels, lined up."""
     width = max(len(label) for label, _ in fields) + 1
-    return [f"  {label + ':':<{width}} {value}" for label, value in fields]
+    return [f"    {label + ':':<{width}} {value}" for label, value in fields]
+
+
+# Long enough for the CSE7766 and Tasmota's energy driver to report a new reading.
+METER_SETTLE = 4.0
+MAINS_VOLTS, DEAD_VOLTS = 90.0, 20.0     # clearly live / clearly switched off
+LOAD_WATTS, IDLE_WATTS = 1.0, 0.5
+
+
+def describe_hardware(switched: bool, restored: bool,
+                      on: dict[str, Any] | None, off: dict[str, Any] | None) -> dict[str, str]:
+    """The report's Relay, Mains voltage and Power meter lines, from the relay's
+    replies and the meter read with it on and with it off.
+
+    The relay answering both commands proves the firmware drives it; a reading
+    that drops when it is off - the voltage, where the meter is on the switched
+    side, or the power of whatever is plugged in - proves it really switches.
+    """
+    def number(reading: dict[str, Any] | None, key: str) -> float | None:
+        value = (reading or {}).get(key)
+        return float(value) if isinstance(value, (int, float)) else None
+
+    def reading(values: dict[str, Any] | None) -> str:
+        volts, watts = number(values, "Voltage"), number(values, "Power")
+        if volts is None and watts is None:
+            return "no reading"
+        return ", ".join(part for part in (
+            f"{volts:g} V" if volts is not None else "",
+            f"{watts:g} W" if watts is not None else "") if part)
+
+    v_on, v_off = number(on, "Voltage"), number(off, "Voltage")
+    p_on, p_off = number(on, "Power"), number(off, "Power")
+    seen = ((v_on is not None and v_off is not None and v_on >= MAINS_VOLTS and v_off < DEAD_VOLTS)
+            or (p_on is not None and p_off is not None and p_on >= LOAD_WATTS and p_off < IDLE_WATTS))
+    if not (switched and restored):
+        relay = "did not switch on command"
+    elif seen:
+        relay = "switches (seen on the meter)"
+    else:
+        relay = "switches on command (no change on the meter)"
+    return {
+        "Relay": relay,
+        "Mains voltage": f"{v_on:g} V" if v_on is not None else "no reading",
+        "Power meter": "no readings" if on is None and off is None
+                       else f"on: {reading(on)}; off: {reading(off)}",
+    }
+
+
+def check_hardware(ctx: Context) -> dict[str, str]:
+    """Switch the relay to the other state and back - two switches - reading the
+    meter after each, so one reading is with it on and one with it off.
+
+    Whatever is plugged into the plug is switched for a few seconds, without
+    asking: the run has just finished, and the plug ends as it started.
+    """
+    device = ctx.device
+
+    def switch(on: bool) -> bool:
+        reply = device.command(f"Power {'ON' if on else 'OFF'}")
+        return isinstance(reply, dict) and str(reply.get("POWER", "")).upper() == ("ON" if on else "OFF")
+
+    def meter() -> dict[str, Any] | None:
+        time.sleep(METER_SETTLE)
+        status = device.command("Status 10")
+        energy = status.get("StatusSNS", {}).get("ENERGY") if isinstance(status, dict) else None
+        return energy if isinstance(energy, dict) else None
+
+    say("Checking the relay and power meter...")
+    try:
+        before = device.command("Power")
+        was_on = isinstance(before, dict) and str(before.get("POWER", "")).upper() == "ON"
+        switched = switch(not was_on)
+        first = meter()
+        restored = switch(was_on)
+        second = meter()
+    except (DeviceError, OSError, ValueError) as exc:
+        say(f"    The plug did not answer the check: {exc}")
+        return {key: "could not be checked" for key in ("Relay", "Mains voltage", "Power meter")}
+    on, off = (second, first) if was_on else (first, second)
+    result = describe_hardware(switched, restored, on, off)
+    for label, value in result.items():
+        say(f"    {label}: {value}")
+    return result
 
 
 def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     """Ask for a report, with this run's details ready to paste."""
-    fields = report_fields(ctx, seconds, resumed)
+    fields = report_fields(ctx, seconds, resumed, check_hardware(ctx))
     copied = hostsys.copy_to_clipboard(report_markdown(fields))
     tell("")
-    tell("Please share how it went - it takes a minute, and it is how the next")
-    tell("person finds out this works for a plug and a computer like yours.")
-    tell("Post it in the Test reports thread:")
+    tell("Please share how it went!")
+    tell("Copy/paste your results below into the Test-Reports discussion thread:")
     output.show_link(REPORTS_URL)
     tell("")
-    tell("These details from this run are " + ("copied - just paste them:" if copied
-                                                 else "ready to copy from here:"))
     for line in report_screen(fields):
         tell(line)
+    if any(value == "__" for _, value in fields):
+        tell("")
+        tell("Fill in the blanks (__) if you know them.")
     tell("")
-    tell("Fill in the blanks (__): whether the relay, button, LED and power readings")
-    tell("behave, and any prompts your computer showed and what you chose. Nothing")
-    tell("above is private.")
 
 
 def display_path(path: Path) -> str:

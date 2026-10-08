@@ -377,6 +377,24 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Joined setup network"], "no")
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60TPG")
 
+    def test_hardware_that_was_not_checked_says_so(self):
+        import tools.s60_autoflash as af
+        fields = dict(af.report_fields(self.ctx(), 441, False))
+        self.assertEqual(fields["Relay"], "not checked")
+        self.assertEqual(fields["Mains voltage"], "not checked")
+        self.assertEqual(fields["Power meter"], "not checked")
+        self.assertNotIn("System prompts", fields)
+        self.assertNotIn("__", fields.values())
+
+    def test_the_plug_page_is_the_plug_or_the_emulators_forward(self):
+        import tools.s60_autoflash as af
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("S60_EMULATOR_URL", None)
+            self.assertEqual(af.plug_page_url("192.168.0.50"), "http://192.168.0.50/")
+            self.assertIsNone(af.plug_page_url(None))
+        with mock.patch.dict(os.environ, {"S60_EMULATOR_URL": "http://localhost:8080"}):
+            self.assertEqual(af.plug_page_url("192.168.60.50"), "http://localhost:8080")
+
     def test_the_report_holds_nothing_private(self):
         import tools.s60_autoflash as af
         report = af.report_markdown(af.report_fields(self.ctx(), 441, False))
@@ -399,15 +417,17 @@ class ReportTests(OutputTestCase):
         copied = []
 
         def body():
-            with mock.patch.object(af.hostsys, "copy_to_clipboard", side_effect=lambda text: copied.append(text) or True):
+            with mock.patch.object(af.hostsys, "copy_to_clipboard", side_effect=lambda text: copied.append(text) or True), \
+                 mock.patch.object(af, "check_hardware", return_value={"Relay": "switches (seen on the meter)"}):
                 af.invite_report(self.ctx(), 441, False)
         screen, _ = self.run_with(io.StringIO(), False, body)
         self.assertIn(af.REPORTS_URL, screen)
         self.assertIn("adamsthws/Sonoff-OTA/discussions", af.REPORTS_URL)
-        self.assertIn("copied - just paste them", screen)
+        self.assertIn("Please share how it went", screen)
         self.assertNotIn("**", screen)                       # the terminal shows no Markdown
         self.assertRegex(screen, r"Plug model: +S60TPG")
         self.assertIn("**Plug model:** S60TPG", copied[0])   # the thread gets bold labels
+        self.assertIn("**Relay:** switches (seen on the meter)", copied[0])
 
 
 
