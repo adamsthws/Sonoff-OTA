@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.parse
@@ -33,6 +34,13 @@ API = {
     "us": "https://us-apia.coolkit.cc",
     "eu": "https://eu-apia.coolkit.cc",
 }
+
+
+# A certificate this computer does not trust, from a site that has a good one:
+# almost always something in between reading encrypted connections.
+INSPECTED = ("{what} certificate was not trusted - security software, or a work or "
+             "school network, that inspects encrypted connections does this. Try another "
+             "network, or pause that software while you convert the plug")
 
 
 class EwelinkError(RuntimeError):
@@ -62,6 +70,8 @@ def api_json(url: str, *, body: bytes | None = None, headers: dict[str, str] | N
     except urllib.error.HTTPError as exc:
         raise EwelinkError(f"eWeLink HTTP error {exc.code}") from None
     except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ssl.SSLCertVerificationError):
+            raise EwelinkError(INSPECTED.format(what="eWeLink's")) from None
         raise EwelinkError(f"eWeLink connection failed: {exc.reason}") from None
     except json.JSONDecodeError:
         raise EwelinkError("eWeLink returned a non-JSON response") from None

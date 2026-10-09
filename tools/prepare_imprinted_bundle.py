@@ -24,6 +24,7 @@ import datetime as dt
 import json
 import os
 import shutil
+import ssl
 import sys
 import tempfile
 import time
@@ -35,6 +36,7 @@ try:
     from tools.autoflash import output
     from tools.autoflash.prompts import QuitRun, ask_secret, ask_text
     from tools.prepare_safeboot_migration import artifact_record, obtain
+    from tools.get_device_key import INSPECTED
     from tools.safeboot_migration import (
         APP0_OFFSET,
         APP0_SIZE,
@@ -69,6 +71,7 @@ except ModuleNotFoundError:  # running from inside tools/
     from autoflash import output
     from autoflash.prompts import QuitRun, ask_secret, ask_text
     from prepare_safeboot_migration import artifact_record, obtain
+    from get_device_key import INSPECTED
     from safeboot_migration import (
         APP0_OFFSET,
         APP0_SIZE,
@@ -182,6 +185,9 @@ def build_bundle(
         safeboot_bytes = obtain(safeboot, OFFICIAL_URLS["safeboot"], safeboot_path)
         app_bytes = obtain(app, OFFICIAL_URLS["app"], app_path)
     except OSError as exc:
+        if isinstance(getattr(exc, "reason", None), ssl.SSLCertVerificationError):
+            raise BundleError("could not download the official release files: "
+                              + INSPECTED.format(what="GitHub's")) from exc
         raise BundleError(f"could not download the official release files: {exc}") from exc
 
     try:

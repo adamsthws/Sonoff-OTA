@@ -43,6 +43,18 @@ class DeviceKeyTests(unittest.TestCase):
         with self.assertRaises(EwelinkError):
             select_device(devices, "two")
 
+    def test_an_inspected_connection_is_named(self):
+        import ssl
+        import urllib.error
+        from unittest import mock
+
+        from tools import get_device_key
+        failure = urllib.error.URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+        with mock.patch.object(get_device_key.urllib.request, "urlopen", side_effect=failure):
+            with self.assertRaises(EwelinkError) as caught:
+                get_device_key.api_json("https://eu-apia.coolkit.cc/v2/user/login")
+        self.assertIn("inspects encrypted connections", str(caught.exception))
+
     def test_secret_file_permissions(self):
         device = {"deviceid": "abc", "devicekey": "secret", "name": "test", "extra": {"uiid": 5}}
         with tempfile.TemporaryDirectory() as directory:
