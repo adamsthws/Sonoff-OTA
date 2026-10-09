@@ -15,6 +15,7 @@ import concurrent.futures
 import getpass
 import hashlib
 import ipaddress
+import json
 import os
 import platform
 import re
@@ -43,13 +44,41 @@ def system_name() -> str:
     return {"Darwin": "macOS"}.get(SYSTEM, SYSTEM)
 
 
+# What the system's own tools print is read whatever language the computer is
+# in. Windows' console tools (netsh, ipconfig, arp) print in the console's OEM
+# code page, not the ANSI one Python would assume - an umlaut in a German
+# netsh's output was not even decodable - and anything that still does not
+# decode is replaced, never fatal. Elsewhere the tools whose words are read
+# (sudo, ufw) are asked for them in English.
+COMMAND_ENCODING = "oem" if IS_WINDOWS else None
+COMMAND_ENV = None if IS_WINDOWS or IS_MAC else {**os.environ, "LC_ALL": "C.UTF-8", "LANGUAGE": ""}
+
+
 def _run(command: Sequence[str], timeout: float = 15.0) -> subprocess.CompletedProcess | None:
     try:
         return subprocess.run(
-            list(command), capture_output=True, text=True, timeout=timeout, check=False
+            list(command), capture_output=True, text=True, timeout=timeout, check=False,
+            encoding=COMMAND_ENCODING, errors="replace", env=COMMAND_ENV,
         )
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def powershell(script: str, timeout: float = 60.0) -> subprocess.CompletedProcess | None:
+    """Run a PowerShell script: its cmdlets report objects, not translated text."""
+    return _run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                 "-EncodedCommand", _encoded(script)], timeout=timeout)
+
+
+def _encoded(script: str) -> str:
+    """A script for -EncodedCommand: no quoting to get wrong on its way there."""
+    import base64
+    return base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+
+
+def _ps_string(value: str) -> str:
+    """`value` as a PowerShell single-quoted string."""
+    return "'" + value.replace("'", "''") + "'"
 
 
 def normalise_mac(text: str) -> str:
@@ -341,7 +370,8 @@ def elevated(command: Sequence[str]) -> int:
         )
         try:
             result = subprocess.run(["powershell", "-NoProfile", "-Command", script],
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                    encoding=COMMAND_ENCODING, errors="replace")
         except OSError:
             return 127
         if result.stdout.strip():
@@ -380,8 +410,10 @@ def check_sudo_password(password: str) -> str | None:
     password goes through a pipe, never a command line, and is not kept.
     """
     try:
+        # In English (COMMAND_ENV): its words are read just below.
         result = subprocess.run(["sudo", "-S", "-v", "-p", ""], input=password + "\n",
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                errors="replace", env=COMMAND_ENV)
     except OSError as exc:
         raise OSError(f"sudo could not be run: {exc}") from None
     if result.returncode == 0:
@@ -412,7 +444,8 @@ def elevated_output(command: Sequence[str]) -> tuple[int, str]:
         try:
             result = subprocess.run([*sudo, *command], input=(password + "\n") if password is not None else None,
                                     stdin=None if password is not None else subprocess.DEVNULL,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                    errors="replace", env=COMMAND_ENV)
         except OSError:
             return 127, ""
         finally:
@@ -424,7 +457,7 @@ def elevated_output(command: Sequence[str]) -> tuple[int, str]:
         output.before_input(SUDO_PROMPT.replace("%u", getpass.getuser()))
     try:
         result = subprocess.run(["sudo", "-p", SUDO_PROMPT, *command], stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True)
+                                stderr=subprocess.STDOUT, text=True, errors="replace", env=COMMAND_ENV)
     except OSError:
         return 127, ""
     finally:
@@ -461,13 +494,159 @@ class FirewallRule:
         return cls(**data)
 
 
+# Windows' firewall as objects, not as netsh's translated text: whether each
+# profile is on and takes rules added on this computer (an organisation's
+# Group Policy can say no), which network is which profile, any other
+# firewall registered with Windows Security (absent on Windows Server), and
+# whether the computer is joined to an organisation's domain.
+WINDOWS_FIREWALL_STATE = r"""
+$ErrorActionPreference = 'SilentlyContinue'
+$profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore | ForEach-Object {
+    [ordered]@{ name = [string]$_.Name; enabled = ([string]$_.Enabled -eq 'True');
+                local_rules = ([string]$_.AllowLocalFirewallRules -ne 'False') } })
+$networks = @(Get-NetConnectionProfile | ForEach-Object {
+    [ordered]@{ interface = [string]$_.InterfaceAlias; category = [string]$_.NetworkCategory } })
+$others = @(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName FirewallProduct |
+    ForEach-Object { [string]$_.displayName })
+$domain = [bool](Get-CimInstance Win32_ComputerSystem).PartOfDomain
+[ordered]@{ profiles = $profiles; networks = $networks; others = $others; domain = $domain } |
+    ConvertTo-Json -Compress -Depth 4
+"""
+PROFILE_OF = {"Public": "Public", "Private": "Private", "DomainAuthenticated": "Domain"}
+
+
+def windows_firewall(plug_ip: str | None = None) -> dict[str, Any]:
+    """Windows' firewall, for the network the plug is on when `plug_ip` is given.
+
+    {"enabled", "local_rules", "others", "domain"}; when it cannot be read,
+    "enabled" is None - treated as on, as adding a rule then does no harm.
+    """
+    cached = _firewall_cache.get(plug_ip)
+    if cached and time.monotonic() - cached[0] < 60:
+        return cached[1]  # the query takes seconds, and a step asks more than once
+    state = _read_windows_firewall(plug_ip)
+    _firewall_cache[plug_ip] = (time.monotonic(), state)
+    return state
+
+
+_firewall_cache: dict[str | None, tuple[float, dict[str, Any]]] = {}
+
+
+def _read_windows_firewall(plug_ip: str | None) -> dict[str, Any]:
+    unknown = {"enabled": None, "local_rules": True, "others": [], "domain": False}
+    completed = powershell(WINDOWS_FIREWALL_STATE)
+    try:
+        state = json.loads(completed.stdout) if completed and completed.returncode == 0 else None
+    except ValueError:
+        state = None
+    if not isinstance(state, dict):
+        return unknown
+    profiles = [p for p in state.get("profiles") or [] if isinstance(p, dict)]
+    interface = interface_towards(plug_ip) if plug_ip else None
+    category = next((n.get("category") for n in state.get("networks") or []
+                     if isinstance(n, dict) and n.get("interface") == interface), None)
+    applying = [p for p in profiles if p.get("name") == PROFILE_OF.get(category)] or profiles
+    others = [str(name) for name in state.get("others") or []
+              if name and "windows" not in str(name).lower()]
+    return {
+        "enabled": any(p.get("enabled") for p in applying) if applying else None,
+        "local_rules": all(p.get("local_rules", True) for p in applying if p.get("enabled")),
+        "others": others,
+        "domain": bool(state.get("domain")),
+    }
+
+
+def python_program() -> str:
+    """The Python that listens for the plug, as Windows' firewall sees it.
+
+    The image of the running process - not sys.executable, which can be a
+    stand-in: a venv's python.exe only starts the base interpreter, and the
+    Microsoft Store's Python runs from a versioned folder behind an alias in
+    WindowsApps. The helper servers are started the same way, so they are
+    this same program.
+    """
+    if IS_WINDOWS:
+        try:
+            import ctypes
+            import ctypes.wintypes as wt
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.GetCurrentProcess.restype = wt.HANDLE
+            kernel32.QueryFullProcessImageNameW.argtypes = [wt.HANDLE, wt.DWORD, wt.LPWSTR,
+                                                            ctypes.POINTER(wt.DWORD)]
+            buffer = ctypes.create_unicode_buffer(32768)
+            size = wt.DWORD(len(buffer))
+            if kernel32.QueryFullProcessImageNameW(kernel32.GetCurrentProcess(), 0, buffer, ctypes.byref(size)):
+                return buffer.value
+        except (AttributeError, OSError):
+            pass
+    if IS_MAC:
+        # The same on a Mac: python.org's and Homebrew's bin/python3 starts the
+        # binary inside Python.framework's Python.app, and that is the program
+        # the macOS firewall is asked about.
+        try:
+            import ctypes
+            libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+            buffer = ctypes.create_string_buffer(4096)
+            if libproc.proc_pidpath(os.getpid(), buffer, ctypes.c_uint32(len(buffer))) > 0:
+                return buffer.value.decode()
+        except (AttributeError, OSError):
+            pass
+    return os.path.realpath(getattr(sys, "_base_executable", None) or sys.executable)
+
+
+def firewall_advice(plug_ip: str | None, ports: Sequence[int], *, after_failure: bool = False) -> list[str]:
+    """What else on this computer could keep the plug out, said plainly.
+
+    Before trying: other security software, and an organisation's policy that
+    ignores rules added on this computer. After a failure, also that the
+    computer is managed by an organisation at all.
+    """
+    if not IS_WINDOWS:
+        return []
+    state = windows_firewall(plug_ip)
+    lines: list[str] = []
+    if state["others"]:
+        lines += [
+            f"Security software besides Windows' own firewall is installed: {', '.join(state['others'])}.",
+            "It can block the plug even when Windows lets it in. If the plug cannot",
+            f"connect, allow incoming connections in it to Python ({python_program()})",
+            f"on TCP ports {_ports(ports)}, or pause it for the conversion.",
+        ]
+    if not state["local_rules"]:
+        lines += [
+            "This computer's firewall is managed by an organisation (Group Policy), set",
+            "to ignore rules added on the computer itself - so the plug cannot be let",
+            "in from here. Ask whoever manages it, or use another computer.",
+        ]
+    elif after_failure and state["domain"]:
+        lines += [
+            "This computer is managed by an organisation (it is joined to a domain), whose",
+            "policies may keep the plug out. If it still cannot connect, try another computer.",
+        ]
+    return lines
+
+
+def local_rules_ignored(plug_ip: str | None) -> bool:
+    """Whether an organisation's policy makes Windows ignore rules added here -
+    a certain failure, unlike the rest of firewall_advice."""
+    return IS_WINDOWS and not windows_firewall(plug_ip)["local_rules"]
+
+
+def security_software_note() -> list[str]:
+    """For when the plug does not answer at all: other security software can
+    drop its answers before Windows' own firewall sees them."""
+    others = windows_firewall()["others"] if IS_WINDOWS else []
+    if not others:
+        return []
+    return [f"Security software besides Windows' own firewall is installed: {', '.join(others)}.",
+            "If the plug is on and set up as above, it may be dropping the plug's",
+            "answers - pausing it while you convert the plug is the quickest test."]
+
+
 def active_firewall() -> str | None:
     """Which host firewall is filtering incoming connections, if one can be seen."""
     if IS_WINDOWS:
-        completed = _run(["netsh", "advfirewall", "show", "allprofiles", "state"])
-        if completed and re.search(r"State\s+ON", completed.stdout, re.I):
-            return "windows"
-        return None
+        return "windows" if windows_firewall()["enabled"] is not False else None
     if IS_MAC:
         tool = "/usr/libexec/ApplicationFirewall/socketfilterfw"
         completed = _run([tool, "--getglobalstate"]) if Path(tool).exists() else None
@@ -487,8 +666,14 @@ def _ports(ports: Sequence[int]) -> str:
     return ",".join(str(port) for port in ports)
 
 
-def firewall_commands(kind: str, plug_ip: str, ports: Sequence[int]) -> tuple[list[str], list[str]]:
-    """(add, remove) commands for one rule.  Pure, so it can be shown and tested."""
+def firewall_commands(kind: str, plug_ip: str, ports: Sequence[int],
+                      program: str | None = None) -> tuple[list[str], list[str]]:
+    """(add, remove) commands for one rule.  Pure, so it can be shown and tested.
+
+    On Windows the rule names `program` too: a rule for the program is what
+    stops Windows Security asking whether Python may use networks - where a
+    "Cancel" would block the plug whatever the rule says.
+    """
     if kind == "ufw":
         spec = ["from", plug_ip, "to", "any", "port", _ports(ports), "proto", "tcp"]
         return (["ufw", "allow", *spec, "comment", RULE_NAME], ["ufw", "delete", "allow", *spec])
@@ -503,27 +688,113 @@ def firewall_commands(kind: str, plug_ip: str, ports: Sequence[int]) -> tuple[li
         name = f"{RULE_NAME} {plug_ip}"
         return (
             ["netsh", "advfirewall", "firewall", "add", "rule", f"name={name}", "dir=in",
-             "action=allow", "protocol=TCP", f"localport={_ports(ports)}", f"remoteip={plug_ip}"],
+             "action=allow", *([f"program={program}"] if program else []),
+             "protocol=TCP", f"localport={_ports(ports)}", f"remoteip={plug_ip}"],
             ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={name}"],
         )
     if kind == "macos":
         tool = "/usr/libexec/ApplicationFirewall/socketfilterfw"
         # The macOS firewall allows programs, not ports.
-        return ([tool, "--add", sys.executable, "--unblockapp", sys.executable],
-                [tool, "--remove", sys.executable])
+        program = program or python_program()
+        return ([tool, "--add", program, "--unblockapp", program],
+                [tool, "--remove", program])
     raise ValueError(f"unknown firewall {kind!r}")
 
 
 def display(command: Sequence[str]) -> str:
-    prefix = "" if IS_WINDOWS else "sudo "
+    """A command to type: double quotes on Windows, for cmd and PowerShell alike."""
+    prefix, quote = ("", '"') if IS_WINDOWS else ("sudo ", "'")
     return prefix + " ".join(
-        part if re.fullmatch(r"[\w@%+=:,./-]+", part) else f"'{part}'" for part in command
+        part if re.fullmatch(r"[\w@%+=:,./\\-]+", part) else f"{quote}{part}{quote}" for part in command
     )
 
 
-def mac_app_already_allowed() -> bool:
+def undo_commands(rule: FirewallRule) -> list[str]:
+    """What to type to undo `rule` by hand, when the tool could not."""
+    program = rule.detail.get("program")
+    lines = [display(firewall_commands(rule.kind, rule.plug_ip, rule.ports, program)[1])]
+    # Block rules paused for the run: on again, in an administrator PowerShell.
+    lines += [f"Enable-NetFirewallRule -Name '{name}'" for name in rule.detail.get("paused", [])]
+    return lines
+
+
+# Elevated, in one prompt: pause this Python's inbound block rules - an earlier
+# "Cancel" in Windows Security leaves them, and a block beats any allow - and
+# add the tool's rule. The names of the paused rules come back in a file.
+WINDOWS_OPEN = r"""
+$ErrorActionPreference = 'Stop'
+$program = @PROGRAM@
+$paused = @()
+try {
+    $paused = @(Get-NetFirewallApplicationFilter -PolicyStore PersistentStore |
+        Where-Object { [Environment]::ExpandEnvironmentVariables($_.Program) -ieq $program } |
+        Get-NetFirewallRule | Where-Object {
+            [string]$_.Direction -eq 'Inbound' -and [string]$_.Action -eq 'Block' -and [string]$_.Enabled -eq 'True' })
+    $paused | Disable-NetFirewallRule
+    & netsh @ADD@ | Out-Null
+    if ($LASTEXITCODE) { throw "netsh failed (exit $LASTEXITCODE)" }
+    @{ paused = @($paused | ForEach-Object { [string]$_.Name }) } | ConvertTo-Json -Compress |
+        Set-Content -Encoding UTF8 -Path @RESULT@
+} catch {
+    $paused | Enable-NetFirewallRule -ErrorAction SilentlyContinue
+    exit 1
+}
+"""
+
+# Elevated, in one prompt: remove the tool's rule, and turn back on the block
+# rules it paused.
+WINDOWS_CLOSE = r"""
+$failed = $false
+& netsh @REMOVE@ | Out-Null
+if ($LASTEXITCODE) { $failed = $true }
+foreach ($name in @(@PAUSED@)) {
+    try { Enable-NetFirewallRule -Name $name -ErrorAction Stop } catch { $failed = $true }
+}
+if ($failed) { exit 1 }
+"""
+
+
+def _ps_arguments(arguments: Sequence[str]) -> str:
+    return " ".join(_ps_string(argument) for argument in arguments)
+
+
+def _elevated_powershell(script: str) -> int:
+    return elevated(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                     "-EncodedCommand", _encoded(script)])
+
+
+def _windows_open(plug_ip: str, ports: Sequence[int]) -> FirewallRule:
+    import tempfile
+    program = python_program()
+    add, _ = firewall_commands("windows", plug_ip, ports, program)
+    # In the checkout, not %TEMP%: the Microsoft Store's Python keeps what it
+    # writes under %LOCALAPPDATA% in a private copy the elevated script cannot see.
+    scratch = Path(__file__).resolve().parents[2] / "captures"
+    scratch.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".firewall-", dir=scratch) as directory:
+        result = Path(directory) / "result.json"
+        script = (WINDOWS_OPEN.replace("@PROGRAM@", _ps_string(program))
+                  .replace("@ADD@", _ps_arguments(add[1:]))
+                  .replace("@RESULT@", _ps_string(str(result))))
+        if _elevated_powershell(script) != 0:
+            raise OSError(f"could not add the firewall rule: {display(add)}")
+        try:
+            paused = json.loads(result.read_text(encoding="utf-8-sig")).get("paused") or []
+        except (OSError, ValueError):
+            paused = []
+    return FirewallRule("windows", plug_ip, list(ports), {"program": program, "paused": list(paused)})
+
+
+def _windows_close(rule: FirewallRule) -> bool:
+    _, remove = firewall_commands("windows", rule.plug_ip, rule.ports, rule.detail.get("program"))
+    paused = ", ".join(_ps_string(name) for name in rule.detail.get("paused", []))
+    script = WINDOWS_CLOSE.replace("@REMOVE@", _ps_arguments(remove[1:])).replace("@PAUSED@", paused)
+    return _elevated_powershell(script) == 0
+
+
+def mac_app_already_allowed(program: str) -> bool:
     completed = _run(["/usr/libexec/ApplicationFirewall/socketfilterfw", "--listapps"])
-    return bool(completed and sys.executable in completed.stdout)
+    return bool(completed and program in completed.stdout)
 
 
 def open_firewall(plug_ip: str, ports: Sequence[int]) -> FirewallRule | None:
@@ -531,22 +802,28 @@ def open_firewall(plug_ip: str, ports: Sequence[int]) -> FirewallRule | None:
     kind = active_firewall()
     if kind is None:
         return None
-    if kind == "macos" and mac_app_already_allowed():
-        return FirewallRule(kind, plug_ip, list(ports), {"preexisting": True})
-    add, _ = firewall_commands(kind, plug_ip, ports)
+    if kind == "windows":
+        return _windows_open(plug_ip, ports)
+    # The macOS firewall names the program; kept, so the same one is removed.
+    detail = {"program": python_program()} if kind == "macos" else {}
+    if kind == "macos" and mac_app_already_allowed(detail["program"]):
+        return FirewallRule(kind, plug_ip, list(ports), {**detail, "preexisting": True})
+    add, _ = firewall_commands(kind, plug_ip, ports, detail.get("program"))
     code, output = elevated_output(add)
     if code != 0:
         raise OSError(f"could not add the firewall rule: {display(add)}")
     if any(phrase in output.lower() for phrase in ALREADY_PRESENT):
-        return FirewallRule(kind, plug_ip, list(ports), {"preexisting": True})
-    return FirewallRule(kind, plug_ip, list(ports))
+        return FirewallRule(kind, plug_ip, list(ports), {**detail, "preexisting": True})
+    return FirewallRule(kind, plug_ip, list(ports), detail)
 
 
 def close_firewall(rule: FirewallRule) -> bool:
     """Remove exactly the rule that was added.  True when it is gone."""
     if rule.detail.get("preexisting"):
         return True  # it was allowed before this run; leave it as it was
-    _, remove = firewall_commands(rule.kind, rule.plug_ip, rule.ports)
+    if rule.kind == "windows":
+        return _windows_close(rule)
+    _, remove = firewall_commands(rule.kind, rule.plug_ip, rule.ports, rule.detail.get("program"))
     return elevated(remove) == 0
 
 

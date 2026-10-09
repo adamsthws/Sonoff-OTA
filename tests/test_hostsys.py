@@ -1,3 +1,5 @@
+import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -69,6 +71,123 @@ class FirewallCommandTests(unittest.TestCase):
             rule = hostsys.open_firewall("192.168.1.50", [8088])
             self.assertTrue(hostsys.close_firewall(rule))
         elevated.assert_called_once()
+
+
+class WindowsFirewallTests(unittest.TestCase):
+    """Windows' firewall read as objects, whatever language Windows is in."""
+
+    STATE = {
+        "profiles": [
+            {"name": "Domain", "enabled": True, "local_rules": True},
+            {"name": "Private", "enabled": True, "local_rules": True},
+            {"name": "Public", "enabled": True, "local_rules": False},
+        ],
+        "networks": [{"interface": "Wi-Fi", "category": "Private"}],
+        "others": ["Windows Defender Firewall", "Norton Security"],
+        "domain": True,
+    }
+
+    def read(self, state, interface="Wi-Fi"):
+        hostsys._firewall_cache.clear()
+        reply = mock.Mock(returncode=0, stdout=json.dumps(state))
+        with mock.patch.object(hostsys, "powershell", return_value=reply), \
+                mock.patch.object(hostsys, "interface_towards", return_value=interface):
+            return hostsys.windows_firewall("192.168.1.50")
+
+    def test_the_plugs_network_decides_which_profile_counts(self):
+        state = self.read(self.STATE)
+        self.assertTrue(state["enabled"])
+        self.assertTrue(state["local_rules"])          # Private takes local rules...
+        self.assertEqual(state["others"], ["Norton Security"])  # ...and Windows' own is not "other"
+        public = dict(self.STATE, networks=[{"interface": "Wi-Fi", "category": "Public"}])
+        self.assertFalse(self.read(public)["local_rules"])     # Public is set to ignore them
+
+    def test_an_unreadable_state_counts_as_on(self):
+        hostsys._firewall_cache.clear()
+        with mock.patch.object(hostsys, "powershell", return_value=None):
+            self.assertIsNone(hostsys.windows_firewall()["enabled"])
+            with mock.patch.object(hostsys, "IS_WINDOWS", True):
+                self.assertEqual(hostsys.active_firewall(), "windows")
+
+    def test_advice_names_what_the_tool_cannot_change(self):
+        public = dict(self.STATE, networks=[{"interface": "Wi-Fi", "category": "Public"}])
+        self.read(public)
+        with mock.patch.object(hostsys, "IS_WINDOWS", True), \
+                mock.patch.object(hostsys, "interface_towards", return_value="Wi-Fi"):
+            text = " ".join(hostsys.firewall_advice("192.168.1.50", [8088, 8089]))
+        self.assertIn("Norton Security", text)
+        self.assertIn("8088,8089", text)
+        self.assertIn("Group Policy", text)
+
+    def test_being_on_a_domain_is_only_said_after_a_failure(self):
+        self.read(self.STATE)
+        with mock.patch.object(hostsys, "IS_WINDOWS", True), \
+                mock.patch.object(hostsys, "interface_towards", return_value="Wi-Fi"):
+            before = " ".join(hostsys.firewall_advice("192.168.1.50", [8088]))
+            after = " ".join(hostsys.firewall_advice("192.168.1.50", [8088], after_failure=True))
+        self.assertNotIn("domain", before)
+        self.assertIn("domain", after)
+
+    def test_the_rule_names_python_so_windows_security_does_not_ask(self):
+        add, remove = hostsys.firewall_commands("windows", "192.168.1.50", [8088], r"C:\Program Files\Python\python.exe")
+        self.assertIn(r"program=C:\Program Files\Python\python.exe", add)
+        self.assertNotIn("program", " ".join(remove))  # removed by name
+
+    def test_paused_block_rules_are_put_back(self):
+        rule = hostsys.FirewallRule("windows", "192.168.1.50", [8088],
+                                    {"program": r"C:\Python\python.exe", "paused": ["{abc}"]})
+        with mock.patch.object(hostsys, "IS_WINDOWS", True):
+            undo = hostsys.undo_commands(rule)
+        self.assertEqual(undo[1], "Enable-NetFirewallRule -Name '{abc}'")
+        with mock.patch.object(hostsys, "_elevated_powershell", return_value=0) as ran:
+            self.assertTrue(hostsys.close_firewall(rule))
+        script = ran.call_args[0][0]
+        self.assertIn("'name=S60 autoflash 192.168.1.50'", script)
+        self.assertIn("@('{abc}')", script)
+
+    def test_windows_commands_are_shown_with_double_quotes(self):
+        with mock.patch.object(hostsys, "IS_WINDOWS", True):
+            shown = hostsys.display(["netsh", "name=S60 autoflash 1.2.3.4", r"program=C:\Python\python.exe"])
+        self.assertEqual(shown, r'netsh "name=S60 autoflash 1.2.3.4" program=C:\Python\python.exe')
+
+
+class MacFirewallTests(unittest.TestCase):
+    """The macOS firewall allows programs: the one that really listens."""
+
+    APP = "/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python"
+
+    def test_the_rule_names_the_running_program_and_removes_that_one(self):
+        with mock.patch.object(hostsys, "active_firewall", return_value="macos"), \
+                mock.patch.object(hostsys, "python_program", return_value=self.APP), \
+                mock.patch.object(hostsys, "mac_app_already_allowed", return_value=False), \
+                mock.patch.object(hostsys, "elevated_output", return_value=(0, "")) as added:
+            rule = hostsys.open_firewall("192.168.1.50", [8088])
+        self.assertEqual(added.call_args[0][0][1:], ["--add", self.APP, "--unblockapp", self.APP])
+        self.assertEqual(rule.detail["program"], self.APP)
+        # Removed by what was added, even if this Python would now say otherwise.
+        with mock.patch.object(hostsys, "python_program", return_value="/somewhere/else"), \
+                mock.patch.object(hostsys, "elevated", return_value=0) as removed:
+            self.assertTrue(hostsys.close_firewall(hostsys.FirewallRule.from_json(rule.to_json())))
+        self.assertEqual(removed.call_args[0][0][1:], ["--remove", self.APP])
+
+    def test_an_already_allowed_program_is_left_alone(self):
+        with mock.patch.object(hostsys, "active_firewall", return_value="macos"), \
+                mock.patch.object(hostsys, "python_program", return_value=self.APP), \
+                mock.patch.object(hostsys, "mac_app_already_allowed", return_value=True) as checked, \
+                mock.patch.object(hostsys, "elevated_output") as added:
+            rule = hostsys.open_firewall("192.168.1.50", [8088])
+        checked.assert_called_once_with(self.APP)
+        added.assert_not_called()
+        self.assertTrue(rule.detail["preexisting"])
+
+
+class CommandOutputTests(unittest.TestCase):
+    def test_output_that_does_not_decode_is_not_fatal(self):
+        # A German netsh's umlaut, say, in a code page Python did not expect.
+        completed = hostsys._run([sys.executable, "-c",
+                                  "import sys; sys.stdout.buffer.write(bytes(range(128, 256)))"])
+        self.assertIsNotNone(completed)
+        self.assertEqual(completed.returncode, 0)
 
 
 class WindowsElevationTests(unittest.TestCase):

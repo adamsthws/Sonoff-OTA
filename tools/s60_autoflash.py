@@ -331,8 +331,8 @@ def remove_run(directory: Path) -> bool:
         if left:
             output.transient_end()  # this has to stay on screen
         for rule in left:
-            tell("Remove it yourself: "
-                 + hostsys.display(hostsys.firewall_commands(rule.kind, rule.plug_ip, rule.ports)[1]))
+            for line in hostsys.undo_commands(rule):
+                tell("Remove it yourself: " + line)
     shutil.rmtree(directory)
     if read_current() == directory.name:
         CURRENT_POINTER.unlink(missing_ok=True)
@@ -685,19 +685,34 @@ def ensure_firewall(ctx: Context) -> None:
     rules = recorded_rules(ctx)
     if not plug_ip or any(r.plug_ip == plug_ip and set(ports) <= set(r.ports) for r in rules):
         return
+    # Other security software, or an organisation's policy: logged, and shown if
+    # the plug then cannot connect (firewall_hint) - except a policy that
+    # ignores rules added here, which is certain to stop it, so is shown now.
+    advice = hostsys.firewall_advice(plug_ip, ports)
+    for line in advice:
+        say(line)
+    if hostsys.local_rules_ignored(plug_ip):
+        section("This computer's firewall is managed by an organisation", [
+            "It is set (by Group Policy) to ignore rules added on the computer itself,",
+            "so the plug cannot be let in from here. Ask whoever manages it, or use",
+            "another computer. Carrying on - if the plug is blocked, the next step",
+            "stops and says so.",
+        ])
+        return
     kind = hostsys.active_firewall()
     if kind is None:
         return
-    add, _ = hostsys.firewall_commands(kind, plug_ip, ports)
+    program = hostsys.python_program() if kind in ("windows", "macos") else None
+    add, _ = hostsys.firewall_commands(kind, plug_ip, ports, program)
     prompt_note = [
         "Windows will ask whether to allow the change - choose Yes. This window",
         "does not need to be run as administrator; only this rule asks for it.",
-        "If Windows Security then asks whether Python may use networks, choose",
-        "Allow: cancelling can block the plug even with this rule in place.",
     ] if hostsys.IS_WINDOWS else ["You may be asked for this computer's password.",
                                   *emulator_password_hint()]
     what = ("lets Python accept incoming connections - the macOS firewall allows "
             "programs, not ports" if kind == "macos"
+            else f"allows only {plug_ip} in, to Python, on TCP ports {', '.join(map(str, ports))}"
+            if kind == "windows"
             else f"allows only {plug_ip} in, on TCP ports {', '.join(map(str, ports))}")
     output.transient_begin()  # the note, and the system's password question
     section("Let the plug through this computer's firewall", [
@@ -715,6 +730,11 @@ def ensure_firewall(ctx: Context) -> None:
             f"  {hostsys.display(add)}",
             "and remove it after the conversion. Carrying on - if the plug is still",
             "blocked, the next step stops and says so.",
+            *([
+                "",
+                "Adding it needs administrator rights. On a work computer you may not be",
+                "allowed them: then ask whoever manages it, or use another computer.",
+            ] if hostsys.IS_WINDOWS else []),
         ])
         return
     output.transient_end()
@@ -723,6 +743,10 @@ def ensure_firewall(ctx: Context) -> None:
         ctx.state.set_input("firewall_rules", [r.to_json() for r in rules])
         say("The rule was already there, so it is left in place afterwards."
             if rule.detail.get("preexisting") else "Firewall rule added.")
+        if rule.detail.get("paused"):
+            say("Python had been blocked from networks here, most likely by a \"Cancel\" in")
+            say("Windows Security once. That block is paused while this runs, and put back")
+            say("as it was afterwards.")
 
 
 def firewall_hint(ctx: Context) -> list[str]:
@@ -733,9 +757,14 @@ def firewall_hint(ctx: Context) -> list[str]:
         "computer's firewall, or this computer having changed address.",
     ]
     kind = hostsys.active_firewall()
+    ports = firewall_ports(ctx)
     if kind:
-        add, _ = hostsys.firewall_commands(kind, plug_ip, firewall_ports(ctx))
+        program = hostsys.python_program() if kind in ("windows", "macos") else None
+        add, _ = hostsys.firewall_commands(kind, plug_ip, ports, program)
         lines += ["", f"A {kind} firewall is on. This allows the plug in:", f"  {hostsys.display(add)}"]
+    advice = hostsys.firewall_advice(plug_ip if plug_ip != "PLUG_IP" else None, ports, after_failure=True)
+    if advice:
+        lines += ["", *advice]
     return lines
 
 
@@ -763,8 +792,7 @@ def close_firewall_rules(ctx: Context) -> None:
     output.transient_end()
     if left:
         section("Remove the temporary firewall rules yourself", [
-            hostsys.display(hostsys.firewall_commands(r.kind, r.plug_ip, r.ports)[1])
-            for r in left
+            line for r in left for line in hostsys.undo_commands(r)
         ])
     else:
         say("The temporary firewall rules have been removed.")
@@ -790,7 +818,8 @@ def release_firewall(ctx: Context) -> bool:
              + (" (stopped with Ctrl-C)." if isinstance(exc, KeyboardInterrupt) else f": {exc}."))
         tell("Remove it yourself with:")
         for rule in left:
-            tell("    " + hostsys.display(hostsys.firewall_commands(rule.kind, rule.plug_ip, rule.ports)[1]))
+            for line in hostsys.undo_commands(rule):
+                tell("    " + line)
         return False
 
 
@@ -1295,8 +1324,10 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
                 output.transient_end()
                 return str(ready[choice].ip)
             output.transient_begin()
+            note = hostsys.security_software_note()
             section("Your S60 did not answer on this network", [
-                f"- {why_not_found(sighting)}" for sighting in sightings
+                *(f"- {why_not_found(sighting)}" for sighting in sightings),
+                *([""] + note if note else []),
             ])
             choice = ask_choice("What now", [
                 "Look again",
@@ -1340,12 +1371,14 @@ def find_any_plug() -> str:
             # Taken off the screen once answered, so looking again does not
             # stack another copy under the stage line.
             output.transient_begin()
+            note = hostsys.security_software_note()
             section("No Sonoff plug answered on this network", [
                 "Check, in the eWeLink app:",
                 "- the S60 is added, on the same 2.4 GHz Wi-Fi network as this",
                 "  computer - the plug cannot use 5 GHz",
                 "- LAN Control is turned on in the plug's settings",
                 "- the plug is switched on at the wall",
+                *([""] + note if note else []),
             ])
             choice = ask_choice(
                 "What now",
@@ -1393,6 +1426,9 @@ def step_discover(ctx: Context) -> dict[str, Any]:
     # The same report the discovery tool writes, without its console output.
     report = discover(8.0, None, plug_ip)
     if not report["packets"]:
+        note = hostsys.security_software_note()
+        if note:
+            section("Something on this computer may be in the way", note)
         raise Abort(f"the plug at {plug_ip} did not answer the eWeLink discovery; check "
                     "it is switched on and LAN Control is on in the eWeLink app")
     mdns.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")

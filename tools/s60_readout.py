@@ -355,13 +355,20 @@ def run(args: argparse.Namespace) -> int:
     rule = None
     try:
         stage(4, f"Installing {name}")
+        if args.verbose or hostsys.local_rules_ignored(plug_ip):
+            for line in hostsys.firewall_advice(plug_ip, [port]):
+                print(line)
         if hostsys.active_firewall():
             print("Adding a temporary firewall rule so the plug can fetch the firmware;")
-            print("you may be asked for this computer's password.")
+            print("Windows will ask for permission - choose Yes." if hostsys.IS_WINDOWS
+                  else "you may be asked for this computer's password.")
             try:
                 rule = hostsys.open_firewall(plug_ip, [port])
             except OSError as exc:
                 print(f"Could not add it ({exc}); carrying on.")
+            if rule is not None and rule.detail.get("paused") and args.verbose:
+                print("Python had been blocked from networks here (a \"Cancel\" in Windows")
+                print("Security, most likely): paused while this runs, put back afterwards.")
         code = deliver(plug_ip, listen_ip, port, email, version, work, env, firmware, args.verbose)
         env.pop("EWELINK_PASSWORD", None)
         if code == 2:
@@ -406,7 +413,8 @@ def run(args: argparse.Namespace) -> int:
     finally:
         if rule is not None and not hostsys.close_firewall(rule):
             print("Remove the temporary firewall rule yourself:")
-            print("  " + hostsys.display(hostsys.firewall_commands(rule.kind, rule.plug_ip, rule.ports)[1]))
+            for line in hostsys.undo_commands(rule):
+                print("  " + line)
 
     stage(6, "Putting the plug back to stock")
     print("Switch the plug off at the wall, wait five seconds, and switch it on again.")

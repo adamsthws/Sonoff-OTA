@@ -31,14 +31,28 @@ security software, or rules managed some other way - or that the addition was
 declined. The message shows the command for the firewall it found. Nothing
 was written; run again once the plug can get through.
 
-On Windows, the tool's rule can be overridden by an earlier choice. The first
-time Python listens for the plug, Windows Security may ask whether Python may
-use networks; choosing Cancel there can add a rule that blocks Python, and
-Windows applies blocking rules before allowing ones. Open Windows Defender
-Firewall, then Advanced settings, then Inbound Rules, and look for a rule for
-Python whose action is Block. Delete it, or set it to Allow, and run again.
-Running the terminal as administrator does not help and is not needed: the
-tool asks for administrator rights itself, only for its firewall rule.
+On Windows the tool's rule names Python itself, so Windows Security does not
+ask whether Python may use networks. If it was asked once before and "Cancel"
+was chosen, that left a rule blocking Python - and Windows applies blocking
+rules before allowing ones. The tool finds such rules, turns them off while it
+runs, and turns them back on afterwards, all within the one permission
+question. Running the terminal as administrator does not help and is not
+needed: the tool asks for administrator rights itself, only for its firewall
+rule.
+
+What the tool cannot change, it says, before it starts and again if the plug
+cannot connect:
+
+- **Other security software** (Norton, McAfee, Bitdefender and the like)
+  often has a firewall of its own, which can block the plug whatever Windows'
+  firewall allows. Allow Python in there, or pause it for the conversion.
+- **A computer managed by an organisation** can have its firewall set, by
+  Group Policy, to ignore rules added on the computer itself. Ask whoever
+  manages it, or use another computer. A work computer may not allow
+  administrator rights at all, which the rule needs.
+- **A network or software that inspects encrypted connections** - common at
+  work or school - makes eWeLink's and GitHub's certificates untrusted. The
+  tool says so; use another network, or pause that software.
 
 Windows and macOS have not been through a real conversion yet, so a problem
 there may be new. Please post it in the
