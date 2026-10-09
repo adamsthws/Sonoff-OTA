@@ -15,12 +15,14 @@ import concurrent.futures
 import getpass
 import hashlib
 import ipaddress
+import os
 import platform
 import re
 import shutil
 import socket
 import subprocess
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -282,6 +284,24 @@ def copy_to_clipboard(text: str) -> bool:
 # -- files ----------------------------------------------------------------------
 
 
+def replace_file(source: Path, target: Path) -> None:
+    """os.replace, waiting out Windows' brief refusals.
+
+    A virus scanner or indexer opening a file - one just written, or just
+    renamed - makes Windows refuse to rename over it, or away from it, for a
+    moment.  Elsewhere a refusal means what it says, at once.
+    """
+    for attempt in range(50):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if not IS_WINDOWS or attempt == 49:
+                raise
+            time.sleep(0.1)
+
+
+
 def check_sha256sums(listing: Path) -> list[str]:
     """Verify a sha256sum-format file.  Returns the problems; empty means all good."""
     problems: list[str] = []
@@ -307,10 +327,17 @@ def elevated(command: Sequence[str]) -> int:
     """Run `command` with administrator rights, using the system's own prompt."""
     if IS_WINDOWS:
         program, *arguments = command
-        quoted = ",".join("'" + argument.replace("'", "''") + "'" for argument in arguments)
+        # One command line, quoted the Windows way: given a list, Start-Process
+        # joins it with spaces and no quotes, so "name=S60 autoflash 1.2.3.4"
+        # would reach netsh as three arguments.
+        line = subprocess.list2cmdline(arguments).replace("'", "''")
+        # A declined or cancelled prompt makes Start-Process fail, leaving no
+        # process - whose exit code would read as 0, success.
         script = (
-            f"$p = Start-Process -FilePath '{program}' -ArgumentList {quoted or chr(39) * 2} "
-            "-Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode"
+            f"try {{ $p = Start-Process -FilePath '{program}' "
+            + (f"-ArgumentList '{line}' " if line else "")
+            + "-Verb RunAs -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop } "
+            "catch { Write-Output $_.Exception.Message; exit 1223 }; exit $p.ExitCode"
         )
         try:
             result = subprocess.run(["powershell", "-NoProfile", "-Command", script],

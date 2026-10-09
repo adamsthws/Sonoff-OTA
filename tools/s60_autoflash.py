@@ -1473,7 +1473,7 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
     lock = ROOT / "RECOVERY_LOCK"
     moved = ROOT / "RECOVERY_LOCK.owner-authorized"
     started = time.monotonic()
-    lock.rename(moved)
+    hostsys.replace_file(lock, moved)
     try:
         code = run_tool(
             [sys.executable, "tools/serve_tasmota_ota.py",
@@ -1487,7 +1487,7 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
             env=env,
         )
     finally:
-        moved.rename(lock)
+        hostsys.replace_file(moved, lock)
         say("RECOVERY_LOCK restored")
     if code != 0:
         # The sender can fail after the plug already has everything - the cloud
@@ -1751,7 +1751,7 @@ def step_commit(ctx: Context) -> dict[str, Any]:
 
     lock = ROOT / "REPARTITION_LOCK"
     moved = ROOT / "REPARTITION_LOCK.owner-authorized"
-    lock.rename(moved)
+    hostsys.replace_file(lock, moved)
     try:
         code, _ = ctx.phase_runner().run(
             "commit",
@@ -1759,7 +1759,7 @@ def step_commit(ctx: Context) -> dict[str, Any]:
             confirm=gate,
         )
     finally:
-        moved.rename(lock)
+        hostsys.replace_file(moved, lock)
         say("REPARTITION_LOCK restored")
     if code != 0:
         raise Abort(f"commit did not pass (exit {code})")

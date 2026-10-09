@@ -43,7 +43,8 @@ class ScrubTests(PrivacyTestCase):
 
     def test_the_home_folder_is_shortened(self):
         path = str(Path.home() / "Git" / "repo" / "captures" / "run.log")
-        self.assertEqual(output.scrub(f"saved to {path}"), "saved to ~/Git/repo/captures/run.log")
+        expected = os.sep.join(["~", "Git", "repo", "captures", "run.log"])
+        self.assertEqual(output.scrub(f"saved to {path}"), f"saved to {expected}")
 
     def test_values_the_run_learns_are_replaced(self):
         output.private("Home & Garden 2G", "wifi-name")

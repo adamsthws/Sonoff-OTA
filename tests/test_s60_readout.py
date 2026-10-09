@@ -136,7 +136,7 @@ class ControlTests(unittest.TestCase):
         sums = (s60_readout.ROOT / "SHA256SUMS").read_text()
         for path, digest in s60_readout.CONTROL_FILES.values():
             s60_readout.check_control_file(s60_readout.ROOT / path, digest)
-            self.assertIn(f"{digest}  {path}", sums)
+            self.assertIn(f"{digest}  {Path(path).as_posix()}", sums)
 
     def test_the_default_control_is_what_the_conversion_sends(self):
         from tools import s60_autoflash

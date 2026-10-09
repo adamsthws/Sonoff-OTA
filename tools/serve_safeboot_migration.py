@@ -17,6 +17,7 @@ import json
 import os
 import re
 import secrets
+import socketserver
 import sys
 import time
 import urllib.parse
@@ -129,7 +130,16 @@ def atomic_write(path: Path, data: bytes) -> None:
     temporary = path.with_name(f".{path.name}.{secrets.token_hex(6)}.tmp")
     try:
         temporary.write_bytes(data)
-        os.replace(temporary, path)
+        # On Windows a virus scanner or indexer opening the file just written
+        # makes replacing it fail for a moment: wait that out, mid-phase.
+        for attempt in range(50):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                if sys.platform != "win32" or attempt == 49:
+                    raise
+                time.sleep(0.1)
     finally:
         try:
             temporary.unlink()
@@ -560,6 +570,13 @@ class MigrationServer(http.server.HTTPServer):
         self.device_ip = device_ip
         self.state = state
 
+    def server_bind(self) -> None:
+        # Not HTTPServer's own, which looks the address up by name between
+        # binding and listening: on Windows that takes seconds, and a plug
+        # connecting meanwhile is dropped and gives up.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
 
 def validate_lan_ipv4(value: str, option: str) -> str:
     try:
@@ -651,6 +668,15 @@ def main() -> int:
         print(f"REFUSING: {exc}", file=sys.stderr)
         return 2
 
+    # Listening before the loader is printed: whoever reads it - the
+    # autoflash tool, at once - may have the plug fetch straight away.
+    try:
+        server = MigrationServer((listen_ip, args.listen_port), device_ip, state)
+    except OSError as exc:
+        print(f"REFUSING: could not bind server: {exc}", file=sys.stderr)
+        return 2
+    server.timeout = 0.5
+
     print(f"Phase: {args.phase}")
     print(f"Manifest: {manifest_path}")
     print(f"Berry source: {len(rendered):,} bytes")
@@ -662,12 +688,6 @@ def main() -> int:
         print("\nLoading performs no writes. After it prints a loaded closure, arm separately with:")
         print(f'{function_name}("{state.arm_token}")')
 
-    try:
-        server = MigrationServer((listen_ip, args.listen_port), device_ip, state)
-    except OSError as exc:
-        print(f"REFUSING: could not bind server: {exc}", file=sys.stderr)
-        return 2
-    server.timeout = 0.5
     deadline = time.monotonic() + args.wait
     try:
         while not state.complete and time.monotonic() < deadline:

@@ -24,7 +24,9 @@ import datetime as dt
 import json
 import os
 import shutil
+import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -112,7 +114,16 @@ def private_write(path: Path, data: bytes) -> None:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        # On Windows a virus scanner or indexer opening the file just written
+        # makes replacing it fail for a moment: wait that out.
+        for attempt in range(50):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError:
+                if sys.platform != "win32" or attempt == 49:
+                    raise
+                time.sleep(0.1)
     finally:
         try:
             temporary.unlink()

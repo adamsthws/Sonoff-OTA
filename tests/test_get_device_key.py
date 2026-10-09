@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -47,7 +48,8 @@ class DeviceKeyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "key.json"
             write_secret(path, device)
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name == "posix":  # Windows has no permission bits: the profile's ACL keeps it private
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(json.loads(path.read_text())["devicekey"], "secret")
 
 

@@ -71,11 +71,36 @@ class FirewallCommandTests(unittest.TestCase):
         elevated.assert_called_once()
 
 
+class WindowsElevationTests(unittest.TestCase):
+    def test_an_argument_with_spaces_stays_one_argument(self):
+        add, _ = hostsys.firewall_commands("windows", "192.168.1.50", [8088, 8089])
+        with mock.patch.object(hostsys, "IS_WINDOWS", True), \
+                mock.patch.object(hostsys.subprocess, "run",
+                                  return_value=mock.Mock(returncode=0, stdout="")) as run:
+            self.assertEqual(hostsys.elevated(add), 0)
+        script = run.call_args[0][0][-1]
+        # Start-Process given a list joins it unquoted; one quoted line keeps the name whole.
+        self.assertIn("-ArgumentList 'advfirewall firewall add rule \"name=S60 autoflash 192.168.1.50\" "
+                      "dir=in action=allow", script)
+
+    @unittest.skipUnless(hostsys.IS_WINDOWS, "runs PowerShell")
+    def test_a_failed_start_is_not_success(self):
+        # What a cancelled elevation prompt does: Start-Process fails, no process.
+        real = hostsys.subprocess.run
+
+        def without_elevation(command, **kwargs):
+            return real([*command[:-1], command[-1].replace("-Verb RunAs ", "")], **kwargs)
+
+        with mock.patch.object(hostsys.subprocess, "run", side_effect=without_elevation):
+            self.assertNotEqual(hostsys.elevated(["no-such-program-s60.exe"]), 0)
+
+
 class SystemCommandTests(unittest.TestCase):
     def test_ping_flags_follow_the_system(self):
         for flag, system in (("IS_WINDOWS", ["-n", "1", "-w", "2000"]),
                              ("IS_MAC", ["-c", "1", "-t", "2"])):
-            with mock.patch.object(hostsys, flag, True):
+            with mock.patch.object(hostsys, "IS_WINDOWS", flag == "IS_WINDOWS"), \
+                    mock.patch.object(hostsys, "IS_MAC", flag == "IS_MAC"):
                 self.assertEqual(hostsys.ping_command("10.0.0.1", 2)[1:-1], system)
         with mock.patch.object(hostsys, "IS_WINDOWS", False), mock.patch.object(hostsys, "IS_MAC", False):
             self.assertEqual(hostsys.ping_command("10.0.0.1", 2)[1:-1], ["-c", "1", "-W", "2"])

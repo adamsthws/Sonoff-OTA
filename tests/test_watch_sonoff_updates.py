@@ -150,7 +150,9 @@ class SummaryTests(unittest.TestCase):
     def test_summary_counts_a_download(self):
         with tempfile.TemporaryDirectory() as tmp:
             recorder = Recorder(Path(tmp) / "run")
-            self.assertEqual(os.stat(recorder.directory).st_mode & 0o777, 0o700)
+            posix = os.name == "posix"  # Windows has no permission bits to check
+            if posix:
+                self.assertEqual(os.stat(recorder.directory).st_mode & 0o777, 0o700)
             with contextlib.redirect_stdout(io.StringIO()):
                 for event in parse(PacketParser("192.168.1.96", None)):
                     screen, notable = describe(event)
@@ -159,7 +161,8 @@ class SummaryTests(unittest.TestCase):
                 recorder.event("ota_offer", "offer", offer=[{"version": "1.2.1", "files": 2}])
             report = summarise(recorder, time.monotonic())
             recorder.close()
-            self.assertEqual(os.stat(recorder.directory / "events.jsonl").st_mode & 0o777, 0o600)
+            if posix:
+                self.assertEqual(os.stat(recorder.directory / "events.jsonl").st_mode & 0o777, 0o600)
         self.assertIn("Firmware downloads seen: 1", report)
         self.assertIn("Firmware versions reported: 1.2.0", report)
         self.assertIn("Update offers, in order: 1.2.1", report)

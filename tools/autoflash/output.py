@@ -299,6 +299,13 @@ def transient_end() -> None:
         rows, _s.transient_rows = _s.transient_rows, None
         if rows is None:
             return
+        if rows >= shutil.get_terminal_size((100, 24)).lines:
+            # Taller than the window (VS Code's terminal panel, say): the cursor
+            # cannot go up past the window's top, so erasing would leave the
+            # block's start and the stage line above it stranded. Keep it whole.
+            if _s.stage is not None and not _s.paused:
+                _draw_stage()
+            return
         if _s.live:
             sys.stdout.write("\r\x1b[K")  # a stage line redrawn after the answer
             _s.live = 0
@@ -366,7 +373,7 @@ def stage_end(outcome: str) -> None:
         line = f"{_s.stage} - {outcome}{timing}"
         _write_log(line)
         if _s.concise:
-            colour = {"complete": GREEN, "stopped": RED}.get(outcome)
+            colour = {"complete": GREEN, "already done": GREEN, "stopped": RED}.get(outcome)
             word = outcome.capitalize()
             plain = f"{_s.stage_screen} - {word}{timing}"
             text = plain if not colour else (
@@ -465,10 +472,10 @@ def stream(process: subprocess.Popen) -> int:
                 while "\n" in pending:
                     line, pending = pending.split("\n", 1)
                     # A child redrawing a progress line: keep only what it ended on.
-                    _keep(line.split("\r")[-1])
+                    _keep(_last_redraw(line))
         if pending.strip():
             with _lock:
-                _keep(pending.split("\r")[-1])
+                _keep(_last_redraw(pending))
 
     reader = threading.Thread(target=pump, daemon=True)
     reader.start()
@@ -487,6 +494,14 @@ def tool_problems(limit: int = 3) -> list[str]:
     lines = [line for line in _s.tool_tail if line.strip()]
     problems = [line for line in lines if PROBLEM_RE.search(line)]
     return [line.strip() for line in (problems or lines)[-limit:]]
+
+
+def _last_redraw(line: str) -> str:
+    """What a line redrawn with "\\r" ended on.  Its own line ending comes off
+    first: "\\r\\n" on Windows, which would otherwise leave nothing."""
+    if line.endswith("\r"):
+        line = line[:-1]
+    return line.split("\r")[-1]
 
 
 def _keep(line: str) -> None:

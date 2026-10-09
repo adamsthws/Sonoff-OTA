@@ -96,6 +96,23 @@ class ConciseTests(OutputTestCase):
         self.assertIn("Before going on", log)
         self.assertIn("-> proceed", log)
 
+    def test_a_question_taller_than_the_window_stays_whole(self):
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True), \
+                 mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 5))):
+                output.stage_begin(5, 14, "Installing the installer firmware")
+                output.transient_begin()          # the underway line: 1 row
+                prompts.warning_box("Before going on", ["One line."])  # 3 rows
+                output.before_input("Type PROCEED to go ahead: ")
+                output.answered("proceed")        # prompt and answer: 1 row - 5 in all
+                output.transient_end()
+                output.stage_end("complete")
+        screen, _ = self.run_with(FakeTerminal(), False, body)
+        # The cursor cannot reach the block's first row: erasing would strand it.
+        self.assertNotIn("\x1b[1F", screen)
+        self.assertIn("Before going on", screen)
+        self.assertIn("Installing the installer firmware - Complete", output.ANSI_RE.sub("", screen))
+
     def test_success_is_green_and_underway_is_bold(self):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True):
@@ -106,6 +123,15 @@ class ConciseTests(OutputTestCase):
         self.assertIn(f"{output.GREEN}Stage 1 of 1{output.RESET} - Checking the files - "
                       f"{output.GREEN}Complete{output.RESET} (0s)", screen)
         self.assertIn("Stage 1 of 1 - Checking the files - complete (0s)", log)
+
+    def test_a_stage_done_on_an_earlier_run_is_green_too(self):
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True):
+                output.stage_begin(1, 1, "Checking the files")
+                output.stage_end("already done")
+        screen, _ = self.run_with(FakeTerminal(), False, body)
+        self.assertIn(f"{output.GREEN}Stage 1 of 1{output.RESET} - Checking the files - "
+                      f"{output.GREEN}Already done{output.RESET}", screen)
 
     def test_without_cursor_control_the_question_stays(self):
         def body():
@@ -214,6 +240,16 @@ class StreamTests(OutputTestCase):
         screen, log = self.run_with(io.StringIO(), True, lambda: output.stream(self.child()))
         self.assertIn("Serving the firmware", screen)
         self.assertIn("| Done", log)
+
+    def test_windows_line_endings_keep_the_line(self):
+        # A child on Windows ends its lines "\r\n": the "\r" is not a redraw.
+        child = subprocess.Popen(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'Served 10 bytes\\r\\nDone\\r\\n')"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        _, log = self.run_with(io.StringIO(), False, lambda: output.stream(child))
+        self.assertIn("| Served 10 bytes", log)
+        self.assertIn("| Done", log)
+        self.assertEqual(output.tool_problems(), ["Served 10 bytes", "Done"])
 
 
 class InputTests(OutputTestCase):

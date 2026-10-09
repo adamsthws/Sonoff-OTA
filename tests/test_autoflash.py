@@ -1,12 +1,37 @@
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools.autoflash.phases import ARM_RE, LOADER_RE, PhaseRunner, PhaseError, short_loader
 from tools.autoflash.state import DONE, FAILED, RunState
 
 
 class RunStateTests(unittest.TestCase):
+    def test_a_moment_of_windows_refusal_is_waited_out(self):
+        from tools.autoflash import hostsys
+        real = hostsys.os.replace
+        with tempfile.TemporaryDirectory() as directory:
+            run = RunState.open(Path(directory))
+            refusals = [PermissionError(5, "Access is denied")] * 2
+
+            def flaky(source, target):
+                if refusals:
+                    raise refusals.pop()
+                real(source, target)
+
+            with mock.patch.object(hostsys.os, "replace", side_effect=flaky), \
+                    mock.patch.object(hostsys, "IS_WINDOWS", True), \
+                    mock.patch.object(hostsys.time, "sleep"):
+                run.mark("E3", DONE)
+            self.assertTrue(RunState.open(Path(directory)).is_done("E3"))
+            # Elsewhere a refusal means what it says, at once.
+            with mock.patch.object(hostsys.os, "replace", side_effect=PermissionError(13, "denied")), \
+                    mock.patch.object(hostsys, "IS_WINDOWS", False), \
+                    self.assertRaises(PermissionError):
+                run.mark("E2", DONE)
+
     def test_state_survives_reload_and_records_steps(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -226,6 +251,7 @@ class SecretPromptTests(unittest.TestCase):
             line.feed(char)
         self.assertEqual(line.value, "abc")
 
+    @unittest.skipIf(sys.platform == "win32", "needs a POSIX pseudo-terminal")
     def test_a_real_terminal_never_keeps_a_readable_character(self):
         import os
         import pty
@@ -246,10 +272,10 @@ class SecretPromptTests(unittest.TestCase):
         os.close(slave)
         output = b""
 
-        def drain(seconds):
+        def drain(seconds, until=None):
             nonlocal output
             deadline = time.monotonic() + seconds
-            while time.monotonic() < deadline:
+            while time.monotonic() < deadline and not (until and until in output):
                 import select
                 if select.select([master], [], [], 0.05)[0]:
                     try:
@@ -257,7 +283,9 @@ class SecretPromptTests(unittest.TestCase):
                     except OSError:
                         return
 
-        drain(1.0)
+        # Typed only once the prompt is up: a busy machine can take more than
+        # a second to start the child, and keys typed before then are lost.
+        drain(15.0, until=b"> ")
         for char in "Secret-9x":
             os.write(master, char.encode())
             drain(0.05)

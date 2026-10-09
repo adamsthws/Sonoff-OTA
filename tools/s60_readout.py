@@ -204,7 +204,7 @@ def deliver(plug_ip: str, listen_ip: str, port: int, email: str, version: str,
     """
     lock = ROOT / "RECOVERY_LOCK"
     moved = ROOT / "RECOVERY_LOCK.owner-authorized"
-    lock.rename(moved)
+    hostsys.replace_file(lock, moved)
     try:
         process = subprocess.Popen(
             [sys.executable, "-u", "tools/serve_tasmota_ota.py",
@@ -232,7 +232,7 @@ def deliver(plug_ip: str, listen_ip: str, port: int, email: str, version: str,
         progress.finish()
         return process.wait()
     finally:
-        moved.rename(lock)
+        hostsys.replace_file(moved, lock)
 
 
 SERVED_RE = re.compile(r"Served /\S+ bytes ([\d,]+)-([\d,]+)")

@@ -1,5 +1,6 @@
 import http.client
 import threading
+import time
 import unittest
 
 from tools.serve_tasmota_ota import FirmwareServer, parse_single_range
@@ -64,6 +65,10 @@ class FirmwareServerTests(unittest.TestCase):
         self.assertIn(("Content-Range", "bytes 0-23/100"), headers)
         self.assertEqual(body, self.firmware[:24])
         self.request(byte_range="bytes=20-99")
+        # The handler counts after writing, so its thread may finish after the client has read.
+        deadline = time.monotonic() + 2
+        while self.server.bytes_served < 104 and time.monotonic() < deadline:
+            time.sleep(0.01)
         self.assertEqual(self.server.bytes_served, 104)
         self.assertEqual(self.server.unique_bytes_served(), 100)
 

@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import os
 import secrets
 from pathlib import Path
 from typing import Any
 
-from tools.autoflash import output
+from tools.autoflash import hostsys, output
 
 SCHEMA = 1
 
@@ -70,7 +69,9 @@ class RunState:
             temporary.write_text(
                 json.dumps(self.data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
-            os.replace(temporary, self.path)
+            # Saved twice in a row as a step finishes: on Windows the first
+            # save's scan can still have the file open.
+            hostsys.replace_file(temporary, self.path)
         finally:
             try:
                 temporary.unlink()
