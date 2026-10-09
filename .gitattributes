@@ -3,3 +3,5 @@
 *.patch text eol=lf
 *.Dockerfile text eol=lf
 tools/emulator/container/** text eol=lf
+# Run by cmd.exe, which expects CRLF.
+*.cmd text eol=crlf

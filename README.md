@@ -20,10 +20,11 @@ the official Tasmota release, the final automated checks verify this by reading 
 ```sh
 git clone https://github.com/adamsthws/Sonoff-OTA.git
 cd Sonoff-OTA
-python3 tools/s60_autoflash.py run
+sh start.sh          # macOS and Linux; on Windows, double-click start.cmd
 ```
 
-No extra packages, just Python 3.10+. See [Getting set up](#getting-set-up).
+No extra packages, just Python 3.10+ - which the start script installs for you
+on Windows or a Mac if you have none. See [Doing it](#doing-it).
 
 ---
 
@@ -48,7 +49,7 @@ any support or warranty you had, and the eWeLink app will no longer control it.
 |---|---|
 | **The plug** | A Wi-Fi Sonoff S60 (ESP32-C3 inside): the UK **S60TPG** or the European **S60TPF**. Not the Zigbee S60 (S60ZB...), which has a different chip. |
 | **An eWeLink account** | Free. A throwaway one is fine. The plug has to be added to it first. |
-| **A computer** | Linux, macOS or Windows, Python 3.10 or newer, with Wi-Fi. |
+| **A computer** | Linux, macOS or Windows, with Wi-Fi. It needs Python 3.10 or newer, which the start script installs if need be. |
 | **Administrator rights** | If the computer's firewall is on, the tool requests to add one temporary firewall rule (allowing the plug to communicate with the computer), and removes it when the run finishes - Adding this rule requires an admin/sudo elevation.  |
 
 Your Wi-Fi must be **2.4 GHz** - the plug cannot use 5 GHz.
@@ -159,21 +160,46 @@ your home network stay, as they are needed to follow the run.
 
 ## Doing it
 
-The tool needs only Python 3.10 or newer. It uses nothing outside Python's
-standard library, so there is nothing to install and no virtual environment
-to set up.
+Get the code - with git, or
+[as a zip](https://github.com/adamsthws/Sonoff-OTA/archive/refs/heads/main.zip)
+to unpack:
 
 ```sh
 git clone https://github.com/adamsthws/Sonoff-OTA.git
 cd Sonoff-OTA
-python3 tools/s60_autoflash.py run
 ```
 
-No git? Download
-[the code as a zip](https://github.com/adamsthws/Sonoff-OTA/archive/refs/heads/main.zip),
-unpack it, and run the `python3 tools/s60_autoflash.py run` command from inside the unpacked folder.
+Then start it:
 
-On Windows, type `py` where these instructions say `python3`.
+| On | Do this |
+|---|---|
+| **Windows** | Double-click `start.cmd` - or, in PowerShell, `.\start.ps1` |
+| **macOS** | In Terminal, in the folder: `sh start.sh` |
+| **Linux** | In a terminal, in the folder: `sh start.sh` |
+
+The tool needs only Python 3.10 or newer, and nothing outside Python's
+standard library - nothing to install with pip, no virtual environment. The
+start script sees to Python for you, leaving your computer as it found it
+wherever it can:
+
+- **Windows and Linux:** it uses a pinned, portable Python - the same one for
+  everyone - unpacked into a `.python` folder in this one. Nothing is
+  installed, and deleting the folder removes it. (Windows: python.org's own,
+  about 11 MB. Linux: the standalone builds uv uses, about 30 MB.)
+- **macOS:** macOS is wary of unsigned programs, and python.org's signed
+  Python has to be installed. So the script uses a Python 3.10 or newer you
+  already have - python.org's, Homebrew's or another - and only if there is
+  none installs python.org's (macOS asks for your password).
+
+If the portable Python cannot be used - no internet, say, or a work computer
+that blocks programs in your own folders - it uses one you have installed
+instead, and only if there is none does it install one (on Windows quietly,
+for your account only, with no administrator rights; on Linux it says how).
+A Python it installed is offered for removal when the tool exits: keep it if
+you will run the tool again, for another plug or to finish this one.
+
+Already have Python 3.10 or newer? `python3 tools/s60_autoflash.py run` (`py`
+on Windows) does the same as the start script.
 
 Run the same command for every plug: it carries on an unfinished run, or
 starts a new one. The screen shows one line per stage as it goes and it walks you through the conversion. Everything else goes to a log, `captures/<run>/run.log`, and `--verbose` shows it all live.
@@ -195,11 +221,7 @@ has the detail.
 ### If you have to stop
 
 Close the window, lose your Wi-Fi, run out of time - it doesn't matter. Run the
-same command again:
-
-```sh
-python3 tools/s60_autoflash.py run
-```
+same command again - `start.cmd` or `sh start.sh`.
 
 It remembers which plug it was working on and what it had done. Where a step
 was interrupted, it checks the plug to work out whether that step finished,
@@ -210,7 +232,7 @@ run ended; a resumed run adds it again. To give up on a plug part-way, and
 remove anything a run that was killed outright left behind:
 
 ```sh
-python3 tools/s60_autoflash.py cleanup
+sh start.sh cleanup      # on Windows: .\start.ps1 cleanup
 ```
 
 ## What you end up with

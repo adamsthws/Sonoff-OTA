@@ -9,11 +9,9 @@ again with `--verbose` shows the same detail as it happens. The run's own
 record is in `captures/<name>/autoflash-state.json`, with the phase evidence
 beside it.
 
-First thing to try, always:
-
-```sh
-python3 tools/s60_autoflash.py run
-```
+First thing to try, always: start it again - `start.cmd` on Windows, `sh
+start.sh` on macOS or Linux (or `python3 tools/s60_autoflash.py run`; the
+examples below use that form, and the start scripts take the same options).
 
 It picks up where it stopped. Re-running is safe - every step checks the plug
 before writing anything.

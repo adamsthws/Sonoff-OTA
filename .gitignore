@@ -7,6 +7,8 @@ captures/
 .platformio-core/
 .python-venv/
 .venv/
+# The start scripts' portable Python, and the record of one they installed.
+.python/
 .pio/
 bridge/.pio/
 
