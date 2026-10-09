@@ -1,0 +1,5 @@
+# Run inside Linux (the emulator's container, WSL): LF even in a Windows checkout.
+*.sh text eol=lf
+*.patch text eol=lf
+*.Dockerfile text eol=lf
+tools/emulator/container/** text eol=lf
