@@ -1,7 +1,7 @@
 #!/bin/bash
 # Test the conversion on Windows from a Linux machine: the emulated plug in
-# Docker as usual (emu.sh --windows), and beside it Windows Server 2025 in a
-# container of its own (windows/vm.Dockerfile) - one layer of KVM, nothing
+# Docker as usual (emu.sh --windows), and beside it Windows Server 2025 (Server
+# Core) in a container of its own (windows/vm.Dockerfile) - one layer of KVM, nothing
 # nested. Windows is wired onto the plug's home network, you work in it over
 # Remote Desktop, and every run starts from a clean copy of it.
 #
@@ -9,19 +9,19 @@
 #
 # Options as emu.sh's (a conversion needs --cloud). The first run checks what
 # this computer needs, lists it, and gets it all after one question:
-# Microsoft's pre-installed evaluation disk (11.7 GB, no sign-up), made ready
-# once - its first start, and the conversion tool's prerequisites installed by
-# tools/emulator/windows-bootstrap.ps1 - in 10-20 minutes. Later runs start in
-# about a minute. See docs/emulator.md, "Windows from Linux".
+# Microsoft's evaluation ISO (8.2 GB, no sign-up), from which Windows is made
+# ready once - an unattended Setup, then the conversion tool's prerequisites
+# installed by tools/emulator/windows-bootstrap.ps1 - in 20-40 minutes. Later
+# runs start in about a minute. See docs/emulator.md, "Windows from Linux".
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 CACHE=${S60_WINDOWS_CACHE:-$HOME/.cache/s60-emu/windows}
 VM_IMAGE=s60-win
-# Microsoft's Windows Server 2025 Datacenter evaluation VHDX (en-US), from the
-# Evaluation Center. Pinned: a changed file is reported, never used unseen.
-DISK_URL="https://go.microsoft.com/fwlink/?linkid=2345826"
-DISK_SHA256=${S60_WINDOWS_DISK_SHA256:-2d175924c8e647969a82e36f931b22397108bd94a030e0e947b7e66e47e0be9a}
+# Microsoft's Windows Server 2025 evaluation ISO (en-US, build 26100.32230),
+# from the Evaluation Center. Pinned: a changed file is reported, never used unseen.
+ISO_URL="https://go.microsoft.com/fwlink/?linkid=2345730"
+ISO_SHA256=${S60_WINDOWS_ISO_SHA256:-7b052573ba7894c9924e3e87ba732ccd354d18cb75a883efa9b900ea125bfd51}
 # Not a secret: Remote Desktop listens on this computer's 127.0.0.1 only.
 PASSWORD=S60-emulator
 
@@ -84,8 +84,8 @@ if [ ! -f "$CACHE/base.qcow2" ]; then
         say "Windows needs about 30 GB free under $CACHE while it is first made ready; there is ${free} GB."
         exit 1
     fi
-    [ -f "$CACHE/server2025-eval.vhdx" ] || [ -f "$CACHE/server2025-eval.qcow2" ] || plan+=("Microsoft's Windows Server 2025 evaluation disk (11.7 GB download, checked against its pinned SHA-256)")
-    plan+=("Windows made ready once (10-20 minutes): it installs Python 3.12 and OpenVPN's TAP-Windows6 driver itself, with windows-bootstrap.ps1")
+    [ -f "$CACHE/server2025-eval.iso" ] || plan+=("Microsoft's Windows Server 2025 evaluation ISO (8.2 GB download, checked against its pinned SHA-256)")
+    plan+=("Windows Server Core installed from it once (20-40 minutes); it then gets the tool's portable Python and OpenVPN's TAP-Windows6 driver itself, with windows-bootstrap.ps1")
     user_steps+=(windows)
 fi
 
@@ -114,16 +114,16 @@ if [ ${#plan[@]} -gt 0 ]; then
             ;;
         windows)
             mkdir -p "$CACHE"
-            if [ ! -f "$CACHE/server2025-eval.vhdx" ] && [ ! -f "$CACHE/server2025-eval.qcow2" ]; then
-                say "Downloading Microsoft's disk..."
-                curl -fL -C - --retry 5 -o "$CACHE/server2025-eval.vhdx.part" "$DISK_URL"
-                got=$(sha256sum "$CACHE/server2025-eval.vhdx.part" | cut -d' ' -f1)
-                if [ "$got" != "$DISK_SHA256" ]; then
-                    say "Microsoft's disk is not the one this was made for (SHA-256 $got)."
-                    say "If they have published a new one, try it with S60_WINDOWS_DISK_SHA256=$got"
+            if [ ! -f "$CACHE/server2025-eval.iso" ]; then
+                say "Downloading Microsoft's ISO..."
+                curl -fL -C - --retry 5 -o "$CACHE/server2025-eval.iso.part" "$ISO_URL"
+                got=$(sha256sum "$CACHE/server2025-eval.iso.part" | cut -d' ' -f1)
+                if [ "$got" != "$ISO_SHA256" ]; then
+                    say "Microsoft's ISO is not the one this was made for (SHA-256 $got)."
+                    say "If they have published a new one, try it with S60_WINDOWS_ISO_SHA256=$got"
                     exit 1
                 fi
-                mv "$CACHE/server2025-eval.vhdx.part" "$CACHE/server2025-eval.vhdx"
+                mv "$CACHE/server2025-eval.iso.part" "$CACHE/server2025-eval.iso"
             fi
             ;;
         esac
@@ -141,7 +141,7 @@ vm() {  # the Windows VM container, with its disks and this checkout
         -v "$CACHE:/cache" -v "$ROOT:/repo:ro" "$VM_IMAGE"
 }
 if [ ! -f "$CACHE/base.qcow2" ]; then
-    say "Making Windows ready - watch it with a VNC viewer on localhost:5900 if you like."
+    say "Installing Windows - watch it with a VNC viewer on localhost:5900 if you like."
     vm --rm --name s60-win-prepare -p 127.0.0.1:5900:5900 prepare
 fi
 
