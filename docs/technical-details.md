@@ -2,8 +2,8 @@
 
 This page covers what the [README](../README.md) leaves out. You don't need it
 to convert a plug. It covers what the firmware bundle holds, how your Wi-Fi
-details are handled, the finished memory layout, and where the developer and
-research material lives.
+details and eWeLink account are handled, the finished memory layout, and where
+the developer and research material lives.
 
 For a plain-English account of what happens to the plug, read
 [what-happens.md](what-happens.md) instead.
@@ -74,11 +74,71 @@ handed to the migration server through a pipe, never as a file. The plug loses
 the password at the end of the run, when the official startup firmware
 replaces the temporary one.
 
-Other secrets are not kept either: the plug's eWeLink LAN key is no longer
-fetched, and the update links, the plug's settings memory and staged firmware
+Other secrets are not kept either: the plug's eWeLink LAN key is never
+saved, and the update links, the plug's settings memory and staged firmware
 are deleted or reduced to hashes as soon as they have been checked - however
-the run ends. `python3 tools/s60_autoflash.py cleanup` removes anything an older
-version of the tool left behind.
+the run ends. `python3 tools/s60_autoflash.py cleanup` deletes any such file
+still on disk, such as after the computer lost power mid-run.
+
+### What crosses the network
+
+Not written to disk is not the same as never exposed. The password crosses
+your local network up to twice during a run, in plain HTTP:
+
+- when the tool reads it, in the plug's configuration backup (skipped if you
+  typed the details instead). This is the same `/dl` download as
+  Configuration → Backup Configuration in Tasmota's web UI. The file is only
+  lightly obfuscated: each byte is XORed with a fixed key, by a published
+  method that tools such as Tasmota's `decode-config.py` reverse, and the
+  password inside is plain text;
+- when the temporary startup firmware is uploaded, with the password written
+  into it as plain bytes.
+
+Tasmota's own web password, if one is set, also travels unencrypted - from
+the tool just as from a browser logging in.
+
+That risk is accepted on purpose. Tasmota's web UI has no HTTPS, so every
+settings backup taken from a browser exposes the password the same way;
+the run adds nothing an ordinary backup does not. And the password only gets
+someone onto the network the plug is already on - which anyone able to watch
+this traffic is on already.
+
+Keeping the password on the plug throughout was considered: Berry could
+write it into the startup firmware on the plug, or leave it in flash for that
+firmware to read. That is not worth it to close two brief exposures in a
+process that is no more exposed than everyday Tasmota use. If traffic on your
+local network is a concern, the answer is to separate it, for example with an
+IoT VLAN, not to change this tool.
+
+## How your eWeLink account is handled
+
+The run signs in to your eWeLink account twice: once to find the plug, by
+matching the S60s in the account against what answers on your network, and
+once to send the plug the cloud update command that installs the bridge. Both
+go straight to eWeLink's own servers over HTTPS, and the update command over
+an encrypted WebSocket. Nothing about the account passes through anyone else.
+
+Your eWeLink password is asked once per run and held in memory only. It is
+never written to disk, to the run state or to the log, and never put on a
+command line: the delivery tool, `serve_tasmota_ota.py`, receives it through
+the `EWELINK_PASSWORD` environment variable and clears its copy as soon as it
+has signed in. The access token eWeLink hands back is not kept either.
+
+What is kept is the account's email, so the next run can offer it first. It
+is in `captures/settings.json` and the run's state file, both inside
+`captures/`, which git ignores. In the run's log it is written as `<email>`,
+along with the plug's device id, name and hardware address.
+
+The device list eWeLink returns includes each device's LAN key (`devicekey`):
+not the device id, and not an account login, but the secret its LAN Control
+mode encrypts local traffic with. eWeLink sends it whether asked or not. The
+run does not use it: it is never logged, and is left out of everything the
+run records about the plug. It stays in memory only while the run needs the
+account, and is gone when the run's processes exit. It stops mattering once
+the plug runs Tasmota.
+
+A throwaway eWeLink account is fine, and limits what a mistake could expose:
+once the plug is converted, the account is no longer needed.
 
 ## Locks on the destructive steps
 
