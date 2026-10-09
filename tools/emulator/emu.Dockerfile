@@ -33,8 +33,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         tmux socat tcpdump curl sudo procps less ca-certificates ufw \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=qemu /opt/qemu /opt/qemu
-COPY requirements.txt /tmp/requirements.txt
-RUN python3 -m venv /opt/venv && /opt/venv/bin/pip install -q -r /tmp/requirements.txt
+# The tool needs only Python's standard library; the venv just provides `python`.
+RUN python3 -m venv /opt/venv
 COPY container/ /opt/s60emu/
 RUN chmod 0755 /opt/s60emu/bin/* /opt/s60emu/entrypoint.sh /opt/s60emu/udhcpc.script \
     && ln -s /opt/s60emu/bin/* /usr/local/bin/

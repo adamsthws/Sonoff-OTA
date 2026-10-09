@@ -62,7 +62,7 @@ if [ "$rebuild" = 1 ] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
     context=$(mktemp -d)
     trap 'rm -rf "$context"' EXIT
     cp -r "$ROOT/tools/emulator/emu.Dockerfile" "$ROOT/tools/emulator/fork" \
-          "$ROOT/tools/emulator/container" "$ROOT/requirements.txt" "$context/"
+          "$ROOT/tools/emulator/container" "$context/"
     echo "Building the emulator image (the first time takes a few minutes)..."
     docker build -q -t "$IMAGE" -f "$context/emu.Dockerfile" "$context" >/dev/null
 fi

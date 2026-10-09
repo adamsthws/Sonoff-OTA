@@ -142,7 +142,7 @@ In a terminal:
 
 ```sh
 cd "/path/to/Tasmatized Sonoff s60"
-python3 -m pip install -r requirements.txt
+python3 -m pip install -r archive/requirements.txt
 python3 -m unittest discover -s tests -v
 ```
 
