@@ -43,6 +43,7 @@ tools/emulator/emu.sh --pcap     # also record the plug's Wi-Fi traffic
 tools/emulator/emu.sh --rebuild  # rebuild the image first
 tools/emulator/emu.sh --detach   # start in the background; join with: docker attach s60-emu
 tools/emulator/emu.sh --no-firewall  # without the "computer's" firewall, which is on by default
+tools/emulator/emu.sh --windows  # Windows is the computer (see "From Windows"; started by emu.ps1)
 ```
 
 A conversion needs `--cloud`: the upgrade to the bridge firmware is sent
@@ -73,6 +74,58 @@ The tool knows when it runs in the emulator (`S60_EMULATOR_URL`), and its
 final link points at http://localhost:8080 instead of the plug's own address.
 Where it warns that sudo may ask for a password, it gives the emulator's
 (`S60_EMULATOR_SUDO_PASSWORD`); on a real computer it never knows one.
+
+## From Windows
+
+To test the tool's Windows code paths (`arp -a`, `netsh` firewall rules
+behind the elevation prompt, the Windows firewall itself), Windows can be the
+computer on the emulated home Wi-Fi instead of the container. The emulator
+still runs in Docker under WSL; a wire carries Ethernet frames between it and
+a TAP adapter on Windows, so Windows sees the plug's MAC, its mDNS answers
+and its connections exactly as on a real network.
+
+Once:
+
+- **WSL 2 with Docker in it** (Docker Engine in the distribution is enough:
+  `apt install docker.io rsync python3-venv`, and add yourself to the
+  `docker` group), and in WSL the NVS generator, in a venv of its own:
+  `python3 -m venv ~/.local/share/s60-emu/venv && ~/.local/share/s60-emu/venv/bin/pip install esp-idf-nvs-partition-gen`.
+- **OpenVPN** (`winget install OpenVPNTechnologies.OpenVPN`), only for its
+  TAP-Windows6 driver.
+- **`tools\emulator\windows-setup.ps1`**, which asks for administrator
+  rights and makes the "S60 emulator" adapter: 192.168.60.10/24, no gateway
+  (Windows' internet stays where it is), and the lowest interface metric, so
+  the tool's mDNS goes out on it. While the emulator is not running it shows
+  as disconnected and does nothing.
+
+Then, from the repository in PowerShell:
+
+```powershell
+tools\emulator\emu.ps1 -Cloud                       # opens the emulator and the link, each in a window
+.venv\Scripts\python tools\s60_autoflash.py run     # once the link says Connected
+```
+
+The emulator window is the usual tmux session, for `plug restart` and the
+serial log. Joining the plug's own Wi-Fi from Windows is not emulated.
+
+From a Windows checkout the emulator keeps its state - the plug's flash, the
+serial log, the in-container run's captures - in `~/.local/share/s60-emu/state`
+inside WSL (`\\wsl$\<distribution>\home\<you>\.local\share\s60-emu\state` from
+Windows), not in `captures/emulation/state/`. WSL reaches the Windows drive
+through 9p, where one flash write can take 100 ms, and the bridge then trips its
+interrupt watchdog while writing Tasmota. The Windows tool's own captures stay
+in `captures/` as usual.
+
+WSL stops its VM, and Docker with it, soon after its last window closes: with
+`emu.sh --detach`, keep a WSL window open.
+
+```
+ Windows: s60_autoflash.py ── "S60 emulator" TAP 192.168.60.10
+                                   │  windows_link.py ⇄ 127.0.0.1:7860 (length-prefixed frames)
+ container s60-emu ────────────────┼───────────────────────────────────────
+   windows-link ⇄ tap1 ─┐          │
+                        br0 192.168.60.1 (dnsmasq, ufw) ── tap0 ── QEMU (plug .50)
+```
 
 ## How it fits together
 
@@ -167,6 +220,12 @@ Copies only; the original dump is never written.
   reset type.
 - **`-serial file:/dev/stdout`, not `-serial stdio`.** With stdin at
   `/dev/null`, the fork's stdio serial port prints nothing.
+- **Only ARP requests for the plug reach it** (a `tc` filter on `tap0`, in
+  `entrypoint.sh`). When the plug does not answer, the conversion tool looks
+  for it by pinging every address on the network, and that burst of ARP
+  requests stops the fork's Wi-Fi receiving for good: the plug keeps sending,
+  but hears nothing until it is restarted. A real plug ignores requests for
+  other addresses anyway.
 
 ### The browser forward (`container/bin/browser-forward`)
 

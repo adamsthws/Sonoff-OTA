@@ -8,19 +8,28 @@
 #   tools/emulator/emu.sh --rebuild  rebuild the image first
 #   tools/emulator/emu.sh --detach   start in the background; join with: docker attach s60-emu
 #   tools/emulator/emu.sh --no-firewall  without the "computer's" firewall (ufw), on by default
+#   tools/emulator/emu.sh --windows  Windows is the computer, wired in by windows_link.py
+#                                    (from Windows, start it all with tools/emulator/emu.ps1)
 #
 # Needs the private stock dump copies in captures/emulation/ (flash.bin,
 # efuse.bin; see docs/emulator.md). Everything the emulator writes stays in
-# captures/emulation/state/, which is private and Git-ignored.
+# captures/emulation/state/, which is private and Git-ignored (from a Windows
+# checkout under WSL: ~/.local/share/s60-emu/state, on WSL's own disk).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 EMU=$ROOT/captures/emulation
 STATE=$EMU/state
+# A Windows checkout under WSL (/mnt/c, reached through 9p) is far too slow for
+# the plug's flash: a write can take 100 ms, and the bridge then trips its
+# interrupt watchdog while flashing Tasmota. Its state lives on WSL's own disk.
+case "$ROOT" in /mnt/[a-z]/*) STATE=$HOME/.local/share/s60-emu/state ;; esac
 PY=$ROOT/.venv/bin/python
+# A Windows checkout's .venv is Windows' own: under WSL the NVS generator lives here.
+[ -x "$PY" ] || PY=$HOME/.local/share/s60-emu/venv/bin/python
 IMAGE=s60-emu
 
-cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 tty=-it
+cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 tty=-it
 for arg in "$@"; do
     case "$arg" in
     --cloud) cloud=1 ;;
@@ -29,7 +38,8 @@ for arg in "$@"; do
     --rebuild) rebuild=1 ;;
     --detach) tty=-dt ;;
     --no-firewall) firewall=0 ;;
-    *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    --windows) windows=1 ;;
+    *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
 done
 
@@ -37,8 +47,9 @@ for f in "$EMU/flash.bin" "$EMU/efuse.bin"; do
     [ -f "$f" ] || { echo "Missing $f - see docs/emulator.md" >&2; exit 1; }
 done
 "$PY" -c 'import esp_idf_nvs_partition_gen' 2>/dev/null || {
-    echo "The emulator needs ESP-IDF's NVS generator in .venv:" >&2
-    echo "    .venv/bin/python -m pip install esp-idf-nvs-partition-gen" >&2
+    venv=$(dirname "$(dirname "$PY")")
+    echo "The emulator needs ESP-IDF's NVS generator in $venv:" >&2
+    echo "    python3 -m venv $venv && $PY -m pip install esp-idf-nvs-partition-gen" >&2
     exit 1
 }
 if docker ps -q --filter "name=^s60-emu$" | grep -q .; then
@@ -105,12 +116,15 @@ EOF
     [ "$answer" = unplugged ] || { echo "Not confirmed; start without --cloud for an offline plug."; exit 1; }
 fi
 
+# Your browser, and with --windows the wire windows_link.py connects to.
+publish=(-p 127.0.0.1:8080:8080)
+[ "$windows" = 1 ] && publish+=(-p 127.0.0.1:7860:7860)
 exec docker run --rm $tty --name s60-emu --hostname s60-emu-computer \
     --cap-add NET_ADMIN --device /dev/net/tun \
     --sysctl net.ipv4.ip_forward="$cloud" \
-    -p 127.0.0.1:8080:8080 \
+    "${publish[@]}" \
     -v "$STATE:/state" -v "$EMU/flash.bin:/secrets/stock-flash.bin:ro" \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e PLUG_MAC="$mac" \
-    -e CLOUD="$cloud" -e PCAP="$pcap" -e FIREWALL="$firewall" \
+    -e CLOUD="$cloud" -e PCAP="$pcap" -e FIREWALL="$firewall" -e WINDOWS="$windows" \
     -e S60_EMULATOR_URL=http://localhost:8080 \
     "$IMAGE"

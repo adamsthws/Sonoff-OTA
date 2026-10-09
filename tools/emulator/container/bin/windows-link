@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Windows' wire into the emulated home network (emu.sh --windows).
+
+The tap device named on the command line is a port on the home network's
+bridge. Its Ethernet frames go to and from tools/emulator/windows_link.py, on
+Windows, over one TCP connection at a time: each frame preceded by its length,
+two bytes, big-endian. Port 7860 is published on the host's localhost only.
+"""
+
+import fcntl
+import os
+import select
+import socket
+import struct
+import sys
+
+PORT = 7860
+TUNSETIFF = 0x400454CA
+IFF_TAP, IFF_NO_PI = 0x0002, 0x1000
+
+
+def open_tap(name: str) -> int:
+    fd = os.open("/dev/net/tun", os.O_RDWR)
+    fcntl.ioctl(fd, TUNSETIFF, struct.pack("16sH", name.encode(), IFF_TAP | IFF_NO_PI))
+    return fd
+
+
+def carry(tap: int, conn: socket.socket) -> None:
+    """Frames both ways until Windows hangs up."""
+    pending = b""
+    while True:
+        ready, _, _ = select.select([tap, conn], [], [])
+        if tap in ready:
+            frame = os.read(tap, 65536)
+            conn.sendall(struct.pack(">H", len(frame)) + frame)
+        if conn in ready:
+            data = conn.recv(65536)
+            if not data:
+                return
+            pending += data
+            while len(pending) >= 2:
+                (length,) = struct.unpack(">H", pending[:2])
+                if len(pending) < 2 + length:
+                    break
+                os.write(tap, pending[2:2 + length])
+                pending = pending[2 + length:]
+
+
+def main() -> None:
+    tap = open_tap(sys.argv[1])
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("0.0.0.0", PORT))
+    server.listen(1)
+    print(f"waiting for Windows on port {PORT}", flush=True)
+    while True:
+        conn, peer = server.accept()
+        conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        print(f"Windows connected from {peer[0]}", flush=True)
+        try:
+            carry(tap, conn)
+        except OSError as exc:
+            print(f"link error: {exc}", flush=True)
+        finally:
+            conn.close()
+        print("Windows disconnected", flush=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -13,7 +13,7 @@ stop_all() {
     [ -f "$RUN/dnsmasq.pid" ] && kill "$(cat "$RUN/dnsmasq.pid")" 2>/dev/null || true
     rm -f "$RUN/dnsmasq.pid"
     pkill -x udhcpc 2>/dev/null || true
-    ip address flush dev tap0
+    ip address flush dev "$LAN"
 }
 
 # tap0's own MAC, kept so `home` can put it back after joining the plug's network
@@ -29,10 +29,10 @@ case "${1:-}" in
 home)
     stop_all
     [ "$(cat /sys/class/net/tap0/address)" = "$(cat "$RUN/tap-mac")" ] || set_mac "$(cat "$RUN/tap-mac")"
-    ip address add "$NET.1/24" dev tap0
-    ip route replace 224.0.0.0/4 dev tap0   # mDNS discovery goes to the plug's network
+    ip address add "$NET.1/24" dev "$LAN"
+    ip route replace 224.0.0.0/4 dev "$LAN"   # mDNS discovery goes to the plug's network
     if [ "$CLOUD" = 1 ]; then dns=(--resolv-file=/etc/resolv.conf); else dns=(--no-resolv); fi
-    dnsmasq --interface=tap0 --bind-interfaces --except-interface=lo \
+    dnsmasq --interface="$LAN" --bind-interfaces --except-interface=lo \
         --dhcp-range="$NET.100,$NET.199,255.255.255.0,1h" \
         --dhcp-host="$PLUG_MAC,$PLUG_IP" \
         --dhcp-option=option:router,"$NET.1" --dhcp-option=option:dns-server,"$NET.1" \
@@ -43,6 +43,11 @@ home)
     ;;
 join)
     ssid=${2:?which network}
+    if [ "$WINDOWS" = 1 ]; then
+        echo "Windows is the computer on this network (emu.sh --windows), and joining" >&2
+        echo "the plug's own network from Windows is not emulated." >&2
+        exit 1
+    fi
     stop_all
     # The emulated Wi-Fi associates with the plug's network as one virtual
     # station; this side of the tap has to be that station.

@@ -3,8 +3,12 @@
 # hands over to you, as your own user id, in a tmux session.
 set -euo pipefail
 
-: "${HOST_UID:?}" "${HOST_GID:?}" "${PLUG_MAC:?}" "${CLOUD:=0}" "${PCAP:=0}" "${FIREWALL:=1}"
+: "${HOST_UID:?}" "${HOST_GID:?}" "${PLUG_MAC:?}" "${CLOUD:=0}" "${PCAP:=0}" "${FIREWALL:=1}" "${WINDOWS:=0}"
 RUN=/run/s60emu
+# The home network: the plug's tap on its own, or with emu.sh --windows a
+# bridge of it and the wire to Windows, which is then the computer on it.
+LAN=tap0
+[ "$WINDOWS" = 1 ] && LAN=br0 && cp /opt/s60emu/motd.windows /opt/s60emu/motd
 mkdir -p "$RUN" /state/logs
 
 # -- you, with sudo that asks for your password, as on a real computer ----------
@@ -41,9 +45,12 @@ if [ "$FIREWALL" = 1 ]; then
     ufw --force reset >/dev/null
     ufw default deny incoming >/dev/null
     ufw default allow outgoing >/dev/null
-    ufw allow in on tap0 to any port 67 proto udp comment 'emulator: DHCP for the plug' >/dev/null
-    ufw allow in on tap0 to any port 53 comment 'emulator: DNS for the plug' >/dev/null
+    ufw allow in on "$LAN" to any port 67 proto udp comment 'emulator: DHCP for the plug' >/dev/null
+    ufw allow in on "$LAN" to any port 53 comment 'emulator: DNS for the plug' >/dev/null
     ufw allow in on eth0 to any port 8080 proto tcp comment 'emulator: your browser' >/dev/null
+    if [ "$WINDOWS" = 1 ]; then
+        ufw allow in on eth0 to any port 7860 proto tcp comment 'emulator: the wire to Windows' >/dev/null
+    fi
     ufw logging off >/dev/null
     ufw --force enable >/dev/null
 else
@@ -59,8 +66,8 @@ fi
 # mistake. Replies to your browser (published port 8080) still get out.
 iptables -P FORWARD DROP
 if [ "$CLOUD" = 1 ]; then
-    iptables -A FORWARD -i tap0 -o eth0 -j ACCEPT
-    iptables -A FORWARD -i eth0 -o tap0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    iptables -A FORWARD -i "$LAN" -o eth0 -j ACCEPT
+    iptables -A FORWARD -i eth0 -o "$LAN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     iptables -t nat -A POSTROUTING -s 192.168.60.0/24 -o eth0 -j MASQUERADE
 else
     iptables -A OUTPUT -o eth0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
@@ -70,7 +77,32 @@ fi
 # -- the plug's radio: a tap device QEMU's emulated Wi-Fi is wired to ---------
 ip tuntap add dev tap0 mode tap user "$HOST_UID" group "$HOST_GID"
 ip link set tap0 up
+# A burst of ARP requests - the conversion tool's sweep for the plug sends one
+# to every address - stops the fork's emulated Wi-Fi receiving for good. A
+# plug ignores requests for other addresses anyway, so only its own reach it.
+if ! { tc qdisc add dev tap0 clsact &&
+       tc filter add dev tap0 egress pref 1 protocol arp flower arp_op request arp_tip 192.168.60.50 action pass &&
+       tc filter add dev tap0 egress pref 2 protocol arp flower arp_op request arp_tip 192.168.60.0/24 action drop; }; then
+    echo "warning: no ARP filter for the plug; a sweep for it may stop its Wi-Fi" >&2
+fi
+if [ "$WINDOWS" = 1 ]; then
+    # Windows' wire (tap1, carried by windows-link) and the plug's radio, on one
+    # segment: Windows sees the plug's MAC, its mDNS and its connections, as
+    # a computer on the same Wi-Fi does. Docker loads br_netfilter, so frames
+    # crossing the bridge meet iptables' FORWARD (policy DROP, below): let
+    # them through, as a home access point does. Snooping off: the plug never
+    # joins a multicast group, and mDNS must still reach it.
+    ip link add br0 type bridge mcast_snooping 0
+    ip tuntap add dev tap1 mode tap
+    ip link set tap0 master br0
+    ip link set tap1 master br0
+    ip link set tap1 up
+    ip link set br0 up
+    iptables -I FORWARD 1 -i br0 -o br0 -j ACCEPT
+fi
 cat > "$RUN/env" <<EOF
+LAN=$LAN
+WINDOWS=$WINDOWS
 PLUG_MAC=$PLUG_MAC
 CLOUD=$CLOUD
 PCAP=$PCAP
@@ -93,6 +125,7 @@ as_you() { runuser -u "$user" -- env HOME="$home" PATH="$PATH" S60_EMULATOR_URL=
     S60_EMULATOR_SUDO_PASSWORD="$SUDO_PASSWORD" "$@"; }
 as_you /opt/s60emu/bin/plug-supervisor >/dev/null 2>&1 &
 as_you /opt/s60emu/bin/browser-forward >"$RUN/browser-forward.log" 2>&1 &
+[ "$WINDOWS" = 1 ] && /opt/s60emu/bin/windows-link tap1 >"$RUN/windows-link.log" 2>&1 &
 
 cd /work
 as_you tmux new-session -d -s s60 -n conversion -c /work
