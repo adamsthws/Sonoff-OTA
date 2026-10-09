@@ -89,7 +89,7 @@ mac=$("$PY" -I -c 'import sys; d=open(sys.argv[1],"rb").read(); print(":".join(f
 # A copy, so a run's lock renames and captures never touch the real checkout.
 # The code is refreshed on every start, and the run's captures are kept.
 mkdir -p "$STATE/work/captures"
-rsync -a --delete --exclude /captures/ --exclude /.venv/ --exclude /.git/ \
+rsync -a --delete --exclude /captures/ --exclude /.venv/ --exclude /.python/ --exclude /.git/ \
       --exclude __pycache__/ "$ROOT/" "$STATE/work/"
 # Not the firmware bundle in captures/safeboot-recovery-migration: a real
 # bundle is set up for the real home Wi-Fi. The run builds its own, as a new

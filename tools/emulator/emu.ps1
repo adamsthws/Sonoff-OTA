@@ -1,40 +1,34 @@
 <#
 The emulator with Windows as the computer: run the conversion tool on Windows
-against the emulated S60 (see docs/emulator.md, "From Windows").
+against the emulated S60 (see docs/emulator.md, "On Windows").
 
     tools\emulator\emu.ps1 -Cloud     plug and tool online (real plug must be unplugged)
 
 Options as emu.sh's: -Cloud -Fresh -Pcap -Rebuild -NoFirewall, and -Distro to
-pick the WSL distribution (its default otherwise).
+pick the WSL distribution (Ubuntu-24.04 otherwise).
 
 Opens the emulator (emu.sh --windows, under WSL) in a window of its own - the
 plug's power and serial log are there - and the link that puts Windows on its
 home network in another. This window is left for the conversion:
 
-    .venv\Scripts\python tools\s60_autoflash.py run
+    .\start.ps1
 
-Needs, once: WSL with Docker, and tools\emulator\windows-setup.ps1.
+Anything this computer is missing - WSL, Docker in it, Python, the TAP driver,
+the adapter - is listed first, and installed after one question
+(tools\emulator\windows-bootstrap.ps1 -LocalEmulator).
 #>
 param([switch]$Cloud, [switch]$Fresh, [switch]$Pcap, [switch]$Rebuild, [switch]$NoFirewall,
-      [string]$Distro = "")
+      [string]$Distro = "Ubuntu-24.04")
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$Adapter = "S60 emulator"
 
-if (-not (Get-NetAdapter -Name $Adapter -ErrorAction SilentlyContinue)) {
-    throw "No '$Adapter' network adapter: run tools\emulator\windows-setup.ps1 once first."
-}
+& (Join-Path $PSScriptRoot "windows-bootstrap.ps1") -LocalEmulator -Distro $Distro
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }   # it has said why, or that Windows needs a restart
 
-# Windows' own Python, for the link and the conversion tool.
-$Python = Join-Path $Root ".venv\Scripts\python.exe"
-if (-not (Test-Path $Python)) {
-    Write-Host "Setting up .venv for Windows' Python..."
-    py -3 -m venv (Join-Path $Root ".venv")
-    & $Python -m pip install -q -r (Join-Path $Root "requirements.txt")
-}
-
-$wsl = @()
-if ($Distro) { $wsl += @("-d", $Distro) }
+# Windows' own Python, for the link (start.ps1 finds the same one for the tool).
+. (Join-Path $Root "tools\windows-python.ps1")
+$Python = Get-ToolPython
+$wsl = @("-d", $Distro)
 
 # Closing the emulator's window stops only the Docker client: the emulator
 # carries on, and emu.sh would refuse to start another.
@@ -70,7 +64,7 @@ Write-Host @"
 The emulator is starting in its own window$(if ($Cloud) { " - confirm the real plug is unplugged there" }),
 and the link in another. Once the link says Connected, run the conversion here:
 
-    .venv\Scripts\python tools\s60_autoflash.py run
+    .\start.ps1
 
 When it asks you to switch the plug off and on, type in the emulator window:
     plug restart | plug off | plug on | plug cycle 7

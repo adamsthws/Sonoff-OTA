@@ -2,19 +2,26 @@
 """Wire Windows into the emulator's home network (emu.sh --windows).
 
 Carries Ethernet frames between the "S60 emulator" TAP adapter and the
-container's windows-link, over 127.0.0.1:7860, so that Windows is a computer
+container's windows-link, over TCP port 7860, so that Windows is a computer
 on the emulated Wi-Fi: the plug's MAC in its ARP table, its mDNS answers, its
 connections in through the Windows firewall - what the conversion tool meets
 on a real network. Each frame goes preceded by its length, two bytes,
 big-endian.
 
-Started by tools/emulator/emu.ps1; the adapter is made, once, by
-tools/emulator/windows-setup.ps1. The adapter shows as connected only while
-the emulator is reachable, so at other times Windows ignores it.
+The emulator is on this computer, under WSL (127.0.0.1, started by
+tools/emulator/emu.ps1), or elsewhere - for the Windows VM of
+tools/emulator/windows-test.sh, the Linux machine running it:
+
+    windows_link.py [--host ADDRESS]
+
+The adapter is made by tools/emulator/windows-bootstrap.ps1. It shows as
+connected only while the emulator is reachable, so at other times Windows
+ignores it.
 """
 
 from __future__ import annotations
 
+import argparse
 import ctypes
 import ctypes.wintypes as wt
 import socket
@@ -185,9 +192,9 @@ class Link:
                 self.conn = None
 
 
-def connect() -> socket.socket | None:
+def connect(host: str) -> socket.socket | None:
     try:
-        conn = socket.create_connection((HOST, PORT), timeout=2)
+        conn = socket.create_connection((host, PORT), timeout=2)
     except OSError:
         return None
     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -196,19 +203,22 @@ def connect() -> socket.socket | None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Wire Windows into the emulator's home network.")
+    parser.add_argument("--host", default=HOST, help=f"where the emulator is (default {HOST})")
+    host = parser.parse_args().host
     guid = adapter_guid(ADAPTER)
     if guid is None:
-        raise LinkError(f"No network adapter called '{ADAPTER}': run tools\\emulator\\windows-setup.ps1 once.")
+        raise LinkError(f"No network adapter called '{ADAPTER}': run tools\\emulator\\windows-bootstrap.ps1.")
     tap = Tap(guid)
     link = Link(tap)
     tap.set_connected(False)
     waiting = False
     try:
         while True:
-            conn = connect()
+            conn = connect(host)
             if conn is None:
                 if not waiting:
-                    print("Waiting for the emulator (tools/emulator/emu.sh --windows)...", flush=True)
+                    print(f"Waiting for the emulator at {host}:{PORT}...", flush=True)
                     waiting = True
                 time.sleep(2)
                 continue

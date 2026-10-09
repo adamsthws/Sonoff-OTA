@@ -43,7 +43,7 @@ tools/emulator/emu.sh --pcap     # also record the plug's Wi-Fi traffic
 tools/emulator/emu.sh --rebuild  # rebuild the image first
 tools/emulator/emu.sh --detach   # start in the background; join with: docker attach s60-emu
 tools/emulator/emu.sh --no-firewall  # without the "computer's" firewall, which is on by default
-tools/emulator/emu.sh --windows  # Windows is the computer (see "From Windows"; started by emu.ps1)
+tools/emulator/emu.sh --windows  # Windows is the computer (see "On Windows"; started by emu.ps1 and windows-test.sh)
 ```
 
 A conversion needs `--cloud`: the upgrade to the bridge firmware is sent
@@ -75,38 +75,81 @@ final link points at http://localhost:8080 instead of the plug's own address.
 Where it warns that sudo may ask for a password, it gives the emulator's
 (`S60_EMULATOR_SUDO_PASSWORD`); on a real computer it never knows one.
 
-## From Windows
+## On Windows
 
 To test the tool's Windows code paths (`arp -a`, `netsh` firewall rules
 behind the elevation prompt, the Windows firewall itself), Windows can be the
-computer on the emulated home Wi-Fi instead of the container. The emulator
-still runs in Docker under WSL; a wire carries Ethernet frames between it and
-a TAP adapter on Windows, so Windows sees the plug's MAC, its mDNS answers
-and its connections exactly as on a real network.
+computer on the emulated home Wi-Fi instead of the container. A wire carries
+Ethernet frames between the emulator and a TAP adapter on Windows, so Windows
+sees the plug's MAC, its mDNS answers and its connections exactly as on a
+real network. There are two ways to have it:
 
-Once:
+- **Windows from Linux** - nothing to install by hand, and a clean Windows
+  every run: `tools/emulator/windows-test.sh`.
+- **On a Windows computer**, the emulator in WSL beside it:
+  `tools\emulator\emu.ps1`.
 
-- **WSL 2 with Docker in it** (Docker Engine in the distribution is enough:
-  `apt install docker.io rsync python3-venv`, and add yourself to the
-  `docker` group), and in WSL the NVS generator, in a venv of its own:
-  `python3 -m venv ~/.local/share/s60-emu/venv && ~/.local/share/s60-emu/venv/bin/pip install esp-idf-nvs-partition-gen`.
-- **OpenVPN** (`winget install OpenVPNTechnologies.OpenVPN`), only for its
-  TAP-Windows6 driver.
-- **`tools\emulator\windows-setup.ps1`**, which asks for administrator
-  rights and makes the "S60 emulator" adapter: 192.168.60.10/24, no gateway
-  (Windows' internet stays where it is), and the lowest interface metric, so
-  the tool's mDNS goes out on it. While the emulator is not running it shows
-  as disconnected and does nothing.
+Both check what is needed first, list what is missing, and get all of it
+after one question - and, where administrator rights are needed, one sudo or
+User Account Control prompt. Joining the plug's own Wi-Fi from Windows is not
+emulated either way.
 
-Then, from the repository in PowerShell:
+### Windows from Linux
 
-```powershell
-tools\emulator\emu.ps1 -Cloud                       # opens the emulator and the link, each in a window
-.venv\Scripts\python tools\s60_autoflash.py run     # once the link says Connected
+```sh
+tools/emulator/windows-test.sh --cloud
 ```
 
+The emulated plug runs in Docker as usual, and beside it Windows Server 2025
+in a container of its own (`tools/emulator/windows/`): QEMU with KVM, so one
+layer of virtualisation, nothing nested. It needs Linux with `/dev/kvm` and
+Docker; on a Mac, use a Windows computer or VM instead (below).
+
+The first run fetches Microsoft's pre-installed **Windows Server 2025
+evaluation disk** - 11.7 GB, straight from Microsoft's Evaluation Center link,
+no sign-up, checked against its pinned SHA-256 - and makes it ready once, in
+10-20 minutes: an answer file takes it through its first start, and it
+installs Python and the TAP driver itself, with the same
+`windows-bootstrap.ps1` a Windows computer uses. That prepared disk is kept
+in `~/.cache/s60-emu/windows/base.qcow2`; every run starts from a throwaway
+copy of it, with this checkout in `C:\S60\repo`, in about a minute.
+
+Windows logs on by itself, opens the link and a PowerShell window for the
+conversion; work in it over Remote Desktop - `localhost:3389`, user `s60`,
+password `S60-emulator` (only this computer can reach it) - or watch on VNC,
+`localhost:5900`. The user is an ordinary administrator, so User Account
+Control asks as it would on someone's own computer. The terminal you started
+from is the emulator's, for `plug restart` and the serial log; leaving it
+shuts Windows down. The conversion's captures are kept between runs
+(`~/.cache/s60-emu/windows/captures`), so an unfinished one can be resumed.
+
+The evaluation lasts 180 days from when the disk was made ready; after that,
+delete `base.qcow2` and the next run makes a new one.
+
+### On a Windows computer
+
+From the repository in PowerShell:
+
+```powershell
+tools\emulator\emu.ps1 -Cloud     # opens the emulator and the link, each in a window
+.\start.ps1                       # once the link says Connected - as a Windows user would
+```
+
+`emu.ps1` first runs `tools\emulator\windows-bootstrap.ps1 -LocalEmulator`,
+which installs what is missing: WSL 2 (one restart - run it again after, and
+it carries on without asking), Ubuntu in it with Docker and the NVS
+generator, Python if there is no 3.10 or newer (python.org's, for your
+account), OpenVPN's TAP-Windows6 driver (pinned installers, checked by
+SHA-256), and the "S60 emulator" adapter - 192.168.60.10/24, no gateway, so
+Windows' internet stays where it is, and the lowest interface metric, so the
+tool's mDNS goes out on it. While the emulator is not running the adapter
+shows as disconnected and does nothing. `windows-bootstrap.ps1 -ListPython`
+shows every Python it finds, and which it would use.
+
 The emulator window is the usual tmux session, for `plug restart` and the
-serial log. Joining the plug's own Wi-Fi from Windows is not emulated.
+serial log. To wire a Windows computer to an emulator running elsewhere,
+`windows-bootstrap.ps1` without `-LocalEmulator`, then
+`windows_link.py --host ADDRESS`.
 
 From a Windows checkout the emulator keeps its state - the plug's flash, the
 serial log, the in-container run's captures - in `~/.local/share/s60-emu/state`
