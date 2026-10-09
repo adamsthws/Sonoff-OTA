@@ -7,7 +7,8 @@
 #
 #   tools/emulator/windows-test.sh [--cloud] [--fresh] [--no-firewall] [--rebuild]
 #
-# Options as emu.sh's (a conversion needs --cloud). The first run checks what
+# Options as emu.sh's (a conversion needs --cloud). Windows gets 2 GB and 2 CPUs
+# (S60_WINDOWS_RAM=3G, S60_WINDOWS_CPUS=4 to change). The first run checks what
 # this computer needs, lists it, and gets it all after one question:
 # Microsoft's evaluation ISO (8.2 GB, no sign-up), from which Windows is made
 # ready once - an unattended Setup, then the conversion tool's prerequisites
@@ -24,6 +25,16 @@ ISO_URL="https://go.microsoft.com/fwlink/?linkid=2345730"
 ISO_SHA256=${S60_WINDOWS_ISO_SHA256:-7b052573ba7894c9924e3e87ba732ccd354d18cb75a883efa9b900ea125bfd51}
 # Not a secret: Remote Desktop listens on this computer's 127.0.0.1 only.
 PASSWORD=S60-emulator
+# What Windows gets: Server Core with only the tool to run is content in 2 GB.
+# Its container is capped at that plus 1 GB for QEMU itself and the disk tools
+# between runs, without swap, so it can never take more of this computer.
+RAM=${S60_WINDOWS_RAM:-2G}
+CPUS=${S60_WINDOWS_CPUS:-2}
+if [[ $RAM =~ ^([1-9][0-9]*)G$ ]]; then ram_mb=$(( BASH_REMATCH[1] * 1024 ))
+elif [[ $RAM =~ ^([1-9][0-9]*)M$ ]]; then ram_mb=${BASH_REMATCH[1]}
+else echo "S60_WINDOWS_RAM is a size such as 2G or 3072M, not $RAM"; exit 2
+fi
+cap_mb=$(( ram_mb + 1024 ))
 
 emu_flags=() rebuild=0
 for arg in "$@"; do
@@ -138,8 +149,14 @@ if [ "$rebuild" = 1 ] || ! docker image inspect "$VM_IMAGE" >/dev/null 2>&1; the
 fi
 vm() {  # the Windows VM container, with its disks and this checkout
     docker run "$@" --device /dev/kvm -e "KEYBOARD=${LANG:-}" -e "WINDOWS_PASSWORD=$PASSWORD" \
+        -e "RAM=$RAM" -e "CPUS=$CPUS" --memory "${cap_mb}m" --memory-swap "${cap_mb}m" --cpus "$CPUS" \
         -v "$CACHE:/cache" -v "$ROOT:/repo:ro" "$VM_IMAGE"
 }
+avail_mb=$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)
+if [ "$avail_mb" -lt "$(( cap_mb + 1024 ))" ]; then  # the emulator's container too
+    say "Windows and the emulator may use up to $(( (cap_mb + 1024) / 1024 )) GB; this computer has ${avail_mb} MB free."
+    say "Close what you can, or give Windows less (S60_WINDOWS_RAM=1536M), or it may be slow."
+fi
 if [ ! -f "$CACHE/base.qcow2" ]; then
     say "Installing Windows - watch it with a VNC viewer on localhost:5900 if you like."
     vm --rm --name s60-win-prepare -p 127.0.0.1:5900:5900 prepare

@@ -36,7 +36,7 @@ qemu() {  # $1 the disk; then any extra QEMU options (Setup's discs)
     qemu-system-x86_64 \
         -machine q35,accel=kvm \
         -cpu host,hv_relaxed,hv_vapic,hv_spinlocks=0x1fff,hv_time,hv_vpindex,hv_synic,hv_stimer,hv_frequencies,hv_runtime \
-        -global kvm-pit.lost_tick_policy=discard -smp "${CPUS:-4}" -m "${RAM:-6G}" \
+        -global kvm-pit.lost_tick_policy=discard -smp "${CPUS:-2}" -m "${RAM:-2G}" \
         -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
         -drive if=pflash,format=raw,file=/run/vars.fd \
         -device ahci,id=ahci -drive id=disk,if=none,format=qcow2,file="$disk" \

@@ -9,8 +9,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         qemu-system-x86 qemu-utils ovmf libguestfs-tools linux-image-kvm genisoimage \
         python3 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
-# libguestfs boots its own small appliance from the kernel installed above.
-ENV LIBGUESTFS_BACKEND=direct
+# libguestfs boots its own small appliance from the kernel installed above,
+# given a fixed 768 MB so it stays inside the container's memory cap.
+ENV LIBGUESTFS_BACKEND=direct LIBGUESTFS_MEMSIZE=768
 COPY guest/ /opt/s60win/guest/
 COPY vm-run.sh /usr/local/bin/vm-run
 RUN chmod 0755 /usr/local/bin/vm-run

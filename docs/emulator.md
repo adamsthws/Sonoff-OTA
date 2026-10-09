@@ -104,6 +104,14 @@ The emulated plug runs in Docker as usual, and beside it **Windows Server 2025,
 Server Core** in a container of its own (`tools/emulator/windows/`): QEMU with
 KVM, so one layer of virtualisation, nothing nested. It needs Linux with
 `/dev/kvm` and Docker; on a Mac, use a Windows computer or VM instead (below).
+If `/dev/kvm` is missing on a PC, its processor's virtualisation is usually
+off in the firmware set-up: "SVM Mode" on AMD, "Intel Virtualization
+Technology" (VT-x) on Intel.
+
+Both containers are capped, so they cannot take over the computer. Windows
+gets 2 GB and 2 CPUs (`S60_WINDOWS_RAM=3G`, `S60_WINDOWS_CPUS=4` to change), and
+its container at most 1 GB more, for QEMU itself, without swap. The emulator
+gets 1 GB and 2 CPUs (`S60_EMU_MEMORY`, `S60_EMU_CPUS`).
 
 The first run fetches Microsoft's **Windows Server 2025 evaluation ISO** - 8.2
 GB, straight from Microsoft's Evaluation Center link, no sign-up, checked
