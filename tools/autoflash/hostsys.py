@@ -411,7 +411,7 @@ def elevated(command: Sequence[str]) -> int:
         # A declined or cancelled prompt makes Start-Process fail, leaving no
         # process - whose exit code would read as 0, success.
         script = (
-            f"try {{ $p = Start-Process -FilePath '{program}' "
+            f"try {{ $p = Start-Process -FilePath {_ps_string(program)} "
             + (f"-ArgumentList '{line}' " if line else "")
             + "-Verb RunAs -Wait -PassThru -WindowStyle Hidden -ErrorAction Stop } "
             "catch { Write-Output $_.Exception.Message; exit 1223 }; exit $p.ExitCode"
@@ -762,7 +762,7 @@ def undo_commands(rule: FirewallRule) -> list[str]:
     program = rule.detail.get("program")
     lines = [display(firewall_commands(rule.kind, rule.plug_ip, rule.ports, program)[1])]
     # Block rules paused for the run: on again, in an administrator PowerShell.
-    lines += [f"Enable-NetFirewallRule -Name '{name}'" for name in rule.detail.get("paused", [])]
+    lines += [f"Enable-NetFirewallRule -Name {_ps_string(name)}" for name in rule.detail.get("paused", [])]
     return lines
 
 
