@@ -1,4 +1,6 @@
+import base64
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -152,56 +154,81 @@ class WindowsFirewallTests(unittest.TestCase):
 
 
 class WindowsRootCertificateTests(unittest.TestCase):
-    """A root Windows has not fetched yet is fetched, and the request tried once more."""
+    """A root Windows has not fetched yet: Windows Update's list of the roots
+    Windows trusts is read, and the request tried once more."""
 
-    URL = "https://raw.githubusercontent.com/tasmota/install/x/firmware/release/tasmota32c3.bin"
+    URL = "https://eu-apia.coolkit.cc/v2/user/login"
 
     def setUp(self):
-        hostsys._roots_fetched.clear()
+        hostsys._windows_update_tried = False
         hostsys._roots_context = None
         self.addCleanup(setattr, hostsys, "_roots_context", None)
+        self.addCleanup(setattr, hostsys, "_windows_update_tried", False)
         self.untrusted = hostsys.urllib.error.URLError(
             hostsys.ssl.SSLCertVerificationError("certificate verify failed"))
 
-    def open(self, outcomes, windows=True):
+    def open(self, outcomes, windows=True, roots=b"root one", listed=True):
         request = hostsys.urllib.request.Request(self.URL)
+        stdout = (base64.b64encode(roots).decode() + "\r\n") if listed else ""
+        listing = subprocess.CompletedProcess([], 0 if listed else 1, stdout, "")
         with mock.patch.object(hostsys, "IS_WINDOWS", windows), \
-                mock.patch.object(hostsys, "powershell") as asked, \
+                mock.patch.object(hostsys, "powershell", return_value=listing) as asked, \
+                mock.patch.object(hostsys.ssl, "create_default_context") as contexts, \
                 mock.patch.object(hostsys.urllib.request, "urlopen", side_effect=outcomes) as opened:
             try:
-                return hostsys.urlopen(request, timeout=5), asked, opened
+                return hostsys.urlopen(request, timeout=5), asked, opened, contexts
             except hostsys.urllib.error.URLError as exc:
-                return exc, asked, opened
+                return exc, asked, opened, contexts
 
-    def test_windows_fetches_the_root_and_the_request_is_tried_again(self):
-        result, asked, opened = self.open([self.untrusted, "response"])
+    def test_windows_update_s_roots_are_read_and_the_request_tried_again(self):
+        result, asked, opened, contexts = self.open([self.untrusted, "response"], roots=b"\x30\x82 der")
         self.assertEqual(result, "response")
         self.assertEqual(opened.call_count, 2)
-        fresh = opened.call_args.kwargs.get("context")
-        self.assertIsNotNone(fresh)  # the roots read afresh...
-        _, _, opened = self.open(["next file"])
-        self.assertIs(opened.call_args.kwargs.get("context"), fresh)  # ...and for what follows
-        script = asked.call_args[0][0]
-        self.assertIn("'https://raw.githubusercontent.com/'", script)
-        self.assertIn("Invoke-WebRequest", script)
+        self.assertIn("certutil -generateSSTFromWU", asked.call_args[0][0])
+        contexts.return_value.load_verify_locations.assert_called_once_with(cadata=b"\x30\x82 der")
+        self.assertIs(opened.call_args.kwargs.get("context"), contexts.return_value)
+        _, _, opened, _ = self.open(["next file"])
+        self.assertIs(opened.call_args.kwargs.get("context"), contexts.return_value)  # and for what follows
 
     def test_still_untrusted_after_that_is_reported(self):
-        result, _, opened = self.open([self.untrusted, self.untrusted])
+        result, _, opened, _ = self.open([self.untrusted, self.untrusted])
         self.assertIs(result, self.untrusted)
         self.assertEqual(opened.call_count, 2)
-        result, asked, opened = self.open([self.untrusted])  # the same site: not asked twice
+        result, asked, opened, _ = self.open([self.untrusted])  # read once a run: not again
         self.assertIs(result, self.untrusted)
         asked.assert_not_called()
 
+    def test_without_the_list_the_failure_stands(self):
+        result, _, opened, _ = self.open([self.untrusted], listed=False)
+        self.assertIs(result, self.untrusted)
+        self.assertEqual(opened.call_count, 1)
+
+    def test_a_connection_of_its_own_gets_the_same_second_try(self):
+        # The eWeLink websocket wraps its own socket: no URLError around the failure.
+        tried = []
+
+        def connect(context):
+            tried.append(context)
+            if len(tried) == 1:
+                raise hostsys.ssl.SSLCertVerificationError("certificate verify failed")
+            return "socket"
+        listing = subprocess.CompletedProcess([], 0, base64.b64encode(b"root").decode(), "")
+        with mock.patch.object(hostsys, "IS_WINDOWS", True), \
+                mock.patch.object(hostsys, "powershell", return_value=listing) as asked, \
+                mock.patch.object(hostsys.ssl, "create_default_context"):
+            self.assertEqual(hostsys.with_trusted_roots(connect), "socket")
+        self.assertEqual(len(tried), 2)
+        asked.assert_called_once()
+
     def test_only_windows_is_asked(self):
-        result, asked, opened = self.open([self.untrusted], windows=False)
+        result, asked, opened, _ = self.open([self.untrusted], windows=False)
         self.assertIs(result, self.untrusted)
         asked.assert_not_called()
         self.assertEqual(opened.call_count, 1)
 
     def test_other_failures_are_not_retried(self):
         offline = hostsys.urllib.error.URLError(OSError("Network is unreachable"))
-        result, asked, opened = self.open([offline])
+        result, asked, _, _ = self.open([offline])
         self.assertIs(result, offline)
         asked.assert_not_called()
 

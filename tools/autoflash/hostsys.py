@@ -11,6 +11,7 @@ and never sees or stores a password itself.
 
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import getpass
 import hashlib
@@ -76,7 +77,6 @@ def powershell(script: str, timeout: float = 60.0) -> subprocess.CompletedProces
 
 def _encoded(script: str) -> str:
     """A script for -EncodedCommand: no quoting to get wrong on its way there."""
-    import base64
     return base64.b64encode(script.encode("utf-16-le")).decode("ascii")
 
 
@@ -90,43 +90,74 @@ def _ps_string(value: str) -> str:
 # Update the first time one of its own components meets a site that needs it.
 # Python reads only the roots already there and never asks, so on a computer
 # that has not yet met a site's root - Edge keeps its own, so browsing need not
-# have - a good certificate fails: raw.githubusercontent.com's ISRG Root X1 was
-# missing from a fresh Windows. PowerShell's web request is one of Windows' own.
-_roots_fetched: set[str] = set()
-# The roots as they are since Windows last fetched one: urlopen's own context
-# read them once, before that, and goes on using what it read.
+# have - a good certificate fails: raw.githubusercontent.com's ISRG Root X1, and
+# eu-apia.coolkit.cc's Starfield root, were missing from a fresh Windows. Having
+# PowerShell meet the site, so that Windows fetched the root, worked only some of
+# the time; Windows Update's own list of the roots Windows trusts (certutil
+# -generateSSTFromWU, a second or so) is read instead, for this run alone -
+# nothing is installed.
+_windows_update_tried = False
+# The roots trusted once Windows Update's list is read: the system's and that list.
 _roots_context: ssl.SSLContext | None = None
 
 
-def fetch_windows_root(url: str) -> bool:
-    """Have Windows fetch the root `url`'s site needs. True if it was asked to now.
+def windows_update_roots() -> ssl.SSLContext | None:
+    """A context trusting the system's roots and every root Windows trusts, as
+    Windows Update lists them; None if that list cannot be had.
 
-    Once per site, and only on Windows: elsewhere the roots are all there.
+    Once per run, and only on Windows: elsewhere the roots are all there.
     """
-    host = urllib.parse.urlsplit(url).hostname
-    if not IS_WINDOWS or not host or host in _roots_fetched:
-        return False
-    _roots_fetched.add(host)
-    output.detail(f"Asking Windows for the root certificate {host} needs...")
-    powershell("try { Invoke-WebRequest -Uri " + _ps_string(f"https://{host}/")
-               + " -Method Head -UseBasicParsing -TimeoutSec 30 | Out-Null } catch {}", timeout=45)
-    return True
+    global _windows_update_tried
+    if not IS_WINDOWS or _windows_update_tried:
+        return None
+    _windows_update_tried = True
+    output.detail("Reading Windows Update's list of trusted root certificates...")
+    completed = powershell(
+        "$f = Join-Path $env:TEMP ('s60-roots-' + [guid]::NewGuid() + '.sst'); "
+        "try { certutil -generateSSTFromWU $f | Out-Null; "
+        "$c = New-Object Security.Cryptography.X509Certificates.X509Certificate2Collection; "
+        "$c.Import($f); $c | ForEach-Object { [Convert]::ToBase64String($_.RawData) } } "
+        "finally { Remove-Item $f -ErrorAction SilentlyContinue }", timeout=90)
+    if completed is None or completed.returncode != 0:
+        return None
+    try:
+        der = b"".join(base64.b64decode(line, validate=True) for line in completed.stdout.split())
+    except ValueError:
+        return None
+    if not der:
+        return None
+    context = ssl.create_default_context()
+    try:
+        context.load_verify_locations(cadata=der)
+    except ssl.SSLError:
+        return None
+    return context
 
 
-def urlopen(request: urllib.request.Request, timeout: float):
-    """urllib's urlopen, tried again once on Windows after it fetches a missing root.
+def with_trusted_roots(connect: Callable[[ssl.SSLContext], Any]) -> Any:
+    """connect(context), tried again once on Windows with every root Windows
+    trusts if the site's certificate was not.  Anything that opens a TLS
+    connection goes through here, or through urlopen, which does.
 
     Still untrusted after that, the certificate is not the site's own.
     """
     global _roots_context
     try:
-        return urllib.request.urlopen(request, timeout=timeout, context=_roots_context)
-    except urllib.error.URLError as exc:
-        if not (isinstance(exc.reason, ssl.SSLCertVerificationError)
-                and fetch_windows_root(request.full_url)):
+        return connect(_roots_context or ssl.create_default_context())
+    except (ssl.SSLCertVerificationError, urllib.error.URLError) as exc:
+        reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+        if not isinstance(reason, ssl.SSLCertVerificationError):
             raise
-    _roots_context = ssl.create_default_context()
-    return urllib.request.urlopen(request, timeout=timeout, context=_roots_context)
+        context = windows_update_roots()
+        if context is None:
+            raise
+    _roots_context = context
+    return connect(context)
+
+
+def urlopen(request: urllib.request.Request, timeout: float):
+    """urllib's urlopen, with with_trusted_roots()'s second try."""
+    return with_trusted_roots(lambda context: urllib.request.urlopen(request, timeout=timeout, context=context))
 
 
 def normalise_mac(text: str) -> str:

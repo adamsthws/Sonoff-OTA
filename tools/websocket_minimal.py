@@ -11,6 +11,11 @@ import ssl
 import struct
 from typing import Any
 
+try:
+    from tools.autoflash.hostsys import with_trusted_roots
+except ModuleNotFoundError:  # Support import from scripts run directly in tools/.
+    from autoflash.hostsys import with_trusted_roots
+
 
 class WebSocketError(RuntimeError):
     pass
@@ -50,9 +55,15 @@ class WebSocket:
 
     @classmethod
     def connect(cls, host: str, port: int, path: str = "/api/ws", timeout: float = 10.0) -> "WebSocket":
-        raw = socket.create_connection((host, port), timeout=timeout)
-        context = ssl.create_default_context()
-        sock = context.wrap_socket(raw, server_hostname=host)
+        def open_tls(context: ssl.SSLContext) -> ssl.SSLSocket:
+            raw = socket.create_connection((host, port), timeout=timeout)
+            try:
+                return context.wrap_socket(raw, server_hostname=host)
+            except BaseException:
+                raw.close()
+                raise
+
+        sock = with_trusted_roots(open_tls)
         sock.settimeout(timeout)
         key = base64.b64encode(os.urandom(16)).decode("ascii")
         request = (
