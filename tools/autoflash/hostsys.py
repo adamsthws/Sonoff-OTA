@@ -480,7 +480,7 @@ def elevated(command: Sequence[str]) -> int:
 # sudo's question, set rather than left to the system, so the screen knows how
 # wide it is (%u is sudo's own placeholder for the user name).  Only used when
 # no password_asker is set.
-SUDO_PROMPT = "[sudo] password for %u: "
+SUDO_PROMPT = output.MARGIN + "[sudo] password for %u: "
 
 # Asks for this computer's password, in the tool's own words, until sudo
 # accepts it (see check_sudo_password); returns it, or raises OSError.  Set by

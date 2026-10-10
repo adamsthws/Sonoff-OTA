@@ -33,11 +33,15 @@ from typing import IO
 IS_WINDOWS = platform.system() == "Windows"
 
 GREEN, RED, YELLOW, BOLD, RESET = "\x1b[32m", "\x1b[31m", "\x1b[33m", "\x1b[1m", "\x1b[0m"
+# Every row on screen starts this far in, clear of the terminal's left edge.
+MARGIN = " "
+PURPLE = "\x1b[38;5;135m"  # #af5fff: link titles, opposite the green on the colour wheel
+MAGENTA = "\x1b[35m"        # the same where only the basic colours are: rounded, 135 comes out blue
 
 _lock = threading.RLock()
 
 # Colour and hyperlink sequences, which take no room on screen.
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\]8;;[^\x1b]*\x1b\\\\")
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\]8;;[^\x1b]*\x1b\\")
 
 # Words that mark a helper tool's line as the reason it failed.
 PROBLEM_RE = re.compile(r"error|refus|fail|warning|interrupted|did not|denied|invalid|unable|timed? ?out",
@@ -58,6 +62,8 @@ class _State:
     stage_started = 0.0
     live = 0                          # characters of an unfinished line on screen
     live_is_stage = False
+    stream_fresh = True               # a helper's output is at the start of a row
+    after_stage = False               # a stage line was the last on screen: a gap before what follows
     paused = False                    # waiting for the keyboard: draw nothing
     held = False                      # between questions that belong together: no clock
     ticker: threading.Thread | None = None
@@ -159,6 +165,7 @@ def finish() -> None:
         _s.stage = None
         _s.transient_rows = None
         _s.name_width = 0
+        _s.after_stage = False
 
 
 def log_path() -> Path | None:
@@ -194,24 +201,61 @@ def _enable_windows_vt() -> bool:
         return False
 
 
-def hyperlink(url: str) -> str:
+def links_ok() -> bool:
+    """Whether the terminal takes OSC 8 links.
+
+    The classic Windows console, macOS Terminal and the Linux console are
+    left out: they show or drop the sequence rather than make a link.
+    """
+    if not colour_ok() or os.environ.get("TERM") in ("dumb", "linux"):
+        return False
+    if os.environ.get("TERM_PROGRAM") == "Apple_Terminal":
+        return False
+    return not IS_WINDOWS or bool(os.environ.get("WT_SESSION"))
+
+
+def hyperlink(url: str, title: str | None = None) -> str:
     """The URL as a link the terminal can open on a click (OSC 8).
 
-    The visible text is the URL itself, so a terminal that does not know the
-    sequence, or picks out URLs on its own, still has it to work with.  The
-    classic Windows console is left out: only Windows Terminal is known to
-    take it.
+    The URL itself is always shown, after the title if there is one, so a
+    terminal that does not take the sequence still has it to pick out or
+    copy.  Only the URL is the link: the title stays outside it, coloured
+    wherever colour is, as some terminals repaint link text in their own
+    colour.
     """
-    if not colour_ok() or os.environ.get("TERM") == "dumb" or (IS_WINDOWS and not os.environ.get("WT_SESSION")):
-        return url
-    return f"\x1b]8;;{url}\x1b\\{url}\x1b]8;;\x1b\\"
+    link = f"\x1b]8;;{url}\x1b\\{url}\x1b]8;;\x1b\\" if links_ok() else url
+    return f"{styled(title + ':', BOLD, _purple())} {link}" if title else link
 
 
-def show_link(url: str, indent: str = "    ") -> None:
+def _purple() -> str:
+    """The link titles' purple, or the terminal's magenta where it has only
+    the basic colours (tmux or screen named plainly, the Linux console)."""
+    if IS_WINDOWS or os.environ.get("COLORTERM") in ("truecolor", "24bit"):
+        return PURPLE
+    return PURPLE if "256" in os.environ.get("TERM", "") else MAGENTA
+
+
+def click_hint() -> str:
+    """How to open a link here, or nothing where clicking is not known to work."""
+    if not links_ok():
+        return ""
+    return "Cmd+click to open" if platform.system() == "Darwin" else "Ctrl+click to open"
+
+
+def show_link(url: str, title: str | None = None, indent: str = "    ") -> None:
     """A link on a line of its own: clickable on screen, plain in the log."""
+    show_links([(url, title)], indent)
+
+
+def show_links(links: list[tuple[str, str | None]], indent: str = "    ", *, hint: bool = False) -> None:
+    """Links one to a line, and with hint=True how to open them underneath."""
     with _lock:
-        _write_log(indent + url)
-        _print(indent + hyperlink(url))
+        for url, title in links:
+            _write_log(indent + (f"{title}: {url}" if title else url))
+            _print(indent + hyperlink(url, title))
+        how = click_hint() if hint else ""
+        if how:
+            _print(indent + styled(f"({how})", "\x1b[2m"))
 
 
 def styled(text: str, *codes: str) -> str:
@@ -245,10 +289,27 @@ def before_input(prompt: str = "") -> None:
     """Called just before reading the keyboard: the question must start on its own line."""
     with _lock:
         _break()
+        _gap("?")
         _s.paused = True
         _s.pending_prompt, _s.pending_answer = prompt, ""
         if prompt:
             _write_log(f"? {prompt.strip()}")
+
+
+def question(text: str, tail: str = "") -> str:
+    """before_input(), with the question laid out for the screen: every row
+    but its last written here, the last returned for input() to show.
+    `tail` - ": ", say - follows the question on screen but not in the log."""
+    with _lock:
+        before_input(text)
+        body = text + tail
+        rows = _fit(body.rstrip(" ")).split("\n")
+        rows[-1] += body[len(body.rstrip(" ")):]
+        for row in rows[:-1]:
+            sys.stdout.write(row + "\n")
+        sys.stdout.flush()
+        _s.pending_prompt = "\n".join(rows)
+        return rows[-1]
 
 
 def after_input() -> None:
@@ -357,10 +418,10 @@ def stage_begin(number: int, total: int, name: str) -> None:
             if sys.stdout.isatty():
                 _draw_stage()
             else:
-                _print(f"{_s.stage_screen} - Underway")
+                _print(f"{_s.stage_screen} - Underway", stage=True)
         else:
             _print("")
-            _print(f"== {_s.stage}")
+            _print(f"== {_s.stage}", stage=True)
 
 
 def stage_end(outcome: str) -> None:
@@ -381,11 +442,14 @@ def stage_end(outcome: str) -> None:
                 + " - " + styled(word, colour) + timing)
             if _s.live and _s.live_is_stage:
                 # Replace the "underway" line in place.
-                sys.stdout.write("\r" + text + " " * max(0, _s.live - len(plain)) + "\n")
+                first, _, rest = _fit(text).partition("\n")
+                pad = " " * max(0, _s.live - len(ANSI_RE.sub("", first)))
+                sys.stdout.write("\r" + first + pad + ("\n" + rest if rest else "") + "\n")
                 sys.stdout.flush()
                 _s.live = 0
+                _s.after_stage = True
             else:
-                _print(text)
+                _print(text, stage=True)
         _s.stage = None
 
 
@@ -402,7 +466,8 @@ def progress(text: str = "") -> None:
             return
         if _s.live and _s.live_is_stage:
             _break()
-        line = f"    {text}"
+        _gap(text)
+        line = _clip(f"{MARGIN}    {text}")
         sys.stdout.write("\r" + line + " " * max(0, _s.live - len(line)))
         sys.stdout.flush()
         _s.live, _s.live_is_stage = len(line), False
@@ -466,7 +531,8 @@ def stream(process: subprocess.Popen) -> int:
                 if not _s.concise:
                     if _s.live:
                         _break()
-                    sys.stdout.write(text)
+                    _gap(text)
+                    sys.stdout.write(_margin_stream(text))
                     sys.stdout.flush()
                 pending += text
                 while "\n" in pending:
@@ -531,11 +597,10 @@ def _tick_forever() -> None:
 
 def _draw_stage() -> None:
     clock = _elapsed(time.monotonic() - _s.stage_started)
-    width = shutil.get_terminal_size((100, 20)).columns - 1
-    line = f"{_s.stage_screen} - Underway {clock}"
-    shown = f"{_s.stage_screen} - {styled('Underway', BOLD)} {clock}"
-    if len(line) > width:
-        line = shown = line[: width - 3] + "..."
+    line = f"{MARGIN}{_s.stage_screen} - Underway {clock}"
+    shown = f"{MARGIN}{_s.stage_screen} - {styled('Underway', BOLD)} {clock}"
+    if _clip(line) != line:
+        line = shown = _clip(line)
     if _s.live and not _s.live_is_stage:
         _break()
     sys.stdout.write("\r" + shown + " " * max(0, _s.live - len(line)))
@@ -557,17 +622,108 @@ def _break() -> None:
             sys.stdout.write("\n")            # the underway line stays as it was
             if _s.transient_rows is not None:
                 _s.transient_rows += 1
+            _s.after_stage = True
         else:
             sys.stdout.write("\r" + " " * _s.live + "\r")
         sys.stdout.flush()
         _s.live = 0
 
 
-def _print(text: str) -> None:
+def _print(text: str, *, stage: bool = False) -> None:
     _break()
+    if stage:
+        _s.after_stage = False  # stage lines follow one another with no gap
+    else:
+        _gap(text)
+    text = _fit(text)
     print(text, flush=True)
     if _s.transient_rows is not None:
         _s.transient_rows += _rows(text)
+    if stage:
+        _s.after_stage = True
+
+
+def _screen_width() -> int | None:
+    """Columns a row may fill after the margin, or None when not a terminal.
+    One short of the edge: some consoles start a new row on reaching it."""
+    if not sys.stdout.isatty():
+        return None
+    return max(20, shutil.get_terminal_size((100, 20)).columns - 1 - len(MARGIN))
+
+
+def _clip(line: str) -> str:
+    """A row redrawn in place, cut to fit: wrapped, it could not be redrawn."""
+    width = _screen_width()
+    if width is None or len(line) <= width + len(MARGIN):
+        return line
+    return line[: width + len(MARGIN) - 3] + "..."
+
+
+def _fit(text: str) -> str:
+    """Text for the screen: each row after the margin, long ones wrapped to
+    the terminal's width."""
+    width = _screen_width()
+    rows = []
+    for line in text.split("\n"):
+        for row in (_wrap(line, width) if width else [line]):
+            rows.append(MARGIN + row if ANSI_RE.sub("", row).strip() else row)
+    return "\n".join(rows)
+
+
+def _wrap(line: str, width: int) -> list[str]:
+    """One line as rows of at most `width` visible characters, broken between
+    words.  A row carrying on from the one above starts under its text - past
+    a leading indent, or past a "Label:" set in from the edge - so lists and
+    lined-up labels stay lined up.  A word longer than a row (a long URL) is
+    never broken: it starts a row, at the edge if need be, and only past the
+    terminal's width does the terminal itself wrap it."""
+    plain = ANSI_RE.sub("", line)
+    if len(plain) <= width:
+        return [line]
+    lead = len(line) - len(line.lstrip(" "))
+    label = re.match(r"\s+[^\s:][^:]{0,30}:\s+(?=\S)", plain)
+    hang = len(label.group(0)) if label else lead
+    if hang > width // 2:
+        hang = lead if lead <= width // 2 else 0
+    rows: list[str] = []
+    row, used, started = " " * lead, lead, False
+    for word in line[lead:].split(" "):
+        size = len(ANSI_RE.sub("", word))
+        if started and size and used + 1 + size > width:
+            rows.append(row.rstrip(" "))
+            indent = hang if hang + size <= width else 0  # a long URL: as much of it on one row as can be
+            row, used = " " * indent + word, indent + size
+        elif started:
+            row, used = row + " " + word, used + 1 + size
+        else:
+            row, used, started = row + word, used + size, True
+    rows.append(row)
+    return rows
+
+
+def _margin_stream(text: str) -> str:
+    """A helper's raw output, each row started at the margin."""
+    out = []
+    for char in text:
+        if _s.stream_fresh and char not in "\r\n":
+            out.append(MARGIN)
+            _s.stream_fresh = False
+        out.append(char)
+        if char in "\r\n":
+            _s.stream_fresh = True
+    return "".join(out)
+
+
+def _gap(text: str) -> None:
+    """One blank line between a stage's line and whatever is shown under it -
+    a message, a question, a helper's output - unless that starts with one."""
+    if not _s.after_stage:
+        return
+    _s.after_stage = False
+    if ANSI_RE.sub("", text).strip("\r\n\t "):
+        print("", flush=True)
+        if _s.transient_rows is not None:
+            _s.transient_rows += 1
 
 
 def _write_log(text: str) -> None:

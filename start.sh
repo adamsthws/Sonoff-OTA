@@ -35,7 +35,7 @@ MAC_VERSION=3.12
 MAC_FRAMEWORK=/Library/Frameworks/Python.framework
 MAC_PYTHON=$MAC_FRAMEWORK/Versions/$MAC_VERSION/bin/python3
 
-say() { echo "$@" >&2; }   # to the screen, never into $(...)
+say() { echo " $*" >&2; }   # to the screen, never into $(...); one space in, as the tool's own output
 
 usable() {  # $1: a Python 3.10 or newer
     "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
@@ -150,15 +150,15 @@ remove_mac_python() {
 offer_removal() {
     [ -f "$MARKER" ] || return 0
     echo
-    echo "$(cat "$MARKER") was installed for this tool. Remove it now, to leave nothing"
-    echo "behind? If you will run the tool again - for another plug, or to finish this"
-    echo "one - keep it: the next run then starts straight away."
-    printf 'Remove Python now? [y/N] '
+    echo " $(cat "$MARKER") was installed for this tool. Remove it now, to leave nothing"
+    echo " behind? If you will run the tool again - for another plug, or to finish this"
+    echo " one - keep it: the next run then starts straight away."
+    printf ' Remove Python now? [y/N] '
     read -r answer || answer=""
     case "$answer" in
     y|Y|yes|YES|Yes)
-        if remove_mac_python; then rm -f "$MARKER"; echo "Removed."; else echo "Removing it failed."; fi ;;
-    *) echo "Kept." ;;
+        if remove_mac_python; then rm -f "$MARKER"; echo " Removed."; else echo " Removing it failed."; fi ;;
+    *) echo " Kept." ;;
     esac
 }
 

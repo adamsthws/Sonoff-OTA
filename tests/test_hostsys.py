@@ -449,11 +449,11 @@ class SudoPromptTests(unittest.TestCase):
         command, before, after = self.run_elevated(False)
         before.assert_not_called()
         after.assert_not_called()
-        self.assertEqual(command[:3], ["sudo", "-p", "[sudo] password for %u: "])
+        self.assertEqual(command[:3], ["sudo", "-p", " [sudo] password for %u: "])  # at the margin
 
     def test_the_question_is_the_one_sudo_is_told_to_ask(self):
         _, before, after = self.run_elevated(True)
-        before.assert_called_once_with("[sudo] password for someone: ")
+        before.assert_called_once_with(" [sudo] password for someone: ")
         after.assert_called_once()
 
 

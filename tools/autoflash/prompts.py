@@ -38,6 +38,8 @@ class QuitRun(SystemExit):
 
 
 BULLET = "    "
+# A password field on a row of its own, below a prompt too long to share one.
+FIELD = output.MARGIN + "> "
 QUIT_WORDS = {"q", "quit", "exit", "abort"}
 QUIT_HINT = " (q to quit)"
 QUIT_OPTION = "Quit - stop here"
@@ -71,8 +73,7 @@ def section(title: str, body: Sequence[str] = (), *, quiet: bool = False) -> Non
 
 def _raw(question: str, default: str | None, private: str | None = None) -> str:
     suffix = f" [{default}]" if default else ""
-    output.before_input(f"{question}{suffix}")
-    answer = input(f"{question}{suffix}: ").strip()
+    answer = input(output.question(f"{question}{suffix}", ": ")).strip()
     if private:
         output.private(answer, private)
     output.answered(answer)
@@ -130,7 +131,7 @@ def ask_secret(prompt: str, reveal_seconds: float = 1.0) -> str:
     terminal it falls back to getpass, which shows nothing at all.
     """
     prompt = prompt.rstrip().rstrip(":") + QUIT_HINT + ": "
-    output.before_input(prompt)  # the question is logged; the answer never is
+    prompt = output.question(prompt)  # the question is logged; the answer never is
     value = ""
     try:
         value = _read_secret(prompt, reveal_seconds)
@@ -138,7 +139,7 @@ def ask_secret(prompt: str, reveal_seconds: float = 1.0) -> str:
         # What the screen holds: the prompt, then one asterisk a character -
         # on a row of their own when the prompt was too long to share one.
         stars = "*" * len(value)
-        output.after_secret(("\n> " + stars) if _secret_field_below(prompt) else stars)
+        output.after_secret(f"\n{FIELD}{stars}" if _secret_field_below(prompt) else stars)
     # Real passwords here are at least eight characters, so a lone q cannot
     # be one.
     if value.strip().lower() in QUIT_WORDS:
@@ -197,7 +198,7 @@ def _read_secret(prompt: str, reveal_seconds: float) -> str:
     out = sys.stdout
     if _secret_field_below(prompt):
         out.write(prompt.rstrip() + "\n")
-        prompt = "> "
+        prompt = FIELD
     if hostsys.IS_WINDOWS:
         return _ask_secret_windows(prompt, reveal_seconds)
     try:
@@ -300,8 +301,7 @@ def wait_for_key(prompt: str = "Press any key to continue, or q to quit...") -> 
     """
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return
-    output.before_input(prompt)
-    sys.stdout.write(prompt)
+    sys.stdout.write(output.question(prompt))
     sys.stdout.flush()
     try:
         if hostsys.IS_WINDOWS:

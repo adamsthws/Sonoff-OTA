@@ -700,6 +700,30 @@ class StartChoiceTests(unittest.TestCase):
             result = autoflash.step_pair(ctx)
         self.assertEqual(result["plug_ip"], "10.0.0.5")
 
+    def test_a_typed_address_leaves_the_screen_with_its_question(self):
+        # Asked after the "did not answer" menu, it is a block of its own, taken
+        # off once answered - not left under the stage line.
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        ctx = self.ctx()
+        ctx.account_devices = lambda: [{"deviceid": "1000000001", "productModel": "S60TPG",
+                                        "name": "Sonoff S60", "online": True, "params": {}}]
+        screen = mock.Mock()
+        with mock.patch.object(autoflash, "sight_plugs",
+                               side_effect=lambda plugs: [autoflash.Sighting(p, None, False) for p in plugs]), \
+             mock.patch.object(autoflash, "ask_choice", return_value=2), \
+             mock.patch.object(autoflash, "ask_ipv4", screen.ask_ipv4), \
+             mock.patch.object(autoflash.output, "transient_begin", screen.begin), \
+             mock.patch.object(autoflash.output, "transient_end", screen.end), \
+             mock.patch.object(autoflash.hostsys, "security_software_note", return_value=[]), \
+             mock.patch.object(autoflash.hostsys, "mac_of", return_value=None), \
+             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
+            screen.ask_ipv4.return_value = "192.168.60.50"
+            result = autoflash.step_pair(ctx)
+        self.assertEqual(result["plug_ip"], "192.168.60.50")
+        calls = [name for name, _, _ in screen.mock_calls]
+        self.assertEqual(calls[-3:], ["begin", "ask_ipv4", "end"])
+
 
 class RemoveRunTests(RunChoiceTests):
     """Unfinished runs can be removed from the menu, with care for half-converted plugs."""

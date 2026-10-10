@@ -1,3 +1,4 @@
+import contextlib
 import io
 import os
 import subprocess
@@ -62,7 +63,7 @@ class ConciseTests(OutputTestCase):
         screen, _ = self.run_with(FakeTerminal(), False, body)
         drawn = screen.split("\n")[0]
         self.assertIn("Checking the files - Underway", drawn)
-        self.assertTrue(drawn.split("\r")[-1].startswith("Stage 1 of 1 - Checking the files - Complete"))
+        self.assertTrue(drawn.split("\r")[-1].startswith(" Stage 1 of 1 - Checking the files - Complete"))
 
     def test_stage_lines_line_up_in_columns(self):
         def body():
@@ -75,7 +76,7 @@ class ConciseTests(OutputTestCase):
         self.assertEqual(len(done), 2)
         self.assertEqual(done[0].index(" - Complete"), done[1].index(" - Complete"))
         self.assertEqual(done[0].index(" - Checking"), done[1].index(" - Installing"))
-        self.assertTrue(done[0].startswith("Stage  1 of 14 - "))
+        self.assertTrue(done[0].startswith(" Stage  1 of 14 - "))
         self.assertIn("Stage 1 of 14 - Checking you have ev - complete", log)  # the log is not padded
 
     def test_an_answered_question_is_taken_off_the_screen(self):
@@ -151,8 +152,8 @@ class ConciseTests(OutputTestCase):
             output.stage_end("complete")
         screen, _ = self.run_with(FakeTerminal(), False, body)
         lines = [line.split("\r")[-1] for line in screen.split("\n")]
-        self.assertIn("Join the bridge's Wi-Fi network", lines)
-        self.assertTrue(any(line.startswith("Stage 1 of 1 - Installing Tasmota - Complete") for line in lines))
+        self.assertIn(" Join the bridge's Wi-Fi network", lines)
+        self.assertTrue(any(line.startswith(" Stage 1 of 1 - Installing Tasmota - Complete") for line in lines))
 
     def test_progress_stays_off_the_concise_screen_and_the_log(self):
         def body():
@@ -186,7 +187,7 @@ class ConciseTests(OutputTestCase):
     def test_the_warning_is_a_short_note(self):
         screen, _ = self.run_with(io.StringIO(), False,
                                   lambda: prompts.warning_box("Before going on", ["One line."]))
-        self.assertEqual(screen.strip().splitlines(), ["! Before going on", "    One line."])
+        self.assertEqual(screen.strip().splitlines(), ["! Before going on", "     One line."])
         self.assertNotIn("!!", screen)
 
     def test_block_counters_stay_off_the_concise_screen(self):
@@ -469,8 +470,11 @@ class ReportTests(OutputTestCase):
         self.assertIn(af.REPORTS_URL, screen)
         self.assertIn("adamsthws/Sonoff-OTA/discussions", af.REPORTS_URL)
         self.assertIn("Please share how it went", screen)
+        self.assertIn("already on your clipboard", screen)
+        self.assertIn(f"Test reports: {af.REPORTS_URL}", screen)
         self.assertIn("Throw your friendly neighbourhood dev a biscuit:", screen)
         self.assertGreater(screen.index(af.DONATE_URL), screen.index("Plug model"))  # after the report
+        self.assertIn(f"PayPal: {af.DONATE_URL}", screen)
         self.assertNotIn("**", screen)                       # the terminal shows no Markdown
         self.assertRegex(screen, r"Plug model: +S60TPG")
         self.assertIn("**Plug model:** S60TPG", copied[0])   # the thread gets bold labels
@@ -500,6 +504,229 @@ class LinkTests(OutputTestCase):
              mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("WT_SESSION", None)
             self.assertEqual(output.hyperlink(self.URL), self.URL)
+
+    def links_on(self):
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.dict(os.environ, {"TERM": "xterm-256color"}))
+        stack.enter_context(mock.patch.object(output, "IS_WINDOWS", False))
+        stack.enter_context(mock.patch.object(output.platform, "system", return_value="Linux"))
+        os.environ.pop("NO_COLOR", None)
+        os.environ.pop("TERM_PROGRAM", None)
+        return stack
+
+    def test_a_titled_link_shows_the_title_and_the_url_both(self):
+        def body():
+            with self.links_on():
+                output.show_link(self.URL, "Test reports")
+        screen, log = self.run_with(FakeTerminal(), False, body)
+        self.assertIn(f"\x1b]8;;{self.URL}\x1b\\{self.URL}\x1b]8;;\x1b\\", screen)  # only the URL is the link
+        self.assertLess(screen.index(f"{output.PURPLE}Test reports:"), screen.index("\x1b]8;;"))
+        self.assertEqual(output.ANSI_RE.sub("", screen).strip(), f"Test reports: {self.URL}")  # no hint
+        self.assertIn(f"  Test reports: {self.URL}\n", log)
+
+    def test_a_group_of_links_has_the_hint_once_underneath(self):
+        def body():
+            with self.links_on():
+                output.show_links([(self.URL, "Ko-fi"), (self.URL, "PayPal")], hint=True)
+        screen, log = self.run_with(FakeTerminal(), False, body)
+        lines = output.ANSI_RE.sub("", screen).strip().splitlines()
+        self.assertEqual([line.split(":")[0].strip() for line in lines], ["Ko-fi", "PayPal", "(Ctrl+click to open)"])
+        self.assertNotIn("click", log)
+
+    def test_a_titled_link_is_plain_text_where_links_do_not_work(self):
+        screen, _ = self.run_with(FakeTerminal(), False, lambda: output.show_link(self.URL, "Ko-fi"))  # NO_COLOR set
+        self.assertEqual(screen.strip(), f"Ko-fi: {self.URL}")  # no hint: clicking may not work
+        with mock.patch.object(output, "colour_ok", return_value=True), \
+             mock.patch.object(output, "IS_WINDOWS", False), \
+             mock.patch.dict(os.environ, {"TERM_PROGRAM": "Apple_Terminal"}):
+            text = output.hyperlink(self.URL, "Ko-fi")
+        self.assertNotIn("\x1b]8;;", text)
+        self.assertEqual(output.ANSI_RE.sub("", text), f"Ko-fi: {self.URL}")
+
+    def test_with_only_basic_colours_the_title_is_magenta_not_rounded_to_blue(self):
+        with mock.patch.object(output, "colour_ok", return_value=True), \
+             mock.patch.object(output, "IS_WINDOWS", False), \
+             mock.patch.dict(os.environ, {"TERM": "screen"}):
+            os.environ.pop("COLORTERM", None)
+            self.assertIn(f"{output.MAGENTA}Ko-fi:", output.hyperlink(self.URL, "Ko-fi"))
+            os.environ["TERM"] = "tmux-256color"
+            self.assertIn(f"{output.PURPLE}Ko-fi:", output.hyperlink(self.URL, "Ko-fi"))
+
+    def test_the_title_is_purple_on_the_classic_windows_console_too(self):
+        with mock.patch.object(output, "colour_ok", return_value=True), \
+             mock.patch.object(output, "IS_WINDOWS", True), \
+             mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("WT_SESSION", None)
+            text = output.hyperlink(self.URL, "Ko-fi")
+        self.assertIn(f"{output.PURPLE}Ko-fi:", text)
+        self.assertNotIn("\x1b]8;;", text)                    # coloured, not a link
+        self.assertEqual(output.ANSI_RE.sub("", text), f"Ko-fi: {self.URL}")
+
+
+def rendered(text):
+    """The rows a terminal shows once `text` is written to it: carriage
+    returns, erasing a row or its end, and moving up a row applied."""
+    import re
+    rows, row, col = [""], 0, 0
+    for token in re.findall(r"\x1b\[1F|\x1b\[2K|\x1b\[K|\x1b\[[0-9;?]*[A-Za-z]|\x1b\]8;;[^\x1b]*\x1b\\|[\s\S]", text):
+        if token == "\x1b[1F":
+            row, col = max(0, row - 1), 0
+        elif token == "\x1b[2K":
+            rows[row] = ""
+        elif token == "\x1b[K":
+            rows[row] = rows[row][:col]
+        elif token.startswith("\x1b"):
+            continue
+        elif token == "\r":
+            col = 0
+        elif token == "\n":
+            row, col = row + 1, 0
+            if row == len(rows):
+                rows.append("")
+        else:
+            line = rows[row].ljust(col)
+            rows[row] = line[:col] + token + line[col + 1:]
+            col += 1
+    rows = [" ".join(line.split()) for line in rows]  # columns padded or not
+    while rows and not rows[-1]:
+        rows.pop()
+    return rows
+
+
+class StageGapTests(OutputTestCase):
+    """Whatever is shown under a stage's line - a message, a question, a
+    helper's output - has one blank line between it and the stage line."""
+
+    def screen(self, body, verbose=False, colour=False):
+        def wrapped():
+            with mock.patch.object(output, "colour_ok", return_value=colour), \
+                 mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((100, 40))):
+                body()
+        screen, _ = self.run_with(FakeTerminal(), verbose, wrapped)
+        return rendered(screen)
+
+    def test_a_message_under_the_stage_line_has_a_blank_line_above_it(self):
+        def body():
+            output.stage_begin(3, 14, "Discovering the plug")
+            output.show("Looking for it on your network...")
+            output.stage_end("complete")
+        rows = self.screen(body)
+        self.assertTrue(rows[0].startswith("Stage 3 of 14 - Discovering the plug - Underway"))
+        self.assertEqual(rows[1:3], ["", "Looking for it on your network..."])
+        self.assertTrue(rows[3].startswith("Stage 3 of 14 - Discovering the plug - Complete"))
+
+    def test_a_section_s_own_blank_line_is_the_gap(self):
+        def body():
+            output.stage_begin(4, 14, "Querying Sonoff firmware")
+            prompts.section("What the plug reported", ["Firmware now 1.2.0"])
+        rows = self.screen(body)
+        self.assertEqual(rows[1:3], ["", "-- What the plug reported"])
+
+    def test_a_question_has_the_gap_too(self):
+        def body():
+            output.stage_begin(3, 14, "Discovering the plug")
+            output.before_input("eWeLink account email: ")
+            sys.stdout.write("eWeLink account email: ")
+            output.answered("someone@example.com")
+        rows = self.screen(body)
+        self.assertEqual(rows[1], "")
+        self.assertEqual(rows[2], "eWeLink account email:")
+
+    def test_the_gap_leaves_the_screen_with_an_answered_question(self):
+        def body():
+            output.stage_begin(3, 14, "Discovering the plug")
+            output.transient_begin()
+            prompts.warning_box("Before going on", ["One line."])
+            output.before_input("Type PROCEED to go ahead: ")
+            sys.stdout.write("Type PROCEED to go ahead: proceed\n")
+            output.answered("proceed")
+            output.transient_end()
+            output.show("Sending the bridge...")
+            output.stage_end("complete")
+        rows = self.screen(body, colour=True)
+        self.assertTrue(rows[0].startswith("Stage 3 of 14 - Discovering the plug - Underway"))
+        self.assertEqual(rows[1:3], ["", "Sending the bridge..."])
+        self.assertNotIn("Before going on", "\n".join(rows))
+
+    def test_stage_lines_follow_one_another_without_a_gap(self):
+        def body():
+            for number in (1, 2):
+                output.stage_begin(number, 14, f"Stage number {number}")
+                output.stage_end("already done")
+        rows = self.screen(body)
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(rows[1].startswith("Stage 2 of 14"))
+
+    def test_a_failure_under_a_stopped_stage_has_the_gap(self):
+        def body():
+            output.stage_begin(5, 14, "Installing bridge firmware")
+            output.stage_end("stopped")
+            output.show("FAILED: bridge delivery failed")
+        rows = self.screen(body)
+        self.assertTrue(rows[0].endswith("Stopped"))
+        self.assertEqual(rows[1:], ["", "FAILED: bridge delivery failed"])
+
+    def test_verbose_output_under_a_stage_heading_has_the_gap(self):
+        def body():
+            output.stage_begin(4, 14, "Querying Sonoff firmware")
+            output.detail("$ python tools/query_ota.py")
+        rows = self.screen(body, verbose=True)
+        heading = rows.index("== Stage 4 of 14 - Querying Sonoff firmware")
+        self.assertEqual(rows[heading + 1:heading + 3], ["", "$ python tools/query_ota.py"])
+
+    def test_piped_output_gets_the_gap_too(self):
+        def body():
+            output.stage_begin(3, 14, "Discovering the plug")
+            output.show("Found it.")
+        with mock.patch("sys.stdout", io.StringIO()) as piped:
+            output.start(self.log, verbose=False)
+            body()
+            output.finish()
+        rows = piped.getvalue().splitlines()
+        self.assertEqual(rows[1:3], ["", " Found it."])
+
+
+
+class MarginTests(OutputTestCase):
+    """Every row starts one space in, and nothing is wider than the terminal."""
+
+    def narrow(self, body, columns=40):
+        def run():
+            with mock.patch.dict(os.environ, {"COLUMNS": str(columns), "LINES": "24"}):
+                body()
+        screen, _ = self.run_with(FakeTerminal(), True, run)
+        return [row for row in output.ANSI_RE.sub("", screen).split("\n") if row.strip()]
+
+    def test_a_long_message_wraps_between_words_inside_the_margin(self):
+        text = "Fix the cause, then carry on with the same command again, and it picks up where it stopped."
+        rows = self.narrow(lambda: output.show(text))
+        self.assertGreater(len(rows), 1)
+        for row in rows:
+            self.assertTrue(row.startswith(" ") and not row.startswith("  "), row)
+            self.assertLessEqual(len(row), 39)
+        self.assertEqual(" ".join(row.strip() for row in rows), text)
+
+    def test_lined_up_labels_carry_on_under_their_value(self):
+        rows = self.narrow(lambda: output.show("    Relay:      switches, seen on the meter with a lamp plugged in"))
+        self.assertEqual(rows[0].index("switches"), rows[1].index(rows[1].strip()))
+
+    def test_a_url_is_never_broken(self):
+        url = "https://github.com/adamsthws/Sonoff-OTA/discussions/1"
+        rows = self.narrow(lambda: output.show_link(url, "Test reports"))
+        self.assertIn(url, [row.strip() for row in rows])
+
+    def test_a_long_question_wraps_and_leaves_its_last_row_for_the_answer(self):
+        shown = []
+        rows = self.narrow(lambda: shown.append(output.question(
+            "Type YES to go ahead - anything else stops, changing nothing", ": ")))
+        self.assertTrue(shown[0].endswith(": "))
+        self.assertTrue(shown[0].startswith(" "))
+        self.assertTrue(all(len(row) <= 39 for row in rows + shown))
+
+    def test_piped_output_keeps_the_margin_but_is_not_wrapped(self):
+        text = "word " * 40
+        screen, _ = self.run_with(io.StringIO(), True, lambda: output.show(text.strip()))
+        self.assertEqual(screen.strip("\n"), " " + text.strip())
 
 
 if __name__ == "__main__":

@@ -15,9 +15,9 @@ $ErrorActionPreference = "Stop"
 
 try { $python = Get-ToolPython }
 catch {
-    Write-Host "No Python could be found or set up: $($_.Exception.Message)"
-    Write-Host "Install Python 3.10 or newer yourself (https://www.python.org/downloads/),"
-    Write-Host "then run this again."
+    Write-Host " No Python could be found or set up: $($_.Exception.Message)"
+    Write-Host " Install Python 3.10 or newer yourself (https://www.python.org/downloads/),"
+    Write-Host " then run this again."
     exit 1
 }
 

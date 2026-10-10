@@ -45,7 +45,7 @@ function Get-Pinned($what, $pin, $dir = (Join-Path $env:TEMP "s60-downloads")) {
     New-Item -ItemType Directory -Force $dir | Out-Null
     $file = Join-Path $dir ([IO.Path]::GetFileName($pin.Url))
     if (-not ((Test-Path $file) -and (Get-FileHash $file).Hash -eq $pin.Sha256)) {
-        Write-Host "Downloading $what..."   # not Write-Output: that would join the returned path
+        Write-Host " Downloading $what..."   # not Write-Output: that would join the returned path
         $progress, $global:ProgressPreference = $global:ProgressPreference, "SilentlyContinue"
         try { Invoke-WebRequest -Uri $pin.Url -OutFile $file -UseBasicParsing }
         finally { $global:ProgressPreference = $progress }   # many times slower with it shown
@@ -117,9 +117,9 @@ function Show-PythonCandidates {
         $python = Test-PythonCandidate $candidate
         $verdict = if (-not $python) { "not usable (the Store's stub, older than 3.10, or 32-bit)" }
                    elseif ($first) { $first = $false; "USED: $python" } else { "usable: $python" }
-        Write-Host ("{0,-12} {1}`n             {2}" -f $candidate.How, $candidate.Exe, $verdict)
+        Write-Host (" {0,-12} {1}`n              {2}" -f $candidate.How, $candidate.Exe, $verdict)
     }
-    if ($first) { Write-Host "No usable Python: $($PythonInstaller.Name) would be installed." }
+    if ($first) { Write-Host " No usable Python: $($PythonInstaller.Name) would be installed." }
 }
 
 function Install-Python {
@@ -127,7 +127,7 @@ function Install-Python {
     # anyone else on the computer. It adds itself, and the py launcher, to PATH.
     # The installer is kept beside the record of it: it is what removes it.
     $installer = Get-Pinned $PythonInstaller.Name $PythonInstaller
-    Write-Host "Installing $($PythonInstaller.Name), for your account..."
+    Write-Host " Installing $($PythonInstaller.Name), for your account..."
     $p = Start-Process $installer -Wait -PassThru -ArgumentList `
         "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_launcher=1", "InstallLauncherAllUsers=0", "Include_test=0"
     if ($p.ExitCode -ne 0) { throw "the Python installer failed (exit $($p.ExitCode))" }
@@ -156,7 +156,7 @@ function Get-PortablePython {
         }
         return Test-PythonCandidate ([pscustomobject]@{ How = "portable"; Exe = $exe; Arguments = @() })
     } catch {
-        Write-Host "The portable Python could not be used ($($_.Exception.Message)); looking for an installed one."
+        Write-Host " The portable Python could not be used ($($_.Exception.Message)); looking for an installed one."
         return $null
     }
 }
@@ -179,14 +179,14 @@ function Request-PythonRemoval {
     if (-not (Test-Path $InstalledMarker)) { return }
     $record = Get-Content $InstalledMarker -Raw | ConvertFrom-Json
     Write-Host ""
-    Write-Host "$($record.name) was installed for this tool. Remove it now, to leave nothing"
-    Write-Host "behind? If you will run the tool again - for another plug, or to finish this"
-    Write-Host "one - keep it: the next run then starts straight away."
-    $answer = "$(Read-Host 'Remove Python now? [y/N]')"
-    if ($answer.Trim() -notmatch '^(y|yes)$') { Write-Host "Kept."; return }
+    Write-Host " $($record.name) was installed for this tool. Remove it now, to leave nothing"
+    Write-Host " behind? If you will run the tool again - for another plug, or to finish this"
+    Write-Host " one - keep it: the next run then starts straight away."
+    $answer = "$(Read-Host ' Remove Python now? [y/N]')"
+    if ($answer.Trim() -notmatch '^(y|yes)$') { Write-Host " Kept."; return }
     $p = Start-Process $record.installer -Wait -PassThru -ArgumentList "/uninstall", "/quiet"
-    if ($p.ExitCode -ne 0) { Write-Host "Removing it failed (exit $($p.ExitCode)): use Settings > Apps instead."; return }
+    if ($p.ExitCode -ne 0) { Write-Host " Removing it failed (exit $($p.ExitCode)): use Settings > Apps instead."; return }
     Remove-Item $InstalledMarker, $record.installer -Force -ErrorAction SilentlyContinue
     Update-SessionPath
-    Write-Host "Removed."
+    Write-Host " Removed."
 }

@@ -146,8 +146,7 @@ def require_word(word: str) -> bool:
     tell("")
     # Read directly: an empty answer must stop here, not be asked again.
     question = f"Type {word.upper()} to go ahead - anything else stops, changing nothing: "
-    output.before_input(question)
-    answer = input(question)
+    answer = input(output.question(question))
     output.answered(answer)
     return answer.strip().lower() == word.lower()
 
@@ -1336,11 +1335,14 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
             ])
             output.transient_end()
         if choice == 2:
-            return ask_ipv4(
+            output.transient_begin()  # gone once answered, as the menu was
+            ip = ask_ipv4(
                 "The plug's address",
                 help_lines=["It is in your router's device list, and in eWeLink's device information."],
                 must_respond=True,
             )
+            output.transient_end()
+            return ip
         if choice == 1:
             ctx.forget_account()
         refreshed = ctx.account_devices()  # its online status may have changed
@@ -2287,10 +2289,13 @@ def confirm_skip(ctx: Context, step: str, title: str) -> bool:
     if ok:
         say(f"[skip] {step} {title} (done, and the plug still agrees)")
         return True
+    output.transient_begin()  # the note and its question, gone once answered
     say("")
     tell(f"{step} is recorded as done, but {message}.")
     tell("The record and the device disagree, so the checklist cannot be trusted here.")
-    return not ask_yes_no(f"Run {step} again", default=False)
+    again = ask_yes_no(f"Run {step} again", default=False)
+    output.transient_end()
+    return not again
 
 
 
@@ -2369,17 +2374,16 @@ def run_steps(ctx: Context) -> int:
             if output.log_path():
                 tell(f"What happened, in full: {display_path(output.log_path())}")
             tell("Stuck? Start a discussion or open an issue:")
-            output.show_link(DISCUSSIONS_URL)
-            output.show_link(ISSUES_URL)
+            output.show_links([(DISCUSSIONS_URL, "Start a discussion"), (ISSUES_URL, "Open an issue")])
             return code
     say("")
     close_firewall_rules(ctx)
     tell("")
     output.show("Conversion complete!", output.GREEN)
-    tell("The plug is running official Tasmota:")
+    tell("The plug is running official Tasmota...")
     url = plug_page_url(ctx.state.input("plug_ip"))
     if url:
-        output.show_link(url)
+        output.show_link(url, "Your plug")
     invite_report(ctx, time.monotonic() - started, resumed)
     return 0
 
@@ -2548,8 +2552,11 @@ def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     copied = hostsys.copy_to_clipboard(report_markdown(fields))
     tell("")
     output.show("Please share how it went!", output.GREEN)
-    tell("Copy/paste your results below into the Test-Reports discussion thread:")
-    output.show_link(REPORTS_URL)
+    if copied:
+        tell("Paste your results into the thread (they're already on your clipboard):")
+    else:
+        tell("Copy your results below and post them in the thread...")
+    output.show_link(REPORTS_URL, "Test reports")
     tell("")
     for line in report_screen(fields):
         tell(line)
@@ -2557,9 +2564,9 @@ def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
         tell("")
         tell("Fill in the blanks (__) if you know them.")
     tell("")
-    output.show("And finally, you've reached the bit where I hold out my hat!", output.GREEN)
+    output.show("You've reached the bit where I hold out my hat!", output.GREEN)
     tell("Free software, not free biscuits... Throw your friendly neighbourhood dev a biscuit:")
-    output.show_link(DONATE_URL)
+    output.show_links([(DONATE_URL, "PayPal")], hint=True)
 
 
 def display_path(path: Path) -> str:
