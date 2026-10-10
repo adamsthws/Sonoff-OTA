@@ -2362,8 +2362,8 @@ def run_steps(ctx: Context) -> int:
         if code != 0:
             close_firewall_rules(ctx)
             tell("")
-            tell("Fix the cause, then carry on with:")
-            tell("    python3 tools/s60_autoflash.py run")
+            tell("Fix the cause, then carry on with the same command again:")
+            tell("    start.cmd, or .\\start.ps1 in PowerShell" if hostsys.IS_WINDOWS else "    sh start.sh")
             if output.log_path():
                 tell(f"What happened, in full: {display_path(output.log_path())}")
             tell("Stuck? Start a discussion or open an issue:")
