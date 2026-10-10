@@ -15,7 +15,7 @@
 # rig (what the tests need) and tool (the tool's own Python, as its first run
 # leaves it). A run starts from tool, or with --first-run from rig, so the tool
 # sets itself up as on a new computer. A layer whose scripts changed is set up
-# again before the run, with those above it - a few minutes, or 10-15 for
+# again before the run, with those above it - a few minutes, or 5-10 for
 # installed; --rebuild-layer does it anyway. The first run lists what this
 # computer needs and gets it after one question. Windows gets 2 GB and 2 CPUs
 # (S60_WINDOWS_RAM=3G, S60_WINDOWS_CPUS=4). See docs/emulator.md.
@@ -131,7 +131,7 @@ if [ "${stale[0]:-}" = installed ]; then
         exit 1
     fi
     [ -f "$CACHE/server2025-eval.iso" ] || plan+=("Microsoft's Windows Server 2025 evaluation ISO (8.2 GB download, checked against its pinned SHA-256, kept for installing again)")
-    plan+=("Windows Server Core installed from it (10-15 minutes), then set up for the tests and the tool (a few minutes more)")
+    plan+=("Windows Server Core installed from it (5-10 minutes), then set up for the tests and the tool (a few minutes more)")
     [ -f "$CACHE/base.qcow2" ] && plan+=("The disk from before Windows was kept in layers removed (base.qcow2, about 10 GB)")
     user_steps+=(windows)
 fi

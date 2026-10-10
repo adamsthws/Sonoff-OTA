@@ -32,12 +32,44 @@ another regional version's power meter.
 | Processors | 2, the emulator's cap | 2 more for Windows (caps, shared with everything else, not set aside) |
 | Disk | about 0.5 GB: the image, and the plug's state under `captures/emulation/state/` | about 30 GB free while Windows installs; then about 21 GB: the ISO 8.2 GB, the layers 10.8, 0.9 and 0.4 GB, the images 0.8 GB |
 | Downloads | the QEMU fork's source, once | Microsoft's ISO (8.2 GB) and Windows Terminal (12 MB), once; Python (11 MB) and OpenVPN (6 MB) each time a layer that gets them is set up |
-| Time | a few minutes to build the image, once | 10-15 minutes to install Windows, a few more for its other layers, once; then about a minute to Windows' logon per run |
+| Time | see "How long it takes", below | |
 
 Measured on an AMD Ryzen 5 4500U (6 cores) with 8 GB: Windows peaked at
 2.1 GB, the emulator at 70 MB, and the layers took 7, 2 and 1 minutes to set
 up. The caps can be changed (below), and a computer short of memory is warned
 before Windows starts.
+
+### How long it takes
+
+For a computer like the one these were measured on - an AMD Ryzen 5 4500U
+laptop with 8 GB, from 2020 - or faster. A faster one is nearer the low end.
+
+**Once, the first time:**
+
+| Step | Takes |
+|---|---|
+| Building the emulator's image (QEMU from source) | 2-3 minutes |
+| Building the Windows VM's image | about a minute |
+| Downloading Microsoft's ISO, 8.2 GB | depends on the connection: about 20 minutes at 50 Mbit/s, 2-3 at 500 Mbit/s |
+| Installing Windows (layer `installed`) | 5-10 minutes |
+| Setting up the `rig` and `tool` layers | 2-4 minutes together |
+
+So the emulator alone is ready in a few minutes, and Windows beside it in
+about 10-20 minutes plus the download.
+
+**Each run:**
+
+| Step | Takes |
+|---|---|
+| The emulator starting, until the plug is on its Wi-Fi | under 10 seconds |
+| Windows from Linux: starting, until the link says Connected | 30-60 seconds |
+| A conversion | about 7 minutes on a real plug, through all 14 stages; the emulator's has not been timed end to end yet - expect about the same, and longer if the emulated flash writes are slower |
+| Windows shutting down at the end | about 10 seconds |
+
+**After changing what Windows is set up with:** the layers whose scripts
+changed are set up again before the run starts - about a minute for `tool`,
+2-4 for `rig` (and `tool` above it), or the full install again for
+`installed`, from the kept ISO, without the download.
 
 **The dump is private.** It holds the home Wi-Fi password and the plug's
 eWeLink keys in cleartext. Keep it, and everything the emulator writes, under
@@ -149,7 +181,7 @@ to the one below:
 
 | Layer | What it adds | Set up by | Takes |
 |---|---|---|---|
-| `installed` | Windows Server Core, as Setup leaves it: the user `s60`, who logs on by itself, and a hook that runs `start.ps1` at logon | the ISO, `unattend.xml`, `firstlogon.ps1` | 10-15 min |
+| `installed` | Windows Server Core, as Setup leaves it: the user `s60`, who logs on by itself, and a hook that runs `start.ps1` at logon | the ISO, `unattend.xml`, `firstlogon.ps1` | 5-10 min |
 | `rig` | what only the tests need: Remote Desktop, no Windows Update or SConfig, and for the link OpenVPN's TAP driver, the "S60 emulator" adapter and a Python of its own, from the same `windows-bootstrap.ps1` a Windows computer uses | `rig.ps1` | a few min |
 | `tool` | what the tool's own first run leaves: its portable Python | `tool.ps1` | about a min |
 
