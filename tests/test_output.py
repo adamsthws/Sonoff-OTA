@@ -474,7 +474,7 @@ class ReportTests(OutputTestCase):
         self.assertIn(f"Test reports: {af.REPORTS_URL}", screen)
         self.assertIn("Throw your friendly neighbourhood dev a biscuit:", screen)
         self.assertGreater(screen.index(af.DONATE_URL), screen.index("Plug model"))  # after the report
-        self.assertIn(f"PayPal: {af.DONATE_URL}", screen)
+        self.assertGreater(screen.index(f"PayPal: {af.DONATE_URL}"), screen.index(f"Ko-fi: {af.KOFI_URL}"))
         self.assertNotIn("**", screen)                       # the terminal shows no Markdown
         self.assertRegex(screen, r"Plug model: +S60TPG")
         self.assertIn("**Plug model:** S60TPG", copied[0])   # the thread gets bold labels

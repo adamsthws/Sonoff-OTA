@@ -57,7 +57,7 @@ there may be new. Please post it in the
 [Test reports](https://github.com/adamsthws/Sonoff-OTA/discussions/1) thread - see
 [Reporting how it went](../README.md#reporting-how-it-went) - and the fix
 will help everyone after you. To ask for help, start a
-[discussion](https://github.com/adamsthws/Sonoff-OTA/discussions/new/choose)
+[discussion](https://github.com/adamsthws/Sonoff-OTA/discussions)
 of your own or open an [issue](https://github.com/adamsthws/Sonoff-OTA/issues)
 rather than asking in the thread.
 

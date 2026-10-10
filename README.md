@@ -147,7 +147,7 @@ Please include:
 - **if it stopped:** the on-screen messages around where it stopped.
 
 The thread is for reports, not for asking for help. If you are stuck, start a
-[discussion](https://github.com/adamsthws/Sonoff-OTA/discussions/new/choose)
+[discussion](https://github.com/adamsthws/Sonoff-OTA/discussions)
 of your own, or open an [issue](https://github.com/adamsthws/Sonoff-OTA/issues)
 if something clearly needs fixing in the code - and link it from your report
 so the thread stays complete.

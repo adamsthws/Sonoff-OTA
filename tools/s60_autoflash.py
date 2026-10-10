@@ -109,10 +109,11 @@ SETTINGS_PATH = ROOT / "captures" / "settings.json"
 REPORTS_URL = "https://github.com/adamsthws/Sonoff-OTA/discussions/1"
 # Where people ask for help: a discussion or issue of their own, so the
 # reports thread stays a record of runs.
-DISCUSSIONS_URL = "https://github.com/adamsthws/Sonoff-OTA/discussions/new/choose"
+DISCUSSIONS_URL = "https://github.com/adamsthws/Sonoff-OTA/discussions"
 ISSUES_URL = "https://github.com/adamsthws/Sonoff-OTA/issues/new"
 # Shown once a conversion has succeeded, after the report.
-DONATE_URL = "https://www.paypal.com/biz/profile/adamsthws"
+KOFI_URL = "https://ko-fi.com/adamsthws"
+DONATE_URL = "https://www.paypal.me/adamsthws"
 TASMOTA_AP_PREFIX = "tasmota-"
 
 
@@ -2565,7 +2566,7 @@ def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     tell("")
     output.show("You've reached the bit where I hold out my hat!", output.GREEN)
     tell("Free software, not free biscuits... Throw your friendly neighbourhood dev a biscuit:")
-    output.show_links([(DONATE_URL, "PayPal")], hint=True)
+    output.show_links([(KOFI_URL, "Ko-fi"), (DONATE_URL, "PayPal")], hint=True)
 
 
 def display_path(path: Path) -> str:
