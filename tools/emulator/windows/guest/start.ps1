@@ -1,23 +1,27 @@
 <#
-At each logon of a test run: wire Windows into the emulator's home network,
-and open a window at the checkout to run the conversion tool in. vm-run.sh
+At each logon (the hook firstlogon.ps1 adds). vm-run.sh layer leaves the name
+of a layer to set up in C:\S60\layer.txt: its script runs, and shuts Windows
+down. In a test run: wire Windows into the emulator's home network, and open
+a window at the checkout to run the conversion tool in. vm-run.sh
 puts the checkout in C:\S60\repo, and the emulator's address and the console to
 run in in C:\S60\run.json: OpenConsole - Windows Terminal's console, as on
 Windows 11 (Terminal itself needs XAML, which Server Core lacks) - or the
 classic one, as on Windows 10.
 #>
-# vm-run.sh refresh: set the base up again with the current scripts, which shuts it down.
-if (Test-Path C:\S60\refresh) {
-    Remove-Item C:\S60\refresh
-    & C:\S60\provision.ps1
+if (Test-Path C:\S60\layer.txt) {
+    $layer = (Get-Content C:\S60\layer.txt -Raw).Trim()
+    Remove-Item C:\S60\layer.txt
+    & "C:\S60\$layer.ps1"
     exit 0
 }
 $run = "C:\S60\run.json"
-if (-not (Test-Path $run)) { exit 0 }  # the base disk itself: nothing to start
+if (-not (Test-Path $run)) { exit 0 }  # a layer itself, booted by hand: nothing to start
 $config = Get-Content $run -Raw | ConvertFrom-Json
 $repo = "C:\S60\repo"
 . "$repo\tools\windows-python.ps1"
-$python = Get-ToolPython
+# The link's own Python (rig.ps1), never the tool's: in a --first-run there is
+# none yet, and the tool must find that so.
+$python = Join-Path (Join-Path C:\S60\rig-python $PortablePython.Folder) python.exe
 
 Start-Process $python -ArgumentList "tools\emulator\windows_link.py", "--host", $config.link_host `
     -WorkingDirectory $repo

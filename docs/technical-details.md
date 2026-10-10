@@ -181,8 +181,10 @@ python3 -m unittest discover -s tests
 To try a change against a plug without converting a real one, the emulator in
 `tools/emulator/` runs the whole conversion against a virtual S60 booting a
 real stock flash dump, in Docker. It has taken a UK S60TPG on stock 1.2.0
-through every stage to the official layout. How to set it up and use it, how
-it works, and what had to be changed in the emulator to get there are in
+through every stage to the official layout. On a Linux computer with KVM it
+also runs the tool on Windows beside the plug, in a Windows that starts clean
+every run. What it needs, how to set it up, use it and start over, how it
+works, and what had to be changed in the emulator to get there are in
 **[emulator.md](emulator.md)**.
 
 To build the temporary startup firmware yourself instead of using the

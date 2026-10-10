@@ -12,8 +12,8 @@ another regional version's power meter.
 
 ## What you need
 
-- **Docker.** Everything that is built or run lives in containers; nothing is
-  installed on the host.
+- **Docker,** on Linux, macOS, or Windows through WSL 2. Everything that is
+  built or run lives in containers; nothing is installed on the host.
 - **A flash dump of a stock plug,** taken with `tools/s60_readout.py` (over
   Wi-Fi; the plug is put back to stock afterwards). Copy `flash.bin` and
   `efuse.bin` into `captures/emulation/`.
@@ -22,6 +22,22 @@ another regional version's power meter.
   ```sh
   .venv/bin/python -m pip install esp-idf-nvs-partition-gen
   ```
+
+### Hardware
+
+| | The emulator alone | With Windows beside it ("Windows from Linux") |
+|---|---|---|
+| Processor | any 64-bit one Docker runs on | x86-64 with hardware virtualisation (AMD-V/SVM or Intel VT-x) switched on in the firmware, so Linux has `/dev/kvm` |
+| Memory | 256 MB, the emulator's cap | 3.3 GB at most: Windows 2 GB, QEMU and the disk tools 1 GB, the emulator 256 MB. An 8 GB laptop with a desktop open manages it |
+| Processors | 2, the emulator's cap | 2 more for Windows (caps, shared with everything else, not set aside) |
+| Disk | about 0.5 GB: the image, and the plug's state under `captures/emulation/state/` | about 30 GB free while Windows installs; then about 21 GB: the ISO 8.2 GB, the layers 10.8, 0.9 and 0.4 GB, the images 0.8 GB |
+| Downloads | the QEMU fork's source, once | Microsoft's ISO (8.2 GB) and Windows Terminal (12 MB), once; Python (11 MB) and OpenVPN (6 MB) each time a layer that gets them is set up |
+| Time | a few minutes to build the image, once | 10-15 minutes to install Windows, a few more for its other layers, once; then about a minute to Windows' logon per run |
+
+Measured on an AMD Ryzen 5 4500U (6 cores) with 8 GB: Windows peaked at
+2.1 GB, the emulator at 70 MB, and the layers took 7, 2 and 1 minutes to set
+up. The caps can be changed (below), and a computer short of memory is warned
+before Windows starts.
 
 **The dump is private.** It holds the home Wi-Fi password and the plug's
 eWeLink keys in cleartext. Keep it, and everything the emulator writes, under
@@ -34,6 +50,8 @@ and an upgrade sent by the conversion could reach the real plug. Unplug the
 real plug before using `--cloud`.
 
 ## Using it
+
+On Linux or macOS (on Windows, see "On Windows" below):
 
 ```sh
 tools/emulator/emu.sh            # plug offline: nothing reaches the internet
@@ -111,19 +129,37 @@ Technology" (VT-x) on Intel.
 Both containers are capped, so they cannot take over the computer. Windows
 gets 2 GB and 2 CPUs (`S60_WINDOWS_RAM=3G`, `S60_WINDOWS_CPUS=4` to change), and
 its container at most 1 GB more, for QEMU itself, without swap. The emulator
-gets 1 GB and 2 CPUs (`S60_EMU_MEMORY`, `S60_EMU_CPUS`).
+gets 256 MB and 2 CPUs (`S60_EMU_MEMORY=512m`, `S60_EMU_CPUS`).
+
+```sh
+tools/emulator/windows-test.sh --cloud                    # a conversion, in OpenConsole, as on Windows 11
+tools/emulator/windows-test.sh --cloud --classic-console  # ... in the classic console, as on Windows 10
+tools/emulator/windows-test.sh --cloud --first-run        # ... on a Windows that has never seen the tool
+tools/emulator/windows-test.sh --cloud --fresh            # ... with the plug back to stock and no earlier run
+tools/emulator/windows-test.sh --rebuild-layer=rig        # set Windows' rig layer (and tool) up again first
+```
+
+`--fresh`, `--pcap`, `--no-firewall` and `--rebuild` are `emu.sh`'s.
 
 The first run fetches Microsoft's **Windows Server 2025 evaluation ISO** - 8.2
 GB, straight from Microsoft's Evaluation Center link, no sign-up, checked
-against its pinned SHA-256 - and installs Windows from it once, in 20-40
-minutes. A seed disc beside the ISO carries the answer file, the set-up
-scripts and this checkout: Setup installs the Datacenter Server Core image,
-the first logon copies the scripts off the seed disc, and Windows gets the
-tool's portable Python and the TAP driver itself, with the same
-`windows-bootstrap.ps1` a Windows computer uses. The prepared disk is kept in
-`~/.cache/s60-emu/windows/base.qcow2`, and the ISO is deleted; every run
-starts from a throwaway copy of that disk, with this checkout in
-`C:\S60\repo`, in about a minute.
+against its pinned SHA-256, and kept - and sets Windows up from it in three
+**layers**, each a disk in `~/.cache/s60-emu/windows` holding only its changes
+to the one below:
+
+| Layer | What it adds | Set up by | Takes |
+|---|---|---|---|
+| `installed` | Windows Server Core, as Setup leaves it: the user `s60`, who logs on by itself, and a hook that runs `start.ps1` at logon | the ISO, `unattend.xml`, `firstlogon.ps1` | 10-15 min |
+| `rig` | what only the tests need: Remote Desktop, no Windows Update or SConfig, and for the link OpenVPN's TAP driver, the "S60 emulator" adapter and a Python of its own, from the same `windows-bootstrap.ps1` a Windows computer uses | `rig.ps1` | a few min |
+| `tool` | what the tool's own first run leaves: its portable Python | `tool.ps1` | about a min |
+
+Every run starts from a throwaway layer on `tool`, with this checkout in
+`C:\S60\repo`, in about a minute. `--first-run` starts it on `rig` instead:
+Windows has never seen the tool, so `start.cmd` gets its Python itself, as on
+a new computer. When a layer's scripts change, the next run sets it up again
+first, and every layer above it; `--rebuild-layer=installed|rig|tool` does
+that anyway, from that layer up. A layer is replaced only once its set-up has
+finished, so one that fails leaves the layers as they were.
 
 Windows logs on by itself, opens the link and a PowerShell window for the
 conversion - in **OpenConsole**, Windows Terminal's own console, as on Windows
@@ -137,8 +173,11 @@ unfinished one can be resumed.
 
 Server Core has no desktop, which is what makes it quick to install and run,
 and leaves three things a person's Windows has untested here: the User
-Account Control prompt (an administrator's console is already elevated, so the
-firewall rule is added without asking), Windows Security's notifications, and
+Account Control prompt (Server Core has neither the prompt nor the service
+behind it, and an administrator's programs are always elevated there, so the
+firewall rule is added without asking; tests/test_windows_uac.py answers it
+every way instead, and a Windows 11 computer shows the real one), Windows
+Security's notifications, and
 Windows Terminal's window itself. Terminal cannot start on Server Core, which
 lacks the XAML it draws with; OpenConsole, from the same release (pinned, 12
 MB, fetched once into `~/.cache/s60-emu/windows`), is the same code for what
@@ -147,12 +186,32 @@ line or take a block back off the screen, wrapping - but not Terminal's tabs,
 or its clickable links. Everything the tool does on the network - finding the
 plug, the firewall rule, serving the firmware - is the same as on any Windows.
 
-When the scripts that set Windows up change (`provision.ps1`,
-`windows-bootstrap.ps1`, `windows-python.ps1`), the next run sets the prepared
-disk up again with them first, in a few minutes, without the ISO or a new
-install; `--refresh-base` does it anyway. The evaluation lasts 180 days from
-when the disk was installed; after that, delete `base.qcow2` and the next run
-installs it again.
+```
+ ~/.cache/s60-emu/windows/
+   server2025-eval.iso ─ Setup ─▶ installed.qcow2      Windows as Setup leaves it
+                                    └─ rig.qcow2        + what the tests need
+                                        └─ tool.qcow2   + the tool's Python
+                                            └─ (a run)  thrown away when Windows shuts down
+   captures/      the Windows conversion's captures, kept between runs
+   windows-terminal.zip, *.built-from   OpenConsole's release; what each layer was set up from
+```
+
+The evaluation lasts 180 days from when Windows was installed; after that,
+`--rebuild-layer=installed` installs it again from the kept ISO.
+
+#### Starting over
+
+| To get | Do |
+|---|---|
+| A clean Windows | nothing: every run starts from a throwaway layer, so nothing a run does - a firewall rule, a setting, a file - reaches the next one |
+| The plug back to stock, and no earlier conversion to resume | `--fresh` (the plug's flash, the emulator's run, and the Windows run's captures; the eWeLink email is not offered either) |
+| A Windows that has never seen the tool | `--first-run` |
+| The test rig, or the tool's Python, set up again | `--rebuild-layer=rig` or `--rebuild-layer=tool`; changing their scripts does it by itself |
+| Windows installed again | `--rebuild-layer=installed`, from the kept ISO |
+| None of it on the computer | `docker rmi s60-win s60-emu`, and delete `~/.cache/s60-emu` |
+
+Everything under `~/.cache/s60-emu` belongs to you, not root, though the
+containers write it.
 
 ### On a Windows computer
 

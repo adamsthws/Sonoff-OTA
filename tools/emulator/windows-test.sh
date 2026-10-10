@@ -6,19 +6,19 @@
 # Remote Desktop, and every run starts from a clean copy of it.
 #
 #   tools/emulator/windows-test.sh [--cloud] [--fresh] [--no-firewall] [--rebuild]
-#                                  [--classic-console] [--refresh-base]
+#       [--classic-console] [--first-run] [--rebuild-layer=installed|rig|tool]
 #
 # Options as emu.sh's (a conversion needs --cloud). The conversion runs in
 # OpenConsole, Windows Terminal's own console, as on Windows 11; with
-# --classic-console in Windows' classic one, as on Windows 10. Windows gets
-# 2 GB and 2 CPUs (S60_WINDOWS_RAM=3G, S60_WINDOWS_CPUS=4). When Windows' set-up
-# scripts change, its disk is set up again with them first, in a few minutes
-# (--refresh-base to do that anyway). The first run checks what
-# this computer needs, lists it, and gets it all after one question:
-# Microsoft's evaluation ISO (8.2 GB, no sign-up), from which Windows is made
-# ready once - an unattended Setup, then the conversion tool's prerequisites
-# installed by tools/emulator/windows-bootstrap.ps1 - in 20-40 minutes. Later
-# runs start in about a minute. See docs/emulator.md, "Windows from Linux".
+# --classic-console in Windows' classic one, as on Windows 10. Windows is kept
+# in layers: installed (from Microsoft's evaluation ISO, 8.2 GB, no sign-up),
+# rig (what the tests need) and tool (the tool's own Python, as its first run
+# leaves it). A run starts from tool, or with --first-run from rig, so the tool
+# sets itself up as on a new computer. A layer whose scripts changed is set up
+# again before the run, with those above it - a few minutes, or 10-15 for
+# installed; --rebuild-layer does it anyway. The first run lists what this
+# computer needs and gets it after one question. Windows gets 2 GB and 2 CPUs
+# (S60_WINDOWS_RAM=3G, S60_WINDOWS_CPUS=4). See docs/emulator.md.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -45,18 +45,42 @@ else echo "S60_WINDOWS_RAM is a size such as 2G or 3072M, not $RAM"; exit 2
 fi
 cap_mb=$(( ram_mb + 1024 ))
 
-emu_flags=() rebuild=0 console=openconsole refresh=0
+emu_flags=() rebuild=0 console=openconsole from=tool rebuild_layer="" fresh=0
 for arg in "$@"; do
     case "$arg" in
-    --refresh-base) refresh=1 ;;
+    --first-run) from=rig ;;
+    --rebuild-layer=installed|--rebuild-layer=rig|--rebuild-layer=tool) rebuild_layer=${arg#*=} ;;
     --classic-console) console=classic ;;
-    --cloud|--fresh|--no-firewall|--pcap) emu_flags+=("$arg") ;;
+    --fresh) fresh=1; emu_flags+=("$arg") ;;
+    --cloud|--no-firewall|--pcap) emu_flags+=("$arg") ;;
     --rebuild) rebuild=1; emu_flags+=("$arg") ;;
     *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
 done
 
 say() { printf '%s\n' "$*"; }
+
+# -- Windows' layers -------------------------------------------------------------------
+# What each layer is set up from, with what the layer below it was: when that
+# changes, the layer is set up again, and so are those above it.
+LAYERS=(installed rig tool)
+built_from() {  # $1: a layer
+    local guest=emulator/windows/guest
+    case "$1" in
+    installed) (cd "$ROOT/tools" && sha256sum $guest/unattend.xml $guest/firstlogon.ps1; echo "$ISO_SHA256") ;;
+    rig) (built_from installed; cd "$ROOT/tools" && sha256sum $guest/rig.ps1 emulator/windows-bootstrap.ps1 windows-python.ps1) ;;
+    tool) (built_from rig; cd "$ROOT/tools" && sha256sum $guest/tool.ps1 windows-python.ps1) ;;
+    esac | sha256sum | cut -c1-16
+}
+stale=() forced=0
+for name in "${LAYERS[@]}"; do
+    [ "$name" = "$rebuild_layer" ] && forced=1
+    if [ "$forced" = 1 ] || [ ! -f "$CACHE/$name.qcow2" ] ||
+       [ "$(cat "$CACHE/$name.built-from" 2>/dev/null)" != "$(built_from "$name")" ]; then
+        stale+=("$name")
+        forced=1  # and every layer above it
+    fi
+done
 
 # -- what this computer needs ----------------------------------------------------
 if [ "$(uname -s)" != Linux ] || [ ! -e /dev/kvm ]; then
@@ -100,14 +124,15 @@ if ! "$venv/bin/python" -c 'import esp_idf_nvs_partition_gen' 2>/dev/null; then
     plan+=("ESP-IDF's NVS generator, in $venv (emu.sh rewrites the dump's Wi-Fi with it)")
 fi
 
-if [ ! -f "$CACHE/base.qcow2" ]; then
+if [ "${stale[0]:-}" = installed ]; then
     free=$(df -Pk "$(dirname "$CACHE")" 2>/dev/null | awk 'NR==2 {print int($4/1048576)}')
     if [ -n "$free" ] && [ "$free" -lt 30 ]; then
-        say "Windows needs about 30 GB free under $CACHE while it is first made ready; there is ${free} GB."
+        say "Windows needs about 30 GB free under $CACHE while it is installed; there is ${free} GB."
         exit 1
     fi
-    [ -f "$CACHE/server2025-eval.iso" ] || plan+=("Microsoft's Windows Server 2025 evaluation ISO (8.2 GB download, checked against its pinned SHA-256)")
-    plan+=("Windows Server Core installed from it once (20-40 minutes); it then gets the tool's portable Python and OpenVPN's TAP-Windows6 driver itself, with windows-bootstrap.ps1")
+    [ -f "$CACHE/server2025-eval.iso" ] || plan+=("Microsoft's Windows Server 2025 evaluation ISO (8.2 GB download, checked against its pinned SHA-256, kept for installing again)")
+    plan+=("Windows Server Core installed from it (10-15 minutes), then set up for the tests and the tool (a few minutes more)")
+    [ -f "$CACHE/base.qcow2" ] && plan+=("The disk from before Windows was kept in layers removed (base.qcow2, about 10 GB)")
     user_steps+=(windows)
 fi
 if [ ! -f "$CACHE/windows-terminal.zip" ]; then
@@ -140,6 +165,7 @@ if [ ${#plan[@]} -gt 0 ]; then
             ;;
         windows)
             mkdir -p "$CACHE"
+            rm -f "$CACHE/base.qcow2" "$CACHE/base.provisioned-from"
             if [ ! -f "$CACHE/server2025-eval.iso" ]; then
                 say "Downloading Microsoft's ISO..."
                 curl -fL -C - --retry 5 -o "$CACHE/server2025-eval.iso.part" "$ISO_URL"
@@ -176,28 +202,31 @@ if [ "$rebuild" = 1 ] || [ "$(docker image inspect -f '{{index .Config.Labels "s
     docker build -q -t "$VM_IMAGE" --label "s60.built-from=$built_from" \
         -f "$ROOT/tools/emulator/windows/vm.Dockerfile" "$ROOT/tools/emulator/windows" >/dev/null
 fi
-vm() {  # the Windows VM container, with its disks and this checkout
-    docker run "$@" --device /dev/kvm -e "KEYBOARD=${LANG:-}" -e "WINDOWS_PASSWORD=$PASSWORD" \
+vm() {  # vm DOCKER-RUN-OPTIONS... -- VM-RUN-COMMAND...: the Windows VM container
+    local options=()
+    while [ "$1" != -- ]; do options+=("$1"); shift; done
+    shift
+    docker run "${options[@]}" --device /dev/kvm -e "KEYBOARD=${LANG:-}" -e "WINDOWS_PASSWORD=$PASSWORD" \
+        -e "HOST_UID=$(id -u)" -e "HOST_GID=$(id -g)" \
         -e "RAM=$RAM" -e "CPUS=$CPUS" --memory "${cap_mb}m" --memory-swap "${cap_mb}m" --cpus "$CPUS" \
-        -v "$CACHE:/cache" -v "$ROOT:/repo:ro" "$VM_IMAGE"
+        -v "$CACHE:/cache" -v "$ROOT:/repo:ro" "$VM_IMAGE" "$@"
 }
 avail_mb=$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)
-if [ "$avail_mb" -lt "$(( cap_mb + 1024 ))" ]; then  # the emulator's container too
-    say "Windows and the emulator may use up to $(( (cap_mb + 1024) / 1024 )) GB; this computer has ${avail_mb} MB free."
+if [ "$avail_mb" -lt "$(( cap_mb + 256 ))" ]; then  # the emulator's container too
+    say "Windows and the emulator may use up to $(( cap_mb + 256 )) MB; this computer has ${avail_mb} MB free."
     say "Close what you can, or give Windows less (S60_WINDOWS_RAM=1536M), or it may be slow."
 fi
-# What the base disk was set up with: when these change, it is set up again.
-provisioned_from=$(cd "$ROOT/tools" && sha256sum emulator/windows/guest/provision.ps1 \
-    emulator/windows-bootstrap.ps1 windows-python.ps1 | sha256sum | cut -c1-16)
-if [ ! -f "$CACHE/base.qcow2" ]; then
-    say "Installing Windows - watch it with a VNC viewer on localhost:5900 if you like."
-    vm --rm --name s60-win-prepare -p 127.0.0.1:5900:5900 prepare
-    echo "$provisioned_from" > "$CACHE/base.provisioned-from"
-elif [ "$refresh" = 1 ] || [ "$(cat "$CACHE/base.provisioned-from" 2>/dev/null)" != "$provisioned_from" ]; then
-    say "Setting Windows up again with the current scripts (a few minutes; VNC: localhost:5900)..."
-    vm --rm --name s60-win-prepare -p 127.0.0.1:5900:5900 refresh
-    echo "$provisioned_from" > "$CACHE/base.provisioned-from"
-fi
+for name in "${stale[@]}"; do
+    rm -f "$CACHE/$name.built-from"  # until it is set up again
+    if [ "$name" = installed ]; then
+        say "Installing Windows - watch it with a VNC viewer on localhost:5900 if you like."
+        vm --rm --name s60-win-setup -p 127.0.0.1:5900:5900 -- install
+    else
+        say "Setting up Windows' $name layer (a few minutes)..."
+        vm --rm --name s60-win-setup -p 127.0.0.1:5900:5900 -- layer "$name"
+    fi
+    built_from "$name" > "$CACHE/$name.built-from"
+done
 
 # -- a run -----------------------------------------------------------------------------
 for name in s60-emu s60-win; do
@@ -216,8 +245,8 @@ stop_all() {
 trap stop_all EXIT
 emu_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' s60-emu)
 docker rm -f s60-win >/dev/null 2>&1 || true
-vm -d --name s60-win --stop-timeout 150 -e "LINK_HOST=$emu_ip" -e "CONSOLE=$console" \
-    -p 127.0.0.1:3389:3389 -p 127.0.0.1:5900:5900 run >/dev/null
+vm -d --name s60-win --stop-timeout 150 -e "LINK_HOST=$emu_ip" -e "CONSOLE=$console" -e "LAYER=$from" -e "FRESH=$fresh" \
+    -p 127.0.0.1:3389:3389 -p 127.0.0.1:5900:5900 -- run >/dev/null
 
 say "Windows is starting (about a minute). Connect with Remote Desktop:"
 say "    localhost:3389    user s60, password $PASSWORD"

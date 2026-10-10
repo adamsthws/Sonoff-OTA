@@ -125,9 +125,9 @@ fi
 # Your browser, and with --windows the wire windows_link.py connects to.
 publish=(-p 127.0.0.1:8080:8080)
 [ "$windows" = 1 ] && publish+=(-p 127.0.0.1:7860:7860)
-# Capped: the plug, its router and the tool need a few hundred MB between them.
+# Capped: the plug, its router and the tool used under 70 MB between them.
 exec docker run --rm $tty --name s60-emu --hostname s60-emu-computer \
-    --memory "${S60_EMU_MEMORY:-1g}" --cpus "${S60_EMU_CPUS:-2}" \
+    --memory "${S60_EMU_MEMORY:-256m}" --cpus "${S60_EMU_CPUS:-2}" \
     --cap-add NET_ADMIN --device /dev/net/tun \
     --sysctl net.ipv4.ip_forward="$cloud" \
     "${publish[@]}" \

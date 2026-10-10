@@ -1,25 +1,32 @@
 #!/bin/bash
 # Inside the Windows VM container (vm.Dockerfile), started by windows-test.sh.
 #
-#   vm-run prepare   once: Windows Server 2025 (Server Core), installed from
-#                    Microsoft's evaluation ISO by an unattended Setup ->
-#                    base.qcow2, with the conversion tool's prerequisites
-#                    installed by its own windows-bootstrap.ps1, and a user
-#                    who logs on by itself
-#   vm-run refresh   base.qcow2 set up again by the current provision.ps1 and
-#                    windows-bootstrap.ps1, without installing Windows again
-#   vm-run run       a throwaway copy of base.qcow2, with this checkout in it,
-#                    until Windows is shut down or the container is stopped
+# Windows is kept in three layers, each a disk holding only its changes to
+# the one below, so any of them can be set up again without those below it:
 #
-# /cache holds the disks (and the conversion's captures, kept between runs);
-# /repo is the checkout, read-only. LINK_HOST is the emulator's address;
-# CONSOLE what the conversion runs in: openconsole (Windows Terminal's console,
-# from /cache/windows-terminal.zip) or classic (Windows' own).
+#   vm-run install     1, installed.qcow2: Windows Server 2025 (Server Core),
+#                      installed from Microsoft's evaluation ISO by an
+#                      unattended Setup, with a user who logs on by itself and
+#                      a hook that runs start.ps1 at logon (firstlogon.ps1)
+#   vm-run layer rig   2, rig.qcow2: what the tests need (rig.ps1) - Remote
+#                      Desktop, the link's TAP driver, adapter and Python
+#   vm-run layer tool  3, tool.qcow2: what the tool's first run leaves (tool.ps1)
+#   vm-run run         a throwaway layer on rig or tool (LAYER), with this
+#                      checkout in it, until Windows is shut down or the
+#                      container is stopped
+#
+# Setting a layer up again drops those above it. /cache holds the disks (and
+# the conversion's captures, kept between runs); /repo is the checkout,
+# read-only. LINK_HOST is the emulator's address; CONSOLE what the conversion
+# runs in: openconsole (Windows Terminal's console, from
+# /cache/windows-terminal.zip) or classic (Windows' own); FRESH=1 forgets the
+# conversion's captures first. What is written to /cache belongs to
+# HOST_UID:HOST_GID, the person who started it, not root.
 set -euo pipefail
 
 CACHE=/cache
 ISO=$CACHE/server2025-eval.iso
-BASE=$CACHE/base.qcow2
+LAYERS=(installed rig tool)
 # The image Setup installs from the ISO, by its name in install.wim:
 # Datacenter, Server Core. (SERVERDATACENTER, without CORE, has the desktop.)
 IMAGE_NAME=${WINDOWS_IMAGE:-Windows Server 2025 SERVERDATACENTERCORE}
@@ -29,6 +36,12 @@ MON=/run/qemu-monitor.sock
 PASSWORD=${WINDOWS_PASSWORD:-S60-emulator}
 
 log() { echo "[vm] $*"; }
+
+own_cache() {  # everything in /cache, the host user's to read and delete
+    [ -n "${HOST_UID:-}" ] && chown -R "$HOST_UID:${HOST_GID:-$HOST_UID}" "$CACHE" 2>/dev/null
+    return 0
+}
+trap own_cache EXIT
 
 qemu() {  # $1 the disk; then any extra QEMU options (Setup's discs)
     local disk=$1
@@ -86,23 +99,30 @@ repo_tar() {  # $1: this checkout, without its private captures, as a tar
         --exclude='*/__pycache__' .
 }
 
-provisioned() {  # $1: a disk provision.ps1 has just run on; shows its log
-    guestfish --ro -a "$1" -i <<EOF > /run/provision.log 2>&1 || true
-cat /S60/provision.log
+set_up() {  # $1: a disk $2 (a layer's name) has just been set up on; shows its log
+    guestfish --ro -a "$1" -i <<EOF > /run/setup.log 2>&1 || true
+cat /S60/$2.log
 EOF
-    cat /run/provision.log
-    guestfish --ro -a "$1" -i is-file /S60/provisioned | grep -q true
+    cat /run/setup.log
+    guestfish --ro -a "$1" -i is-file "/S60/$2.done" | grep -q true
 }
 
-seed_disc() {  # the answer file, the set-up scripts and this checkout, on a disc
+drop_above() {  # the layers above $1: built on what it was, so no longer valid
+    local found=0 name
+    for name in "${LAYERS[@]}"; do
+        [ "$found" = 1 ] && rm -f "$CACHE/$name.qcow2"
+        [ "$name" = "$1" ] && found=1
+    done
+    return 0
+}
+
+seed_disc() {  # the answer file and the first logon's scripts, on a disc
     local layout=0409:00000409
     case "${KEYBOARD:-}" in en_GB*|en-GB*) layout=0809:00000809 ;; esac
-    rm -rf /run/seed && mkdir -p /run/seed/S60/repo
+    rm -rf /run/seed && mkdir -p /run/seed/S60
     sed -e "s|@PASSWORD@|$PASSWORD|g" -e "s|@LAYOUT@|$layout|g" -e "s|@IMAGE@|$IMAGE_NAME|g" \
         "$GUEST/unattend.xml" > /run/seed/autounattend.xml
-    cp "$GUEST/provision.ps1" "$GUEST/start.ps1" /run/seed/S60/
-    tar -C /repo -cf - --exclude=./.git --exclude=./.venv --exclude=./.python --exclude=./captures \
-        --exclude='*/__pycache__' . | tar -C /run/seed/S60/repo -xf -
+    cp "$GUEST/firstlogon.ps1" "$GUEST/start.ps1" /run/seed/S60/
     genisoimage -quiet -J -joliet-long -r -V S60SEED -o /run/seed.iso /run/seed
 }
 
@@ -115,72 +135,83 @@ stop_windows() {
     kill "$QEMU" 2>/dev/null || true
 }
 
-prepare() {
-    [ -f "$BASE" ] && { log "base.qcow2 is already prepared"; return 0; }
+install() {
     [ -f "$ISO" ] || { log "missing $ISO"; exit 1; }
-    log "the answer file, the set-up scripts and this checkout, on a seed disc..."
+    local disk=$CACHE/installed.partial.qcow2
+    log "the answer file and the first logon's scripts, on a seed disc..."
     seed_disc
-    rm -f "$CACHE/base.partial.qcow2"
-    qemu-img create -q -f qcow2 "$CACHE/base.partial.qcow2" 64G
-    log "installing Windows Server Core from the ISO, unattended, then the tool's"
-    log "prerequisites; it shuts itself down when done (watch on VNC, localhost:5900)..."
-    qemu "$CACHE/base.partial.qcow2" \
+    rm -f "$disk"
+    qemu-img create -q -f qcow2 "$disk" 64G
+    log "installing Windows Server Core from the ISO, unattended; it shuts itself"
+    log "down when done (watch on VNC, localhost:5900)..."
+    qemu "$disk" \
         -drive id=iso,if=none,media=cdrom,readonly=on,file="$ISO" -device ide-cd,drive=iso,bus=ahci.1,bootindex=1 \
         -drive id=seed,if=none,media=cdrom,readonly=on,file=/run/seed.iso -device ide-cd,drive=seed,bus=ahci.2
     press_any_key
     wait "$QEMU" || true
     QEMU=
-    if ! provisioned "$CACHE/base.partial.qcow2"; then
-        log "set-up did not finish - see above. Running this again starts it afresh."
+    if ! set_up "$disk" installed; then
+        log "Setup did not finish - see above. Running this again starts it afresh."
         exit 1
     fi
-    guestfish --rw -a "$CACHE/base.partial.qcow2" -i rm-rf /S60/repo
-    mv "$CACHE/base.partial.qcow2" "$BASE"
-    rm -f "$ISO"   # only Setup needed it; a new base downloads it again
-    log "prepared: base.qcow2"
+    drop_above installed
+    mv "$disk" "$CACHE/installed.qcow2"
+    log "layer 1 ready: installed.qcow2 (the ISO is kept, for installing again)"
 }
 
-# The base set up again, on a copy that replaces it only once that worked: the
-# current scripts and checkout copied in, and a marker for start.ps1, which at
-# logon runs provision.ps1 instead of a test run; that shuts Windows down.
-refresh() {
-    [ -f "$BASE" ] || { log "not prepared yet - run prepare first"; exit 1; }
-    local disk=$CACHE/base.refresh.qcow2
-    log "setting the base up again with the current scripts (a few minutes)..."
-    cp --sparse=always "$BASE" "$disk"
+# A layer on the one below it: its script, start.ps1 and this checkout copied
+# in, with layer.txt, which makes start.ps1 run that script at logon; it shuts
+# Windows down. The layer replaces the old one only once that worked.
+layer() {
+    local name=$1 below
+    case "$name" in
+    rig) below=installed ;;
+    tool) below=rig ;;
+    *) log "no layer '$name' (rig or tool)"; exit 2 ;;
+    esac
+    [ -f "$CACHE/$below.qcow2" ] || { log "no $below.qcow2 to build $name on"; exit 1; }
+    local disk=$CACHE/$name.partial.qcow2
+    log "setting up $name.qcow2 on $below.qcow2 (a few minutes; VNC: localhost:5900)..."
+    rm -f "$disk"
+    # The layer below by its name alone, so the chain holds wherever /cache is.
+    (cd "$CACHE" && qemu-img create -q -f qcow2 -b "$below.qcow2" -F qcow2 "$name.partial.qcow2")
     repo_tar /run/repo.tar
+    printf '%s\n' "$name" > /run/layer.txt
     guestfish --rw -a "$disk" -i <<EOF
-rm-f /S60/provisioned
 rm-rf /S60/repo
 mkdir-p /S60/repo
 tar-in /run/repo.tar /S60/repo
-upload $GUEST/provision.ps1 /S60/provision.ps1
+upload $GUEST/$name.ps1 /S60/$name.ps1
 upload $GUEST/start.ps1 /S60/start.ps1
-touch /S60/refresh
+upload /run/layer.txt /S60/layer.txt
 EOF
     qemu "$disk"
     wait "$QEMU" || true
     QEMU=
-    if ! provisioned "$disk"; then
+    if ! set_up "$disk" "$name"; then
         rm -f "$disk"
-        log "set-up did not finish - see above. The base is as it was."
+        log "$name did not finish - see above. The layers are as they were."
         exit 1
     fi
     guestfish --rw -a "$disk" -i rm-rf /S60/repo
-    mv "$disk" "$BASE"
-    log "refreshed: base.qcow2"
+    drop_above "$name"
+    mv "$disk" "$CACHE/$name.qcow2"
+    log "layer ready: $name.qcow2"
 }
 
 run() {
-    [ -f "$BASE" ] || { log "not prepared yet - run prepare first"; exit 1; }
+    local from=${LAYER:-tool}
+    [ -f "$CACHE/$from.qcow2" ] || { log "no $from.qcow2 - set it up first (vm-run layer $from)"; exit 1; }
     : "${LINK_HOST:?set LINK_HOST to the address of the emulator}"
     local disk=/run/run.qcow2
-    qemu-img create -q -f qcow2 -b "$BASE" -F qcow2 "$disk"
+    qemu-img create -q -f qcow2 -b "$CACHE/$from.qcow2" -F qcow2 "$disk"
     # This checkout, without its private captures; the conversion's own
     # captures from earlier runs, so an unfinished one can be resumed.
     repo_tar /run/repo.tar
+    # --fresh: as a new user would, with no earlier run and no email to offer.
+    [ "${FRESH:-0}" = 1 ] && rm -rf "$CACHE/captures"
     mkdir -p "$CACHE/captures"
-    if [ ! -f "$CACHE/captures/settings.json" ] && [ -f /repo/captures/settings.json ]; then
+    if [ "${FRESH:-0}" != 1 ] && [ ! -f "$CACHE/captures/settings.json" ] && [ -f /repo/captures/settings.json ]; then
         cp /repo/captures/settings.json "$CACHE/captures/"   # the eWeLink email, to save typing it
     fi
     tar -C "$CACHE/captures" -cf /run/captures.tar .
@@ -199,7 +230,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     fi
     tar -C /run/openconsole -cf /run/openconsole.tar .
     printf '{"link_host": "%s", "console": "%s"}\n' "$LINK_HOST" "$console" > /run/config.json
-    # start.ps1 too, so a change to it needs no new base disk.
+    # start.ps1 too, so a change to it needs no layer set up again.
     guestfish --rw -a "$disk" -i <<EOF
 mkdir-p /S60/repo/captures
 mkdir-p /S60/openconsole
@@ -225,8 +256,8 @@ EOF
 }
 
 case "${1:-}" in
-prepare) prepare ;;
-refresh) refresh ;;
+install) install ;;
+layer) layer "${2:-}" ;;
 run) run ;;
-*) echo "usage: vm-run prepare | refresh | run" >&2; exit 2 ;;
+*) echo "usage: vm-run install | layer rig|tool | run" >&2; exit 2 ;;
 esac
