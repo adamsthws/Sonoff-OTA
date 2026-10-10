@@ -40,24 +40,41 @@ end
 
 def fetch_chunk(index, expected_length)
   var path = format("/chunk/safeboot/%i", index)
-  var client = webclient()
-  client.begin(base_url + path)
-  var status = client.GET()
-  guard(status == 200, format("GET %s returned HTTP %i", path, status))
-  guard(client.get_size() == expected_length * 2, "official Safeboot chunk HTTP length differs")
-  var encoded = client.get_string()
-  guard(size(encoded) == expected_length * 2, "official Safeboot chunk body length differs")
-  var data = bytes(encoded)
-  guard(size(data) == expected_length, "official Safeboot chunk hex is invalid")
-  return data
+  var attempts = 0
+  while attempts < 5
+    var client = webclient()
+    client.begin(base_url + path)
+    var status = client.GET()
+    if status == 200 && client.get_size() == expected_length * 2
+      var encoded = client.get_string()
+      client.close()
+      if size(encoded) == expected_length * 2
+        var data = bytes(encoded)
+        if size(data) == expected_length
+          return data
+        end
+      end
+    else
+      client.close()
+    end
+    attempts += 1
+    tasmota.delay(150)
+  end
+  raise "migration_refused", format("GET %s failed after retries", path)
 end
 
 def post_text(path, body)
-  var client = webclient()
-  client.begin(base_url + path)
-  var status = client.POST(body)
-  client.close()
-  guard(status == 200, format("POST %s returned HTTP %i", path, status))
+  var attempts = 0
+  while attempts < 5
+    var client = webclient()
+    client.begin(base_url + path)
+    var status = client.POST(body)
+    client.close()
+    if status == 200 return true end
+    attempts += 1
+    tasmota.delay(150)
+  end
+  raise "migration_refused", format("POST %s failed after retries", path)
 end
 
 def best_effort_report(status)
