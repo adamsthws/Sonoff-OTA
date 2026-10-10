@@ -1501,9 +1501,8 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
     output.transient_begin()
     warning_box("Before going on", [
         "From here the plug's Sonoff firmware is replaced, so the eWeLink app",
-        "will no longer control it. Later its memory layout is rewritten; losing",
-        "power during that minute would mean opening the plug to recover it.",
-        "Only go ahead with a plug you can afford to lose. You won't be asked again.",
+        "will no longer control it. DO NOT UNPLUG IT during the process.",
+        "Only go ahead with a plug you can afford to lose",
     ])
     if not require_word(CONSENT_WORD):
         raise Abort("not confirmed - nothing has been written to the plug")
