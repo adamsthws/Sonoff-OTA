@@ -272,6 +272,38 @@ class CommandOutputTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0)
 
 
+class PythonScriptTests(unittest.TestCase):
+    """A helper script imports the tools beside it, even on a Python that does
+    not put the script's folder on sys.path - python.org's portable one, which
+    start.cmd fetches.  -I leaves it off the same way."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.folder = Path(directory.name)
+        (self.folder / "beside.py").write_text("WORD = 'found'\n")
+        self.script = self.folder / "helper.py"
+        self.script.write_text(
+            "import sys\n"
+            "from beside import WORD\n"
+            "if __name__ == '__main__':\n"
+            "    print(WORD, *sys.argv[1:])\n"
+            "    sys.exit(3)\n")
+
+    def run_isolated(self, command):
+        return subprocess.run([command[0], "-I", *command[1:]], capture_output=True, text=True,
+                              cwd=self.folder.parent)
+
+    def test_without_it_the_script_cannot_import_its_neighbours(self):
+        completed = self.run_isolated([sys.executable, str(self.script)])
+        self.assertIn("No module named 'beside'", completed.stderr)
+
+    def test_the_script_runs_as_main_with_its_arguments_and_exit_code(self):
+        completed = self.run_isolated(hostsys.python_script(self.script, "--email", "a b", unbuffered=True))
+        self.assertEqual(completed.stdout, "found --email a b\n", completed.stderr)
+        self.assertEqual(completed.returncode, 3)
+
+
 class WindowsElevationTests(unittest.TestCase):
     def test_an_argument_with_spaces_stays_one_argument(self):
         add, _ = hostsys.firewall_commands("windows", "192.168.1.50", [8088, 8089])

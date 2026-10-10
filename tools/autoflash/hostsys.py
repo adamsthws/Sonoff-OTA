@@ -85,6 +85,24 @@ def _ps_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+# Puts the script's own folder first on sys.path, as `python script.py` does,
+# then runs the script as __main__.
+_RUN_SCRIPT = ("import os, runpy, sys; del sys.argv[0]; "
+               "sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[0]))); "
+               "runpy.run_path(sys.argv[0], run_name='__main__')")
+
+
+def python_script(script: str | Path, *args: str, unbuffered: bool = False) -> list[str]:
+    """The command that runs one of the tools' scripts in a process of its own.
+
+    Not `python script.py`: python.org's portable Python - the one start.cmd
+    fetches on Windows - has a ._pth file, which leaves the script's own folder
+    off sys.path (and ignores PYTHONPATH), so the script could not import the
+    tools beside it.  This puts the folder there itself, whatever the Python.
+    """
+    return [sys.executable, *(["-u"] if unbuffered else []), "-c", _RUN_SCRIPT, str(script), *map(str, args)]
+
+
 # -- trusted certificates ---------------------------------------------------------
 # Windows ships with a few root certificates and fetches the rest from Windows
 # Update the first time one of its own components meets a site that needs it.

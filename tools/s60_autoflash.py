@@ -1434,8 +1434,9 @@ def step_discover(ctx: Context) -> dict[str, Any]:
     mdns.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     email = ctx.email()
     env = ctx.ewelink_env()
-    if run_tool([sys.executable, "tools/query_ota.py", "--mdns-capture", str(mdns),
-                 "--email", email, "--output", str(meta)], interactive=True, env=env) != 0:
+    if run_tool(hostsys.python_script("tools/query_ota.py", "--mdns-capture", str(mdns),
+                                      "--email", email, "--output", str(meta)),
+                interactive=True, env=env) != 0:
         reasons = output.tool_problems(1)
         raise Abort("the eWeLink query failed" + (f": {reasons[0]}" if reasons else ""))
 
@@ -1512,13 +1513,14 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
     hostsys.replace_file(lock, moved)
     try:
         code = run_tool(
-            [sys.executable, "tools/serve_tasmota_ota.py",
-             "--listen-ip", listen_ip, "--listen-port", str(port),
-             "--device-ip", plug_ip,
-             "--firmware", str(ctx.bridge),
-             "--email", email, "--expected-current-version", version,
-             "--mdns-capture", str(ctx.dir / "mdns.json"),
-             "--i-understand-stock-has-no-automatic-rollback"],
+            hostsys.python_script(
+                "tools/serve_tasmota_ota.py",
+                "--listen-ip", listen_ip, "--listen-port", str(port),
+                "--device-ip", plug_ip,
+                "--firmware", str(ctx.bridge),
+                "--email", email, "--expected-current-version", version,
+                "--mdns-capture", str(ctx.dir / "mdns.json"),
+                "--i-understand-stock-has-no-automatic-rollback"),
             interactive=True,
             env=env,
         )

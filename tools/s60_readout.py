@@ -155,8 +155,8 @@ def query_plug(plug_ip: str, email: str, env: dict[str, str], work: Path) -> str
     meta = work / "ota-metadata.json"
     try:
         completed = subprocess.run(
-            [sys.executable, "tools/query_ota.py", "--mdns-capture", str(mdns),
-             "--email", email, "--output", str(meta)],
+            hostsys.python_script("tools/query_ota.py", "--mdns-capture", str(mdns),
+                                  "--email", email, "--output", str(meta)),
             cwd=ROOT, env=env, capture_output=True, text=True,
         )
         if completed.returncode != 0:
@@ -207,12 +207,13 @@ def deliver(plug_ip: str, listen_ip: str, port: int, email: str, version: str,
     hostsys.replace_file(lock, moved)
     try:
         process = subprocess.Popen(
-            [sys.executable, "-u", "tools/serve_tasmota_ota.py",
-             "--listen-ip", listen_ip, "--listen-port", str(port),
-             "--device-ip", plug_ip, "--firmware", str(firmware),
-             "--email", email, "--expected-current-version", version,
-             "--mdns-capture", str(work / "mdns.json"),
-             "--i-understand-stock-has-no-automatic-rollback"],
+            hostsys.python_script(
+                "tools/serve_tasmota_ota.py",
+                "--listen-ip", listen_ip, "--listen-port", str(port),
+                "--device-ip", plug_ip, "--firmware", str(firmware),
+                "--email", email, "--expected-current-version", version,
+                "--mdns-capture", str(work / "mdns.json"),
+                "--i-understand-stock-has-no-automatic-rollback", unbuffered=True),
             cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
         total = (ROOT / firmware).stat().st_size if (ROOT / firmware).is_file() else 0

@@ -12,12 +12,11 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 import threading
 from pathlib import Path
 from typing import Callable
 
-from . import output
+from . import hostsys, output
 from .device import Device
 
 ARMED_PHASES = {"commit", "restore"}
@@ -172,10 +171,8 @@ class PhaseRunner:
             return None
 
     def _command(self, phase: str, extra_flags: list[str]) -> list[str]:
-        return [
-            sys.executable,
-            "-u",
-            str(self.repo_root / "tools" / "serve_safeboot_migration.py"),
+        return hostsys.python_script(
+            self.repo_root / "tools" / "serve_safeboot_migration.py",
             phase,
             "--manifest",
             str(self.manifest),
@@ -189,7 +186,8 @@ class PhaseRunner:
             self.device.host,
             *(["--recovery-from-stdin", "--no-sensitive-captures"] if self.recovery else []),
             *extra_flags,
-        ]
+            unbuffered=True,
+        )
 
     def run(
         self,
