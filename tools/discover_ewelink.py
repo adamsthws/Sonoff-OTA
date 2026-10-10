@@ -29,6 +29,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+try:
+    from tools.autoflash import hostsys
+except ModuleNotFoundError:  # Support direct execution as tools/discover_ewelink.py.
+    from autoflash import hostsys
+
 # The link-local multicast group and port reserved for mDNS (RFC 6762 §3).
 MDNS_GROUP = "224.0.0.251"
 MDNS_PORT = 5353
@@ -235,14 +240,39 @@ def local_ipv4(interface: str | None = None) -> str | None:
         probe.close()
 
 
+def local_ipv4s(interface: str | None = None) -> list[str]:
+    """Every address of this computer's a plug could be reached from:
+    ``interface`` if given, else the one local_ipv4() finds, then the other
+    private ones.  Windows sends multicast out of the adapter that has the
+    default route, whatever the metrics - a VPN, a virtual machine's network -
+    so the question goes out on each network, not just that one."""
+    if interface:
+        return [interface]
+    found: list[str] = []
+    for address in [local_ipv4(), *sorted(hostsys.local_addresses())]:
+        if address and address not in found and _could_be_home(address):
+            found.append(address)
+    return found
+
+
+def _could_be_home(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return False
+    return ip.version == 4 and ip.is_private and not ip.is_loopback and not ip.is_link_local
+
+
 def sweep_targets(interface: str | None = None) -> list[str]:
-    """Every other address in this computer's /24, the range ``hostsys.sweep``
-    pings too."""
-    local = local_ipv4(interface)
-    if not local:
-        return []
-    network = ipaddress.ip_network(f"{local}/24", strict=False)
-    return [str(host) for host in network.hosts() if str(host) != local]
+    """Every other address in each of this computer's /24s, the range
+    ``hostsys.sweep`` pings too."""
+    mine = local_ipv4s(interface)
+    targets: list[str] = []
+    for local in mine:
+        network = ipaddress.ip_network(f"{local}/24", strict=False)
+        targets += [str(host) for host in network.hosts()
+                    if str(host) not in mine and str(host) not in targets]
+    return targets
 
 
 def answered_ids(packets: list[dict[str, Any]]) -> set[str]:
@@ -274,8 +304,8 @@ def discover(timeout: float, interface: str | None = None, target: str | None = 
       after a couple of seconds the ``wanted`` device ids (or, without them,
       any device at all) have not answered.
 
-    ``interface`` is the local IPv4 address to send multicast from (useful on
-    hosts with several NICs/VPNs, where the default route is the wrong one).
+    ``interface`` is the local IPv4 address to send multicast from; without
+    it, the question goes out from every one in local_ipv4s().
     ``target`` restricts the results to a single device IP.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -290,15 +320,18 @@ def discover(timeout: float, interface: str | None = None, target: str | None = 
         # arrive in this mode, which is why make_query() sets the QU bit.
         bind_port = 0
         sock.bind(("", 0))
-    interface_bytes = socket.inet_aton(interface or "0.0.0.0")
+    # Each local network the question goes out on; with none known, wherever
+    # the system sends multicast.
+    outgoing = local_ipv4s(interface) or [None]
     if bind_port == MDNS_PORT:
         # Joining the group is only meaningful (and only permitted) when we
         # actually hold the mDNS port.
-        membership = socket.inet_aton(MDNS_GROUP) + interface_bytes
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
-    if interface:
-        # Pin outgoing multicast to the chosen interface.
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, interface_bytes)
+        for local in outgoing:
+            membership = socket.inet_aton(MDNS_GROUP) + socket.inet_aton(local or "0.0.0.0")
+            try:
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, membership)
+            except OSError:
+                pass  # an adapter that has just gone: the others still count
     # When 5353 is shared with avahi/Bonjour (SO_REUSEADDR), the kernel hands a
     # unicast reply to only one of the sockets on that port - usually the system
     # responder's - so ask for a multicast reply, which every socket receives.
@@ -318,7 +351,8 @@ def discover(timeout: float, interface: str | None = None, target: str | None = 
     try:
         while (now := time.monotonic()) < deadline:
             if now >= next_group:
-                _send(sock, group_query, MDNS_GROUP)
+                for local in outgoing:
+                    _send_group(sock, group_query, local)
                 next_group = now + MULTICAST_EVERY
             if now >= next_direct:
                 for address in addresses:
@@ -351,6 +385,16 @@ def discover(timeout: float, interface: str | None = None, target: str | None = 
         "interface": interface,
         "packets": packets,
     }
+
+
+def _send_group(sock: socket.socket, query: bytes, local: str | None) -> None:
+    """The question to the mDNS group, out of the network `local` is on."""
+    if local is not None:
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(local))
+        except OSError:
+            return
+    _send(sock, query, MDNS_GROUP)
 
 
 def _send(sock: socket.socket, query: bytes, address: str) -> None:

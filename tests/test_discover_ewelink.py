@@ -69,18 +69,60 @@ class MdnsTests(unittest.TestCase):
         self.assertIsNone(_keep(answer, "192.168.0.50", "192.168.0.51"))  # not the target
 
 
+def addresses(route, others=()):
+    """This computer: the address the mDNS route uses, and its others."""
+    return mock.patch.multiple(
+        discover_ewelink, local_ipv4=mock.Mock(return_value=route),
+        hostsys=mock.Mock(local_addresses=mock.Mock(return_value=set(others))))
+
+
 class SweepTests(unittest.TestCase):
     def test_every_other_address_on_this_computers_slash_24(self):
-        with mock.patch.object(discover_ewelink, "local_ipv4", return_value="192.168.0.10"):
-            addresses = sweep_targets()
-        self.assertEqual(len(addresses), 253)
-        self.assertNotIn("192.168.0.10", addresses)
-        self.assertIn("192.168.0.50", addresses)
-        self.assertNotIn("192.168.0.255", addresses)
+        with addresses("192.168.0.10"):
+            targets = sweep_targets()
+        self.assertEqual(len(targets), 253)
+        self.assertNotIn("192.168.0.10", targets)
+        self.assertIn("192.168.0.50", targets)
+        self.assertNotIn("192.168.0.255", targets)
 
     def test_no_network_means_no_sweep(self):
-        with mock.patch.object(discover_ewelink, "local_ipv4", return_value=None):
+        with addresses(None):
             self.assertEqual(sweep_targets(), [])
+
+    def test_every_network_is_swept_not_just_the_routes(self):
+        # Windows' multicast route was QEMU's NAT network; the plug was on the other.
+        with addresses("10.0.2.15", {"10.0.2.15", "192.168.60.10"}):
+            targets = sweep_targets()
+        self.assertIn("10.0.2.2", targets)
+        self.assertIn("192.168.60.50", targets)
+        self.assertNotIn("192.168.60.10", targets)
+        self.assertEqual(len(targets), 2 * 253)
+
+    def test_an_interface_given_is_the_only_one_swept(self):
+        with addresses("10.0.2.15", {"10.0.2.15", "192.168.60.10"}):
+            targets = sweep_targets("192.168.60.10")
+        self.assertNotIn("10.0.2.2", targets)
+        self.assertEqual(len(targets), 253)
+
+
+class NetworkTests(unittest.TestCase):
+    def test_the_routes_address_comes_first_then_the_other_home_networks(self):
+        others = {"192.168.60.10", "10.0.2.15", "127.0.0.1", "169.254.3.4", "8.8.8.8"}
+        with addresses("10.0.2.15", others):
+            self.assertEqual(discover_ewelink.local_ipv4s(), ["10.0.2.15", "192.168.60.10"])
+
+    def test_the_question_goes_out_of_each_network_it_names(self):
+        sock = mock.Mock()
+        discover_ewelink._send_group(sock, b"q", "192.168.60.10")
+        sock.setsockopt.assert_called_once_with(
+            socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton("192.168.60.10"))
+        sock.sendto.assert_called_once_with(b"q", (discover_ewelink.MDNS_GROUP, discover_ewelink.MDNS_PORT))
+
+    def test_without_a_network_it_goes_where_the_system_sends_it(self):
+        sock = mock.Mock()
+        discover_ewelink._send_group(sock, b"q", None)
+        sock.setsockopt.assert_not_called()
+        sock.sendto.assert_called_once()
 
     def test_the_ids_that_answered(self):
         packets = [
