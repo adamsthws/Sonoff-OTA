@@ -151,6 +151,61 @@ class WindowsFirewallTests(unittest.TestCase):
         self.assertEqual(shown, r'netsh "name=S60 autoflash 1.2.3.4" program=C:\Python\python.exe')
 
 
+class WindowsRootCertificateTests(unittest.TestCase):
+    """A root Windows has not fetched yet is fetched, and the request tried once more."""
+
+    URL = "https://raw.githubusercontent.com/tasmota/install/x/firmware/release/tasmota32c3.bin"
+
+    def setUp(self):
+        hostsys._roots_fetched.clear()
+        hostsys._roots_context = None
+        self.addCleanup(setattr, hostsys, "_roots_context", None)
+        self.untrusted = hostsys.urllib.error.URLError(
+            hostsys.ssl.SSLCertVerificationError("certificate verify failed"))
+
+    def open(self, outcomes, windows=True):
+        request = hostsys.urllib.request.Request(self.URL)
+        with mock.patch.object(hostsys, "IS_WINDOWS", windows), \
+                mock.patch.object(hostsys, "powershell") as asked, \
+                mock.patch.object(hostsys.urllib.request, "urlopen", side_effect=outcomes) as opened:
+            try:
+                return hostsys.urlopen(request, timeout=5), asked, opened
+            except hostsys.urllib.error.URLError as exc:
+                return exc, asked, opened
+
+    def test_windows_fetches_the_root_and_the_request_is_tried_again(self):
+        result, asked, opened = self.open([self.untrusted, "response"])
+        self.assertEqual(result, "response")
+        self.assertEqual(opened.call_count, 2)
+        fresh = opened.call_args.kwargs.get("context")
+        self.assertIsNotNone(fresh)  # the roots read afresh...
+        _, _, opened = self.open(["next file"])
+        self.assertIs(opened.call_args.kwargs.get("context"), fresh)  # ...and for what follows
+        script = asked.call_args[0][0]
+        self.assertIn("'https://raw.githubusercontent.com/'", script)
+        self.assertIn("Invoke-WebRequest", script)
+
+    def test_still_untrusted_after_that_is_reported(self):
+        result, _, opened = self.open([self.untrusted, self.untrusted])
+        self.assertIs(result, self.untrusted)
+        self.assertEqual(opened.call_count, 2)
+        result, asked, opened = self.open([self.untrusted])  # the same site: not asked twice
+        self.assertIs(result, self.untrusted)
+        asked.assert_not_called()
+
+    def test_only_windows_is_asked(self):
+        result, asked, opened = self.open([self.untrusted], windows=False)
+        self.assertIs(result, self.untrusted)
+        asked.assert_not_called()
+        self.assertEqual(opened.call_count, 1)
+
+    def test_other_failures_are_not_retried(self):
+        offline = hostsys.urllib.error.URLError(OSError("Network is unreachable"))
+        result, asked, opened = self.open([offline])
+        self.assertIs(result, offline)
+        asked.assert_not_called()
+
+
 class MacFirewallTests(unittest.TestCase):
     """The macOS firewall allows programs: the one that really listens."""
 

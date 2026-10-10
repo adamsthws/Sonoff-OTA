@@ -18,8 +18,10 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.autoflash.hostsys import urlopen
     from tools.autoflash.prompts import ask_secret
 except ModuleNotFoundError:  # running from inside tools/
+    from autoflash.hostsys import urlopen
     from autoflash.prompts import ask_secret
 
 
@@ -36,8 +38,9 @@ API = {
 }
 
 
-# A certificate this computer does not trust, from a site that has a good one:
-# almost always something in between reading encrypted connections.
+# A certificate this computer does not trust, from a site that has a good one -
+# even after Windows was asked for the root it needs (hostsys.urlopen): almost
+# always something in between reading encrypted connections.
 INSPECTED = ("{what} certificate was not trusted - security software, or a work or "
              "school network, that inspects encrypted connections does this. Try another "
              "network, or pause that software while you convert the plug")
@@ -65,7 +68,7 @@ def signed_login_body(email: str, password: str, country_code: str) -> tuple[byt
 def api_json(url: str, *, body: bytes | None = None, headers: dict[str, str] | None = None, timeout: float = 10.0) -> dict[str, Any]:
     request = urllib.request.Request(url, data=body, headers=headers or {}, method="POST" if body is not None else "GET")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urlopen(request, timeout=timeout) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
         raise EwelinkError(f"eWeLink HTTP error {exc.code}") from None

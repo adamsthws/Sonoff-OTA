@@ -21,9 +21,13 @@ import platform
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -79,6 +83,50 @@ def _encoded(script: str) -> str:
 def _ps_string(value: str) -> str:
     """`value` as a PowerShell single-quoted string."""
     return "'" + value.replace("'", "''") + "'"
+
+
+# -- trusted certificates ---------------------------------------------------------
+# Windows ships with a few root certificates and fetches the rest from Windows
+# Update the first time one of its own components meets a site that needs it.
+# Python reads only the roots already there and never asks, so on a computer
+# that has not yet met a site's root - Edge keeps its own, so browsing need not
+# have - a good certificate fails: raw.githubusercontent.com's ISRG Root X1 was
+# missing from a fresh Windows. PowerShell's web request is one of Windows' own.
+_roots_fetched: set[str] = set()
+# The roots as they are since Windows last fetched one: urlopen's own context
+# read them once, before that, and goes on using what it read.
+_roots_context: ssl.SSLContext | None = None
+
+
+def fetch_windows_root(url: str) -> bool:
+    """Have Windows fetch the root `url`'s site needs. True if it was asked to now.
+
+    Once per site, and only on Windows: elsewhere the roots are all there.
+    """
+    host = urllib.parse.urlsplit(url).hostname
+    if not IS_WINDOWS or not host or host in _roots_fetched:
+        return False
+    _roots_fetched.add(host)
+    output.detail(f"Asking Windows for the root certificate {host} needs...")
+    powershell("try { Invoke-WebRequest -Uri " + _ps_string(f"https://{host}/")
+               + " -Method Head -UseBasicParsing -TimeoutSec 30 | Out-Null } catch {}", timeout=45)
+    return True
+
+
+def urlopen(request: urllib.request.Request, timeout: float):
+    """urllib's urlopen, tried again once on Windows after it fetches a missing root.
+
+    Still untrusted after that, the certificate is not the site's own.
+    """
+    global _roots_context
+    try:
+        return urllib.request.urlopen(request, timeout=timeout, context=_roots_context)
+    except urllib.error.URLError as exc:
+        if not (isinstance(exc.reason, ssl.SSLCertVerificationError)
+                and fetch_windows_root(request.full_url)):
+            raise
+    _roots_context = ssl.create_default_context()
+    return urllib.request.urlopen(request, timeout=timeout, context=_roots_context)
 
 
 def normalise_mac(text: str) -> str:

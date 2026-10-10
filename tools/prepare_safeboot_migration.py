@@ -13,6 +13,7 @@ from typing import Any
 
 try:
     from tools.autoflash import output
+    from tools.autoflash.hostsys import urlopen
     from tools.safeboot_migration import (
         APP0_OFFSET,
         APP0_SIZE,
@@ -42,6 +43,7 @@ try:
     )
 except ModuleNotFoundError:
     from autoflash import output
+    from autoflash.hostsys import urlopen
     from safeboot_migration import (
         APP0_OFFSET,
         APP0_SIZE,
@@ -80,7 +82,7 @@ def obtain(path: Path | None, url: str, destination: Path) -> bytes:
         source = str(path.resolve())
     else:
         request = urllib.request.Request(url, headers={"User-Agent": "S60MigrationPrep/1"})
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urlopen(request, timeout=60) as response:
             data = response.read()
         source = url
     destination.write_bytes(data)
