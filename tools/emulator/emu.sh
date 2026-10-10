@@ -125,8 +125,14 @@ fi
 # Your browser, and with --windows the wire windows_link.py connects to.
 publish=(-p 127.0.0.1:8080:8080)
 [ "$windows" = 1 ] && publish+=(-p 127.0.0.1:7860:7860)
-# Capped: the plug, its router and the tool used under 70 MB between them.
-exec docker run --rm $tty --name s60-emu --hostname s60-emu-computer \
+# Awake while you are in it, so a conversion is not cut off by sleep: a lock
+# held only while this runs (systemd-inhibit), changing no setting.
+awake=()
+if [ "$tty" = -it ] && systemd-inhibit --what=sleep:idle true 2>/dev/null; then
+    awake=(systemd-inhibit --what=sleep:idle --who="S60 emulator" --why="the emulated plug's conversion" --mode=block)
+fi
+# Capped: the plug, its router and the tool used about 80 MB between them.
+exec "${awake[@]}" docker run --rm $tty --name s60-emu --hostname s60-emu-computer \
     --memory "${S60_EMU_MEMORY:-256m}" --cpus "${S60_EMU_CPUS:-2}" \
     --cap-add NET_ADMIN --device /dev/net/tun \
     --sysctl net.ipv4.ip_forward="$cloud" \

@@ -35,7 +35,7 @@ another regional version's power meter.
 | Time | see "How long it takes", below | |
 
 Measured on an AMD Ryzen 5 4500U (6 cores) with 8 GB: Windows peaked at
-2.1 GB, the emulator at 70 MB, and the layers took 7, 2 and 1 minutes to set
+2.1 GB, the emulator at 80 MB, and the layers took 7, 2 and 1 minutes to set
 up. The caps can be changed (below), and a computer short of memory is warned
 before Windows starts.
 
@@ -56,6 +56,13 @@ laptop with 8 GB, from 2020 - or faster. A faster one is nearer the low end.
 
 So the emulator alone is ready in a few minutes, and Windows beside it in
 about 10-20 minutes plus the download.
+
+`windows-test.sh`, and `emu.sh` while you are in it, keep the computer from
+going to sleep: an install or a conversion cut off half way has to start
+again. They hold a lock (`systemd-inhibit`) for as long as they run, and
+change no setting, so nothing is left to put back; the lock goes when they
+exit, however they exit. A flat battery cannot be held off, so on a laptop
+running on its battery `windows-test.sh` says to plug it in.
 
 **Each run:**
 

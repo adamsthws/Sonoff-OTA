@@ -58,7 +58,31 @@ for arg in "$@"; do
     esac
 done
 
+# Awake while this runs: a Windows install or a conversion cut off by sleep has
+# to start again. A lock held by this process alone (systemd-inhibit) - no
+# setting of the computer's is changed, and the lock goes when this exits,
+# however it exits. It cannot hold off a flat battery: that is warned of.
+if [ -z "${S60_AWAKE:-}" ] && systemd-inhibit --what=sleep:idle true 2>/dev/null; then
+    exec env S60_AWAKE=1 systemd-inhibit --what=sleep:idle --who="S60 emulator" \
+        --why="Windows set-up or a test run" --mode=block "$0" "$@"
+fi
+
 say() { printf '%s\n' "$*"; }
+
+on_battery() {  # true on a laptop running on its battery
+    local supply battery=1
+    for supply in /sys/class/power_supply/*; do
+        case "$(cat "$supply/type" 2>/dev/null)" in
+        Mains) [ "$(cat "$supply/online" 2>/dev/null)" = 1 ] && return 1 ;;
+        Battery) battery=0 ;;
+        esac
+    done
+    return $battery
+}
+if on_battery; then
+    say "This computer is running on its battery. Plug it in: a Windows install or a"
+    say "conversion cut off by a flat battery has to start again."
+fi
 
 # -- Windows' layers -------------------------------------------------------------------
 # What each layer is set up from, with what the layer below it was: when that
