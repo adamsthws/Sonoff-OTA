@@ -6,9 +6,12 @@
 # Remote Desktop, and every run starts from a clean copy of it.
 #
 #   tools/emulator/windows-test.sh [--cloud] [--fresh] [--no-firewall] [--rebuild]
+#                                  [--classic-console]
 #
-# Options as emu.sh's (a conversion needs --cloud). Windows gets 2 GB and 2 CPUs
-# (S60_WINDOWS_RAM=3G, S60_WINDOWS_CPUS=4 to change). The first run checks what
+# Options as emu.sh's (a conversion needs --cloud). The conversion runs in
+# OpenConsole, Windows Terminal's own console, as on Windows 11; with
+# --classic-console in Windows' classic one, as on Windows 10. Windows gets
+# 2 GB and 2 CPUs (S60_WINDOWS_RAM=3G, S60_WINDOWS_CPUS=4). The first run checks what
 # this computer needs, lists it, and gets it all after one question:
 # Microsoft's evaluation ISO (8.2 GB, no sign-up), from which Windows is made
 # ready once - an unattended Setup, then the conversion tool's prerequisites
@@ -23,6 +26,10 @@ VM_IMAGE=s60-win
 # from the Evaluation Center. Pinned: a changed file is reported, never used unseen.
 ISO_URL="https://go.microsoft.com/fwlink/?linkid=2345730"
 ISO_SHA256=${S60_WINDOWS_ISO_SHA256:-7b052573ba7894c9924e3e87ba732ccd354d18cb75a883efa9b900ea125bfd51}
+# Windows Terminal's release, for its console, OpenConsole: Terminal itself
+# cannot start on Server Core, which has no XAML. Pinned like the ISO.
+TERMINAL_URL="https://github.com/microsoft/terminal/releases/download/v1.25.2733.0/Microsoft.WindowsTerminal_1.25.2733.0_x64.zip"
+TERMINAL_SHA256=bf3ef2012f6c44d8340a4c58125acc9498d19b580f9890dc043cdf831852e796
 # Not a secret: Remote Desktop listens on this computer's 127.0.0.1 only.
 PASSWORD=S60-emulator
 # What Windows gets: Server Core with only the tool to run is content in 2 GB.
@@ -36,12 +43,13 @@ else echo "S60_WINDOWS_RAM is a size such as 2G or 3072M, not $RAM"; exit 2
 fi
 cap_mb=$(( ram_mb + 1024 ))
 
-emu_flags=() rebuild=0
+emu_flags=() rebuild=0 console=openconsole
 for arg in "$@"; do
     case "$arg" in
+    --classic-console) console=classic ;;
     --cloud|--fresh|--no-firewall|--pcap) emu_flags+=("$arg") ;;
     --rebuild) rebuild=1; emu_flags+=("$arg") ;;
-    *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
 done
 
@@ -99,6 +107,10 @@ if [ ! -f "$CACHE/base.qcow2" ]; then
     plan+=("Windows Server Core installed from it once (20-40 minutes); it then gets the tool's portable Python and OpenVPN's TAP-Windows6 driver itself, with windows-bootstrap.ps1")
     user_steps+=(windows)
 fi
+if [ ! -f "$CACHE/windows-terminal.zip" ]; then
+    plan+=("Windows Terminal's release (12 MB, checked against its pinned SHA-256), for its console, OpenConsole, to run the conversion in as on Windows 11")
+    user_steps+=(terminal)
+fi
 
 if [ ${#plan[@]} -gt 0 ]; then
     say "To test the conversion on Windows, this computer needs:"
@@ -136,6 +148,16 @@ if [ ${#plan[@]} -gt 0 ]; then
                 fi
                 mv "$CACHE/server2025-eval.iso.part" "$CACHE/server2025-eval.iso"
             fi
+            ;;
+        terminal)
+            mkdir -p "$CACHE"
+            curl -fsSL --retry 5 -o "$CACHE/windows-terminal.zip.part" "$TERMINAL_URL"
+            got=$(sha256sum "$CACHE/windows-terminal.zip.part" | cut -d' ' -f1)
+            if [ "$got" != "$TERMINAL_SHA256" ]; then
+                say "Windows Terminal's release is not the one this was made for (SHA-256 $got)."
+                exit 1
+            fi
+            mv "$CACHE/windows-terminal.zip.part" "$CACHE/windows-terminal.zip"
             ;;
         esac
     done
@@ -183,7 +205,7 @@ stop_all() {
 trap stop_all EXIT
 emu_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' s60-emu)
 docker rm -f s60-win >/dev/null 2>&1 || true
-vm -d --name s60-win --stop-timeout 150 -e "LINK_HOST=$emu_ip" \
+vm -d --name s60-win --stop-timeout 150 -e "LINK_HOST=$emu_ip" -e "CONSOLE=$console" \
     -p 127.0.0.1:3389:3389 -p 127.0.0.1:5900:5900 run >/dev/null
 
 say "Windows is starting (about a minute). Connect with Remote Desktop:"

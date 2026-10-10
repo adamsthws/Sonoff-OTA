@@ -10,7 +10,9 @@
 #                    until Windows is shut down or the container is stopped
 #
 # /cache holds the disks (and the conversion's captures, kept between runs);
-# /repo is the checkout, read-only. LINK_HOST is the emulator's address.
+# /repo is the checkout, read-only. LINK_HOST is the emulator's address;
+# CONSOLE what the conversion runs in: openconsole (Windows Terminal's console,
+# from /cache/windows-terminal.zip) or classic (Windows' own).
 set -euo pipefail
 
 CACHE=/cache
@@ -141,11 +143,29 @@ run() {
         cp /repo/captures/settings.json "$CACHE/captures/"   # the eWeLink email, to save typing it
     fi
     tar -C "$CACHE/captures" -cf /run/captures.tar .
-    printf '{"link_host": "%s"}\n' "$LINK_HOST" > /run/config.json
+    local console=${CONSOLE:-openconsole}
+    rm -rf /run/openconsole && mkdir /run/openconsole
+    if [ "$console" = openconsole ]; then
+        # OpenConsole.exe, and the notice its licence asks to go with it.
+        python3 -c '
+import os, sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+    for name in z.namelist():
+        if os.path.basename(name) in ("OpenConsole.exe", "NOTICE.html"):
+            open(os.path.join(sys.argv[2], os.path.basename(name)), "wb").write(z.read(name))
+' "$CACHE/windows-terminal.zip" /run/openconsole
+        [ -f /run/openconsole/OpenConsole.exe ] || { log "no OpenConsole.exe in $CACHE/windows-terminal.zip"; exit 1; }
+    fi
+    tar -C /run/openconsole -cf /run/openconsole.tar .
+    printf '{"link_host": "%s", "console": "%s"}\n' "$LINK_HOST" "$console" > /run/config.json
+    # start.ps1 too, so a change to it needs no new base disk.
     guestfish --rw -a "$disk" -i <<EOF
 mkdir-p /S60/repo/captures
+mkdir-p /S60/openconsole
 tar-in /run/repo.tar /S60/repo
 tar-in /run/captures.tar /S60/repo/captures
+tar-in /run/openconsole.tar /S60/openconsole
+upload $GUEST/start.ps1 /S60/start.ps1
 upload /run/config.json /S60/run.json
 EOF
     trap 'stop_windows' TERM INT

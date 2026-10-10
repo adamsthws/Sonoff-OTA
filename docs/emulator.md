@@ -126,7 +126,9 @@ starts from a throwaway copy of that disk, with this checkout in
 `C:\S60\repo`, in about a minute.
 
 Windows logs on by itself, opens the link and a PowerShell window for the
-conversion; work in it over Remote Desktop - `localhost:3389`, user `s60`,
+conversion - in **OpenConsole**, Windows Terminal's own console, as on Windows
+11, or with `--classic-console` in Windows' classic one, as on Windows 10. Work
+in it over Remote Desktop - `localhost:3389`, user `s60`,
 password `S60-emulator` (only this computer can reach it) - or watch on VNC,
 `localhost:5900`. The terminal you started from is the emulator's, for `plug
 restart` and the serial log; leaving it shuts Windows down. The conversion's
@@ -137,9 +139,13 @@ Server Core has no desktop, which is what makes it quick to install and run,
 and leaves three things a person's Windows has untested here: the User
 Account Control prompt (an administrator's console is already elevated, so the
 firewall rule is added without asking), Windows Security's notifications, and
-Windows Terminal (it is the classic console). Everything the tool does on the
-network - finding the plug, the firewall rule, serving the firmware - is the
-same as on any Windows.
+Windows Terminal's window itself. Terminal cannot start on Server Core, which
+lacks the XAML it draws with; OpenConsole, from the same release (pinned, 12
+MB, fetched once into `~/.cache/s60-emu/windows`), is the same code for what
+the tool's output depends on - colours, the escape sequences that redraw a
+line or take a block back off the screen, wrapping - but not Terminal's tabs,
+or its clickable links. Everything the tool does on the network - finding the
+plug, the firewall rule, serving the firmware - is the same as on any Windows.
 
 The evaluation lasts 180 days from when the disk was installed; after that,
 delete `base.qcow2` and the next run installs it again.
