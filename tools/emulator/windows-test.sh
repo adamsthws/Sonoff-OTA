@@ -142,10 +142,14 @@ if [ ${#plan[@]} -gt 0 ]; then
 fi
 
 # -- the images ----------------------------------------------------------------------
-if [ "$rebuild" = 1 ] || ! docker image inspect "$VM_IMAGE" >/dev/null 2>&1; then
+# Rebuilt when what it is built from changes, as emu.sh does the emulator's.
+built_from=$(cd "$ROOT/tools/emulator/windows" && find . -type f -print0 \
+    | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+if [ "$rebuild" = 1 ] || [ "$(docker image inspect -f '{{index .Config.Labels "s60.built-from"}}' \
+        "$VM_IMAGE" 2>/dev/null)" != "$built_from" ]; then
     say "Building the Windows VM's image..."
-    docker build -q -t "$VM_IMAGE" -f "$ROOT/tools/emulator/windows/vm.Dockerfile" \
-        "$ROOT/tools/emulator/windows" >/dev/null
+    docker build -q -t "$VM_IMAGE" --label "s60.built-from=$built_from" \
+        -f "$ROOT/tools/emulator/windows/vm.Dockerfile" "$ROOT/tools/emulator/windows" >/dev/null
 fi
 vm() {  # the Windows VM container, with its disks and this checkout
     docker run "$@" --device /dev/kvm -e "KEYBOARD=${LANG:-}" -e "WINDOWS_PASSWORD=$PASSWORD" \

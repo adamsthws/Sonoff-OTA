@@ -58,13 +58,19 @@ if docker ps -q --filter "name=^s60-emu$" | grep -q .; then
 fi
 
 # -- the image -----------------------------------------------------------------
-if [ "$rebuild" = 1 ] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+# Labelled with a hash of what it is built from, and rebuilt when that changes:
+# an image from an older checkout would otherwise run unseen.
+built_from=$(cd "$ROOT/tools/emulator" && find emu.Dockerfile fork container -type f -print0 \
+    | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+if [ "$rebuild" = 1 ] || [ "$(docker image inspect -f '{{index .Config.Labels "s60.built-from"}}' \
+        "$IMAGE" 2>/dev/null)" != "$built_from" ]; then
     context=$(mktemp -d)
     trap 'rm -rf "$context"' EXIT
     cp -r "$ROOT/tools/emulator/emu.Dockerfile" "$ROOT/tools/emulator/fork" \
           "$ROOT/tools/emulator/container" "$context/"
     echo "Building the emulator image (the first time takes a few minutes)..."
-    docker build -q -t "$IMAGE" -f "$context/emu.Dockerfile" "$context" >/dev/null
+    docker build -q -t "$IMAGE" --label "s60.built-from=$built_from" \
+        -f "$context/emu.Dockerfile" "$context" >/dev/null
 fi
 
 # -- the plug's flash and eFuses ---------------------------------------------
