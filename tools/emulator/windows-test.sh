@@ -2,8 +2,8 @@
 # Test the conversion on Windows from a Linux machine: the emulated plug in
 # Docker as usual (emu.sh --windows), and beside it Windows Server 2025 (Server
 # Core) in a container of its own (windows/vm.Dockerfile) - one layer of KVM, nothing
-# nested. Windows is wired onto the plug's home network, you work in it over
-# Remote Desktop, and every run starts from a clean copy of it.
+# nested. Windows is wired onto the plug's home network, you work in it in a
+# browser (noVNC) or over Remote Desktop, and every run starts from a clean copy of it.
 #
 #   tools/emulator/windows-test.sh [--cloud] [--fresh] [--no-firewall] [--rebuild]
 #       [--classic-console] [--first-run] [--rebuild-layer=installed|rig|tool]
@@ -32,6 +32,12 @@ ISO_SHA256=${S60_WINDOWS_ISO_SHA256:-7b052573ba7894c9924e3e87ba732ccd354d18cb75a
 # cannot start on Server Core, which has no XAML. Pinned like the ISO.
 TERMINAL_URL="https://github.com/microsoft/terminal/releases/download/v1.25.2733.0/Microsoft.WindowsTerminal_1.25.2733.0_x64.zip"
 TERMINAL_SHA256=bf3ef2012f6c44d8340a4c58125acc9498d19b580f9890dc043cdf831852e796
+# virtio-win's guest tools, for the clipboard on VNC and in the browser: the
+# virtio-serial driver and SPICE's agent (rig.ps1). Fetched here, not in
+# Windows: fedorapeople.org answers a browser's User-Agent, which PowerShell's
+# downloads send, with a bot check instead of the file. Pinned like the ISO.
+GUEST_TOOLS_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.302-1/virtio-win-guest-tools.exe"
+GUEST_TOOLS_SHA256=d8ae9ea1e943384ac195e012cd36f82c3161620e5fc9529be4e42e6f420e222d
 # Not a secret: Remote Desktop listens on this computer's 127.0.0.1 only.
 PASSWORD=S60-emulator
 # What Windows gets: Server Core with only the tool to run is content in 2 GB.
@@ -92,7 +98,8 @@ built_from() {  # $1: a layer
     local guest=emulator/windows/guest
     case "$1" in
     installed) (cd "$ROOT/tools" && sha256sum $guest/unattend.xml $guest/firstlogon.ps1; echo "$ISO_SHA256") ;;
-    rig) (built_from installed; cd "$ROOT/tools" && sha256sum $guest/rig.ps1 emulator/windows-bootstrap.ps1 windows-python.ps1) ;;
+    rig) (built_from installed; echo "$GUEST_TOOLS_SHA256"
+          cd "$ROOT/tools" && sha256sum $guest/rig.ps1 emulator/windows-bootstrap.ps1 windows-python.ps1) ;;
     tool) (built_from rig; cd "$ROOT/tools" && sha256sum $guest/tool.ps1 windows-python.ps1) ;;
     esac | sha256sum | cut -c1-16
 }
@@ -163,6 +170,10 @@ if [ ! -f "$CACHE/windows-terminal.zip" ]; then
     plan+=("Windows Terminal's release (12 MB, checked against its pinned SHA-256), for its console, OpenConsole, to run the conversion in as on Windows 11")
     user_steps+=(terminal)
 fi
+if [ ! -f "$CACHE/virtio-win-guest-tools.exe" ]; then
+    plan+=("virtio-win's guest tools (32 MB, checked against their pinned SHA-256), for copy and paste in the browser and on VNC")
+    user_steps+=(guest-tools)
+fi
 
 if [ ${#plan[@]} -gt 0 ]; then
     say "To test the conversion on Windows, this computer needs:"
@@ -212,6 +223,16 @@ if [ ${#plan[@]} -gt 0 ]; then
             fi
             mv "$CACHE/windows-terminal.zip.part" "$CACHE/windows-terminal.zip"
             ;;
+        guest-tools)
+            mkdir -p "$CACHE"
+            curl -fsSL --retry 5 -o "$CACHE/virtio-win-guest-tools.exe.part" "$GUEST_TOOLS_URL"
+            got=$(sha256sum "$CACHE/virtio-win-guest-tools.exe.part" | cut -d' ' -f1)
+            if [ "$got" != "$GUEST_TOOLS_SHA256" ]; then
+                say "virtio-win's guest tools are not the ones this was made for (SHA-256 $got)."
+                exit 1
+            fi
+            mv "$CACHE/virtio-win-guest-tools.exe.part" "$CACHE/virtio-win-guest-tools.exe"
+            ;;
         esac
     done
 fi
@@ -243,11 +264,11 @@ fi
 for name in "${stale[@]}"; do
     rm -f "$CACHE/$name.built-from"  # until it is set up again
     if [ "$name" = installed ]; then
-        say "Installing Windows - watch it with a VNC viewer on localhost:5900 if you like."
-        vm --rm --name s60-win-setup -p 127.0.0.1:5900:5900 -- install
+        say "Installing Windows - watch it in your browser at http://localhost:6080 if you like."
+        vm --rm --name s60-win-setup -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080 -- install
     else
         say "Setting up Windows' $name layer (a few minutes)..."
-        vm --rm --name s60-win-setup -p 127.0.0.1:5900:5900 -- layer "$name"
+        vm --rm --name s60-win-setup -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080 -- layer "$name"
     fi
     built_from "$name" > "$CACHE/$name.built-from"
 done
@@ -261,22 +282,42 @@ for name in s60-emu s60-win; do
 done
 # Its own output stays: with --cloud it asks you to confirm the real plug is unplugged.
 "$ROOT/tools/emulator/emu.sh" --windows --detach "${emu_flags[@]}"
+routed=0
 stop_all() {
     say "Shutting Windows down (its captures are kept for next time)..."
+    [ "$routed" = 1 ] && host_route del
     docker stop -t 150 s60-win >/dev/null 2>&1 || true
     docker stop s60-emu >/dev/null 2>&1 || true
 }
 trap stop_all EXIT
 emu_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' s60-emu)
+# The plug's own address, http://192.168.60.50 - the link the conversion ends
+# with - reachable from this computer's browser: a route to the plug's network
+# through the emulator, for as long as this runs. Set by a container on the
+# host's network, so without sudo; the emulator forwards only this computer's
+# connections to the plug (entrypoint.sh). Not over a route of this
+# computer's own to that network, which would be its real one.
+host_route() {  # replace|del
+    docker run --rm --network host --cap-add NET_ADMIN --entrypoint ip s60-emu \
+        route "$1" 192.168.60.0/24 via "$emu_ip" >/dev/null 2>&1
+}
+existing=$(ip route show 192.168.60.0/24 2>/dev/null)
+# Through Docker's bridge: one left by a run that was killed, replaced.
+if [ -z "$existing" ] || [[ $existing == *"dev docker0"* ]]; then
+    host_route replace && routed=1
+fi
+[ "$routed" = 1 ] || say "This computer has a network of its own at 192.168.60.0/24, so the plug's page is at http://localhost:8080 only."
 docker rm -f s60-win >/dev/null 2>&1 || true
 vm -d --name s60-win --stop-timeout 150 -e "LINK_HOST=$emu_ip" -e "CONSOLE=$console" -e "LAYER=$from" -e "FRESH=$fresh" \
-    -p 127.0.0.1:3389:3389 -p 127.0.0.1:5900:5900 -- run >/dev/null
+    -p 127.0.0.1:3389:3389 -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080 -- run >/dev/null
 
-say "Windows is starting (about a minute). Connect with Remote Desktop:"
-say "    localhost:3389    user s60, password $PASSWORD"
-say "    e.g.  xfreerdp /v:localhost /u:s60 /p:$PASSWORD /cert:ignore /dynamic-resolution"
-say "(or watch it with a VNC viewer on localhost:5900). It opens the link and a"
-say "window to run the conversion in. This terminal is the emulator: plug restart,"
-say "plug log, ... - leaving it (exit, or Ctrl-b d) shuts Windows down too."
+[ "$routed" = 1 ] && say "The plug's page is at http://192.168.60.50, as the conversion's last link says (or http://localhost:8080)."
+say "Windows is starting (about a minute). Open it in your browser:"
+say "    http://localhost:6080    (copy and paste: the clipboard in noVNC's side panel)"
+say "or with Remote Desktop, localhost:3389, user s60, password $PASSWORD, e.g."
+say "    xfreerdp /v:localhost /u:s60 /p:$PASSWORD /cert:ignore /clipboard /dynamic-resolution"
+say "or a VNC viewer on localhost:5900. It opens the link and a window to run the"
+say "conversion in. This terminal is the emulator: plug restart, plug log, ... -"
+say "leaving it (exit, or Ctrl-b d) shuts Windows down too."
 read -r -p "Press Enter to open the emulator here. " _
 docker attach s60-emu || true

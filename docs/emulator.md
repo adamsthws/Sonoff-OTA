@@ -31,7 +31,7 @@ another regional version's power meter.
 | Memory | 256 MB, the emulator's cap | 3.3 GB at most: Windows 2 GB, QEMU and the disk tools 1 GB, the emulator 256 MB. An 8 GB laptop with a desktop open manages it |
 | Processors | 2, the emulator's cap | 2 more for Windows (caps, shared with everything else, not set aside) |
 | Disk | about 0.5 GB: the image, and the plug's state under `captures/emulation/state/` | about 30 GB free while Windows installs; then about 21 GB: the ISO 8.2 GB, the layers 10.8, 0.9 and 0.4 GB, the images 0.8 GB |
-| Downloads | the QEMU fork's source, once | Microsoft's ISO (8.2 GB) and Windows Terminal (12 MB), once; Python (11 MB) and OpenVPN (6 MB) each time a layer that gets them is set up |
+| Downloads | the QEMU fork's source, once | Microsoft's ISO (8.2 GB), Windows Terminal (12 MB) and virtio-win's guest tools (32 MB), once; Python (11 MB) and OpenVPN (6 MB) each time a layer that gets them is set up |
 | Time | see "How long it takes", below | |
 
 Measured on an AMD Ryzen 5 4500U (6 cores) with 8 GB: Windows peaked at
@@ -189,7 +189,7 @@ to the one below:
 | Layer | What it adds | Set up by | Takes |
 |---|---|---|---|
 | `installed` | Windows Server Core, as Setup leaves it: the user `s60`, who logs on by itself, and a hook that runs `start.ps1` at logon | the ISO, `unattend.xml`, `firstlogon.ps1` | 5-10 min |
-| `rig` | what only the tests need: Remote Desktop, no Windows Update or SConfig, and for the link OpenVPN's TAP driver, the "S60 emulator" adapter and a Python of its own, from the same `windows-bootstrap.ps1` a Windows computer uses | `rig.ps1` | a few min |
+| `rig` | what only the tests need: Remote Desktop, the clipboard over VNC (virtio-win's guest tools, pinned), no Windows Update or SConfig, and for the link OpenVPN's TAP driver, the "S60 emulator" adapter and a Python of its own, from the same `windows-bootstrap.ps1` a Windows computer uses | `rig.ps1` | a few min |
 | `tool` | what the tool's own first run leaves: its portable Python | `tool.ps1` | about a min |
 
 Every run starts from a throwaway layer on `tool`, with this checkout in
@@ -203,9 +203,21 @@ finished, so one that fails leaves the layers as they were.
 Windows logs on by itself, opens the link and a PowerShell window for the
 conversion - in **OpenConsole**, Windows Terminal's own console, as on Windows
 11, or with `--classic-console` in Windows' classic one, as on Windows 10. Work
-in it over Remote Desktop - `localhost:3389`, user `s60`,
-password `S60-emulator` (only this computer can reach it) - or watch on VNC,
-`localhost:5900`. The terminal you started from is the emulator's, for `plug
+in it in your browser, at **http://localhost:6080** - nothing to install - or
+over Remote Desktop, `localhost:3389`, user `s60`, password `S60-emulator`, or
+with a VNC viewer on `localhost:5900`. Only this computer can reach any of them.
+Copy and paste works in all three: in the browser through the clipboard box in
+noVNC's side panel (the browser keeps pages from reading the clipboard
+directly; what you paste stays Windows' clipboard while the page is open), on VNC
+through SPICE's agent in Windows, and on Remote Desktop with
+its own clipboard (`xfreerdp /clipboard`). The browser view is there while
+Windows installs and its layers are set up too. The converted plug's own page is at its
+own address, **http://192.168.60.50**, as the conversion's last link gives it:
+for as long as the run lasts, this computer has a route to the plug's network
+through the emulator, which forwards only this computer's connections to the
+plug (and still nothing to the internet without `--cloud`). It is set and
+removed without sudo, and left out if this computer has a network of its own
+at 192.168.60.0/24 - http://localhost:8080 works either way. The terminal you started from is the emulator's, for `plug
 restart` and the serial log; leaving it shuts Windows down. The conversion's
 captures are kept between runs (`~/.cache/s60-emu/windows/captures`), so an
 unfinished one can be resumed.

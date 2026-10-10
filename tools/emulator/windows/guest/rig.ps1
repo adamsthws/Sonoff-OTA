@@ -1,9 +1,9 @@
 <#
 Layer 2, "rig": what the tests need and a person's computer never has -
-Remote Desktop, no Windows Update or SConfig, and for the link to the
-emulator OpenVPN's TAP driver, the "S60 emulator" adapter and a Python of
-its own, all from windows-bootstrap.ps1, as a Windows user of the emulator
-gets them. Runs from start.ps1, on layer 1, then shuts Windows down.
+Remote Desktop, the clipboard over VNC, no Windows Update or SConfig, and for
+the link to the emulator OpenVPN's TAP driver, the "S60 emulator" adapter and
+a Python of its own, all from windows-bootstrap.ps1, as a Windows user of the
+emulator gets them. Runs from start.ps1, on layer 1, then shuts Windows down.
 #>
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -21,6 +21,12 @@ try {
     # Remote Desktop, to work in it from the Linux side (only 127.0.0.1 reaches it).
     Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
     Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+    # The clipboard, in the browser (noVNC) and on VNC: the virtio-serial
+    # driver and SPICE's agent, which carry it to and from QEMU's vdagent
+    # channel. windows-test.sh fetched and checked them; vm-run.sh put them here.
+    $p = Start-Process C:\S60\virtio-win-guest-tools.exe -Wait -PassThru -ArgumentList "/install", "/quiet", "/norestart"
+    if ($p.ExitCode -notin 0, 3010) { throw "virtio-win's guest tools failed (exit $($p.ExitCode))" }
+    Remove-Item C:\S60\virtio-win-guest-tools.exe
     # No updates mid-test: each run starts from this disk, so they would never stick anyway.
     $wu = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
     New-Item $wu -Force | Out-Null

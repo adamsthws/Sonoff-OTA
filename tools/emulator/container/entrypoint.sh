@@ -74,6 +74,19 @@ else
     iptables -A OUTPUT -o eth0 -j DROP
 fi
 
+# -- this computer to the plug, as on the same Wi-Fi --------------------------
+# windows-test.sh routes 192.168.60.0/24 on the computer you started it from
+# through here, so a browser there reaches the plug at its own address, as the
+# conversion's last link gives it. Only that computer (this container's
+# gateway) to the plug, and the plug's replies: nothing else is forwarded, and
+# without --cloud nothing in here reaches the internet still.
+gateway=$(ip route show default | awk '{print $3; exit}')
+if [ -n "$gateway" ]; then
+    iptables -A FORWARD -i eth0 -o "$LAN" -s "$gateway" -d 192.168.60.50 -j ACCEPT
+    iptables -A FORWARD -i "$LAN" -o eth0 -s 192.168.60.50 -d "$gateway" \
+        -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+fi
+
 # -- the plug's radio: a tap device QEMU's emulated Wi-Fi is wired to ---------
 ip tuntap add dev tap0 mode tap user "$HOST_UID" group "$HOST_GID"
 ip link set tap0 up

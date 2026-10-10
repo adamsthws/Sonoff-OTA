@@ -60,8 +60,15 @@ qemu() {  # $1 the disk; then any extra QEMU options (Setup's discs)
         -device ide-hd,drive=disk,bus=ahci.0,bootindex=2 \
         -netdev user,id=net,hostfwd=tcp::3389-:3389 -device e1000e,netdev=net \
         -device qemu-xhci -device usb-tablet -rtc base=utc \
+        -device virtio-serial-pci -chardev qemu-vdagent,id=vdagent,name=vdagent,clipboard=on \
+        -device virtserialport,chardev=vdagent,name=com.redhat.spice.0 \
         -vnc :0 -monitor "unix:$MON,server,nowait" -display none "$@" &
     QEMU=$!
+    # The screen in a browser too: noVNC's page, and its connection to VNC.
+    # The clipboard goes both ways, through SPICE's agent in Windows (rig.ps1)
+    # and the vdagent channel above, on VNC and here alike.
+    # Once per container: each runs QEMU once.
+    websockify --web /usr/share/novnc 6080 127.0.0.1:5900 >/run/websockify.log 2>&1 &
 }
 
 monitor() {  # one command to QEMU's monitor
@@ -143,7 +150,7 @@ install() {
     rm -f "$disk"
     qemu-img create -q -f qcow2 "$disk" 64G
     log "installing Windows Server Core from the ISO, unattended; it shuts itself"
-    log "down when done (watch on VNC, localhost:5900)..."
+    log "down when done (watch at http://localhost:6080, or on VNC, localhost:5900)..."
     qemu "$disk" \
         -drive id=iso,if=none,media=cdrom,readonly=on,file="$ISO" -device ide-cd,drive=iso,bus=ahci.1,bootindex=1 \
         -drive id=seed,if=none,media=cdrom,readonly=on,file=/run/seed.iso -device ide-cd,drive=seed,bus=ahci.2
@@ -171,7 +178,7 @@ layer() {
     esac
     [ -f "$CACHE/$below.qcow2" ] || { log "no $below.qcow2 to build $name on"; exit 1; }
     local disk=$CACHE/$name.partial.qcow2
-    log "setting up $name.qcow2 on $below.qcow2 (a few minutes; VNC: localhost:5900)..."
+    log "setting up $name.qcow2 on $below.qcow2 (a few minutes; watch at http://localhost:6080)..."
     rm -f "$disk"
     # The layer below by its name alone, so the chain holds wherever /cache is.
     (cd "$CACHE" && qemu-img create -q -f qcow2 -b "$below.qcow2" -F qcow2 "$name.partial.qcow2")
@@ -185,6 +192,11 @@ upload $GUEST/$name.ps1 /S60/$name.ps1
 upload $GUEST/start.ps1 /S60/start.ps1
 upload /run/layer.txt /S60/layer.txt
 EOF
+    if [ "$name" = rig ]; then
+        # Fetched and checked by windows-test.sh; rig.ps1 installs them.
+        [ -f "$CACHE/virtio-win-guest-tools.exe" ] || { log "missing $CACHE/virtio-win-guest-tools.exe"; exit 1; }
+        guestfish --rw -a "$disk" -i upload "$CACHE/virtio-win-guest-tools.exe" /S60/virtio-win-guest-tools.exe
+    fi
     qemu "$disk"
     wait "$QEMU" || true
     QEMU=
@@ -241,7 +253,7 @@ upload $GUEST/start.ps1 /S60/start.ps1
 upload /run/config.json /S60/run.json
 EOF
     trap 'stop_windows' TERM INT
-    log "starting Windows - Remote Desktop: localhost:3389, VNC: localhost:5900"
+    log "starting Windows - Remote Desktop: localhost:3389, browser: http://localhost:6080, VNC: localhost:5900"
     qemu "$disk"
     # A stop signal interrupts the first wait; the second sees Windows off.
     wait "$QEMU" || true

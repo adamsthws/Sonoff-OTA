@@ -135,7 +135,7 @@ fi
 exec "${awake[@]}" docker run --rm $tty --name s60-emu --hostname s60-emu-computer \
     --memory "${S60_EMU_MEMORY:-256m}" --cpus "${S60_EMU_CPUS:-2}" \
     --cap-add NET_ADMIN --device /dev/net/tun \
-    --sysctl net.ipv4.ip_forward="$cloud" \
+    --sysctl net.ipv4.ip_forward="$(( cloud || windows ))" \
     "${publish[@]}" \
     -v "$STATE:/state" -v "$EMU/flash.bin:/secrets/stock-flash.bin:ro" \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e PLUG_MAC="$mac" \
