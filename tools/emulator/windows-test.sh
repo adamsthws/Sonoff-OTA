@@ -6,12 +6,14 @@
 # Remote Desktop, and every run starts from a clean copy of it.
 #
 #   tools/emulator/windows-test.sh [--cloud] [--fresh] [--no-firewall] [--rebuild]
-#                                  [--classic-console]
+#                                  [--classic-console] [--refresh-base]
 #
 # Options as emu.sh's (a conversion needs --cloud). The conversion runs in
 # OpenConsole, Windows Terminal's own console, as on Windows 11; with
 # --classic-console in Windows' classic one, as on Windows 10. Windows gets
-# 2 GB and 2 CPUs (S60_WINDOWS_RAM=3G, S60_WINDOWS_CPUS=4). The first run checks what
+# 2 GB and 2 CPUs (S60_WINDOWS_RAM=3G, S60_WINDOWS_CPUS=4). When Windows' set-up
+# scripts change, its disk is set up again with them first, in a few minutes
+# (--refresh-base to do that anyway). The first run checks what
 # this computer needs, lists it, and gets it all after one question:
 # Microsoft's evaluation ISO (8.2 GB, no sign-up), from which Windows is made
 # ready once - an unattended Setup, then the conversion tool's prerequisites
@@ -43,13 +45,14 @@ else echo "S60_WINDOWS_RAM is a size such as 2G or 3072M, not $RAM"; exit 2
 fi
 cap_mb=$(( ram_mb + 1024 ))
 
-emu_flags=() rebuild=0 console=openconsole
+emu_flags=() rebuild=0 console=openconsole refresh=0
 for arg in "$@"; do
     case "$arg" in
+    --refresh-base) refresh=1 ;;
     --classic-console) console=classic ;;
     --cloud|--fresh|--no-firewall|--pcap) emu_flags+=("$arg") ;;
     --rebuild) rebuild=1; emu_flags+=("$arg") ;;
-    *) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
 done
 
@@ -183,9 +186,17 @@ if [ "$avail_mb" -lt "$(( cap_mb + 1024 ))" ]; then  # the emulator's container 
     say "Windows and the emulator may use up to $(( (cap_mb + 1024) / 1024 )) GB; this computer has ${avail_mb} MB free."
     say "Close what you can, or give Windows less (S60_WINDOWS_RAM=1536M), or it may be slow."
 fi
+# What the base disk was set up with: when these change, it is set up again.
+provisioned_from=$(cd "$ROOT/tools" && sha256sum emulator/windows/guest/provision.ps1 \
+    emulator/windows-bootstrap.ps1 windows-python.ps1 | sha256sum | cut -c1-16)
 if [ ! -f "$CACHE/base.qcow2" ]; then
     say "Installing Windows - watch it with a VNC viewer on localhost:5900 if you like."
     vm --rm --name s60-win-prepare -p 127.0.0.1:5900:5900 prepare
+    echo "$provisioned_from" > "$CACHE/base.provisioned-from"
+elif [ "$refresh" = 1 ] || [ "$(cat "$CACHE/base.provisioned-from" 2>/dev/null)" != "$provisioned_from" ]; then
+    say "Setting Windows up again with the current scripts (a few minutes; VNC: localhost:5900)..."
+    vm --rm --name s60-win-prepare -p 127.0.0.1:5900:5900 refresh
+    echo "$provisioned_from" > "$CACHE/base.provisioned-from"
 fi
 
 # -- a run -----------------------------------------------------------------------------

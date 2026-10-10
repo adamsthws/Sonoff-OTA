@@ -6,6 +6,12 @@ run in in C:\S60\run.json: OpenConsole - Windows Terminal's console, as on
 Windows 11 (Terminal itself needs XAML, which Server Core lacks) - or the
 classic one, as on Windows 10.
 #>
+# vm-run.sh refresh: set the base up again with the current scripts, which shuts it down.
+if (Test-Path C:\S60\refresh) {
+    Remove-Item C:\S60\refresh
+    & C:\S60\provision.ps1
+    exit 0
+}
 $run = "C:\S60\run.json"
 if (-not (Test-Path $run)) { exit 0 }  # the base disk itself: nothing to start
 $config = Get-Content $run -Raw | ConvertFrom-Json

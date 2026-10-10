@@ -147,8 +147,12 @@ line or take a block back off the screen, wrapping - but not Terminal's tabs,
 or its clickable links. Everything the tool does on the network - finding the
 plug, the firewall rule, serving the firmware - is the same as on any Windows.
 
-The evaluation lasts 180 days from when the disk was installed; after that,
-delete `base.qcow2` and the next run installs it again.
+When the scripts that set Windows up change (`provision.ps1`,
+`windows-bootstrap.ps1`, `windows-python.ps1`), the next run sets the prepared
+disk up again with them first, in a few minutes, without the ISO or a new
+install; `--refresh-base` does it anyway. The evaluation lasts 180 days from
+when the disk was installed; after that, delete `base.qcow2` and the next run
+installs it again.
 
 ### On a Windows computer
 

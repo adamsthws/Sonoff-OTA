@@ -6,6 +6,8 @@
 #                    base.qcow2, with the conversion tool's prerequisites
 #                    installed by its own windows-bootstrap.ps1, and a user
 #                    who logs on by itself
+#   vm-run refresh   base.qcow2 set up again by the current provision.ps1 and
+#                    windows-bootstrap.ps1, without installing Windows again
 #   vm-run run       a throwaway copy of base.qcow2, with this checkout in it,
 #                    until Windows is shut down or the container is stopped
 #
@@ -79,6 +81,19 @@ press_any_key() {
     log "Setup did not start from the ISO within 10 minutes"
 }
 
+repo_tar() {  # $1: this checkout, without its private captures, as a tar
+    tar -C /repo -cf "$1" --exclude=./.git --exclude=./.venv --exclude=./.python --exclude=./captures \
+        --exclude='*/__pycache__' .
+}
+
+provisioned() {  # $1: a disk provision.ps1 has just run on; shows its log
+    guestfish --ro -a "$1" -i <<EOF > /run/provision.log 2>&1 || true
+cat /S60/provision.log
+EOF
+    cat /run/provision.log
+    guestfish --ro -a "$1" -i is-file /S60/provisioned | grep -q true
+}
+
 seed_disc() {  # the answer file, the set-up scripts and this checkout, on a disc
     local layout=0409:00000409
     case "${KEYBOARD:-}" in en_GB*|en-GB*) layout=0809:00000809 ;; esac
@@ -115,11 +130,7 @@ prepare() {
     press_any_key
     wait "$QEMU" || true
     QEMU=
-    guestfish --ro -a "$CACHE/base.partial.qcow2" -i <<EOF > /run/provision.log 2>&1 || true
-cat /S60/provision.log
-EOF
-    cat /run/provision.log
-    if ! guestfish --ro -a "$CACHE/base.partial.qcow2" -i is-file /S60/provisioned | grep -q true; then
+    if ! provisioned "$CACHE/base.partial.qcow2"; then
         log "set-up did not finish - see above. Running this again starts it afresh."
         exit 1
     fi
@@ -129,6 +140,37 @@ EOF
     log "prepared: base.qcow2"
 }
 
+# The base set up again, on a copy that replaces it only once that worked: the
+# current scripts and checkout copied in, and a marker for start.ps1, which at
+# logon runs provision.ps1 instead of a test run; that shuts Windows down.
+refresh() {
+    [ -f "$BASE" ] || { log "not prepared yet - run prepare first"; exit 1; }
+    local disk=$CACHE/base.refresh.qcow2
+    log "setting the base up again with the current scripts (a few minutes)..."
+    cp --sparse=always "$BASE" "$disk"
+    repo_tar /run/repo.tar
+    guestfish --rw -a "$disk" -i <<EOF
+rm-f /S60/provisioned
+rm-rf /S60/repo
+mkdir-p /S60/repo
+tar-in /run/repo.tar /S60/repo
+upload $GUEST/provision.ps1 /S60/provision.ps1
+upload $GUEST/start.ps1 /S60/start.ps1
+touch /S60/refresh
+EOF
+    qemu "$disk"
+    wait "$QEMU" || true
+    QEMU=
+    if ! provisioned "$disk"; then
+        rm -f "$disk"
+        log "set-up did not finish - see above. The base is as it was."
+        exit 1
+    fi
+    guestfish --rw -a "$disk" -i rm-rf /S60/repo
+    mv "$disk" "$BASE"
+    log "refreshed: base.qcow2"
+}
+
 run() {
     [ -f "$BASE" ] || { log "not prepared yet - run prepare first"; exit 1; }
     : "${LINK_HOST:?set LINK_HOST to the address of the emulator}"
@@ -136,8 +178,7 @@ run() {
     qemu-img create -q -f qcow2 -b "$BASE" -F qcow2 "$disk"
     # This checkout, without its private captures; the conversion's own
     # captures from earlier runs, so an unfinished one can be resumed.
-    tar -C /repo -cf /run/repo.tar --exclude=./.git --exclude=./.venv --exclude=./.python --exclude=./captures \
-        --exclude='*/__pycache__' .
+    repo_tar /run/repo.tar
     mkdir -p "$CACHE/captures"
     if [ ! -f "$CACHE/captures/settings.json" ] && [ -f /repo/captures/settings.json ]; then
         cp /repo/captures/settings.json "$CACHE/captures/"   # the eWeLink email, to save typing it
@@ -185,6 +226,7 @@ EOF
 
 case "${1:-}" in
 prepare) prepare ;;
+refresh) refresh ;;
 run) run ;;
-*) echo "usage: vm-run prepare | run" >&2; exit 2 ;;
+*) echo "usage: vm-run prepare | refresh | run" >&2; exit 2 ;;
 esac

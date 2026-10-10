@@ -1,6 +1,8 @@
 <#
-Runs once, at the emulator Windows VM's first logon (unattend.xml), then
-shuts it down: the disk is then the base every test run starts from.
+Runs at the emulator Windows VM's first logon (unattend.xml), then shuts it
+down: the disk is then the base every test run starts from. vm-run.sh refresh
+runs it again on that base (start.ps1 starts it), so everything here can run
+twice.
 
 Installs what the conversion tool needs with its own bootstrap - so that is
 tested on a Windows that has none of it - and makes each later logon start
@@ -26,6 +28,8 @@ try {
     Register-ScheduledTask -TaskName "S60 run" -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
 
     Set-LocalUser -Name s60 -PasswordNeverExpires $true
+    # No SConfig at logon: it would race the run's window for the keyboard.
+    Set-SConfig -AutoLaunch $false
     # Remote Desktop, to work in it from the Linux side (only 127.0.0.1 reaches it).
     Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
     Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
