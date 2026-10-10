@@ -1,6 +1,8 @@
 # Sonoff S60 → Tasmota, OTA
 ## Fully automated 'Over The Air' conversion
 
+![A successful conversion run](docs/SuccessRunScreenshot.png)
+
 Turns a stock Sonoff S60 smart plug into one running **Tasmota** using
 OTA method - no soldering, no taking the plug apart.
 
@@ -68,9 +70,10 @@ Your Wi-Fi must be **2.4 GHz** - the plug cannot use 5 GHz.
 
 **Computer**
 
-- ✅ Linux
-- ⬜ macOS - (not tested yet but it's expected to work)
-- ⬜ Windows - (not tested yet but it's expected to work)
+- ✅ Linux - (fully tested end to end)
+- ⬜ Windows - (tested on an emulated plug, it's expected to work)
+- ⬜ macOS - (not tested yet - please test and report your results back)
+
 
 
 ### Regional variants of the S60 plugs
