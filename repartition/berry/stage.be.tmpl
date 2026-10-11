@@ -33,42 +33,49 @@ def sha_region(address, length)
 end
 
 def post_text(path, body)
-  var attempts = 0
-  while attempts < 5
+  var status
+  var attempt = 0
+  var deadline = tasmota.millis() + 60000
+  while true
     var client = webclient()
     client.begin(base_url + path)
-    var status = client.POST(body)
+    status = client.POST(body)
     client.close()
-    if status == 200 return true end
-    attempts += 1
-    tasmota.delay(150)
+    if status >= 0 break end   # got an answer from the server: don't retry it
+    attempt += 1
+    if tasmota.millis() >= deadline break end
+    tasmota.delay(50)
+    tasmota.yield()
   end
-  raise "migration_refused", format("POST %s failed after retries", path)
+  guard(status == 200, format("POST %s returned HTTP %i after %i attempts", path, status, attempt + 1))
 end
 
 def fetch_chunk(index, expected_length)
   var path = format("/chunk/safeboot/%i", index)
-  var attempts = 0
-  while attempts < 5
-    var client = webclient()
+  var client
+  var status
+  var attempt = 0
+  var deadline = tasmota.millis() + 60000
+  while true
+    client = webclient()
     client.begin(base_url + path)
-    var status = client.GET()
-    if status == 200 && client.get_size() == expected_length * 2
-      var encoded = client.get_string()
-      client.close()
-      if size(encoded) == expected_length * 2
-        var data = bytes(encoded)
-        if size(data) == expected_length
-          return data
-        end
-      end
-    else
-      client.close()
-    end
-    attempts += 1
-    tasmota.delay(150)
+    status = client.GET()
+    if status >= 0 break end   # got an answer from the server: don't retry it
+    client.close()
+    attempt += 1
+    if tasmota.millis() >= deadline break end
+    tasmota.delay(50)
+    tasmota.yield()
   end
-  raise "migration_refused", format("GET %s failed after retries", path)
+  if status != 200 client.close() end
+  guard(status == 200, format("GET %s returned HTTP %i after %i attempts", path, status, attempt + 1))
+  guard(client.get_size() == expected_length * 2, "Safeboot chunk HTTP length differs")
+  var encoded = client.get_string()
+  client.close()
+  guard(size(encoded) == expected_length * 2, "Safeboot chunk body length differs")
+  var data = bytes(encoded)
+  guard(size(data) == expected_length, "Safeboot chunk hex is invalid")
+  return data
 end
 
 def run_stage()
