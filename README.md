@@ -61,7 +61,7 @@ Your Wi-Fi must be **2.4 GHz** - the plug cannot use 5 GHz.
 **Model**
 
 - ✅ **S60TPG** - UK / Type G
-- ⬜ **S60TPF** - EU / Type E/F - (not tested yet but it's expected to work)
+- ✅ **S60TPF** - EU / Type E/F
 
 **Stock firmware**
 
@@ -72,27 +72,7 @@ Your Wi-Fi must be **2.4 GHz** - the plug cannot use 5 GHz.
 
 - ✅ Linux - (fully tested end to end)
 - ⬜ Windows - (tested on an emulated plug, it's expected to work)
-- ⬜ macOS - (not tested yet - please test and report your results back)
-
-
-
-### Regional variants of the S60 plugs
-
-Testing on other regional versions is very welcome, and we'd encourage it: it
-is the only way the list above grows. There is good reason to expect the European
-**S60TPF** (Type E/F) to work exactly like the UK S60TPG:
-
-- **Same chip and same wiring.** Both are ESP32-C3 plugs, and the published
-  pin assignments for the S60TPF - relay on GPIO4, status LED on GPIO5, power
-  meter on GPIO7, button on GPIO9 - are the ones this tool sets on the S60TPG.
-- **Same way in.** The tool only goes ahead if the plug reports the S60's
-  firmware family (`SN-ESP32C3-S60-01`), and a European plug on stock 1.2.0
-  has already passed the read-only checks.
-- **It checks rather than assumes.** If the plug reports a different firmware
-  family, the run stops before anything is sent.
-
-Whatever happens - converted, stopped partway, or anything odd - please
-[tell us how it went](#reporting-how-it-went).
+- ⬜ macOS - (not tested yet - please test and report your results)
 
 ### Windows and macOS
 
