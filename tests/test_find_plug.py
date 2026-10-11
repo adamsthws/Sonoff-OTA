@@ -47,6 +47,12 @@ class MatchTests(unittest.TestCase):
         [seen] = af.match_plugs([af.account_plug({**S60, "online": False})], {}, {})
         self.assertIn("offline", af.why_not_found(seen))
 
+    def test_answering_but_offline_in_ewelink_means_no_internet(self):
+        offline = af.account_plug({**S60, "online": False})
+        [seen] = af.match_plugs([offline], {"1001234abc": "192.168.0.50"}, {})
+        self.assertTrue(af.cut_off(seen))
+        self.assertIn("allow it internet access", af.why_not_found(seen))
+
     def test_online_but_unseen_names_its_network(self):
         [seen] = af.match_plugs([self.plug], {}, {})
         self.assertIn("(it is on 'Home-2G')", af.why_not_found(seen))
@@ -82,6 +88,18 @@ class FindAccountPlugTests(unittest.TestCase):
              mock.patch.object(af, "tell"), mock.patch.object(af, "say"):
             self.assertEqual(af.find_account_plug(self.ctx(), [S60]), "192.168.0.50")
         self.assertIn("turn on LAN Control", shown.call_args.args[1][0])
+
+    def test_a_plug_without_internet_is_not_chosen(self):
+        sighting = af.Sighting(af.account_plug({**S60, "online": False}), "192.168.0.50", True)
+        with mock.patch.object(af, "sight_plugs", return_value=[sighting]), \
+             mock.patch.object(af, "ask_choice", return_value=2), \
+             mock.patch.object(af, "ask_ipv4", return_value="192.168.0.99"), \
+             mock.patch.object(af, "section") as shown, \
+             mock.patch.object(af, "tell"), mock.patch.object(af, "say"):
+            self.assertEqual(af.find_account_plug(self.ctx(), [S60]), "192.168.0.99")
+        self.assertEqual("Your S60 is on this network but cannot reach the internet",
+                         shown.call_args.args[0])
+        self.assertIn("cannot reach the internet", shown.call_args.args[1][0])
 
     def test_an_account_without_an_s60_says_what_it_has(self):
         ctx = self.ctx()

@@ -1252,12 +1252,25 @@ def describe_plug(plug: AccountPlug) -> str:
     return f"'{plug.name}' ({plug.model})"
 
 
+def cut_off(sighting: Sighting) -> bool:
+    """Answering here while eWeLink shows it offline: the plug is on the
+    network but cannot reach the internet, so the upgrade command, which only
+    reaches it through eWeLink, would never arrive."""
+    return sighting.answering and sighting.plug.online is False
+
+
 def why_not_found(sighting: Sighting) -> str:
-    """What to do about an account plug that is not answering here."""
+    """What to do about an account plug that is not answering here, or that
+    is answering but cannot be converted from here."""
     plug = sighting.plug
+    if cut_off(sighting):
+        return (f"{describe_plug(plug)} answers at {sighting.ip}, but eWeLink shows it "
+                "offline - it cannot reach the internet. The conversion is sent to the "
+                "plug through eWeLink, so allow it internet access for this run (you can "
+                "block it again once it runs Tasmota, which needs no cloud).")
     if plug.online is False:
         return (f"{describe_plug(plug)}: eWeLink shows it offline - check it is switched "
-                "on at the wall and on your Wi-Fi.")
+                "on at the wall, on your Wi-Fi, and allowed to reach the internet.")
     if sighting.ip:
         return (f"{describe_plug(plug)} is at {sighting.ip} but does not answer on the "
                 "network - turn on LAN Control in its settings in the eWeLink app.")
@@ -1310,7 +1323,8 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
         else:
             say("Looking for it on your network...")
             sightings = sight_plugs(plugs)
-            ready = [sighting for sighting in sightings if sighting.answering]
+            ready = [sighting for sighting in sightings
+                     if sighting.answering and not cut_off(sighting)]
             if len(ready) == 1:
                 # The stage line completing says it all; the log keeps which plug.
                 say(f"    Found {describe_plug(ready[0].plug)} at {ready[0].ip}.")
@@ -1324,8 +1338,13 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
                 output.transient_end()
                 return str(ready[choice].ip)
             output.transient_begin()
-            note = hostsys.security_software_note()
-            section("Your S60 did not answer on this network", [
+            if all(map(cut_off, sightings)):
+                # Found here: only its own internet access is in the way.
+                title, note = "Your S60 is on this network but cannot reach the internet", []
+            else:
+                title, note = ("Your S60 did not answer on this network",
+                               hostsys.security_software_note())
+            section(title, [
                 *(f"- {why_not_found(sighting)}" for sighting in sightings),
                 *([""] + note if note else []),
             ])

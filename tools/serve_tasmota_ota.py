@@ -278,7 +278,10 @@ def main():
                 f"Device model is {identity['model']}, not the S60's {S60_DEVICE_MODEL}; refusing"
             )
         if not device.get("online"):
-            raise EwelinkError("Device is offline; refusing to send")
+            raise EwelinkError(
+                "Device is offline in eWeLink; refusing to send. The upgrade command "
+                "reaches the plug only through eWeLink, so allow it internet access for this run"
+            )
         if identity["version"] != args.expected_current_version:
             raise EwelinkError(
                 f"Device reports {identity['version']}, expected "

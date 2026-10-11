@@ -133,6 +133,13 @@ The tool lists each S60 in your eWeLink account with what it found:
 
 - **"eWeLink shows it offline"** - the plug is switched off at the wall, or
   not on Wi-Fi. Switch it on and wait for the app to show it online.
+- **"answers at ..., but eWeLink shows it offline"** (under *"Your S60 is
+  on this network but cannot reach the internet"* when it is the only
+  problem) - the plug is on your network but cannot reach the internet,
+  usually because the router keeps it LAN-only. The conversion is sent to
+  the plug through eWeLink, so allow it internet access, wait for the app to
+  show it online, then choose *Look again*. You can block it again once it
+  runs Tasmota.
 - **"is at ... but does not answer on the network"** - the plug is on your
   network but LAN Control is off. Turn it on in the plug's settings in the
   eWeLink app, then choose *Look again*.

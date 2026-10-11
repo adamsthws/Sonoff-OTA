@@ -56,6 +56,10 @@ any support or warranty you had, and the eWeLink app will no longer control it.
 
 Your Wi-Fi must be **2.4 GHz** - the plug cannot use 5 GHz.
 
+The plug must be **allowed internet access** during the run: the conversion is sent to it
+through eWeLink. If you normally keep it LAN-only, allow it for the run and block it again
+afterwards - Tasmota needs no cloud.
+
 ## What it has been run on
 
 **Model**

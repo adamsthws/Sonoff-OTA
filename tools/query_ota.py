@@ -43,7 +43,10 @@ def ota_identity(device: dict[str, Any]) -> dict[str, str]:
     )
     version = device.get("params", {}).get("fwVersion")
     if not model or not version:
-        raise EwelinkError("Cloud device record did not contain OTA model and firmware version")
+        raise EwelinkError(
+            "Cloud device record did not contain OTA model and firmware version - "
+            "check eWeLink shows the plug online, and that it is allowed internet access"
+        )
     return {"deviceid": device["deviceid"], "model": model, "version": version}
 
 
