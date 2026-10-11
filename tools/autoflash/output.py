@@ -60,6 +60,9 @@ class _State:
     pending_prompt: str | None = None  # a question on screen, waiting for its answer
     pending_answer = ""
     stage_started = 0.0
+    waiting_since: float | None = None  # when the keyboard began to be waited for
+    stage_waited = 0.0                # seconds of it in this stage, left out of its clock
+    run_waited = 0.0                  # and in the whole run, left out of its time
     live = 0                          # characters of an unfinished line on screen
     live_is_stage = False
     stream_fresh = True               # a helper's output is at the start of a row
@@ -142,6 +145,7 @@ def start(log_path: Path | None, *, verbose: bool) -> None:
             _write_log(f"=== run started{' (verbose)' if verbose else ''} ===")
         _s.concise = not verbose
         _s.paused = False
+        _s.run_waited = 0.0
         if _s.concise and sys.stdout.isatty() and _s.ticker is None:
             # Keeps the stage clock moving through waits that print nothing.
             _s.stop_ticker.clear()
@@ -291,6 +295,8 @@ def before_input(prompt: str = "") -> None:
         _break()
         _gap("?")
         _s.paused = True
+        if _s.waiting_since is None:
+            _s.waiting_since = time.monotonic()
         _s.pending_prompt, _s.pending_answer = prompt, ""
         if prompt:
             _write_log(f"? {prompt.strip()}")
@@ -320,6 +326,11 @@ def after_input() -> None:
             _s.transient_rows += _rows(_s.pending_prompt + _s.pending_answer)
         _s.pending_prompt, _s.pending_answer = None, ""
         _s.paused = False
+        if _s.waiting_since is not None:
+            waited = time.monotonic() - _s.waiting_since
+            _s.stage_waited += waited
+            _s.run_waited += waited
+            _s.waiting_since = None
 
 
 def after_secret(shown: str) -> None:
@@ -458,6 +469,7 @@ def stage_begin(number: int, total: int, name: str) -> None:
         _s.stage_prefix = f"Stage {number:>{digits}} of {total}"
         _s.stage_screen = f"{_s.stage_prefix} - {name:<{_s.name_width}}"
         _s.stage_started = time.monotonic()
+        _s.stage_waited = 0.0
         _write_log(f"--- {_s.stage}")
         if _s.concise:
             if sys.stdout.isatty():
@@ -474,7 +486,7 @@ def stage_end(outcome: str) -> None:
     with _lock:
         if _s.stage is None:
             return
-        elapsed = _elapsed(time.monotonic() - _s.stage_started)
+        elapsed = _elapsed(_stage_seconds())
         timing = f" ({elapsed})" if outcome == "complete" else ""
         line = f"{_s.stage} - {outcome}{timing}"
         _write_log(line)
@@ -633,6 +645,24 @@ def _elapsed(seconds: float) -> str:
     return f"{seconds // 60}m {seconds % 60:02d}s" if seconds >= 60 else f"{seconds}s"
 
 
+def _waiting_now() -> float:
+    """Seconds the keyboard has been waited for, if it is being waited for now."""
+    return time.monotonic() - _s.waiting_since if _s.waiting_since is not None else 0.0
+
+
+def _stage_seconds() -> float:
+    """How long the stage has been working: its time less the time spent
+    waiting for answers, so a stage's clock is the tool's time, not the
+    person's."""
+    return time.monotonic() - _s.stage_started - _s.stage_waited - _waiting_now()
+
+
+def waited() -> float:
+    """Seconds this run has spent waiting for answers, to leave out of its time."""
+    with _lock:
+        return _s.run_waited + _waiting_now()
+
+
 def _tick_forever() -> None:
     while not _s.stop_ticker.wait(1.0):
         _tick()
@@ -650,7 +680,7 @@ def _tick() -> None:
 
 
 def _draw_stage() -> None:
-    clock = _elapsed(time.monotonic() - _s.stage_started)
+    clock = _elapsed(_stage_seconds())
     line = f"{MARGIN}{_s.stage_screen} - Underway {clock}"
     shown = f"{MARGIN}{_s.stage_screen} - {styled('Underway', BOLD)} {clock}"
     if _clip(line) != line:

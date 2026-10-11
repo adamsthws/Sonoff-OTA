@@ -138,6 +138,22 @@ class ConciseTests(OutputTestCase):
         self.assertIn("\x1b[1F\x1b[2K", tail)                # the block went at the end
         self.assertEqual(log.count("answered a ping"), 2)    # the log keeps every try
 
+    def test_time_waiting_for_an_answer_is_left_out(self):
+        now = [100.0]
+        def body():
+            with mock.patch.object(output.time, "monotonic", side_effect=lambda: now[0]):
+                output.stage_begin(3, 14, "Discovering the plug")
+                now[0] += 5                     # working
+                output.before_input("The plug's address: ")
+                now[0] += 60                    # the person thinking
+                self.assertEqual(output.waited(), 60)
+                output.answered("192.168.0.50")
+                now[0] += 5                     # working again
+                self.assertEqual(output.waited(), 60)
+                output.stage_end("complete")
+        screen, log = self.run_with(FakeTerminal(), False, body)
+        self.assertIn("Discovering the plug - complete (10s)", log)
+
     def test_no_clock_drawn_in_an_open_block(self):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True), \

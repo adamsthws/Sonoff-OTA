@@ -2430,7 +2430,7 @@ def run_steps(ctx: Context) -> int:
     url = plug_page_url(ctx.state.input("plug_ip"))
     if url:
         output.show_link(url, "Your plug")
-    invite_report(ctx, time.monotonic() - started, resumed)
+    invite_report(ctx, time.monotonic() - started - output.waited(), resumed)
     return 0
 
 
