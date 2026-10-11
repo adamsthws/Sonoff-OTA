@@ -114,6 +114,21 @@ class ConciseTests(OutputTestCase):
         self.assertIn("Before going on", screen)
         self.assertIn("Installing the installer firmware - Complete", output.ANSI_RE.sub("", screen))
 
+    def test_no_clock_drawn_in_an_open_block(self):
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True), \
+                 mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 24))):
+                output.stage_begin(3, 14, "Discovering the plug")
+                output.transient_begin()
+                before = sys.stdout.getvalue()
+                output._tick()  # while the block's note is still being worked out
+                self.assertEqual(sys.stdout.getvalue(), before)
+                output.transient_end()
+                output._tick()  # the block gone, the clock goes on
+                self.assertIn("Underway", sys.stdout.getvalue()[len(before):])
+                output.stage_end("complete")
+        self.run_with(FakeTerminal(), False, body)
+
     def test_success_is_green_and_underway_is_bold(self):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True):

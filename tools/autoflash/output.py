@@ -590,9 +590,18 @@ def _elapsed(seconds: float) -> str:
 
 def _tick_forever() -> None:
     while not _s.stop_ticker.wait(1.0):
-        with _lock:
-            if _s.concise and _s.stage is not None and not _s.paused and not _s.held:
-                _draw_stage()
+        _tick()
+
+
+def _tick() -> None:
+    """The stage clock, a second on.  Not while a block is open to be taken
+    away again: drawn under its rows - while what it shows is still being
+    worked out, say (Windows' security software takes PowerShell a few
+    seconds) - the clock's line would be a second stage line in the block."""
+    with _lock:
+        if (_s.concise and _s.stage is not None and not _s.paused and not _s.held
+                and _s.transient_rows is None):
+            _draw_stage()
 
 
 def _draw_stage() -> None:
