@@ -46,6 +46,7 @@ from tools.autoflash.prompts import (  # noqa: E402
     find_ssid,
     section,
     wait_for_key,
+    wait_for_taller_window,
     warning_box,
     wait_for_ssid,
     wait_or_ask,
@@ -2693,6 +2694,8 @@ def _main() -> int:
     args = parser.parse_args()
 
     try:
+        if args.command == "run" and not args.verbose:
+            wait_for_taller_window()  # before anything else is shown
         if args.command == "list":
             args.run = args.run or "-"
         elif args.command in ("status", "cleanup") and not args.run:

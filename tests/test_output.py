@@ -153,6 +153,55 @@ class ConciseTests(OutputTestCase):
                 output.stage_end("complete")
         self.run_with(FakeTerminal(), False, body)
 
+    def test_a_short_window_is_noticed(self):
+        found = {}
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True):
+                for rows in (12, output.MIN_ROWS):
+                    with mock.patch("shutil.get_terminal_size",
+                                    return_value=os.terminal_size((80, rows))):
+                        found[rows] = output.short_window()
+        self.run_with(FakeTerminal(), False, body)
+        self.assertEqual(found, {12: 12, output.MIN_ROWS: None})
+
+    def test_a_short_window_does_not_matter_when_nothing_is_cleared(self):
+        found = []
+        def body():
+            with mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 12))):
+                found.append(output.short_window())
+        self.run_with(FakeTerminal(), True, body)   # verbose: everything stays anyway
+        self.run_with(io.StringIO(), False, body)  # not a terminal
+        self.assertEqual(found, [None, None])
+
+    def test_a_short_window_is_asked_to_grow_and_waited_for(self):
+        height = [12]
+        size = lambda *a: os.terminal_size((80, height[0]))
+        waited = []
+        def wait(prompt, *, until):
+            for rows in (16, 24):  # made taller: still short, then tall enough
+                self.assertFalse(until())
+                height[0] = rows
+            self.assertTrue(until())
+            waited.append(prompt)
+        stdout = FakeTerminal()
+        with mock.patch("sys.stdout", stdout), \
+             mock.patch.object(output, "colour_ok", return_value=True), \
+             mock.patch("shutil.get_terminal_size", side_effect=size), \
+             mock.patch.object(prompts, "wait_for_key", side_effect=wait):
+            prompts.wait_for_taller_window()
+        self.assertEqual(len(waited), 1)
+        self.assertIn("It is 12 rows tall; make it at least 20", stdout.getvalue())
+
+    def test_a_tall_enough_window_is_not_mentioned(self):
+        stdout = FakeTerminal()
+        with mock.patch("sys.stdout", stdout), \
+             mock.patch.object(output, "colour_ok", return_value=True), \
+             mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 30))), \
+             mock.patch.object(prompts, "wait_for_key") as wait:
+            prompts.wait_for_taller_window()
+        wait.assert_not_called()
+        self.assertEqual(stdout.getvalue(), "")
+
     def test_no_clock_under_an_address_while_it_is_pinged(self):
         # Its line and the gap after it made a try two rows taller: in a short
         # window the try's first row scrolled away, where it could not be erased.

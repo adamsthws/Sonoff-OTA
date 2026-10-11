@@ -302,8 +302,11 @@ def _ask_secret_windows(prompt: str, reveal_seconds: float) -> str:
     return line.value
 
 
-def wait_for_key(prompt: str = "Press any key to continue, or q to quit...") -> None:
+def wait_for_key(prompt: str = "Press any key to continue, or q to quit...", *,
+                 until: Callable[[], bool] | None = None) -> None:
     """Pause until one key is pressed; q quits, anything else carries on.
+    `until`: stop waiting without a key, too, once it is true - looked at a
+    few times a second.
 
     Without an interactive terminal there is nobody to wait for, so it returns.
     """
@@ -315,6 +318,10 @@ def wait_for_key(prompt: str = "Press any key to continue, or q to quit...") -> 
         if hostsys.IS_WINDOWS:
             import msvcrt
 
+            while until is not None and not msvcrt.kbhit():
+                if until():
+                    return
+                time.sleep(0.25)
             char = msvcrt.getwch()
             if char in ("\x00", "\xe0"):
                 msvcrt.getwch()
@@ -330,6 +337,9 @@ def wait_for_key(prompt: str = "Press any key to continue, or q to quit...") -> 
         saved = termios.tcgetattr(fd)
         try:
             tty.setcbreak(fd)
+            while until is not None and not select.select([fd], [], [], 0.25)[0]:
+                if until():
+                    return
             key = os.read(fd, 1)
             while select.select([fd], [], [], 0.02)[0]:
                 os.read(fd, 16)  # the rest of an arrow or function key
@@ -341,6 +351,23 @@ def wait_for_key(prompt: str = "Press any key to continue, or q to quit...") -> 
         sys.stdout.write("\n")
         sys.stdout.flush()
         output.after_input()
+
+
+def wait_for_taller_window() -> None:
+    """First of all, a window too short for answered questions to be cleared
+    away is asked to be made taller.  Once it is, the note goes and the run
+    goes on by itself; a key goes on without."""
+    rows = output.short_window(before_start=True)
+    if not rows:
+        return
+    output.transient_begin(before_start=True)
+    warning_box("Make this window taller", [
+        f"It is {rows} rows tall; make it at least {output.MIN_ROWS}.",
+        "(Otherwise things wouldn't display properly for you)",
+    ])
+    wait_for_key("Or press any key to go on as it is, or q to quit...",
+                 until=lambda: output.short_window(before_start=True) is None)
+    output.transient_end()
 
 
 def ask_text(

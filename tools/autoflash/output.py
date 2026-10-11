@@ -380,6 +380,21 @@ def transient_end() -> None:
             _draw_stage()
 
 
+# Rows a window needs for the run's questions to be taken off the screen once
+# answered: a block taller than the window has to stay (transient_end).
+MIN_ROWS = 20
+
+
+def short_window(*, before_start: bool = False) -> int | None:
+    """The window's height in rows, when answered questions are being taken
+    off the screen but the window is too short for that to always work.
+    `before_start`: as for transient_begin()."""
+    if not ((_s.concise or before_start) and sys.stdout.isatty() and colour_ok()):
+        return None
+    rows = shutil.get_terminal_size((100, 24)).lines
+    return rows if rows < MIN_ROWS else None
+
+
 def transient_mark() -> tuple[int, bool] | None:
     """Where the open block has got to, for transient_rewind() to go back to.
     None when nothing is being taken off the screen."""
