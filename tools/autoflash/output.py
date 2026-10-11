@@ -380,6 +380,36 @@ def transient_end() -> None:
             _draw_stage()
 
 
+def transient_mark() -> tuple[int, bool] | None:
+    """Where the open block has got to, for transient_rewind() to go back to.
+    None when nothing is being taken off the screen."""
+    with _lock:
+        if _s.transient_rows is None:
+            return None
+        _break()
+        return _s.transient_rows, _s.after_stage
+
+
+def transient_rewind(mark: tuple[int, bool] | None) -> bool:
+    """Take the rows since transient_mark() off the screen and keep the block
+    open, so a question asked again does not pile up under its earlier tries
+    - a block taller than the window could no longer be taken away at all.
+    True when they were taken off; the log keeps them regardless."""
+    with _lock:
+        if mark is None or _s.transient_rows is None:
+            return False
+        rows = _s.transient_rows - mark[0]
+        if rows >= shutil.get_terminal_size((100, 24)).lines:
+            return False  # the cursor cannot reach their first row
+        if _s.live:
+            sys.stdout.write("\r\x1b[K")  # a stage line drawn since
+            _s.live = 0
+        sys.stdout.write("\x1b[1F\x1b[2K" * rows)
+        sys.stdout.flush()
+        _s.transient_rows, _s.after_stage = mark
+        return True
+
+
 # ------------------------------------------------------------------- stages
 
 

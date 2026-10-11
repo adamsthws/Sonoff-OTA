@@ -50,6 +50,14 @@ def _emit(lines: Iterable[str]) -> None:
         output.show(f"{BULLET}{line}")
 
 
+def _retry(mark: tuple[int, bool] | None, lines: Iterable[str]) -> None:
+    """A wrong answer: take it and its question off the screen again, back to
+    `mark`, then say why before asking again - so wrong answers do not pile
+    up, one under another, until the question is taller than the window."""
+    output.transient_rewind(mark)
+    _emit(lines)
+
+
 _colour_ok = output.colour_ok
 
 
@@ -350,17 +358,18 @@ def ask_text(
         _emit(help_lines)
     if example:
         _emit([f"Example: {example}"])
+    mark = output.transient_mark()
     while True:
         answer = _raw(question + (QUIT_HINT if quit_hint else ""), default, private)
         if not answer:
-            _emit(["An answer is needed here. Type quit to stop."])
+            _retry(mark, ["An answer is needed here. Type quit to stop."])
             continue
         if validate is None:
             return answer
         ok, message = validate(answer)
         if ok:
             return answer
-        _emit([message])
+        _retry(mark, [message])
 
 
 def ask_yes_no(
@@ -372,6 +381,7 @@ def ask_yes_no(
     if help_lines:
         _emit(help_lines)
     hint = {True: "Y/n", False: "y/N", None: "y/n"}[default] + ", q to quit"
+    mark = output.transient_mark()
     while True:
         answer = _raw(f"{question} ({hint})", None).lower()
         if not answer and default is not None:
@@ -380,7 +390,7 @@ def ask_yes_no(
             return True
         if answer in {"n", "no"}:
             return False
-        _emit(["Please answer y or n, or q to quit."])
+        _retry(mark, ["Please answer y or n, or q to quit."])
 
 
 def ask_choice(question: str, options: Sequence[str], *, help_lines: Sequence[str] = ()) -> int:
@@ -393,18 +403,19 @@ def ask_choice(question: str, options: Sequence[str], *, help_lines: Sequence[st
     shown = [*options, QUIT_OPTION]
     for index, option in enumerate(shown, 1):
         _emit([f"{index}. {option}"])
+    mark = output.transient_mark()
     while True:
         answer = _raw(question, None)
         try:
             chosen = int(answer)
         except ValueError:
-            _emit(["Type the number of one of the options above."])
+            _retry(mark, ["Type the number of one of the options above."])
             continue
         if chosen == len(shown):
             raise QuitRun("stopped at an operator prompt")
         if 1 <= chosen <= len(options):
             return chosen - 1
-        _emit([f"Choose a number between 1 and {len(shown)}."])
+        _retry(mark, [f"Choose a number between 1 and {len(shown)}."])
 
 
 def ping_ok(address: str, timeout: int = 2) -> bool:
@@ -439,22 +450,34 @@ def ask_ipv4(
             )
         return True, ""
 
-    while True:
-        answer = ask_text(
-            question, help_lines=help_lines, default=default,
-            example=example, validate=validate,
-        )
-        help_lines = ()  # only explain once
-        example = None
-        if not must_respond or ping_ok(answer):
-            return answer
-        _emit([
-            f"Nothing at {answer} answered a ping.",
-            "That usually means the address is wrong, or the device is still",
-            "starting up, or it is on a different network from this computer.",
-        ])
-        if ask_yes_no("Use it anyway?", default=False):
-            return answer
+    mark = output.transient_mark()
+    # No stage clock under the address while it is pinged: two more rows
+    # would make a try taller than a short window, and its first row would
+    # scroll out of reach of being taken away again.
+    with output.hold():
+        while True:
+            answer = ask_text(
+                question, help_lines=help_lines, default=default,
+                example=example, validate=validate,
+            )
+            if not must_respond:
+                return answer
+            with _echo_off():  # typing ahead meanwhile waits unseen
+                answered = ping_ok(answer)
+            if answered:
+                return answer
+            _emit([
+                f"Nothing at {answer} answered a ping.",
+                "That usually means the address is wrong, or the device is still",
+                "starting up, or it is on a different network from this computer.",
+            ])
+            if ask_yes_no("Use it anyway?", default=False):
+                return answer
+            # Each try taken away again, or the question would climb the screen
+            # one try at a time; when it stays, it has been explained once already.
+            if not output.transient_rewind(mark):
+                help_lines = ()
+                example = None
 
 
 def wait_for_host(

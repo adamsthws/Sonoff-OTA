@@ -114,6 +114,30 @@ class ConciseTests(OutputTestCase):
         self.assertIn("Before going on", screen)
         self.assertIn("Installing the installer firmware - Complete", output.ANSI_RE.sub("", screen))
 
+    def ask_address(self, rows):
+        """Two addresses that do not answer, then one that does, in a window `rows` tall."""
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True), \
+                 mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, rows))), \
+                 mock.patch.object(prompts, "ping_ok", side_effect=[False, False, True]), \
+                 mock.patch("builtins.input", side_effect=["10.0.0.1", "n", "10.0.0.2", "n", "10.0.0.3"]):
+                output.stage_begin(3, 14, "Discovering the plug")
+                output.transient_begin()
+                self.assertEqual(prompts.ask_ipv4("The plug's address", help_lines=["Where to look."],
+                                                  must_respond=True), "10.0.0.3")
+                output.transient_end()
+                output.stage_end("complete")
+        return self.run_with(FakeTerminal(), False, body)
+
+    def test_an_address_asked_again_takes_the_last_try_away(self):
+        # A short window, as a terminal panel often is: three tries piled up
+        # would be taller than it, and stay on the screen for good.
+        screen, log = self.ask_address(12)
+        self.assertEqual(screen.count("Where to look."), 3)  # explained again each time
+        tail = screen.rsplit("Where to look.", 1)[1]
+        self.assertIn("\x1b[1F\x1b[2K", tail)                # the block went at the end
+        self.assertEqual(log.count("answered a ping"), 2)    # the log keeps every try
+
     def test_no_clock_drawn_in_an_open_block(self):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True), \
@@ -128,6 +152,40 @@ class ConciseTests(OutputTestCase):
                 self.assertIn("Underway", sys.stdout.getvalue()[len(before):])
                 output.stage_end("complete")
         self.run_with(FakeTerminal(), False, body)
+
+    def test_no_clock_under_an_address_while_it_is_pinged(self):
+        # Its line and the gap after it made a try two rows taller: in a short
+        # window the try's first row scrolled away, where it could not be erased.
+        held = []
+        def ping(address, *args):
+            held.append(output._s.held)
+            return address == "10.0.0.2"
+        with mock.patch.object(prompts, "ping_ok", side_effect=ping), \
+             mock.patch("builtins.input", side_effect=["10.0.0.1", "n", "10.0.0.2"]):
+            self.assertEqual(prompts.ask_ipv4("The plug's address", must_respond=True), "10.0.0.2")
+        self.assertEqual(held, [True, True])
+        self.assertFalse(output._s.held)
+
+    def test_wrong_answers_replace_each_other(self):
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True), \
+                 mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 6))), \
+                 mock.patch("builtins.input", side_effect=["maybe", "192.168.0.50", "n"]):
+                output.stage_begin(3, 14, "Discovering the plug")
+                output.transient_begin()
+                self.assertFalse(prompts.ask_yes_no("Use it anyway?", default=False))
+                output.transient_end()
+                output.stage_end("complete")
+        screen, log = self.run_with(FakeTerminal(), False, body)
+        # Piled up, three tries and two complaints would outgrow the window and stay.
+        tail = screen.rsplit("Please answer y or n", 1)[1]
+        self.assertIn("\x1b[1F\x1b[2K", tail)
+        self.assertEqual(log.count("Please answer y or n"), 2)
+
+    def test_a_try_taller_than_the_window_stays(self):
+        screen, _ = self.ask_address(4)
+        self.assertEqual(screen.count("Where to look."), 1)  # still there: not repeated
+        self.assertNotIn("\x1b[1F", screen)
 
     def test_success_is_green_and_underway_is_bold(self):
         def body():
