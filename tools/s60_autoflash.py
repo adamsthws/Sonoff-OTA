@@ -52,7 +52,7 @@ from tools.autoflash.prompts import (  # noqa: E402
     wait_or_ask,
 )
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED, RunState  # noqa: E402
-from tools.discover_ewelink import discover  # noqa: E402
+from tools.discover_ewelink import answered_ids, discover  # noqa: E402
 from tools.get_device_key import EwelinkError, get_devices, login  # noqa: E402
 from tools.prepare_imprinted_bundle import (  # noqa: E402
     BundleError,
@@ -1359,8 +1359,8 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
             output.transient_begin()  # gone once answered, as the menu was
             ip = ask_ipv4(
                 "The plug's address",
-                help_lines=["It is in your router's device list, and in eWeLink's device information."],
-                must_respond=True,
+                help_lines=["Find your plug's IP address in your router's device list, or eWeLink's device information."],
+                check=plug_at({plug.device_id for plug in plugs}),
             )
             output.transient_end()
             return ip
@@ -1410,11 +1410,37 @@ def find_any_plug() -> str:
             if choice == 1:
                 ip = ask_ipv4(
                     "The plug's address",
-                    help_lines=["It is in your router's device list, and in eWeLink's device information."],
-                    must_respond=True,
+                    help_lines=["Find your plug's IP address in your router's device list, or eWeLink's device information."],
+                    check=plug_at(None),
                 )
             output.transient_end()
     return ip
+
+
+def plug_at(wanted: set[str] | None) -> Callable[[str], list[str]]:
+    """For a typed address: what is wrong with it, unless an S60 in the
+    account (`wanted`'s ids; None: any eWeLink device) answers eWeLink's
+    discovery there.  The next stage asks it there, and needs the answer to
+    go on: an address that only answers a ping - the router, say - would
+    stop the run then, with nothing to show what was wrong."""
+    what = "a Sonoff plug" if wanted is None else "your S60"
+
+    def check(address: str) -> list[str]:
+        tell(f"    Checking that {address} is {what}...")
+        try:
+            found = answered_ids(discover(6.0, None, address)["packets"])
+        except OSError:
+            found = set()
+        if found and (wanted is None or found & wanted):
+            return []
+        if found:
+            return [f"{address} is a different eWeLink device, not an S60 in this account."]
+        return [
+            f"{address} answered, but not as an eWeLink device - it is probably something",
+            "else, such as your router. If it is the plug, turn on LAN Control in its",
+            "settings in the eWeLink app.",
+        ]
+    return check
 
 
 def find_ewelink_plugs(timeout: float = 6.0) -> list[tuple[str, str]]:

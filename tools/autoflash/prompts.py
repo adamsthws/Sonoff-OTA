@@ -456,8 +456,15 @@ def ask_ipv4(
     default: str | None = None,
     example: str | None = "192.168.1.50",
     must_respond: bool = False,
+    check: Callable[[str], list[str]] | None = None,
 ) -> str:
-    """Ask for an address on the local network, and sanity-check it."""
+    """Ask for an address on the local network, and sanity-check it.
+
+    `must_respond`: the address has to answer a ping.  `check` (which implies
+    it): what else is wrong with an address that answered, or nothing when it
+    will do.  There is no using an address anyway: the run could not reach
+    the plug there, so it is asked for again, under what was wrong.
+    """
 
     def validate(answer: str) -> tuple[bool, str]:
         try:
@@ -478,27 +485,29 @@ def ask_ipv4(
         return True, ""
 
     mark = output.transient_mark()
-    # No stage clock under the address while it is pinged: two more rows
+    problem: list[str] = []  # what was wrong with the last address, shown above the question
+    # No stage clock under the address while it is checked: two more rows
     # would make a try taller than a short window, and its first row would
     # scroll out of reach of being taken away again.
     with output.hold():
         while True:
+            _emit(problem)
             answer = ask_text(
                 question, help_lines=help_lines, default=default,
                 example=example, validate=validate,
             )
-            if not must_respond:
+            if not (must_respond or check):
                 return answer
             with _echo_off():  # typing ahead meanwhile waits unseen
-                answered = ping_ok(answer)
-            if answered:
-                return answer
-            _emit([
-                f"Nothing at {answer} answered a ping.",
-                "That usually means the address is wrong, or the device is still",
-                "starting up, or it is on a different network from this computer.",
-            ])
-            if ask_yes_no("Use it anyway?", default=False):
+                if not ping_ok(answer):
+                    problem = [
+                        f"Nothing at {answer} answered a ping.",
+                        "That usually means the address is wrong, or the device is still",
+                        "starting up, or it is on a different network from this computer.",
+                    ]
+                else:
+                    problem = check(answer) if check is not None else []
+            if not problem:
                 return answer
             # Each try taken away again, or the question would climb the screen
             # one try at a time; when it stays, it has been explained once already.

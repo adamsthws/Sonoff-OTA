@@ -120,7 +120,7 @@ class ConciseTests(OutputTestCase):
             with mock.patch.object(output, "colour_ok", return_value=True), \
                  mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, rows))), \
                  mock.patch.object(prompts, "ping_ok", side_effect=[False, False, True]), \
-                 mock.patch("builtins.input", side_effect=["10.0.0.1", "n", "10.0.0.2", "n", "10.0.0.3"]):
+                 mock.patch("builtins.input", side_effect=["10.0.0.1", "10.0.0.2", "10.0.0.3"]):
                 output.stage_begin(3, 14, "Discovering the plug")
                 output.transient_begin()
                 self.assertEqual(prompts.ask_ipv4("The plug's address", help_lines=["Where to look."],
@@ -202,6 +202,24 @@ class ConciseTests(OutputTestCase):
         wait.assert_not_called()
         self.assertEqual(stdout.getvalue(), "")
 
+    def test_a_checked_address_must_pass_with_no_using_it_anyway(self):
+        asked = []
+        def check(address):
+            return [] if address == "10.0.0.3" else [f"{address} is not the plug."]
+        def answer(prompt):
+            asked.append(prompt)
+            return {0: "10.0.0.1", 1: "10.0.0.2"}.get(len(asked) - 1, "10.0.0.3")
+        stdout = FakeTerminal()
+        with mock.patch("sys.stdout", stdout), \
+             mock.patch.object(prompts, "ping_ok", side_effect=lambda a, *k: a != "10.0.0.1"), \
+             mock.patch("builtins.input", side_effect=answer):
+            self.assertEqual(prompts.ask_ipv4("The plug's address", check=check), "10.0.0.3")
+        self.assertEqual(len(asked), 3)                     # three addresses, nothing else
+        self.assertNotIn("Use it anyway", "".join(asked))
+        screen = stdout.getvalue()
+        self.assertIn("Nothing at 10.0.0.1 answered a ping.", screen)
+        self.assertIn("10.0.0.2 is not the plug.", screen)
+
     def test_no_clock_under_an_address_while_it_is_pinged(self):
         # Its line and the gap after it made a try two rows taller: in a short
         # window the try's first row scrolled away, where it could not be erased.
@@ -210,7 +228,7 @@ class ConciseTests(OutputTestCase):
             held.append(output._s.held)
             return address == "10.0.0.2"
         with mock.patch.object(prompts, "ping_ok", side_effect=ping), \
-             mock.patch("builtins.input", side_effect=["10.0.0.1", "n", "10.0.0.2"]):
+             mock.patch("builtins.input", side_effect=["10.0.0.1", "10.0.0.2"]):
             self.assertEqual(prompts.ask_ipv4("The plug's address", must_respond=True), "10.0.0.2")
         self.assertEqual(held, [True, True])
         self.assertFalse(output._s.held)

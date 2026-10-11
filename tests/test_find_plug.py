@@ -58,6 +58,34 @@ class MatchTests(unittest.TestCase):
         self.assertIn("(it is on 'Home-2G')", af.why_not_found(seen))
 
 
+class TypedAddressTests(unittest.TestCase):
+    """An address typed in is used only once the plug answers eWeLink's discovery there."""
+
+    def found(self, ids):
+        packets = [{"source": "192.168.0.50", "records": [{"type": "TXT", "value": [f"id={i}"]}]}
+                   for i in ids]
+        return mock.patch.object(af, "discover", return_value={"packets": packets})
+
+    def test_the_accounts_s60_answering_will_do(self):
+        with self.found(["1001234abc"]), mock.patch.object(af, "tell"):
+            self.assertEqual(af.plug_at({"1001234abc"})("192.168.0.50"), [])
+
+    def test_something_that_only_answers_a_ping_is_probably_the_router(self):
+        with self.found([]), mock.patch.object(af, "tell"):
+            problem = af.plug_at({"1001234abc"})("192.168.0.1")
+        self.assertIn("not as an eWeLink device", problem[0])
+        self.assertIn("such as your router", " ".join(problem))
+
+    def test_another_ewelink_device_is_not_taken_for_the_plug(self):
+        with self.found(["1000aaaaaa"]), mock.patch.object(af, "tell"):
+            problem = af.plug_at({"1001234abc"})("192.168.0.60")
+        self.assertEqual(problem, ["192.168.0.60 is a different eWeLink device, not an S60 in this account."])
+
+    def test_without_an_account_any_ewelink_device_will_do(self):
+        with self.found(["1000aaaaaa"]), mock.patch.object(af, "tell"):
+            self.assertEqual(af.plug_at(None)("192.168.0.60"), [])
+
+
 class DescribeTests(unittest.TestCase):
     def test_a_name_that_is_the_model_is_not_repeated(self):
         self.assertEqual(af.describe_plug(af.account_plug({**S60, "name": "S60TPG"})), "'S60TPG'")
