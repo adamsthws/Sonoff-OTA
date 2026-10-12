@@ -426,6 +426,117 @@ class ModelGuardTests(unittest.TestCase):
             self.discover_with_model("SN-ESP32-MINIR4")
 
 
+class AlreadyConvertingTests(unittest.TestCase):
+    """A plug part way through a conversion is not a LAN Control problem."""
+
+    def silent_discover(self, page):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        from tools.autoflash import setup_network
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        state.set_input("plug_ip", "10.0.0.63")
+        ctx = SimpleNamespace(dir=Path(directory.name), state=state)
+        with mock.patch.object(autoflash, "discover", return_value={"packets": []}), \
+             mock.patch.object(setup_network, "page", return_value=page), \
+             mock.patch.object(autoflash.hostsys, "security_software_note", return_value=None), \
+             mock.patch.object(autoflash, "section"):
+            return autoflash.step_discover(ctx)
+
+    def test_the_bridge_is_named(self):
+        import tools.s60_autoflash as autoflash
+        with self.assertRaisesRegex(autoflash.Abort, "already running our installer firmware"):
+            self.silent_discover("<title>S60 OTA Bridge</title>")
+
+    def test_tasmota_is_named(self):
+        import tools.s60_autoflash as autoflash
+        with self.assertRaisesRegex(autoflash.Abort, "running Tasmota, not Sonoff's firmware"):
+            self.silent_discover("<title>Tasmota</title>")
+
+    def test_no_page_keeps_the_lan_control_advice(self):
+        import tools.s60_autoflash as autoflash
+        with self.assertRaisesRegex(autoflash.Abort, "LAN Control"):
+            self.silent_discover(None)
+
+
+class BerryFireTests(unittest.TestCase):
+    """A phase that restarts the plug cuts its own reply off: that is no reply,
+    not a crash (the E3 traceback on macOS)."""
+
+    def test_a_reply_cut_off_is_no_reply(self):
+        import http.client
+        from unittest import mock
+        from tools.autoflash.device import Device
+
+        device = Device("10.0.0.63")
+        for error in (http.client.IncompleteRead(b""), ConnectionResetError(54, "reset")):
+            with mock.patch.object(device, "berry", side_effect=error):
+                self.assertFalse(device.berry_fire('s60_commit("x")'))
+
+    def test_other_errors_still_surface(self):
+        from unittest import mock
+        from tools.autoflash.device import Device, DeviceError
+
+        device = Device("10.0.0.63")
+        with mock.patch.object(device, "berry", side_effect=DeviceError("password")):
+            with self.assertRaises(DeviceError):
+                device.berry_fire("x")
+
+
+class CommitEvidenceTests(unittest.TestCase):
+    """E3 interrupted after the plug reported is finished, not a question."""
+
+    def ctx(self, report):
+        import json
+        from types import SimpleNamespace
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        evidence = Path(directory.name)
+        if report is not None:
+            (evidence / "commit-report.json").write_text(json.dumps(report))
+        return SimpleNamespace(evidence=evidence)
+
+    def test_a_pass_report_means_finished(self):
+        import tools.s60_autoflash as autoflash
+        finished, _ = autoflash.evidence_commit_finished(
+            self.ctx({"phase": "commit", "status": "PASS"}))
+        self.assertTrue(finished)
+
+    def test_a_fail_report_means_not_finished(self):
+        import tools.s60_autoflash as autoflash
+        finished, _ = autoflash.evidence_commit_finished(
+            self.ctx({"phase": "commit", "status": "FAIL"}))
+        self.assertIs(finished, False)
+
+    def test_no_report_cannot_tell(self):
+        import tools.s60_autoflash as autoflash
+        finished, _ = autoflash.evidence_commit_finished(self.ctx(None))
+        self.assertIsNone(finished)
+
+    def test_another_phase_report_is_not_taken(self):
+        import tools.s60_autoflash as autoflash
+        finished, _ = autoflash.evidence_commit_finished(
+            self.ctx({"phase": "stage", "status": "PASS"}))
+        self.assertIsNone(finished)
+
+    def test_redoing_a_passed_commit_touches_nothing(self):
+        # The startup firmware cannot answer the network check: running it
+        # would fail and send the run back to E1 with no way forward.
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        ctx = self.ctx({"phase": "commit", "status": "PASS"})
+        with mock.patch.object(autoflash, "check_plug_network") as network, \
+             mock.patch.object(autoflash, "say"):
+            result = autoflash.step_commit(ctx)
+        network.assert_not_called()
+        self.assertTrue(result["already_written"])
+
+
 class RebootDetectionTests(unittest.TestCase):
     """A restart soon after another must still be seen - the D4 hang."""
 
@@ -793,6 +904,42 @@ class BridgeOnHomeNetworkTests(unittest.TestCase):
 
     def test_no_plug_on_the_network_falls_back_to_joining(self):
         self.assertIsNone(self.find([None] * 20, {}))
+
+
+class WaitForBridgeTests(unittest.TestCase):
+    """While waiting for the bridge's own network, a late join of the home one
+    must still be noticed: the bridge then never raises its own."""
+
+    def wait(self, addresses, pages, timeout=60.0):
+        from types import SimpleNamespace
+        from unittest import mock
+        from tools import s60_autoflash
+        from tools.autoflash import setup_network
+
+        polls = iter(addresses)
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: next(polls, None)))
+        clock = iter(range(0, 10_000, 2))
+        with mock.patch.object(setup_network, "page", side_effect=lambda host, **_: pages.get(host)), \
+             mock.patch.object(s60_autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(s60_autoflash.time, "sleep"), \
+             mock.patch.object(s60_autoflash, "say"):
+            return s60_autoflash.wait_for_bridge(ctx, "S60-OTA-Bridge-A04D", timeout=timeout)
+
+    def test_a_late_join_of_the_home_network_is_taken(self):
+        bridge = "<title>S60 OTA Bridge</title>"
+        self.assertEqual(
+            self.wait([None, None, "192.168.1.51"], {"192.168.1.51": bridge}), "192.168.1.51"
+        )
+
+    def test_joining_the_bridge_network_still_works(self):
+        from tools.autoflash import setup_network
+        bridge = "<title>S60 OTA Bridge</title>"
+        self.assertIsNone(self.wait([None] * 50, {setup_network.SETUP_HOST: bridge}))
+
+    def test_neither_in_time_stops_with_a_reason(self):
+        from tools import s60_autoflash
+        with self.assertRaisesRegex(s60_autoflash.Abort, "did not appear on your network"):
+            self.wait([None] * 50, {}, timeout=20.0)
 
 
 class TasmotaWifiPresetTests(unittest.TestCase):

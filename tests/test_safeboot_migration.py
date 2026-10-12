@@ -464,6 +464,36 @@ class MigrationValidationTests(unittest.TestCase):
                 fixture.safeboot,
             )
 
+    def test_restore_accepts_commit_evidence_of_any_age(self):
+        # A plug left on the recovery Safeboot must still be finishable later:
+        # the restore closure re-checks the live plug before it writes.
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            recovery = fixture.enable_recovery()
+            fixture.evidence_dir.mkdir(parents=True, exist_ok=True)
+            fixture.write_commit_evidence(sha256_bytes(recovery))
+            path = fixture.evidence_dir / "commit-report.json"
+            evidence = json.loads(path.read_text())
+            evidence["created_utc"] = (
+                dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=30)
+            ).isoformat()
+            path.write_text(json.dumps(evidence), encoding="utf-8")
+            state = fixture.state("restore")
+            self.assertEqual(state.commit_evidence["status"], "PASS")
+
+    def test_stage_still_refuses_stale_preflight_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            fixture.write_preflight_evidence(sha256_bytes(canonical_nvs()))
+            path = fixture.evidence_dir / "preflight-report.json"
+            evidence = json.loads(path.read_text())
+            evidence["created_utc"] = (
+                dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=3)
+            ).isoformat()
+            path.write_text(json.dumps(evidence), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "not fresh"):
+                fixture.state("stage")
+
     def test_http_server_exposes_only_the_selected_phase_to_the_selected_device(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = MigrationFixture(Path(directory))

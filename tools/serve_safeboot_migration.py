@@ -231,8 +231,13 @@ class MigrationState:
                 raise ValueError("stage evidence does not match pinned Safeboot")
         self.commit_evidence: dict[str, Any] | None = None
         if phase == "restore":
+            # Any age: unlike preflight and staging, nothing the commit recorded
+            # goes stale.  The restore closure checks the live plug itself - the
+            # official table, the running official app0 and the recovery
+            # Safeboot still in place - before it writes anything, so a plug
+            # left for days on the recovery Safeboot can still be finished.
             self.commit_evidence = load_evidence(
-                evidence_dir / "commit-report.json", "commit", max_evidence_age
+                evidence_dir / "commit-report.json", "commit", sys.maxsize
             )
             if self.commit_evidence.get("manifest_sha256") != self.manifest_sha256:
                 raise ValueError("commit evidence belongs to a different manifest")

@@ -1466,6 +1466,31 @@ def find_ewelink_plugs(timeout: float = 6.0) -> list[tuple[str, str]]:
 
 
 
+def already_converting(plug_ip: str) -> None:
+    """Stop with the real reason when the plug no longer runs Sonoff's firmware.
+
+    eWeLink shows a plug part way through a conversion as offline, and it does
+    not answer eWeLink discovery; "check LAN Control" would send its owner the
+    wrong way.
+    """
+    body = setup_network.page(plug_ip, timeout=3.0)
+    if body is None:
+        return
+    if setup_network.BRIDGE_PAGE_MARKER.lower() in body.lower():
+        raise Abort(
+            f"the plug at {plug_ip} is already running our installer firmware, from "
+            "an earlier conversion. Run this again and choose to continue that "
+            "conversion. If none is offered, switch the plug off and on: it goes "
+            "back to its Sonoff firmware, and a new conversion can start"
+        )
+    if "tasmota" in body.lower():
+        raise Abort(
+            f"{plug_ip} is running Tasmota, not Sonoff's firmware. If that is this "
+            "plug, part way through an earlier conversion, run this again and "
+            "choose to continue that conversion"
+        )
+
+
 def step_discover(ctx: Context) -> dict[str, Any]:
     """A2/A3/A4 - identify the device and read its OTA metadata."""
     plug_ip = ctx.state.require("plug_ip")[0]
@@ -1475,6 +1500,7 @@ def step_discover(ctx: Context) -> dict[str, Any]:
     # The same report the discovery tool writes, without its console output.
     report = discover(8.0, None, plug_ip)
     if not report["packets"]:
+        already_converting(plug_ip)
         note = hostsys.security_software_note()
         if note:
             section("Something on this computer may be in the way", note)
@@ -1626,8 +1652,7 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
         ip = configure_plug_wifi(ctx, setup)
         return {"plug_ip": ip, "device_name": setup, "resumed": True}
 
-    address = bridge_on_home_network(ctx)
-    if address:
+    def through_home_network(address: str) -> dict[str, Any]:
         say(f"    The installer joined your network at {address}.")
         preset = give_tasmota_the_wifi(ctx, address)
         upload_tasmota(image, host=address)
@@ -1639,6 +1664,10 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
             section("Tasmota has not appeared on your network", QUICK_POWER_CYCLE_HINT)
             return finish_tasmota_setup(ctx, route="home network", wait=900.0)
         return finish_tasmota_setup(ctx, route="home network")
+
+    address = bridge_on_home_network(ctx)
+    if address:
+        return through_home_network(address)
     bridge = bridge or "S60-OTA-Bridge-XXXX   (the XXXX varies)"
     copied = hostsys.copy_to_clipboard(BRIDGE_PASSWORD)
     section("Join the bridge's Wi-Fi network", [
@@ -1650,10 +1679,46 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
         "",
         "Your Wi-Fi internet drops while joined - expected. A wired connection,",
         "if this computer has one, can stay connected. This carries on by itself.",
+        "",
+        "If that network is not there, wait: the installer may still be joining",
+        "your own Wi-Fi, and this carries on by itself when it does.",
     ])
-    wait_until_joined(bridge.split()[0], setup_network.BRIDGE_PAGE_MARKER)
+    address = wait_for_bridge(ctx, bridge.split()[0])
+    if address:
+        return through_home_network(address)
     upload_tasmota(image)
     return finish_tasmota_setup(ctx, route="bridge network")
+
+
+def wait_for_bridge(ctx: Context, network: str, *, timeout: float = 900.0) -> str | None:
+    """Wait for this computer to join the bridge's network, or for the bridge to
+    turn up on the home network instead.  The bridge's address on the home
+    network, or None once this computer has joined the bridge's own.
+
+    A bridge on a weak signal can take longer to join the home network than
+    the first look allows; it then never raises its own network, so waiting
+    only for that would wait forever.
+    """
+    marker = setup_network.BRIDGE_PAGE_MARKER.lower()
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        body = setup_network.page(setup_network.SETUP_HOST, timeout=2.0)
+        if body is not None and marker in body.lower():
+            output.progress_clear()
+            say(f"    Connected to {network}.")
+            return None
+        address = ctx.finder.poll()
+        if address:
+            body = setup_network.page(address, timeout=3.0)
+            if body is not None and marker in body.lower():
+                output.progress_clear()
+                return address
+        output.progress(f"waiting for this computer to join {network}, or the installer "
+                        f"to join your Wi-Fi... {time.monotonic() - started:.0f}s")
+        time.sleep(2.0)
+    output.progress_clear()
+    raise Abort(f"this computer did not join {network} within 15 minutes, and the "
+                "installer did not appear on your network")
 
 
 # Tasmota with Wi-Fi details that do not work keeps retrying them and never
@@ -1809,6 +1874,14 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         except (OSError, ValueError):
             return False
         return report.get("manifest_sha256") == sha256_bytes(ctx.manifest_path.read_bytes())
+
+    # Already written: the plug now runs the startup firmware, which cannot
+    # answer the checks below, so failing them would send the run back to E1
+    # with no way forward.
+    if commit_report(ctx) == "PASS":
+        say("The plug already reported the new layout written and checked;")
+        say("there is nothing to do again here.")
+        return {"exit": 0, "already_written": True}
 
     try:
         check_plug_network(ctx)  # may rebuild the bundle
@@ -2312,11 +2385,41 @@ def evidence_official_app_installed(ctx: "Context") -> tuple[bool | None, str]:
     )
 
 
+def commit_report(ctx: "Context") -> str | None:
+    """PASS or FAIL as the plug reported its commit, or None if it never did.
+
+    The plug sends its report only after reading the new layout back, and
+    restarts straight after, so a run stopped at that moment has the report
+    even though the command that started the commit never got its reply.
+    """
+    try:
+        report = json.loads((ctx.evidence / "commit-report.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(report, dict) or report.get("phase") != "commit":
+        return None
+    status = report.get("status")
+    return status if status in {"PASS", "FAIL"} else None
+
+
+def evidence_commit_finished(ctx: "Context") -> tuple[bool | None, str]:
+    status = commit_report(ctx)
+    if status == "PASS":
+        return True, (
+            "The plug reported the new layout written and checked, just before\n"
+            "  it restarted - so this step did finish."
+        )
+    if status == "FAIL":
+        return False, "The plug reported that this step failed."
+    return None, "The plug sent no report of this step."
+
+
 
 # Consulted when a step was interrupted, to answer "did it finish?" from the
 # device rather than from the operator's memory.
 ATTEMPTED_EVIDENCE: dict[str, Callable[["Context"], tuple[bool | None, str]]] = {
     "C2": evidence_bridge_installed,
+    "E3": evidence_commit_finished,
     "F2": evidence_official_app_installed,
 }
 
