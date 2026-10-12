@@ -75,8 +75,8 @@ afterwards - Tasmota needs no cloud.
 **Computer**
 
 - ✅ Linux - (fully tested end to end)
-- ⬜ Windows - (tested on an emulated plug, it's expected to work)
-- ⬜ macOS - (not tested yet - please test and report your results)
+- ✅ Windows - (fully tested end to end)
+- ⬜ macOS - (one tester reported issues - more testing required)
 
 ### Windows and macOS
 
