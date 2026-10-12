@@ -1,0 +1,3 @@
+# Builds and imprinted images made here
+.esphome/
+*.bin
