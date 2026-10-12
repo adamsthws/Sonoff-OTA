@@ -9,7 +9,7 @@
 #                      unattended Setup, with a user who logs on by itself and
 #                      a hook that runs start.ps1 at logon (firstlogon.ps1)
 #   vm-run layer rig   2, rig.qcow2: what the tests need (rig.ps1) - Remote
-#                      Desktop, the link's TAP driver, adapter and Python
+#                      Desktop, SSH, the link's TAP driver, adapter and Python
 #   vm-run layer tool  3, tool.qcow2: what the tool's first run leaves (tool.ps1)
 #   vm-run run         a throwaway layer on rig or tool (LAYER), with this
 #                      checkout in it, until Windows is shut down or the
@@ -58,7 +58,7 @@ qemu() {  # $1 the disk; then any extra QEMU options (Setup's discs)
         -drive if=pflash,format=raw,file=/run/vars.fd \
         -device ahci,id=ahci -drive id=disk,if=none,format=qcow2,file="$disk" \
         -device ide-hd,drive=disk,bus=ahci.0,bootindex=2 \
-        -netdev user,id=net,hostfwd=tcp::3389-:3389 -device e1000e,netdev=net \
+        -netdev user,id=net,hostfwd=tcp::3389-:3389,hostfwd=tcp::22-:22 -device e1000e,netdev=net \
         -device qemu-xhci -device usb-tablet -rtc base=utc \
         -device virtio-serial-pci -chardev qemu-vdagent,id=vdagent,name=vdagent,clipboard=on \
         -device virtserialport,chardev=vdagent,name=com.redhat.spice.0 \
@@ -242,6 +242,9 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     fi
     tar -C /run/openconsole -cf /run/openconsole.tar .
     printf '{"link_host": "%s", "console": "%s"}\n' "$LINK_HOST" "$console" > /run/config.json
+    # The key windows-ssh.sh logs on with; start.ps1 lets it in. None: SSH by password.
+    : > /run/authorized_keys
+    [ -f "$CACHE/ssh/id_ed25519.pub" ] && cp "$CACHE/ssh/id_ed25519.pub" /run/authorized_keys
     # start.ps1 too, so a change to it needs no layer set up again.
     guestfish --rw -a "$disk" -i <<EOF
 mkdir-p /S60/repo/captures
@@ -251,9 +254,10 @@ tar-in /run/captures.tar /S60/repo/captures
 tar-in /run/openconsole.tar /S60/openconsole
 upload $GUEST/start.ps1 /S60/start.ps1
 upload /run/config.json /S60/run.json
+upload /run/authorized_keys /S60/authorized_keys
 EOF
     trap 'stop_windows' TERM INT
-    log "starting Windows - Remote Desktop: localhost:3389, browser: http://localhost:6080, VNC: localhost:5900"
+    log "starting Windows - Remote Desktop: localhost:3389, browser: http://localhost:6080, VNC: localhost:5900, SSH: port 22"
     qemu "$disk"
     # A stop signal interrupts the first wait; the second sees Windows off.
     wait "$QEMU" || true

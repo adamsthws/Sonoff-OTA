@@ -1,6 +1,6 @@
 <#
 Layer 2, "rig": what the tests need and a person's computer never has -
-Remote Desktop, the clipboard over VNC, no Windows Update or SConfig, and for
+Remote Desktop, SSH, the clipboard over VNC, no Windows Update or SConfig, and for
 the link to the emulator OpenVPN's TAP driver, the "S60 emulator" adapter and
 a Python of its own, all from windows-bootstrap.ps1, as a Windows user of the
 emulator gets them. Runs from start.ps1, on layer 1, then shuts Windows down.
@@ -21,6 +21,21 @@ try {
     # Remote Desktop, to work in it from the Linux side (only 127.0.0.1 reaches it).
     Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
     Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+    # SSH, to drive a run and read its log from the Linux side (windows-ssh.sh;
+    # only 127.0.0.1 reaches it). Server 2025 has OpenSSH's server, but off.
+    if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {
+        Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
+    }
+    Set-Service sshd -StartupType Automatic
+    Start-Service sshd  # its host keys made now, so each run's are the same
+    New-Item HKLM:\SOFTWARE\OpenSSH -Force | Out-Null
+    Set-ItemProperty HKLM:\SOFTWARE\OpenSSH -Name DefaultShell `
+        -Value "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    if (-not (Get-NetFirewallRule -Name OpenSSH-Server-In-TCP -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -Name OpenSSH-Server-In-TCP -DisplayName "OpenSSH Server (sshd)" `
+            -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow | Out-Null
+    }
+    Set-NetFirewallRule -Name OpenSSH-Server-In-TCP -Enabled True -Profile Any
     # The clipboard, in the browser (noVNC) and on VNC: the virtio-serial
     # driver and SPICE's agent, which carry it to and from QEMU's vdagent
     # channel. windows-test.sh fetched and checked them; vm-run.sh put them here.
