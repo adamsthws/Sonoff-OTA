@@ -243,6 +243,19 @@ def start_new_run(plug_ip: str | None) -> str:
     return name
 
 
+# The answer to the unfinished-run menu.  The menu is answered before the run's
+# log exists and leaves the screen once answered, so it is held here and
+# written into the log when it opens - otherwise a plug left part converted by
+# "start a new plug" leaves no trace of how.
+RUN_CHOICE: list[str] = []
+
+
+def log_run_choice() -> None:
+    for line in RUN_CHOICE:
+        say(line)
+    RUN_CHOICE.clear()
+
+
 def resolve_run_name(
     requested: str | None, force_new: bool, plug_ip: str | None, ask: bool = False
 ) -> str:
@@ -294,10 +307,13 @@ def resolve_run_name(
         )
         if chosen < len(unfinished):
             output.transient_end()
+            RUN_CHOICE.append(f"Chosen at the start: continue {describe_run(unfinished[chosen])}.")
             remember_current(unfinished[chosen].name)
             return unfinished[chosen].name
         if chosen == len(unfinished):
             output.transient_end()
+            RUN_CHOICE.append("Chosen at the start: a new plug. Left unfinished, on record:")
+            RUN_CHOICE.extend(f"    {describe_run(d)}" for d in unfinished)
             return start_new_run(plug_ip)
         target = unfinished[0] if len(unfinished) == 1 else unfinished[ask_choice(
             "Which run should be removed",
@@ -2877,6 +2893,7 @@ def _main() -> int:
                 release_firewall(ctx)
             output.finish()
     output.start(ctx.dir / "run.log", verbose=args.verbose)
+    log_run_choice()
     code = None  # 130 only when the operator chose to quit, not for Ctrl-C
     try:
         code = cmd_run(ctx)

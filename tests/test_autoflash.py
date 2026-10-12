@@ -679,6 +679,21 @@ class RunChoiceTests(unittest.TestCase):
         self.assertNotIn("past the point of no return", menu.call_args.args[1][0])
         self.assertTrue((self.root / "half").is_dir())
 
+    def test_the_answer_reaches_the_new_runs_log(self):
+        # The menu is gone from the screen once answered and comes before the
+        # log opens: a part-converted plug left behind must still show in it.
+        from unittest import mock
+        self.run_dir("past", ["A0", "A5", "A1", "A2", "C2"])
+        self.autoflash.RUN_CHOICE.clear()
+        self.choose(1)
+        with mock.patch.object(self.autoflash, "say") as say:
+            self.autoflash.log_run_choice()
+        logged = "\n".join(call.args[0] for call in say.call_args_list)
+        self.assertIn("a new plug", logged)
+        self.assertIn("stopped at step D1", logged)
+        self.assertIn("past the point of no return", logged)
+        self.assertEqual(self.autoflash.RUN_CHOICE, [])
+
     def test_other_commands_continue_without_asking(self):
         from unittest import mock
         self.run_dir("half", ["A0"])
