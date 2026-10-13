@@ -682,8 +682,9 @@ def main() -> int:
     parser.add_argument("--device-ip", required=True)
     parser.add_argument("--evidence-dir", type=Path)
     parser.add_argument("--max-evidence-age", type=int, default=7200)
-    parser.add_argument("--wait", type=int, default=900,
-                        help="seconds to wait at most for a phase report")
+    parser.add_argument("--wait", type=int, default=480,
+                        help="seconds to wait at most for a phase report: about 90s of work, "
+                        "plus five minutes riding out a router restart")
     parser.add_argument("--idle", type=int, default=IDLE_LIMIT,
                         help="seconds the plug may send nothing before waiting stops")
     parser.add_argument(COMMIT_FLAG, action="store_true")

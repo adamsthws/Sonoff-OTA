@@ -13,6 +13,7 @@ import json
 import re
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -122,6 +123,15 @@ class PlugNeverConnected(PhaseError):
 
 # The server logs each request; the plug fetching its program is the first.
 FETCH_RE = re.compile(r'"GET /berry/')
+# While a phase runs, the plug answers nothing else: Berry holds it.  So once
+# it has been this quiet, an answer from its web page means it has stopped -
+# with nothing more to send.  Without that, only the server's own six-minute
+# silence limit (the plug's five of retrying through a router restart) ends
+# the wait.
+SILENCE_CHECK = 20.0
+# A backstop only: a stage takes up to about 90s, plus up to five minutes
+# riding out a router restart.  Just over the server's own eight minutes.
+EXEC_TIMEOUT = 540.0
 # Long enough for a slow plug, short enough not to look hung.
 FETCH_DEADLINE = 30.0
 
@@ -216,7 +226,7 @@ class PhaseRunner:
         phase: str,
         extra_flags: list[str] | None = None,
         confirm: Callable[[str], bool] | None = None,
-        exec_timeout: float = 960.0,  # just over the server's own 15 minutes
+        exec_timeout: float = EXEC_TIMEOUT,
     ) -> tuple[int, str]:
         """Run one phase end to end.  Returns (exit code, captured output)."""
         if phase in ARMED_PHASES and confirm is None:
@@ -241,6 +251,7 @@ class PhaseRunner:
         captured: list[str] = []
         url: str | None = None
         arm: tuple[str, str] | None = None
+        heard = [time.monotonic()]  # the server's last line: the plug's last request
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
         log_path = self.evidence_dir / f"{phase}-server.log"
         log_file = log_path.open("w", encoding="utf-8")
@@ -254,6 +265,7 @@ class PhaseRunner:
             nonlocal url, arm
             assert process.stdout is not None
             for line in process.stdout:
+                heard[0] = time.monotonic()
                 captured.append(line.rstrip("\n"))
                 if not log_file.closed:
                     log_file.write(output.scrub(line))
@@ -273,7 +285,7 @@ class PhaseRunner:
         reader.start()
         try:
             code = self._drive(phase, process, captured, reader, confirm, exec_timeout,
-                               lambda: url, lambda: arm)
+                               lambda: url, lambda: arm, lambda: heard[0])
         except PhaseError as exc:
             if isinstance(exc, PlugNeverConnected):  # it never started: nothing to say
                 raise
@@ -316,8 +328,46 @@ class PhaseRunner:
         kind, message = error.group("kind"), error.group("message")
         return message if kind == "migration_refused" else f"{kind}: {message}"
 
+    def _start(self, code: str) -> None:
+        """Send the command that starts the phase, without waiting on its reply.
+
+        The phase reports to the server, which is what is waited on; the reply
+        can come only when the phase ends - or never, when it ends by
+        restarting the plug, as the commit does.
+        """
+        def fire() -> None:
+            try:
+                self.device.berry_fire(code, timeout=60.0)
+            except Exception as exc:  # noqa: BLE001 - the server's evidence decides
+                self.log(f"    Starting it on the plug: {exc}")
+        threading.Thread(target=fire, daemon=True).start()
+
+    def _plug_answers(self) -> bool:
+        try:
+            return self.device.reachable(timeout=3.0)
+        except Exception:  # noqa: BLE001 - not answering, however it fails
+            return False
+
+    def _wait(self, phase, process, exec_timeout, get_heard) -> int:
+        started = time.monotonic()
+        checked = 0.0
+        while True:
+            try:
+                return process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                pass
+            now = time.monotonic()
+            if now - started > exec_timeout:
+                raise PhaseError(f"{phase} did not complete within {exec_timeout / 60:.0f} minutes")
+            if now - get_heard() >= SILENCE_CHECK and now - checked >= SILENCE_CHECK:
+                checked = now
+                if self._plug_answers() and process.poll() is None:
+                    raise PhaseError(
+                        f"the plug stopped the {phase} without being able to say why here"
+                    )
+
     def _drive(self, phase, process, captured, reader, confirm, exec_timeout,
-               get_url, get_arm) -> int:
+               get_url, get_arm, get_heard=time.monotonic) -> int:
         deadline = 30.0
         waited = 0.0
         while get_url() is None and waited < deadline and process.poll() is None:
@@ -347,15 +397,10 @@ class PhaseRunner:
 
             name, token = arm
             self.log("Telling the plug to start. Leave it powered and connected.")
-            self.device.berry_fire(f'{name}("{token}")', timeout=60.0)
+            self._start(f'{name}("{token}")')
         else:
             self.log("Sending the instructions to the plug and starting.")
-            self.device.berry_fire(short_loader(url), timeout=60.0)
+            self._start(short_loader(url))
             self._require_fetch(process, captured, reader, phase)
 
-        try:
-            return process.wait(timeout=exec_timeout)
-        except subprocess.TimeoutExpired as exc:
-            raise PhaseError(
-                f"{phase} did not complete within {exec_timeout / 60:.0f} minutes"
-            ) from exc
+        return self._wait(phase, process, exec_timeout, get_heard)

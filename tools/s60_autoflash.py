@@ -991,6 +991,17 @@ def locate_plug(ctx: Context, *, timeout: float = 300.0) -> str:
 # --------------------------------------------------- the plug's own networks
 
 
+# Waiting on something only a person can do - join a network, say - has no
+# time limit: they may have walked away, and the run should still be there
+# when they come back.  Ctrl-C stops it.  Nobody comes back to an unattended
+# run, so that one gives up.
+UNATTENDED_ACTION_LIMIT = 900.0
+
+
+def user_action_limit() -> float:
+    return UNATTENDED_ACTION_LIMIT if prompts.UNATTENDED else float("inf")
+
+
 def wait_until_joined(network: str, marker: str | None = None) -> None:
     """Block until this computer has joined the plug's network.
 
@@ -1001,11 +1012,12 @@ def wait_until_joined(network: str, marker: str | None = None) -> None:
     def tick(elapsed: float) -> None:
         output.progress(f"waiting for this computer to join {network}... {elapsed:.0f}s")
 
-    joined = (setup_network.wait_for_page(marker, tick=tick) if marker
-              else setup_network.wait_for_port(tick=tick))
+    limit = user_action_limit()
+    joined = (setup_network.wait_for_page(marker, timeout=limit, tick=tick) if marker
+              else setup_network.wait_for_port(timeout=limit, tick=tick))
     if not joined:
         output.progress_clear()
-        raise Abort(f"this computer did not join {network} within 15 minutes")
+        raise Abort(f"this computer did not join {network} within {limit / 60:.0f} minutes")
     output.progress_clear()
     say(f"    Connected to {network}.")
 
@@ -1992,7 +2004,7 @@ def back_up_stock(ctx: Context, host: str) -> str:
     return "saved"
 
 
-def wait_for_bridge(ctx: Context, network: str, *, timeout: float = 900.0) -> str | None:
+def wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None) -> str | None:
     """Wait for this computer to join the bridge's network, or for the bridge to
     turn up on the home network instead.  The bridge's address on the home
     network, or None once this computer has joined the bridge's own.
@@ -2001,6 +2013,8 @@ def wait_for_bridge(ctx: Context, network: str, *, timeout: float = 900.0) -> st
     the first look allows; it then never raises its own network, so waiting
     only for that would wait forever.
     """
+    if timeout is None:
+        timeout = user_action_limit()
     marker = setup_network.BRIDGE_PAGE_MARKER.lower()
     started = time.monotonic()
     while time.monotonic() - started < timeout:
@@ -2019,8 +2033,8 @@ def wait_for_bridge(ctx: Context, network: str, *, timeout: float = 900.0) -> st
                         f"to join your Wi-Fi... {time.monotonic() - started:.0f}s")
         time.sleep(2.0)
     output.progress_clear()
-    raise Abort(f"this computer did not join {network} within 15 minutes, and the "
-                "installer did not appear on your network")
+    raise Abort(f"this computer did not join {network} within {timeout / 60:.0f} minutes, "
+                "and the installer did not appear on your network")
 
 
 # Tasmota with Wi-Fi details that do not work keeps retrying them and never
@@ -2625,15 +2639,18 @@ def execute(ctx: Context, step: str) -> int:
         tell(f"FAILED: {exc}")
         return 1
     except (Abort, DeviceError, ValueError, PhaseError) as exc:
-        ctx.state.mark(step, FAILED, error=str(exc))
+        # A phase that ended with no result may have got as far as writing:
+        # where the plug can show whether the step finished, the step stays
+        # "attempted" and the next run asks it.
+        if not (isinstance(exc, PhaseError) and step in ATTEMPTED_EVIDENCE):
+            ctx.state.mark(step, FAILED, error=str(exc))
         output.stage_end("stopped")
         tell(f"FAILED: {exc}")
         return 1
     except Exception as exc:  # noqa: BLE001 - recorded and explained, not a bare traceback
         message = unexpected(exc)
-        # A step that writes to the plug stays "attempted": whether it got as
-        # far as writing is for the next run to find out from the plug.
-        if step not in DESTRUCTIVE_STEPS:
+        # As above: whether it got as far as writing is for the plug to say.
+        if step not in ATTEMPTED_EVIDENCE:
             ctx.state.mark(step, FAILED, error=message)
         output.stage_end("stopped")
         tell(f"FAILED: {message}")
@@ -2653,7 +2670,73 @@ def cmd_step(ctx: Context, step: str) -> int:
     if step not in STEP_INDEX:
         say(f"unknown step {step}; known: {', '.join(s for s, _, _ in STEPS)}")
         return 2
-    return execute(ctx, step)
+    wait_while_plug_busy(ctx)
+    return execute_with_retries(ctx, step)
+
+
+# Steps run again by themselves when they fail for a reason that may pass -
+# the network, mostly.  Each is safe to repeat: it only reads, or writes only
+# what it checks first (D4 the slot it is in, E2 the spare slot, G1 only over
+# the recovery Safeboot), or sets what it sets again.  Not the steps that ask
+# for anything, nor C2 or E3, which must happen once.
+RETRY_STEPS = {"A2", "D4", "E1", "E2", "F4", "G1", "H1"}
+ATTEMPTS = 3
+RETRY_PAUSE = 10.0
+# A failure worth another go: the plug or the network not answering.  A refusal
+# - the plug's checks, a password, the wrong model - would only say it again.
+TRANSIENT_RE = re.compile(
+    r"HTTP -1|timed out|timeout|sent nothing|did not answer|not answering|unreachable|"
+    r"connection (refused|reset|aborted)|ConnectionError|IncompleteRead|URLError|"
+    r"No route|stopped the \w+ without|did not complete within",
+    re.IGNORECASE,
+)
+
+
+# Up to the plug's five minutes of retrying a request with its Wi-Fi down, plus
+# the minute it gives a computer that does not answer.
+BUSY_PLUG_WAIT = 360.0
+
+
+def wait_while_plug_busy(ctx: Context) -> None:
+    """Give a plug still running a stopped step the time to finish it.
+
+    A migration step keeps the plug busy, answering nothing else, until it
+    succeeds or gives up - for a while after this computer stopped waiting
+    (Ctrl-C, say).  Run again at once, the plug looks unreadable, and the
+    run would go on as if it were.  It is told apart by answering ping.
+    """
+    host = ctx.state.input("plug_ip")
+    if not host or not ctx.state.is_done("D1") or ctx.state.is_done(STEPS[-1][0]):
+        return  # not running Tasmota yet, or finished
+    device = ctx.device
+    if device.reachable(timeout=3.0) or not hostsys.ping_ok(host):
+        return  # answering, or not on the network at all: the steps say which
+    tell("    The plug is on the network but not answering yet. It is most likely still")
+    tell("    finishing the step that was stopped, and gives up within a few minutes.")
+    started = time.monotonic()
+    while time.monotonic() - started < BUSY_PLUG_WAIT:
+        output.progress(f"waiting for the plug to finish... {time.monotonic() - started:.0f}s")
+        if device.reachable(timeout=3.0):
+            output.progress_clear()
+            tell("    It is answering again.")
+            return
+        time.sleep(3.0)
+    output.progress_clear()
+    tell("    It is still not answering; carrying on, and each step will say what it finds.")
+
+
+def execute_with_retries(ctx: Context, step: str) -> int:
+    for attempt in range(1, ATTEMPTS + 1):
+        code = execute(ctx, step)
+        if code != 1 or step not in RETRY_STEPS or attempt == ATTEMPTS:
+            return code
+        error = str(ctx.state.data.get("steps", {}).get(step, {}).get("error", ""))
+        if not TRANSIENT_RE.search(error):
+            return code
+        tell(f"    That may have been the network - trying again in {RETRY_PAUSE:.0f}s "
+             f"(attempt {attempt + 1} of {ATTEMPTS}).")
+        time.sleep(RETRY_PAUSE)
+    return code
 
 
 # Each step's name on its stage line, in words that need no knowledge of the
@@ -2851,6 +2934,7 @@ def run_steps(ctx: Context) -> int:
     tell("minute or two with little to see - that's normal. Keep the plug plugged")
     tell("in, and this computer awake, until the last stage says complete.")
     tell("")
+    wait_while_plug_busy(ctx)
     for step, title, _ in STEPS:
         if ctx.state.is_done(step):
             begin_stage(step)
@@ -2899,7 +2983,7 @@ def run_steps(ctx: Context) -> int:
                 say(f"{step} marked done on your say-so.")
                 output.stage_end("already done")
                 continue
-        code = execute(ctx, step)
+        code = execute_with_retries(ctx, step)
         if code == 0 and step == POINT_OF_NO_RETURN and ctx.research_bridge:
             section("Research bridge installed - stopping here", [
                 f"{ctx.bridge.name} is on the plug. Join the bridge's network",

@@ -61,13 +61,55 @@ def sha_region(address, length)
   return hash.out()
 end
 
+# Wait without blocking Wi-Fi reconnects or tripping Berry's timeout.
+def pause(ms)
+  var wake = tasmota.millis(ms)
+  while !tasmota.time_reached(wake)
+    tasmota.delay(50)
+    tasmota.yield()
+  end
+end
+
+# How long a failed request is worth trying again.  Up to five minutes while
+# the plug's Wi-Fi is down - a router restarting, say.  One minute while it is
+# up and the computer still does not answer: the computer has most likely
+# stopped, and while the plug keeps trying it answers nothing else.
+class retry_window
+  var deadline, up_deadline
+  def init()
+    self.deadline = tasmota.millis(300000)
+    self.up_deadline = nil
+  end
+  def over()
+    if tasmota.time_reached(self.deadline) return true end
+    if tasmota.wifi("up")
+      if self.up_deadline == nil self.up_deadline = tasmota.millis(60000) end
+      return tasmota.time_reached(self.up_deadline)
+    end
+    self.up_deadline = nil
+    return false
+  end
+end
+
 def fetch_target_table()
-  var client = webclient()
-  client.begin(base_url + "/target-table")
-  var status = client.GET()
-  guard(status == 200, format("target table GET returned HTTP %i", status))
+  var client
+  var status
+  var attempt = 0
+  var window = retry_window()
+  while true
+    client = webclient()
+    client.begin(base_url + "/target-table")
+    status = client.GET()
+    attempt += 1
+    if status >= 0 || window.over() break end
+    client.close()
+    pause(1000)
+  end
+  if status != 200 client.close() end
+  guard(status == 200, format("target table GET returned HTTP %i after %i attempts", status, attempt))
   guard(client.get_size() == 8192, "target table HTTP length differs")
   var encoded = client.get_string()
+  client.close()
   guard(size(encoded) == 8192, "target table body length differs")
   var table = bytes(encoded)
   guard(size(table) == 4096, "target table hex is invalid")

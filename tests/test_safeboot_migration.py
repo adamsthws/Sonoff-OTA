@@ -597,10 +597,9 @@ class MigrationValidationTests(unittest.TestCase):
             for phase, source in rendered.items():
                 self.assertIn(f'"/fail/{phase}"', source, phase)
                 self.assertIn("report_failure(", source, phase)
-                if phase != "commit":  # the commit fetches once, before writing
-                    self.assertIn("tasmota.millis(300000)", source, phase)  # Wi-Fi down
-                    self.assertIn("tasmota.millis(60000)", source, phase)   # Wi-Fi up
-                    self.assertIn("window.over()", source, phase)
+                self.assertIn("tasmota.millis(300000)", source, phase)  # Wi-Fi down
+                self.assertIn("tasmota.millis(60000)", source, phase)   # Wi-Fi up
+                self.assertIn("window.over()", source, phase)
             # Commit and restore still hand back their armed closure by name.
             self.assertTrue(rendered["commit"].rstrip().endswith("return commit"))
             self.assertTrue(rendered["restore"].rstrip().endswith("return restore"))
