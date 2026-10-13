@@ -119,24 +119,35 @@ This is what `python3 tools/s60_autoflash.py run` does, in order:
    (your email and password are asked here, once for the whole run) and
    looks on your network for the S60s in it, matched by their eWeLink id, so
    no other device can be mistaken for yours. With one S60 it carries on by
-   itself; with several it asks which. If yours does not answer, it says why:
-   offline in eWeLink, LAN Control off, or on a different network.
+   itself; with several it asks which. A plug that answers here while
+   eWeLink still shows it offline - one that has only just been switched on -
+   is given up to a minute to reach eWeLink before anything is
+   asked. If yours does not answer, it says why: offline in eWeLink, LAN
+   Control off, or on a different network.
 4. **Ask the plug what firmware it has** and where it downloads updates from.
    It stops here, before anything is written, unless the device is an S60.
 5. **Replace the Sonoff firmware** with a small installer of ours. *This is the
    point of no return,* and the one place it asks you to confirm: after a
-   short warning you type PROCEED, which covers the whole conversion,
-   including the rewrite in step 7. If the computer's firewall is on, it adds
-   a temporary rule for the plug first.
-6. **Install a first Tasmota through the installer**, which has joined your
-   Wi-Fi by itself, and give it your Wi-Fi details so it joins too. If the
-   installer could not join, or Tasmota does not appear, it asks you to join
-   the plug's own network instead, names it, does the rest itself, and tells
-   you when to switch back.
-7. **Rebuild the plug's memory layout** to match the official Tasmota one. It
+   short warning - which also says the Sonoff firmware is backed up first,
+   or already was - you type PROCEED, which covers the whole conversion,
+   including the backup in step 6 and the rewrite in step 8. Nothing is sent
+   to the plug before that. If the computer's firewall is on, it adds a
+   temporary rule for the plug first.
+6. **Back up the Sonoff firmware.** The installer, which has joined your
+   Wi-Fi by itself, hands over a copy of the plug's whole memory - Sonoff
+   firmware, settings and all - checked byte for byte against the plug, and
+   kept under the plug's MAC address in `captures/plugs/` (see
+   [Your Sonoff backup](technical-details.md#your-sonoff-backup)). A plug
+   backed up before keeps that backup and is not read again; `--no-backup`
+   skips it.
+7. **Install a first Tasmota through the installer**, and give it your Wi-Fi
+   details so it joins too. If the installer could not join, or Tasmota does
+   not appear, it asks you to join the plug's own network instead, names it,
+   does the rest itself, and tells you when to switch back.
+8. **Rebuild the plug's memory layout** to match the official Tasmota one. It
    counts down ten seconds first - Ctrl-C stops it - before the minute in
    which the power must stay on.
-8. **Install official Tasmota**, which joins your Wi-Fi by itself, apply the
+9. **Install official Tasmota**, which joins your Wi-Fi by itself, apply the
    S60 settings, and check the result. Only if it does not appear on your
    network are you asked to join its setup network.
 

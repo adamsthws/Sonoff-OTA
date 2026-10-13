@@ -54,12 +54,12 @@ from tools.s60_autoflash import (  # noqa: E402
 from tools.serve_tasmota_ota import S60_DEVICE_MODEL  # noqa: E402
 
 # The readout build of the conversion bridge, at the same version.
-READOUT_OTA = Path("captures/flash-readout/s60-ota-bridge-flash-readout-4.4.1.ota")
+READOUT_OTA = Path("captures/flash-readout/s60-ota-bridge-flash-readout-4.4.2.ota")
 # --control: a conversion bridge, only to see whether it starts on this plug.
-# 4.4.1 is the one the conversion sends.  Pinned as in SHA256SUMS.
+# 4.4.2 is the one the conversion sends.  Pinned as in SHA256SUMS.
 CONTROL_FILES = {
-    "4.4.1": (Path("artifacts/s60-ota-bridge-4.4.1.ota"),
-              "c77ca1f3cde6de0d37f408cb59cb36c75fa5a6b1c6c1f4435a861e043b9bc6b5"),
+    "4.4.2": (Path("artifacts/s60-ota-bridge-4.4.2.ota"),
+              "98dd677e405286a75a4b3ed0f1ce71407ed5cf2654a25b065f77be4dd62f5685"),
 }
 CONFIRM_WORD = "readout"
 # How a bridge names itself: "bridge v5" up to v5, "bridge 4.4.1" from then on.
@@ -408,7 +408,7 @@ def run(args: argparse.Namespace) -> int:
         if args.control:
             print(f"{name[0].upper()}{name[1:]} started on this plug ({host}): the Sonoff updater")
             print("accepted it and it runs.")
-        elif save_dump(host, args.label or f"stock-{version}") != 0:
+        elif save_dump(host, args.label or f"stock-{version}", version) != 0:
             raise Stop("the dump was not complete or not well formed. The readout firmware is "
                        f"still running: retry with python3 tools/dump_stock_flash.py --host {host}")
     finally:
@@ -436,9 +436,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--listen-ip", help="this computer's address as the plug sees it")
     parser.add_argument("--label", help="name for the saved dump (default: stock-<version>)")
     parser.add_argument("--firmware", default=str(READOUT_OTA), help=argparse.SUPPRESS)
-    parser.add_argument("--control", nargs="?", const="4.4.1", choices=sorted(CONTROL_FILES),
+    parser.add_argument("--control", nargs="?", const="4.4.2", choices=sorted(CONTROL_FILES),
                         help="send a conversion bridge instead, only to see whether it starts "
-                             "(nothing is read): 4.4.1, the one the conversion sends")
+                             "(nothing is read): 4.4.2, the one the conversion sends")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="also show the cloud's messages while the firmware is delivered")
     args = parser.parse_args(argv)

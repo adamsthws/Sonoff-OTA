@@ -24,6 +24,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 from pathlib import Path
 from typing import Any, Callable
 
@@ -31,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
-from tools.autoflash import __version__, tasmota_settings  # noqa: E402
+from tools.autoflash import __version__, plugs, tasmota_settings  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import PhaseError, PhaseRunner, PlugNeverConnected  # noqa: E402
@@ -53,6 +54,7 @@ from tools.autoflash.prompts import (  # noqa: E402
 )
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED, RunState  # noqa: E402
 from tools.discover_ewelink import answered_ids, discover  # noqa: E402
+from tools.dump_stock_flash import is_good, read_dump, summary  # noqa: E402
 from tools.get_device_key import EwelinkError, get_devices, login  # noqa: E402
 from tools.prepare_imprinted_bundle import (  # noqa: E402
     BundleError,
@@ -98,10 +100,11 @@ WEAK_SIGNAL_DBM = -75
 BRIDGE_AP_PREFIX = "S60-OTA-Bridge"
 # Fixed in the published bridge firmware; not a secret.
 BRIDGE_PASSWORD = "s60-ota-bridge"
-# 4.4.1: joins the home network the stock firmware was on, raising its own
-# only if that fails, and gives Tasmota its Wi-Fi at D1.  Named, like every
-# bridge from now on, by the version the stock updater is given.
-BRIDGE_OTA = Path("artifacts/s60-ota-bridge-4.4.1.ota")
+# 4.4.2: joins the home network the stock firmware was on, raising its own
+# only if that fails, gives Tasmota its Wi-Fi at D1, and lets the plug's whole
+# flash be read first, for the backup.  Named, like every bridge from 4.4.1
+# on, by the version the stock updater is given.
+BRIDGE_OTA = Path("artifacts/s60-ota-bridge-4.4.2.ota")
 # Ports the migration phase servers (serve_safeboot_migration.py) may listen
 # on, in order of preference.  Nothing on the plug keeps the port: each phase
 # starts its own server and sends the plug a loader URL that names it.
@@ -175,14 +178,45 @@ def run_tool(
     return output.stream(process)
 
 
+def run_name(directory: Path) -> str:
+    """How a run is named: its place under captures/, such as
+    plugs/aa-bb-cc-dd-ee-ff/runs/20261013-031500 (tools/autoflash/plugs.py)."""
+    try:
+        return directory.relative_to(plugs.CAPTURES).as_posix()
+    except ValueError:
+        return directory.name
+
+
 def run_directories() -> list[Path]:
-    captures = ROOT / "captures"
+    captures = plugs.CAPTURES
     if not captures.is_dir():
         return []
+    # Runs from before plugs/ were kept straight under captures/.
+    candidates = [*captures.glob(f"plugs/*/{plugs.RUNS}/*"), *captures.iterdir()]
     return sorted(
-        (child for child in captures.iterdir() if (child / "autoflash-state.json").is_file()),
+        (child for child in candidates if (child / "autoflash-state.json").is_file()),
         key=lambda child: (child / "autoflash-state.json").stat().st_mtime,
     )
+
+
+def adopt_older_runs() -> None:
+    """Move runs kept straight under captures/ to their plug's directory, when
+    they know its MAC.  Those that do not stay where they are, still listed."""
+    pointer = read_current()
+    for directory in [d for d in run_directories() if d.parent == plugs.CAPTURES]:
+        try:
+            mac = RunState.open(directory).input("plug_mac")
+            if not mac or not plugs.MAC_RE.match(mac):
+                continue
+            target = plugs.runs_dir(mac) / directory.name
+            if target.exists():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            directory.rename(target)
+        except (OSError, ValueError):
+            continue  # left where it was; it still works from there
+        if pointer == directory.name:
+            remember_current(run_name(target))
 
 
 def run_is_complete(directory: Path) -> bool:
@@ -218,6 +252,9 @@ def describe_run(directory: Path) -> str:
 
     state = RunState.open(directory)
     where = state.input("plug_ip") or "a plug not yet found"
+    mac = plugs.mac_of_run(directory) or state.input("plug_mac")
+    if mac and state.input("plug_ip"):
+        where += f", MAC {mac}"
     pending = next((step for step, _, _ in STEPS if not state.is_done(step)), None)
     try:
         when = dt.datetime.fromisoformat(state.data.get("updated_utc", "")).astimezone()
@@ -228,18 +265,15 @@ def describe_run(directory: Path) -> str:
     details = [f"stopped at step {pending}" if pending else "finished", stamp]
     if state.is_done(POINT_OF_NO_RETURN):
         details.append("past the point of no return")
+    if not state.input("plug_ip"):
+        return f"a run that had not found its plug yet ({', '.join(details)})"
     return f"the plug at {where} ({', '.join(details)})"
 
 
 def new_run_name(plug_ip: str | None) -> str:
-    """A name the operator never has to type, but can recognise if they look."""
-    base = ("plug-" + plug_ip.replace(".", "-")) if plug_ip else (
-        "conversion-" + time.strftime("%Y%m%d-%H%M"))
-    existing = {d.name for d in run_directories()}
-    name, suffix = base, 2
-    while name in existing:
-        name, suffix = f"{base}-{suffix}", suffix + 1
-    return name
+    """A name the operator never has to type: when it started, filed under
+    plugs/unidentified/ until A1 finds the plug and moves it under its MAC."""
+    return run_name(plugs.new_run_dir(None))
 
 
 def start_new_run(plug_ip: str | None) -> str:
@@ -283,13 +317,13 @@ def resolve_run_name(
 
     pointer = read_current()
     # Most recently touched first, so the likely answer is option 1.
-    unfinished.sort(key=lambda d: (d.name != pointer, -d.stat().st_mtime))
+    unfinished.sort(key=lambda d: (run_name(d) != pointer, -d.stat().st_mtime))
     if not ask:
         chosen = unfinished[0]
         say(f"Continuing {describe_run(chosen)}.")
         RUN_CHOICE.append(f"Continuing {describe_run(chosen)}, the most recent unfinished run.")
-        remember_current(chosen.name)
-        return chosen.name
+        remember_current(run_name(chosen))
+        return run_name(chosen)
 
     while unfinished:
         # The menu leaves the screen once answered; after a removal it is
@@ -314,8 +348,8 @@ def resolve_run_name(
         if chosen < len(unfinished):
             output.transient_end()
             RUN_CHOICE.append(f"Chosen at the start: continue {describe_run(unfinished[chosen])}.")
-            remember_current(unfinished[chosen].name)
-            return unfinished[chosen].name
+            remember_current(run_name(unfinished[chosen]))
+            return run_name(unfinished[chosen])
         if chosen == len(unfinished):
             output.transient_end()
             RUN_CHOICE.append("Chosen at the start: a new plug. Left unfinished, on record:")
@@ -357,7 +391,7 @@ def remove_run(directory: Path) -> bool:
             for line in hostsys.undo_commands(rule):
                 tell("Remove it yourself: " + line)
     shutil.rmtree(directory)
-    if read_current() == directory.name:
+    if read_current() == run_name(directory):
         CURRENT_POINTER.unlink(missing_ok=True)
     say(f"Removed the record of {description}.")
     return True
@@ -367,7 +401,7 @@ class Context:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
         self.plug = args.run
-        self.dir = ROOT / "captures" / self.plug
+        self.dir = plugs.CAPTURES / self.plug
         self.evidence = self.dir / "live"
         self.state = RunState.open(self.dir)
         self.manifest_path = (ROOT / args.manifest).resolve()
@@ -393,6 +427,8 @@ class Context:
         self._given_ewelink_password = credentials.get("EWELINK_PASSWORD")
         self._given_email = credentials.get("EWELINK_EMAIL")
         self._finder: PlugFinder | None = None
+        # The account's record of the plug A1 chose, for its plug.json.
+        self.account_plug: AccountPlug | None = None
         # Held only in memory: the Wi-Fi details, and the recovery image built
         # from them.  Neither is ever written to disk.
         self._wifi: tuple[str, str] | None = None
@@ -563,6 +599,29 @@ class Context:
         if settings.get("ewelink_email") != email:
             settings["ewelink_email"] = email
             save_settings(settings)
+
+    def file_under_plug(self, mac: str) -> None:
+        """Move this run under its plug's MAC (plugs.py), once the plug is
+        known and before anything is written to it."""
+        if plugs.mac_of_run(self.dir) == plugs.folder_name(mac).replace("-", ":"):
+            return
+        target = plugs.runs_dir(mac) / self.dir.name
+        suffix = 2
+        while target.exists():
+            target, suffix = target.with_name(f"{self.dir.name}-{suffix}"), suffix + 1
+        source = self.dir
+
+        def move() -> Path:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            source.rename(target)
+            return target / "run.log"
+
+        output.move_log(move)
+        self.dir, self.evidence = target, target / "live"
+        self.state.path = target / "autoflash-state.json"
+        self.plug = run_name(target)
+        remember_current(self.plug)
+        say(f"This run's record is now in {display_path(target)}.")
 
     def listen_ip(self) -> str:
         """This computer's address as the plug sees it, worked out afresh each time.
@@ -1204,10 +1263,26 @@ def step_pair(ctx: Context) -> dict[str, Any]:
         devices = ctx.account_devices()
         ip = find_any_plug() if devices is None else find_account_plug(ctx, devices)
     ctx.state.set_input("plug_ip", ip)
-    mac = hostsys.mac_of(ip)
-    if mac:
+    account = getattr(ctx, "account_plug", None)
+    mac = hostsys.mac_of(ip) or (account.mac if account else None)
+    if mac and plugs.MAC_RE.match(mac):
         ctx.state.set_input("plug_mac", mac)
+        file_plug(ctx, mac, account)
     return {"plug_ip": ip, "plug_mac": mac}
+
+
+def file_plug(ctx: Context, mac: str, account: AccountPlug | None) -> None:
+    """Keep this run, and what is known of the plug, under its MAC; say if its
+    Sonoff firmware is backed up from an earlier run."""
+    if hasattr(ctx, "file_under_plug"):
+        ctx.file_under_plug(mac)
+    if account:
+        plugs.remember_plug(mac, ewelink_name=account.name, ewelink_id=account.device_id,
+                            model=account.model)
+    backup = plugs.find_backup(mac)
+    if backup:
+        say(f"    Its Sonoff firmware is backed up already{f' ({backup.taken})' if backup.taken else ''},"
+            f" in {display_path(backup.directory)}.")
 
 
 @dataclass(frozen=True)
@@ -1339,8 +1414,14 @@ def sight_plugs(plugs: list[AccountPlug]) -> list[Sighting]:
     return match_plugs(plugs, answers, hostsys.neighbour_table())
 
 
+# A plug that has just started answers here before eWeLink shows it online:
+# how long to wait for eWeLink to catch up before asking about its internet.
+CLOUD_CATCH_UP = 60.0
+
+
 def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
     """The address of the S60 to convert, from the account's S60s that answer here."""
+    started = time.monotonic()
     while True:
         plugs = [plug for plug in map(account_plug, devices) if plug is not None]
         if not plugs:
@@ -1366,6 +1447,7 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
             if len(ready) == 1:
                 # The stage line completing says it all; the log keeps which plug.
                 say(f"    Found {describe_plug(ready[0].plug)} at {ready[0].ip}.")
+                ctx.account_plug = ready[0].plug
                 return str(ready[0].ip)
             if ready:
                 output.transient_begin()
@@ -1374,7 +1456,21 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
                     [f"{describe_plug(sighting.plug)} at {sighting.ip}" for sighting in ready],
                 )
                 output.transient_end()
+                ctx.account_plug = ready[choice].plug
                 return str(ready[choice].ip)
+            waited = time.monotonic() - started
+            if all(map(cut_off, sightings)) and waited < CLOUD_CATCH_UP:
+                # Answering here but offline in eWeLink: usually a plug that has
+                # only just started, and is a few seconds from reaching the cloud.
+                say(f"    It answers here but eWeLink shows it offline; checking again ({waited:.0f}s)...")
+                output.progress(f"waiting for eWeLink to see the plug online... {waited:.0f}s")
+                time.sleep(10.0)
+                output.progress_clear()
+                refreshed = ctx.account_devices()
+                if refreshed is None:
+                    return find_any_plug()
+                devices = refreshed
+                continue
             output.transient_begin()
             if all(map(cut_off, sightings)):
                 # Found here: only its own internet access is in the way.
@@ -1608,10 +1704,19 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
     ensure_firewall(ctx)
     env = ctx.ewelink_env()
 
+    mac = ctx.state.input("plug_mac")
+    backup = plugs.find_backup(mac) if mac else None
+    if backup:
+        kept = f"Its Sonoff firmware is backed up already ({backup.taken or 'earlier'})."
+    elif getattr(getattr(ctx, "args", None), "no_backup", False):
+        kept = "No backup of its Sonoff firmware is kept (--no-backup)."
+    else:
+        kept = "Its Sonoff firmware is backed up to this computer first, in full."
     output.transient_begin()
     warning_box("Before going on", [
         "From here the plug's Sonoff firmware is replaced, so the eWeLink app",
         "will no longer control it. DO NOT UNPLUG IT during the process.",
+        kept,
         "Only go ahead with a plug you can afford to lose",
     ])
     if not require_word(CONSENT_WORD):
@@ -1676,36 +1781,22 @@ def bridge_on_home_network(ctx: Context, *, timeout: float = 60.0) -> str | None
     return None
 
 
-def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
-    """D1/D2 - Berry-capable Tasmota through the bridge."""
-    image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
-    say("Looking for the plug's Wi-Fi network...")
-    bridge = find_ssid(BRIDGE_AP_PREFIX)
-    setup = None if bridge else find_ssid(TASMOTA_AP_PREFIX)
-    if setup:
-        # Resuming after the upload: Tasmota is already installed and waiting.
-        say(f"    Tasmota is already installed and waiting on {setup}.")
-        ctx.state.set_input("device_name", setup)
-        ip = configure_plug_wifi(ctx, setup)
-        return {"plug_ip": ip, "device_name": setup, "resumed": True}
+def bridge_answers(host: str) -> bool:
+    body = setup_network.page(host, timeout=2.0)
+    return body is not None and setup_network.BRIDGE_PAGE_MARKER.lower() in body.lower()
 
-    def through_home_network(address: str) -> dict[str, Any]:
-        say(f"    The installer joined your network at {address}.")
-        preset = give_tasmota_the_wifi(ctx, address)
-        upload_tasmota(image, host=address)
-        if preset:
-            found = tasmota_on_home_network(ctx)
-            if found:
-                return {"plug_ip": found, "upload_route": "home network", "wifi": "preset",
-                        "device_name": ctx.state.input("device_name")}
-            section("Tasmota has not appeared on your network", QUICK_POWER_CYCLE_HINT)
-            return finish_tasmota_setup(ctx, route="home network", wait=900.0)
-        return finish_tasmota_setup(ctx, route="home network")
 
+def reach_bridge(ctx: Context) -> str:
+    """The bridge's address: setup_network.SETUP_HOST when this computer is on
+    the bridge's own network, else where it joined the home network.  Asks the
+    person to join the bridge's network only when it raised one."""
+    if bridge_answers(setup_network.SETUP_HOST):
+        return setup_network.SETUP_HOST  # joined at C3, or by hand
     address = bridge_on_home_network(ctx)
     if address:
-        return through_home_network(address)
-    bridge = bridge or "S60-OTA-Bridge-XXXX   (the XXXX varies)"
+        say(f"    The installer joined your network at {address}.")
+        return address
+    bridge = find_ssid(BRIDGE_AP_PREFIX) or "S60-OTA-Bridge-XXXX   (the XXXX varies)"
     copied = hostsys.copy_to_clipboard(BRIDGE_PASSWORD)
     section("Join the bridge's Wi-Fi network", [
         "The plug is running our small installer, which has made its own Wi-Fi",
@@ -1720,11 +1811,175 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
         "If that network is not there, wait: the installer may still be joining",
         "your own Wi-Fi, and this carries on by itself when it does.",
     ])
-    address = wait_for_bridge(ctx, bridge.split()[0])
-    if address:
-        return through_home_network(address)
-    upload_tasmota(image)
-    return finish_tasmota_setup(ctx, route="bridge network")
+    return wait_for_bridge(ctx, bridge.split()[0]) or setup_network.SETUP_HOST
+
+
+# The steps after the backup: once any has started, the installer it reads
+# through may be gone.
+AFTER_BACKUP = ("D1", "D4", "E1", "E2", "E3", "F2", "F4", "G1", "H1")
+
+
+def step_backup(ctx: Context) -> dict[str, Any]:
+    """C3 - the plug's Sonoff firmware, kept whole, before D1 writes over it.
+    Its stage is "skipped" when no backup could be taken, as the conversion
+    does not need one."""
+    if any(ctx.state.status(step) in (DONE, ATTEMPTED) for step in AFTER_BACKUP):
+        say("    The plug is past the installer already, so there is nothing to back up from.")
+        outcome = "not taken"
+    else:
+        skip = backup_not_needed(ctx)
+        if skip:
+            outcome, message = skip
+            say(f"    {message}")
+        else:
+            outcome = back_up_stock(ctx, reach_bridge(ctx))
+    ctx.state.set_input("backup_outcome", outcome)
+    return {"outcome": outcome, "stage_outcome": BACKUP_OUTCOMES[outcome][0]}
+
+
+def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
+    """D1/D2 - Berry-capable Tasmota through the bridge."""
+    image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
+    say("Looking for the plug's Wi-Fi network...")
+    bridge = find_ssid(BRIDGE_AP_PREFIX)
+    setup = None if bridge else find_ssid(TASMOTA_AP_PREFIX)
+    if setup:
+        # Resuming after the upload: Tasmota is already installed and waiting.
+        say(f"    Tasmota is already installed and waiting on {setup}.")
+        ctx.state.set_input("device_name", setup)
+        ip = configure_plug_wifi(ctx, setup)
+        return {"plug_ip": ip, "device_name": setup, "resumed": True}
+
+    address = reach_bridge(ctx)
+    if address == setup_network.SETUP_HOST:
+        upload_tasmota(image)
+        return finish_tasmota_setup(ctx, route="bridge network")
+    preset = give_tasmota_the_wifi(ctx, address)
+    upload_tasmota(image, host=address)
+    if preset:
+        found = tasmota_on_home_network(ctx)
+        if found:
+            return {"plug_ip": found, "upload_route": "home network", "wifi": "preset",
+                    "device_name": ctx.state.input("device_name")}
+        section("Tasmota has not appeared on your network", QUICK_POWER_CYCLE_HINT)
+        return finish_tasmota_setup(ctx, route="home network", wait=900.0)
+    return finish_tasmota_setup(ctx, route="home network")
+
+
+# How the backup went, for the stage line and the report: BACKUP_OUTCOMES.
+BACKUP_OUTCOMES = {
+    "saved": ("complete", "Completed"),
+    "existing": ("already done", "Already taken by an earlier run"),
+    "failed": ("skipped", "Failed - carried on without one"),
+    "not wanted": ("skipped", "Not taken (--no-backup)"),
+    "unreadable": ("skipped", "Not taken - the installer could not read the plug"),
+    "not taken": ("skipped", "Not taken"),
+}
+
+
+def backup_not_needed(ctx: Context) -> tuple[str, str] | None:
+    """Why no backup is to be read, if none is, as (outcome, message): one
+    taken already, or none wanted."""
+    if ctx.state.input("stock_backup"):
+        return ctx.state.input("backup_outcome") or "existing", "Backed up before this run was resumed."
+    if getattr(getattr(ctx, "args", None), "no_backup", False):
+        return "not wanted", "No backup of the Sonoff firmware (--no-backup)."
+    known = ctx.state.input("plug_mac")
+    existing = plugs.find_backup(known) if known else None
+    if existing:
+        # The first backup is the original; a plug converted again keeps it.
+        ctx.state.set_input("stock_backup", display_path(existing.directory))
+        return "existing", f"Its Sonoff firmware is backed up already, in {display_path(existing.directory)}."
+    return None
+
+
+# Testing only (run --simulate-backup-failure): how many backup reads still
+# to fail.  Two fail one round, so the menu that follows can be tried.
+SIMULATED_BACKUP_FAILURES = 0
+BACKUP_RETRY, BACKUP_WITHOUT = 0, 1
+
+
+def read_for_backup(host: str) -> tuple[bytes, bytes, dict[str, Any]]:
+    global SIMULATED_BACKUP_FAILURES
+    if SIMULATED_BACKUP_FAILURES > 0:
+        SIMULATED_BACKUP_FAILURES -= 1
+        raise OSError("simulated failure (--simulate-backup-failure)")
+    return read_dump(host)
+
+
+def backup_failed(problem: str) -> int:
+    """Ask what to do about a backup that failed twice: BACKUP_RETRY or
+    BACKUP_WITHOUT; Quit stops the run, which carries on from here next time."""
+    options = ["Try again", "Carry on without a backup"]
+    output.transient_begin()
+    section("The Sonoff firmware could not be backed up", [
+        f"Reading the plug's memory failed twice: {problem}.",
+        "",
+        "The conversion can be performed without a backup, though that's not recommended.",
+    ])
+    if prompts.UNATTENDED:
+        prompts.answered_unattended("What now", options[BACKUP_WITHOUT])
+        choice = BACKUP_WITHOUT
+    else:
+        choice = ask_choice("What now", options, help_lines=[
+            "Quitting leaves the plug on the installer: run this again to carry on",
+            "from here, or switch the plug off and on to go back to Sonoff.",
+        ])
+    output.transient_end()
+    return choice
+
+
+def back_up_stock(ctx: Context, host: str) -> str:
+    """Keep the plug's whole flash, Sonoff firmware and all, before D1 writes over it.
+
+    The bridge only reads it.  Taken automatically, under the consent typed at
+    C2; if it fails the person decides whether to carry on without one, and an
+    unattended run carries on.  Returns how it went: a BACKUP_OUTCOMES key.
+    """
+    skip = backup_not_needed(ctx)
+    if skip:
+        say(f"    {skip[1]}")
+        return skip[0]
+    known = ctx.state.input("plug_mac")
+    say("Backing up the plug's Sonoff firmware - about a minute...")
+    while True:
+        problem = ""
+        for _ in range(2):
+            try:
+                flash, efuse, report = read_for_backup(host)
+                break
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    # A bridge from before 4.4.2, given with --bridge.
+                    say("    This installer cannot read the plug's memory, so no backup is kept.")
+                    return "unreadable"
+                problem = str(exc)
+            except OSError as exc:  # a short transfer included
+                problem = str(exc)
+            say(f"    The backup did not come through: {problem}")
+        else:
+            if backup_failed(problem) == BACKUP_RETRY:
+                say("    Trying the backup again...")
+                continue
+            say("    Carrying on without a backup.")
+            return "failed"
+        break
+
+    mac = plugs.mac_from_efuse(efuse)
+    if known and plugs.folder_name(known) != plugs.folder_name(mac):
+        say(f"    The network reported {known} for the plug; its chip says {mac}, which is used.")
+    if hasattr(ctx, "file_under_plug"):
+        ctx.file_under_plug(mac)  # if A1 could not tell its MAC
+    out, _ = plugs.save_backup(flash, efuse, report, ctx.state.input("stock_version"))
+    ctx.state.set_input("stock_backup", display_path(out))
+    for line in summary(report):
+        say(f"    {line}")
+    say(f"    Saved in {display_path(out)}, under the plug's MAC (private: it holds the")
+    say("    Wi-Fi password).")
+    if not is_good(report):
+        tell("    It did not check out as a whole, bootable flash, so it may not restore;")
+        tell("    its report.json says what was wrong. Carrying on.")
+    return "saved"
 
 
 def wait_for_bridge(ctx: Context, network: str, *, timeout: float = 900.0) -> str | None:
@@ -2396,6 +2651,7 @@ COMMON_STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = [
     ("A1", "Pair the plug in eWeLink", step_pair),
     ("A2", "Discover, metadata and device key", step_discover),
     ("C2", "Stock to recovery bridge", step_bridge),
+    ("C3", "Back up the Sonoff firmware", step_backup),
     ("D1", "Berry-capable Tasmota via bridge AP", step_berry_tasmota),
 ]
 # Full Tasmota product: repartition to Safeboot layout, then official image.
@@ -2483,10 +2739,12 @@ def execute(ctx: Context, step: str) -> int:
         output.stage_end("stopped")
         tell(f"FAILED: {exc}")
         return 1
+    # A step may end its stage otherwise: "skipped" or "already done".
+    outcome = captured.pop("stage_outcome", "complete") if captured else "complete"
     ctx.state.mark(step, DONE, **{"result": captured})
     for key, value in (captured or {}).items():
         ctx.state.capture(f"{step}.{key}", value)
-    output.stage_end("complete")
+    output.stage_end(outcome)
     say(f"{step} done")
     return 0
 
@@ -2506,16 +2764,17 @@ STAGE_NAMES = {
     "A5": "Validating local files",
     "A1": "Discovering the plug",
     "A2": "Querying Sonoff firmware",
-    "C2": "Installing bridge firmware",
+    "C2": "Sending bridge firmware",
+    "C3": "Backing up Sonoff firmware",
     "D1": "Installing interim firmware",
-    "D4": "Preparing the plug's memory",
-    "E1": "Verifying the memory layout",
-    "E2": "Staging the startup firmware",
-    "E3": "Committing the new memory layout",
-    "F2": "Installing final Tasmota",
-    "F4": "Configuring Wi-Fi and settings",
-    "G1": "Installing official Safeboot",
-    "H1": "Verifying the conversion",
+    "D4": "Preparing memory layout",
+    "E1": "Verifying memory layout",
+    "E2": "Staging startup firmware",
+    "E3": "Committing memory layout",
+    "F2": "Installing Tasmota",
+    "F4": "Configuring Tasmota",
+    "G1": "Installing Safeboot",
+    "H1": "Verifying conversion",
     "I1": "Installing ESPHome (stock layout)",
     "I2": "Waiting for ESPHome",
 }
@@ -2528,6 +2787,7 @@ PLAIN_DESCRIPTION = {
     "A1": "gets the plug onto your network through the eWeLink app",
     "A2": "asks the plug what firmware it is running",
     "C2": "replaces the plug's Sonoff firmware with our small installer firmware",
+    "C3": "keeps a backup of the plug's Sonoff firmware on this computer",
     "D1": "puts a full Tasmota onto the plug through the installer's own Wi-Fi",
     "D4": "moves Tasmota into the other half of the plug's memory, out of the way",
     "E1": "reads the plug's memory layout and checks it, changing nothing",
@@ -2822,6 +3082,8 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Plug model", model or "__"),
         ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),
         ("Stock firmware", ctx.state.input("stock_version") or "__"),
+        # How it went, never where it is or which plug: the path holds the MAC.
+        ("Sonoff backup", BACKUP_OUTCOMES.get(ctx.state.input("backup_outcome") or "not taken")[1]),
         ("Computer", computer_description()),
         ("Time taken", took),
         ("Typed the Wi-Fi", "yes" if ctx.state.input("wifi_typed") else "no"),
@@ -3002,6 +3264,9 @@ def cmd_cleanup(ctx: Context) -> int:
             say(f"  {item}")
     else:
         say("No stored secrets were found.")
+    if plugs.backups():
+        say(f"Kept the Sonoff firmware backups in {display_path(plugs.PLUGS)}/*/{plugs.BACKUP};")
+        say("they hold the Wi-Fi password too. Delete them yourself if you will not want them.")
     return 0
 
 
@@ -3067,6 +3332,8 @@ def _main() -> int:
     parser.add_argument("--web-password", help="Tasmota web password (not stored in run state)")
     parser.add_argument("--wifi", action="store_true",
                         help="type the Wi-Fi details instead of reading them from the plug")
+    parser.add_argument("--no-backup", action="store_true",
+                        help="keep no backup of the Sonoff firmware (it holds the Wi-Fi password)")
     parser.add_argument(
         "--esphome",
         metavar="PATH",
@@ -3084,20 +3351,25 @@ def _main() -> int:
                         "see .env.example")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="show every action as it happens (it is all in the run's log either way)")
+    parser.add_argument("--simulate-backup-failure", action="store_true",
+                        help=argparse.SUPPRESS)  # testing: the backup's first two reads fail
     parser.add_argument("--bridge", help=argparse.SUPPRESS)  # research: archive/docs/reference/automatic-wifi.md
     args = parser.parse_args()
     apply_target(bool(getattr(args, "esphome", None)))
     prompts.UNATTENDED = args.unattended
+    global SIMULATED_BACKUP_FAILURES
+    SIMULATED_BACKUP_FAILURES = 2 if args.simulate_backup_failure else 0
 
     try:
         given = credentials.load(args.env_file)
+        adopt_older_runs()
         if args.command == "run" and not args.verbose and not args.unattended:
             wait_for_taller_window()  # before anything else is shown
         if args.command == "list":
             args.run = args.run or "-"
         elif args.command in ("status", "cleanup") and not args.run:
             # Report on the latest run; never start a new one just to look.
-            args.run = read_current() or (run_directories()[-1].name if run_directories() else None)
+            args.run = read_current() or (run_name(run_directories()[-1]) if run_directories() else None)
             if not args.run:
                 say("No conversions recorded yet.")
                 return 0
@@ -3121,8 +3393,10 @@ def _main() -> int:
             state = RunState.open(directory)
             done = sum(1 for step, _, _ in STEPS if state.is_done(step))
             mark = "verified" if run_is_complete(directory) else "in progress"
-            say(f"  {directory.name:<22} {done}/{len(STEPS)} steps  {mark}"
+            say(f"  {run_name(directory):<55} {done}/{len(STEPS)} steps  {mark}"
                 f"  {state.input('plug_ip') or ''}")
+        for backup in plugs.backups():
+            say(f"  Sonoff backup: {backup.describe()} in {display_path(backup.directory)}")
         return 0
 
     if args.command == "status":

@@ -24,7 +24,10 @@ not ignored. The values stay in the tool's memory: they are not passed on to
 the helper tools' environment, and the passwords are kept out of the log.
 
 The file is also read on an ordinary run, where it saves typing the account
-details. If eWeLink refuses the password, it is asked for instead.
+details. If eWeLink refuses the password, it is asked for instead. The
+emulator is the exception: its copy of the repository leaves `.env` out, so a
+run you sit through there is asked everything, as a real one is, while
+`tools/emulator/unattended-test.sh` hands `.env` to its run alone.
 
 ## Run it
 
@@ -68,7 +71,7 @@ terminal (a CI log, say), and is kept in `captures/unattended/<time>/`
 The terminal is the same size as the one running it, or 100x40 with none.
 `--size 120x50` sets it. Exit codes are the run's: 0 finished, 130 stopped
 at a question, 143 stopped by `--timeout`, anything else failed. The run's
-full log is in `captures/<run>/run.log` as usual.
+full log is in the run's `run.log`, under `captures/plugs/<MAC>/runs/`, as usual.
 
 ## In the emulator
 

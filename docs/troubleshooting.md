@@ -2,11 +2,11 @@
 
 Every problem listed here actually happened while this was being built. The
 screen only shows a line per stage, so when one stops, the full story is in
-the run's log, `captures/<name>/run.log` - the tool prints its path, and it is
+the run's log, `captures/plugs/<MAC>/runs/<date>/run.log` - the tool prints its path, and it is
 safe to share: what identifies you, your network or your plug is written as
 `<email>`, `<wifi-name>`, `<device-id>` and so on. Running
 again with `--verbose` shows the same detail as it happens. The run's own
-record is in `captures/<name>/autoflash-state.json`, with the phase evidence
+record is in `autoflash-state.json` in the same directory, with the phase evidence
 beside it.
 
 First thing to try, always: start it again - `start.cmd` on Windows, `sh

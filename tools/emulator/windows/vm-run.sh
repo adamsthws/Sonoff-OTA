@@ -101,9 +101,10 @@ press_any_key() {
     log "Setup did not start from the ISO within 10 minutes"
 }
 
-repo_tar() {  # $1: this checkout, without its private captures, as a tar
+repo_tar() {  # $1: this checkout, without its private captures or .env, as a tar
+    # Not .env: the conversion in Windows asks for the eWeLink account, as a real one does.
     tar -C /repo -cf "$1" --exclude=./.git --exclude=./.venv --exclude=./.python --exclude=./captures \
-        --exclude='*/__pycache__' .
+        --exclude=./.env --exclude='*/__pycache__' .
 }
 
 set_up() {  # $1: a disk $2 (a layer's name) has just been set up on; shows its log
@@ -246,9 +247,11 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     : > /run/authorized_keys
     [ -f "$CACHE/ssh/id_ed25519.pub" ] && cp "$CACHE/ssh/id_ed25519.pub" /run/authorized_keys
     # start.ps1 too, so a change to it needs no layer set up again.
+    # rm-f .env: a layer set up before it was left out may still hold one.
     guestfish --rw -a "$disk" -i <<EOF
 mkdir-p /S60/repo/captures
 mkdir-p /S60/openconsole
+rm-f /S60/repo/.env
 tar-in /run/repo.tar /S60/repo
 tar-in /run/captures.tar /S60/repo/captures
 tar-in /run/openconsole.tar /S60/openconsole

@@ -5,6 +5,7 @@
 #   tools/emulator/unattended-test.sh            from where the last run left the plug
 #   tools/emulator/unattended-test.sh --fresh    the plug back to stock first, and no earlier run
 #   tools/emulator/unattended-test.sh --keep     leave the emulator running afterwards
+#   tools/emulator/unattended-test.sh --plug=MAC which backed-up plug (else the one run last)
 #   tools/emulator/unattended-test.sh -- --new   anything after -- goes to the run itself
 #
 # Needs .env with the eWeLink account the dump's plug is in. It starts the
@@ -21,7 +22,7 @@ PLUG=192.168.60.50
 emu_args=(--cloud --yes --detach) keep=0 run_args=()
 while [ $# -gt 0 ]; do
     case "$1" in
-    --fresh|--pcap|--rebuild|--no-firewall) emu_args+=("$1") ;;
+    --fresh|--pcap|--rebuild|--no-firewall|--plug=*) emu_args+=("$1") ;;
     --keep) keep=1 ;;
     --) shift; run_args=("$@"); break ;;
     *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
@@ -43,13 +44,20 @@ until "${as_you[@]}" "$NAME" tmux has-session -t s60 >/dev/null 2>&1 &&
 done
 echo "The emulated plug is up; converting it unattended..."
 
+# The eWeLink account, for this run only: the emulator's copy of the
+# repository has no .env, so a run you sit through asks for it. Kept in the
+# container's /tmp, gone when it stops, and removed after the run anyway.
+answers=/tmp/s60-unattended.env
+"${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers" < "$ROOT/.env"
+[ "$keep" = 1 ] && trap 'docker exec "$NAME" rm -f "$answers" 2>/dev/null || true' EXIT
+
 # On a terminal the run is shown live; otherwise its final screen is printed.
 [ -t 1 ] && as_you+=(-t)
 stamp=$(date +%Y%m%d-%H%M%S)
 status=0
 "${as_you[@]}" -e S60_EMULATOR_URL=http://localhost:8080 -e S60_EMULATOR_SUDO_PASSWORD=s60 \
     -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/unattended_run.py --size 100x40 \
-    --save "captures/unattended/$stamp" -- "${run_args[@]}" || status=$?
+    --save "captures/unattended/$stamp" -- --env-file "$answers" "${run_args[@]}" || status=$?
 
 echo "On this computer: ${STATE#"$ROOT/"}/work/captures/unattended/$stamp/"
 [ "$keep" = 1 ] && echo "The emulator is still running: http://localhost:8080, or docker attach $NAME"

@@ -4,7 +4,8 @@
 #   tools/emulator/emu.sh            plug offline: nothing reaches the internet
 #   tools/emulator/emu.sh --cloud    plug and tool online (real plug must be unplugged)
 #   tools/emulator/emu.sh --yes      with --cloud: the real plug is known to be unplugged; don't ask
-#   tools/emulator/emu.sh --fresh    put the plug back to stock 1.2.0, and forget the run and the account
+#   tools/emulator/emu.sh --plug MAC which backed-up plug to run; asked when there are several
+#   tools/emulator/emu.sh --fresh    put the plug back to its Sonoff backup, and forget the run and the account
 #   tools/emulator/emu.sh --pcap     also record the plug's Wi-Fi traffic (captures/emulation/state/logs)
 #   tools/emulator/emu.sh --rebuild  rebuild the image first
 #   tools/emulator/emu.sh --detach   start in the background; join with: docker attach s60-emu
@@ -12,10 +13,12 @@
 #   tools/emulator/emu.sh --windows  Windows is the computer, wired in by windows_link.py
 #                                    (from Windows, start it all with tools/emulator/emu.ps1)
 #
-# Needs the private stock dump copies in captures/emulation/ (flash.bin,
-# efuse.bin; see docs/emulator.md). Everything the emulator writes stays in
-# captures/emulation/state/, which is private and Git-ignored (from a Windows
-# checkout under WSL: ~/.local/share/s60-emu/state, on WSL's own disk).
+# Runs a plug from its Sonoff backup, which every conversion keeps in
+# captures/plugs/<MAC>/sonoff-backup/ (or a dump in captures/emulation/; see
+# docs/emulator.md). The backup is only read: the plug runs a copy. Everything
+# the emulator writes stays in captures/emulation/state/, which is private and
+# Git-ignored (from a Windows checkout under WSL: ~/.local/share/s60-emu/state,
+# on WSL's own disk); each plug's flash is kept there between runs.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -30,9 +33,12 @@ PY=$ROOT/.venv/bin/python
 [ -x "$PY" ] || PY=$HOME/.local/share/s60-emu/venv/bin/python
 IMAGE=s60-emu
 
-cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 yes=0 tty=-it
-for arg in "$@"; do
+cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 yes=0 tty=-it plug=""
+while [ $# -gt 0 ]; do
+    arg=$1
     case "$arg" in
+    --plug) [ $# -ge 2 ] || { echo "--plug needs a MAC address" >&2; exit 2; }; plug=$2; shift ;;
+    --plug=*) plug=${arg#--plug=} ;;
     --cloud) cloud=1 ;;
     --yes) yes=1 ;;
     --fresh) fresh=1 ;;
@@ -41,12 +47,9 @@ for arg in "$@"; do
     --detach) tty=-dt ;;
     --no-firewall) firewall=0 ;;
     --windows) windows=1 ;;
-    *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
-done
-
-for f in "$EMU/flash.bin" "$EMU/efuse.bin"; do
-    [ -f "$f" ] || { echo "Missing $f - see docs/emulator.md" >&2; exit 1; }
+    shift
 done
 "$PY" -c 'import esp_idf_nvs_partition_gen' 2>/dev/null || {
     venv=$(dirname "$(dirname "$PY")")
@@ -57,6 +60,30 @@ done
 if docker ps -q --filter "name=^s60-emu$" | grep -q .; then
     echo "The emulator is already running. Attach to it with: docker attach s60-emu" >&2
     exit 1
+fi
+
+# -- which plug ------------------------------------------------------------------
+mkdir -p -m 0700 "$STATE" "$STATE/logs" "$STATE/plugs"
+efuse_mac() {
+    "$PY" -I -c 'import sys; d=open(sys.argv[1],"rb").read(); print(":".join(f"{b:02x}" for b in (d[0x18:0x1C]+d[0x1C:0x1E])[::-1]))' "$1"
+}
+# The plug whose flash is in $STATE/flash.bin. From before plugs were chosen,
+# that flash came from the dump in captures/emulation/.
+if [ -f "$STATE/plug" ]; then
+    was=$(sed -n 2p "$STATE/plug")
+elif [ -f "$EMU/efuse.bin" ]; then
+    was=$(efuse_mac "$EMU/efuse.bin")
+else
+    was=""
+fi
+"$PY" -I "$ROOT/tools/emulator/choose_plug.py" --out "$STATE/plug" ${plug:+--plug "$plug"} || exit $?
+SRC=$(sed -n 1p "$STATE/plug")
+mac=$(sed -n 2p "$STATE/plug")
+# Another plug than last time: its own flash, kept from its last run, comes
+# back, and the one that was running is put by for its next.
+if [ "$mac" != "$was" ]; then
+    [ -n "$was" ] && [ -f "$STATE/flash.bin" ] && mv "$STATE/flash.bin" "$STATE/plugs/${was//:/-}.bin"
+    [ -f "$STATE/plugs/${mac//:/-}.bin" ] && mv "$STATE/plugs/${mac//:/-}.bin" "$STATE/flash.bin"
 fi
 
 # -- the image -----------------------------------------------------------------
@@ -76,29 +103,31 @@ if [ "$rebuild" = 1 ] || [ "$(docker image inspect -f '{{index .Config.Labels "s
 fi
 
 # -- the plug's flash and eFuses ---------------------------------------------
-mkdir -p -m 0700 "$STATE" "$STATE/logs"
 if [ "$fresh" = 1 ]; then
     rm -rf "$STATE/flash.bin" "$STATE/work/captures"
-    echo "The plug is back to stock 1.2.0; the previous run and eWeLink account are forgotten."
+    echo "The plug is back to its Sonoff backup; the previous run and eWeLink account are forgotten."
 fi
 if [ ! -f "$STATE/flash.bin" ]; then
     # Home Wi-Fi rewritten to the emulator's open network, Bluetooth start-up
     # skipped (the emulator has no Bluetooth), re-sealed for the bootloader.
-    "$PY" -I "$ROOT/tools/emulator/rewrite_nvs.py" "$EMU/flash.bin" "$STATE/wifi-flash.bin" \
+    "$PY" -I "$ROOT/tools/emulator/rewrite_nvs.py" "$SRC/flash.bin" "$STATE/wifi-flash.bin" \
         2>&1 | grep -v 'absolute path given' >/dev/null
     "$PY" -I "$ROOT/tools/emulator/patch_stock.py" "$STATE/wifi-flash.bin" "$STATE/flash.bin" >/dev/null
     rm -f "$STATE/wifi-flash.bin"
 fi
-cp "$EMU/efuse.bin" "$STATE/efuse.bin" && truncate -s 1024 "$STATE/efuse.bin"
+# Copied by content: the backup's files are read-only, and a copy would be too.
+rm -f "$STATE/efuse.bin" && cat "$SRC/efuse.bin" > "$STATE/efuse.bin" && truncate -s 1024 "$STATE/efuse.bin"
 chmod 0600 "$STATE"/*.bin
-mac=$("$PY" -I -c 'import sys; d=open(sys.argv[1],"rb").read(); print(":".join(f"{b:02x}" for b in (d[0x18:0x1C]+d[0x1C:0x1E])[::-1]))' "$EMU/efuse.bin")
 
 # -- the "computer": a copy of this repository ---------------------------------
 # A copy, so a run's lock renames and captures never touch the real checkout.
 # The code is refreshed on every start, and the run's captures are kept.
+# Not .env: a run you sit through asks for the eWeLink account, as a real
+# one does. unattended-test.sh hands it to its run alone.
 mkdir -p "$STATE/work/captures"
 rsync -a --delete --exclude /captures/ --exclude /.venv/ --exclude /.python/ --exclude /.git/ \
-      --exclude __pycache__/ "$ROOT/" "$STATE/work/"
+      --exclude /.env --exclude __pycache__/ "$ROOT/" "$STATE/work/"
+rm -f "$STATE/work/.env"  # one copied before it was left out: --delete spares excluded files
 # Not the firmware bundle in captures/safeboot-recovery-migration: a real
 # bundle is set up for the real home Wi-Fi. The run builds its own, as a new
 # user's would (it downloads the official files, so it needs --cloud).
@@ -141,7 +170,7 @@ exec "${awake[@]}" docker run --rm $tty --name s60-emu --hostname s60-emu-comput
     --cap-add NET_ADMIN --device /dev/net/tun \
     --sysctl net.ipv4.ip_forward="$(( cloud || windows ))" \
     "${publish[@]}" \
-    -v "$STATE:/state" -v "$EMU/flash.bin:/secrets/stock-flash.bin:ro" \
+    -v "$STATE:/state" -v "$SRC/flash.bin:/secrets/stock-flash.bin:ro" \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e PLUG_MAC="$mac" \
     -e CLOUD="$cloud" -e PCAP="$pcap" -e FIREWALL="$firewall" -e WINDOWS="$windows" \
     -e S60_EMULATOR_URL=http://localhost:8080 \

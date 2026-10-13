@@ -28,7 +28,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import IO
+from typing import IO, Callable
 
 from . import __version__
 
@@ -172,6 +172,20 @@ def finish() -> None:
         _s.transient_rows = None
         _s.name_width = 0
         _s.after_stage = False
+
+
+def move_log(move: Callable[[], Path]) -> None:
+    """Close the log while `move` moves its directory, then carry on in the
+    log at the path it returns - Windows will not move a directory with a
+    file open in it."""
+    with _lock:
+        if _s.log is not None:
+            _s.log.close()
+            _s.log = None
+        path = move()
+        if _s.log_path is not None:
+            _s.log = path.open("a", encoding="utf-8")
+            _s.log_path = path
 
 
 def log_path() -> Path | None:
@@ -484,7 +498,8 @@ def stage_begin(number: int, total: int, name: str) -> None:
 
 
 def stage_end(outcome: str) -> None:
-    """outcome: "complete", "stopped" or "already done"."""
+    """outcome: "complete", "stopped", "already done" or "skipped" (a stage
+    the run does not need, passed over)."""
     with _lock:
         if _s.stage is None:
             return
@@ -493,7 +508,8 @@ def stage_end(outcome: str) -> None:
         line = f"{_s.stage} - {outcome}{timing}"
         _write_log(line)
         if _s.concise:
-            colour = {"complete": GREEN, "already done": GREEN, "stopped": RED}.get(outcome)
+            colour = {"complete": GREEN, "already done": GREEN, "skipped": GREEN,
+                      "stopped": RED}.get(outcome)
             word = outcome.capitalize()
             plain = f"{_s.stage_screen} - {word}{timing}"
             text = plain if not colour else (

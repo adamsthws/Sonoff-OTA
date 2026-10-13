@@ -6,9 +6,10 @@
 # browser (noVNC) or over Remote Desktop, and every run starts from a clean copy of it.
 #
 #   tools/emulator/windows-test.sh [--cloud] [--fresh] [--no-firewall] [--rebuild]
-#       [--classic-console] [--first-run] [--rebuild-layer=installed|rig|tool]
+#       [--plug=MAC] [--classic-console] [--first-run] [--rebuild-layer=installed|rig|tool]
 #
-# Options as emu.sh's (a conversion needs --cloud). The conversion runs in
+# Options as emu.sh's (a conversion needs --cloud); which backed-up plug runs
+# is asked first when there are several. The conversion runs in
 # OpenConsole, Windows Terminal's own console, as on Windows 11; with
 # --classic-console in Windows' classic one, as on Windows 10. Windows is kept
 # in layers: installed (from Microsoft's evaluation ISO, 8.2 GB, no sign-up),
@@ -53,16 +54,17 @@ fi
 cap_mb=$(( ram_mb + 1024 ))
 SSH_PORT=${S60_WINDOWS_SSH_PORT:-2222}
 
-emu_flags=() rebuild=0 console=openconsole from=tool rebuild_layer="" fresh=0
+emu_flags=() rebuild=0 console=openconsole from=tool rebuild_layer="" fresh=0 plug=""
 for arg in "$@"; do
     case "$arg" in
+    --plug=*) plug=${arg#--plug=} ;;
     --first-run) from=rig ;;
     --rebuild-layer=installed|--rebuild-layer=rig|--rebuild-layer=tool) rebuild_layer=${arg#*=} ;;
     --classic-console) console=classic ;;
     --fresh) fresh=1; emu_flags+=("$arg") ;;
     --cloud|--no-firewall|--pcap) emu_flags+=("$arg") ;;
     --rebuild) rebuild=1; emu_flags+=("$arg") ;;
-    *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
 done
 
@@ -122,9 +124,12 @@ if [ "$(uname -s)" != Linux ] || [ ! -e /dev/kvm ]; then
     say "tools/emulator/windows-bootstrap.ps1 (docs/emulator.md, \"On a Windows computer\")."
     exit 1
 fi
-for f in "$ROOT/captures/emulation/flash.bin" "$ROOT/captures/emulation/efuse.bin"; do
-    [ -f "$f" ] || { say "Missing $f - see docs/emulator.md"; exit 1; }
-done
+# Which plug, asked now rather than after Windows has started.
+chosen=$(mktemp)
+python3 -I "$ROOT/tools/emulator/choose_plug.py" --out "$chosen" ${plug:+--plug "$plug"} ||
+    { rm -f "$chosen"; exit 1; }
+emu_flags+=("--plug=$(sed -n 2p "$chosen")")
+rm -f "$chosen"
 
 sudo_steps=() user_steps=() plan=()
 pkg=""

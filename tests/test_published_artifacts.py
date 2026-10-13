@@ -26,7 +26,7 @@ class PublishedArtifactTests(unittest.TestCase):
 
     def test_the_run_installs_the_pinned_bridge(self):
         from tools.s60_autoflash import BRIDGE_OTA, ROOT
-        self.assertEqual(BRIDGE_OTA.name, "s60-ota-bridge-4.4.1.ota")
+        self.assertEqual(BRIDGE_OTA.name, "s60-ota-bridge-4.4.2.ota")
         line = f"{sha256_bytes((ROOT / BRIDGE_OTA).read_bytes())}  {BRIDGE_OTA.as_posix()}"
         self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
 
@@ -46,6 +46,13 @@ class PublishedArtifactTests(unittest.TestCase):
         self.assertEqual(report["wrapper"]["record_version"], version)
         self.assertEqual(app_version(wrapped[100:]), version)
         self.assertIn(f"bridge {version}\n".encode(), wrapped)
+
+    def test_the_bridge_can_back_up_the_stock_flash(self):
+        from tools.s60_autoflash import BRIDGE_OTA, ROOT
+        wrapped = (ROOT / BRIDGE_OTA).read_bytes()
+        self.assertIn(b"/flash\0", wrapped)
+        self.assertIn(b"/efuse\0", wrapped)
+        self.assertIn(b"/update\0", wrapped)
 
     def test_the_published_startup_firmware_saves_the_wifi(self):
         from tools.safeboot_migration import PUBLISHED_RECOVERY_FILE, PUBLISHED_RECOVERY_SHA256

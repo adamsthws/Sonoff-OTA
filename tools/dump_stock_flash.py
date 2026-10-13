@@ -24,6 +24,7 @@ import os
 import struct
 import sys
 import time
+import urllib.error
 import urllib.request
 import zlib
 from pathlib import Path
@@ -33,6 +34,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.analyze_vendor_ota import parse_esp_image  # noqa: E402
+from tools.autoflash import plugs  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 PARTITION_TABLE = 0x8000
@@ -158,39 +160,95 @@ def is_readout_bridge(host: str) -> bool:
     return READOUT_STATUS in status.decode("ascii", "replace")
 
 
-def save_dump(host: str, label: str) -> int:
-    """Read, check and save one dump from the readout bridge at `host`.
+class IncompleteDump(OSError):
+    """The flash arrived short, so nothing from it is worth keeping."""
 
-    0 when the dump is complete and well formed; nothing is kept from a short
-    transfer.
-    """
-    print("Reading the whole flash (about a minute)...")
+
+def plug_sha256(host: str) -> str | None:
+    """The SHA-256 of the whole flash as the bridge works it out on the plug;
+    None from a bridge older than 4.4.2, which cannot."""
+    try:
+        body, _ = fetch(host, "/flash-sha256", timeout=60)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+    return body.decode("ascii", "replace").strip().lower()
+
+
+def read_dump(host: str) -> tuple[bytes, bytes, dict[str, Any]]:
+    """The whole flash and the eFuse registers from a bridge at `host`, checked
+    byte for byte against the plug's own hash of its flash where it has one."""
     flash, headers = fetch(host, "/flash", timeout=300)
     declared = int(headers.get("X-Flash-Size", "0"))
     if declared == 0 or len(flash) != declared:
-        print(f"Incomplete: received {len(flash):,} of {declared:,} bytes. Nothing kept.", file=sys.stderr)
-        return 1
+        raise IncompleteDump(f"received {len(flash):,} of {declared:,} bytes")
+    on_plug = plug_sha256(host)
+    received = hashlib.sha256(flash).hexdigest()
+    if on_plug is not None and on_plug != received:
+        raise IncompleteDump(f"what arrived (SHA-256 {received[:16]}...) is not what is on "
+                             f"the plug ({on_plug[:16]}...)")
     efuse, _ = fetch(host, "/efuse", timeout=10)
-
     report = check(flash)
     report["efuse_sha256"] = hashlib.sha256(efuse).hexdigest()
-    out = ROOT / "captures" / "flash-readout" / f"{label}-{time.strftime('%Y%m%d-%H%M%S')}"
+    # True: identical to the plug's flash, by its own hash; None: not checkable.
+    report["matches_plug"] = True if on_plug is not None else None
+    return flash, efuse, report
+
+
+def is_good(report: dict[str, Any]) -> bool:
+    """Whether a dump is well formed enough to boot again, or to emulate."""
+    return report["partition_table_md5_valid"] and report["otadata_selects"] is not None
+
+
+def write_dump(out: Path, flash: bytes, efuse: bytes, report: dict[str, Any]) -> None:
+    """Keep a dump in a new directory `out` that only this user can read."""
     out.mkdir(parents=True, mode=0o700)
     write_private(out / "flash.bin", flash)
     write_private(out / "efuse.bin", efuse)
     write_private(out / "report.json", (json.dumps(report, indent=2) + "\n").encode())
 
-    print(f"Saved to {out.relative_to(ROOT)} (private: it holds the Wi-Fi password).")
-    print(f"  {len(flash):,} bytes, SHA-256 {report['sha256']}")
-    print(f"  partition table MD5: {'valid' if report['partition_table_md5_valid'] else 'INVALID'}")
+
+def summary(report: dict[str, Any]) -> list[str]:
+    """What a dump holds, a line each: its size, the table, each partition."""
+    lines = [f"{report['size']:,} bytes, SHA-256 {report['sha256']}",
+             f"partition table MD5: {'valid' if report['partition_table_md5_valid'] else 'INVALID'}"]
+    if "matches_plug" in report:
+        lines.append("byte for byte the same as the plug's flash, by the plug's own SHA-256"
+                     if report["matches_plug"] else "not checked against the plug (bridge before 4.4.2)")
     for item in report["partitions"]:
         app = item.get("app")
         what = f"{app['project']} {app['version']} ({app['date']})" if app else item.get("error", "")
         valid = "" if "image_valid" not in item else (" valid" if item["image_valid"] else " INVALID")
-        print(f"  {item['label']:<10} {item['offset']}{valid} {what}")
-    print(f"  otadata boots: {report['otadata_selects']}")
-    good = report["partition_table_md5_valid"] and report["otadata_selects"] is not None
-    return 0 if good else 1
+        lines.append(f"{item['label']:<10} {item['offset']}{valid} {what}")
+    lines.append(f"otadata boots: {report['otadata_selects']}")
+    return lines
+
+
+def save_dump(host: str, label: str, version: str | None = None) -> int:
+    """Read, check and save one dump from the readout bridge at `host`.
+
+    Kept under captures/flash-readout/, and as the plug's Sonoff backup
+    (tools/autoflash/plugs.py) if it has none yet.  0 when the dump is complete
+    and well formed; nothing is kept from a short transfer.
+    """
+    print("Reading the whole flash (about a minute)...")
+    try:
+        flash, efuse, report = read_dump(host)
+    except IncompleteDump as exc:
+        print(f"Incomplete: {exc}. Nothing kept.", file=sys.stderr)
+        return 1
+    out = ROOT / "captures" / "flash-readout" / f"{label}-{time.strftime('%Y%m%d-%H%M%S')}"
+    write_dump(out, flash, efuse, report)
+
+    print(f"Saved to {out.relative_to(ROOT)} (private: it holds the Wi-Fi password).")
+    for line in summary(report):
+        print(f"  {line}")
+    if not is_good(report):
+        return 1
+    backup, saved = plugs.save_backup(flash, efuse, report, version)
+    print(f"{'Kept as' if saved else 'It already has'} this plug's Sonoff backup: {backup.relative_to(ROOT)}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

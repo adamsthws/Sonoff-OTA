@@ -290,6 +290,17 @@ class ConciseTests(OutputTestCase):
         self.assertIn(f"{output.GREEN}Stage 1 of 1{output.RESET} - Checking the files - "
                       f"{output.GREEN}Already done{output.RESET}", screen)
 
+    def test_a_skipped_stage_is_green(self):
+        # The backup, when the person carries on without one: nothing went wrong.
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True):
+                output.stage_begin(6, 15, "Backing up the Sonoff firmware")
+                output.stage_end("skipped")
+        screen, log = self.run_with(FakeTerminal(), False, body)
+        self.assertIn(f"{output.GREEN}Stage  6 of 15{output.RESET} - Backing up the Sonoff firmware - "
+                      f"{output.GREEN}Skipped{output.RESET}", screen)
+        self.assertIn("Stage 6 of 15 - Backing up the Sonoff firmware - skipped", log)
+
     def test_without_cursor_control_the_question_stays(self):
         def body():
             output.stage_begin(5, 14, "Installing the installer firmware")
@@ -569,6 +580,23 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Typed the Wi-Fi"], "No")
         self.assertEqual(fields["Joined setup network"], "No")
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60TPG")
+
+    def test_the_report_says_how_the_backup_went_but_not_where_it_is(self):
+        import tools.s60_autoflash as af
+        mac_path = "captures/plugs/58-cf-79-01-02-03/sonoff-backup"
+        for outcome, said in (("saved", "Completed"), ("failed", "Failed - carried on without one"),
+                              ("existing", "Already taken by an earlier run")):
+            with self.subTest(outcome=outcome):
+                ctx = self.ctx(backup_outcome=outcome, stock_backup=mac_path,
+                               plug_mac="58:cf:79:01:02:03")
+                fields = dict(af.report_fields(ctx, 441, False))
+                self.assertEqual(fields["Sonoff backup"], said)
+                report = af.report_markdown(list(fields.items()))
+                self.assertNotIn("58", report.split("Sonoff backup")[1].splitlines()[0])
+                self.assertNotIn("sonoff-backup", report)
+        # A run from before the backup existed.
+        self.assertEqual(dict(af.report_fields(self.ctx(backup_outcome=""), 441, False))["Sonoff backup"],
+                         "Not taken")
 
     def test_hardware_that_was_not_checked_says_so(self):
         import tools.s60_autoflash as af

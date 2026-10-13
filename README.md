@@ -129,10 +129,11 @@ The tool leaves your computer as it found it:
   (macOS asks for your permission and password beforehand).
 
 Run the same command for every plug: it carries on an unfinished run, or
-starts a new one. The screen shows one line per stage as it goes and it walks you through the conversion. Everything else goes to a log, `captures/<run>/run.log`, and `--verbose` shows it all live.
+starts a new one. The screen shows one line per stage as it goes and it walks you through the conversion. Everything else goes to a log, `captures/plugs/<MAC>/runs/<date>/run.log`, and `--verbose` shows it all live.
 
-Everything else - finding the plug, installing Tasmota, rebuilding its memory
-and checking the result - happens by itself.
+Everything else - finding the plug, backing up its Sonoff firmware,
+installing Tasmota, rebuilding its memory and checking the result - happens
+by itself.
 [What actually happens to your plug](docs/what-happens.md#the-run-step-by-step)
 goes through it stage by stage.
 
@@ -167,6 +168,13 @@ over USB. That means normal Tasmota upgrades from then on, more room for
 firmware than the Sonoff layout allowed, and a filesystem the plug never had.
 The [layout itself](docs/technical-details.md#the-finished-memory-layout) is
 in the technical details.
+
+You also keep a full backup of the plug's Sonoff firmware, filed under its
+MAC address in `captures/plugs/`: for going back to Sonoff over USB-serial
+one day, or for running your own plug in the
+[emulator](docs/emulator.md). It holds your Wi-Fi password, so keep it
+private; [Your Sonoff backup](docs/technical-details.md#your-sonoff-backup)
+has the detail.
 
 After it finishes, check the physical side yourself: the relay clicks, the
 button toggles it, the LED follows, and with a load plugged in the voltage,
@@ -216,7 +224,7 @@ of your own, or open an [issue](https://github.com/adamsthws/Sonoff-OTA/issues)
 if something clearly needs fixing in the code - and link it from your report
 so the thread stays complete.
 
-The run's log, `captures/<run>/run.log`, has the full detail if you are asked
+The run's log, `captures/plugs/<MAC>/runs/<date>/run.log`, has the full detail if you are asked
 for it. It is safe to share: your eWeLink email, Wi-Fi name and password, the
 plug's device id, name and hardware address, public IP addresses and your
 home folder are written as `<email>`, `<wifi-name>` and so on. Addresses on

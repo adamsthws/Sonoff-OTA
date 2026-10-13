@@ -4,8 +4,9 @@ against the emulated S60 (see docs/emulator.md, "On Windows").
 
     tools\emulator\emu.ps1 -Cloud     plug and tool online (real plug must be unplugged)
 
-Options as emu.sh's: -Cloud -Fresh -Pcap -Rebuild -NoFirewall, and -Distro to
-pick the WSL distribution (Ubuntu-24.04 otherwise).
+Options as emu.sh's: -Cloud -Fresh -Pcap -Rebuild -NoFirewall, -Plug <MAC> for
+which backed-up plug (asked in the emulator's window when there are several),
+and -Distro to pick the WSL distribution (Ubuntu-24.04 otherwise).
 
 Opens the emulator (emu.sh --windows, under WSL) in a window of its own - the
 plug's power and serial log are there - and the link that puts Windows on its
@@ -18,7 +19,7 @@ the adapter - is listed first, and installed after one question
 (tools\emulator\windows-bootstrap.ps1 -LocalEmulator).
 #>
 param([switch]$Cloud, [switch]$Fresh, [switch]$Pcap, [switch]$Rebuild, [switch]$NoFirewall,
-      [string]$Distro = "Ubuntu-24.04")
+      [string]$Plug = "", [string]$Distro = "Ubuntu-24.04")
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 
@@ -44,6 +45,10 @@ if ($Fresh) { $flags += "--fresh" }
 if ($Pcap) { $flags += "--pcap" }
 if ($Rebuild) { $flags += "--rebuild" }
 if ($NoFirewall) { $flags += "--no-firewall" }
+if ($Plug) {
+    if ($Plug -notmatch '^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$') { throw "-Plug takes a MAC address, such as 58:cf:79:01:02:03" }
+    $flags += "--plug=$Plug"
+}
 
 # One command line, not a list: Start-Process joins a list without quoting.
 # If emu.sh stops, its window stays open until its reason has been read.

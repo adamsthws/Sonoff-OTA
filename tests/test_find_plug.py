@@ -117,9 +117,29 @@ class FindAccountPlugTests(unittest.TestCase):
             self.assertEqual(af.find_account_plug(self.ctx(), [S60]), "192.168.0.50")
         self.assertIn("turn on LAN Control", shown.call_args.args[1][0])
 
+    def clock(self):
+        """A clock that moves on 10 s for every sleep, and no real waiting."""
+        now = [0.0]
+        return (mock.patch.object(af.time, "monotonic", side_effect=lambda: now[0]),
+                mock.patch.object(af.time, "sleep", side_effect=lambda s: now.__setitem__(0, now[0] + s)))
+
+    def test_a_plug_just_started_is_waited_for_until_ewelink_sees_it(self):
+        # It answers here a few seconds before eWeLink shows it online.
+        offline = {**S60, "online": False}
+        ctx = self.ctx()
+        ctx.account_devices = mock.Mock(side_effect=[[offline], [S60]])
+        monotonic, sleep = self.clock()
+        with mock.patch.object(af, "sight_plugs",
+                               side_effect=lambda plugs: [af.Sighting(p, "192.168.0.50", True) for p in plugs]), \
+             mock.patch.object(af, "ask_choice") as asked, monotonic, sleep, \
+             mock.patch.object(af, "tell"), mock.patch.object(af, "say"):
+            self.assertEqual(af.find_account_plug(ctx, [offline]), "192.168.0.50")
+        asked.assert_not_called()
+
     def test_a_plug_without_internet_is_not_chosen(self):
         sighting = af.Sighting(af.account_plug({**S60, "online": False}), "192.168.0.50", True)
-        with mock.patch.object(af, "sight_plugs", return_value=[sighting]), \
+        monotonic, sleep = self.clock()
+        with mock.patch.object(af, "sight_plugs", return_value=[sighting]), monotonic, sleep, \
              mock.patch.object(af, "ask_choice", return_value=2), \
              mock.patch.object(af, "ask_ipv4", return_value="192.168.0.99"), \
              mock.patch.object(af, "section") as shown, \
