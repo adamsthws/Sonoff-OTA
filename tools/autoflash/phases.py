@@ -291,7 +291,7 @@ class PhaseRunner:
                 raise
             said = self._show_plug_console()
             if said:
-                raise PhaseError(f"{exc}; the plug says: {said}") from exc
+                raise PhaseError(f"{exc}; its console says: {said}") from exc
             raise
         finally:
             if process.poll() is None:
@@ -344,7 +344,7 @@ class PhaseRunner:
 
     def _plug_answers(self) -> bool:
         try:
-            return self.device.reachable(timeout=3.0)
+            return self.device.answers(timeout=3.0)
         except Exception:  # noqa: BLE001 - not answering, however it fails
             return False
 
@@ -363,7 +363,7 @@ class PhaseRunner:
                 checked = now
                 if self._plug_answers() and process.poll() is None:
                     raise PhaseError(
-                        f"the plug stopped the {phase} without being able to say why here"
+                        f"the plug stopped the {phase} without reaching this computer"
                     )
 
     def _drive(self, phase, process, captured, reader, confirm, exec_timeout,

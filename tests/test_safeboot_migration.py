@@ -600,6 +600,9 @@ class MigrationValidationTests(unittest.TestCase):
                 self.assertIn("tasmota.millis(300000)", source, phase)  # Wi-Fi down
                 self.assertIn("tasmota.millis(60000)", source, phase)   # Wi-Fi up
                 self.assertIn("window.over()", source, phase)
+                # Not set_timeouts(): on the emulated plug it left Tasmota's web
+                # server unable to answer after a phase gave up.
+                self.assertNotIn("set_timeouts", source, phase)
             # Commit and restore still hand back their armed closure by name.
             self.assertTrue(rendered["commit"].rstrip().endswith("return commit"))
             self.assertTrue(rendered["restore"].rstrip().endswith("return restore"))

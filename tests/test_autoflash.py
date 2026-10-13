@@ -640,7 +640,7 @@ class PhaseWaitTests(unittest.TestCase):
 
     def test_a_plug_that_answers_after_going_quiet_has_stopped(self):
         from tools.autoflash.phases import PhaseError
-        with self.assertRaisesRegex(PhaseError, "stopped the stage without being able to say why"):
+        with self.assertRaisesRegex(PhaseError, "stopped the stage without reaching this computer"):
             self.wait(self.Server(), answers=[True])
 
     def test_a_busy_plug_is_waited_on(self):
@@ -729,7 +729,7 @@ class RetryTests(unittest.TestCase):
             self.addCleanup(directory.cleanup)
             state = RunState.open(Path(directory.name))
             title, _ = autoflash.STEP_INDEX[step]
-            failing = mock.Mock(side_effect=PhaseError("the plug stopped the commit without being able to say why here"))
+            failing = mock.Mock(side_effect=PhaseError("the plug stopped the commit without reaching this computer"))
             with mock.patch.dict(autoflash.STEP_INDEX, {step: (title, failing)}), \
                  mock.patch.object(autoflash, "begin_stage"), \
                  mock.patch.object(autoflash.output, "stage_end"), \
@@ -750,7 +750,7 @@ class BusyPlugTests(unittest.TestCase):
         state.set_input("plug_ip", "10.0.0.63")
         if d1_done:
             state.mark("D1", DONE)
-        device = mock.Mock(reachable=mock.Mock(side_effect=list(answers)))
+        device = mock.Mock(answers=mock.Mock(side_effect=list(answers)))
         return SimpleNamespace(state=state, device=device), pings
 
     def wait(self, ctx, pings):
@@ -773,7 +773,7 @@ class BusyPlugTests(unittest.TestCase):
     def test_a_busy_plug_is_waited_for_until_it_answers(self):
         ctx, pings = self.ctx(answers=[False, False, False, True])
         told = self.wait(ctx, pings)
-        self.assertEqual(ctx.device.reachable.call_count, 4)
+        self.assertEqual(ctx.device.answers.call_count, 4)
         self.assertIn("answering again", told.call_args.args[0])
 
     def test_a_plug_off_the_network_is_left_to_the_steps(self):
@@ -783,7 +783,7 @@ class BusyPlugTests(unittest.TestCase):
     def test_before_tasmota_nothing_is_checked(self):
         ctx, pings = self.ctx(d1_done=False)
         self.wait(ctx, pings)
-        ctx.device.reachable.assert_not_called()
+        ctx.device.answers.assert_not_called()
 
 
 class UserActionWaitTests(unittest.TestCase):

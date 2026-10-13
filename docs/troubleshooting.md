@@ -242,12 +242,13 @@ The plug's own reason. Two kinds:
   below -75 dBm). These stages are safe to repeat, so the tool tries them
   again by itself, up to three times, before stopping.
 
-**"the plug stopped the ... without being able to say why here"** or **"the
-plug has sent nothing for 6 minutes"**
+**"the plug stopped the ... without reaching this computer"** or **"the plug
+has sent nothing for 6 minutes"**
 
 The plug lost its connection to this computer, so its reason could not arrive.
 The tool then reads the plug's own console and shows the last lines, marked
-`The plug's console:` - the reason is usually the last of them. Then as above.
+`The plug's console:`, and gives the plug's reason from there ("its console
+says: ..."). Then as above.
 
 **How long it waits**
 

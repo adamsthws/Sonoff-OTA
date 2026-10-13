@@ -253,6 +253,22 @@ class Device:
         except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError):
             return False
 
+    def answers(self, timeout: float = 3.0) -> bool:
+        """True when the plug's web page answers - without a trace on the plug.
+
+        Not a console command, as reachable() sends: its output goes into the
+        plug's console log, which keeps only the last few kilobytes, and would
+        push out what the plug said there when a step stopped.
+        """
+        try:
+            self._get("/", {}, timeout)
+            return True
+        except urllib.error.HTTPError:
+            return True
+        except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError,
+                http.client.HTTPException):
+            return False
+
     def wait_reachable(self, timeout: float = 180.0, poll: float = 3.0) -> float:
         """Block until the plug answers.  Returns seconds waited."""
         started = time.monotonic()

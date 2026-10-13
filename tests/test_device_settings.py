@@ -67,6 +67,12 @@ class SettingsBackupTests(unittest.TestCase):
         self.assertEqual(lines[-1], "00:00:00.316 S60 recovery: Wi-Fi settings saved for the next firmware")
         self.assertTrue(self.server.referer)  # without one the page closes the connection
 
+    def test_answering_is_checked_without_a_console_command(self):
+        # A command's output would push the plug's own last words out of its
+        # short console log; the main page leaves nothing there.
+        self.assertTrue(self.device.answers())
+        self.assertFalse(Device("127.0.0.1:1").answers(timeout=0.5))
+
     def test_a_restore_arms_the_restore_page_first(self):
         # Without visiting /rs first, Tasmota would take the file as firmware.
         self.device.restore_settings(b"\x09\x12" + bytes(4094))

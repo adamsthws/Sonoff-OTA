@@ -2709,14 +2709,14 @@ def wait_while_plug_busy(ctx: Context) -> None:
     if not host or not ctx.state.is_done("D1") or ctx.state.is_done(STEPS[-1][0]):
         return  # not running Tasmota yet, or finished
     device = ctx.device
-    if device.reachable(timeout=3.0) or not hostsys.ping_ok(host):
+    if device.answers(timeout=3.0) or not hostsys.ping_ok(host):
         return  # answering, or not on the network at all: the steps say which
     tell("    The plug is on the network but not answering yet. It is most likely still")
     tell("    finishing the step that was stopped, and gives up within a few minutes.")
     started = time.monotonic()
     while time.monotonic() - started < BUSY_PLUG_WAIT:
         output.progress(f"waiting for the plug to finish... {time.monotonic() - started:.0f}s")
-        if device.reachable(timeout=3.0):
+        if device.answers(timeout=3.0):
             output.progress_clear()
             tell("    It is answering again.")
             return
