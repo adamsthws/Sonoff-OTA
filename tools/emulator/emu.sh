@@ -3,6 +3,7 @@
 #
 #   tools/emulator/emu.sh            plug offline: nothing reaches the internet
 #   tools/emulator/emu.sh --cloud    plug and tool online (real plug must be unplugged)
+#   tools/emulator/emu.sh --yes      with --cloud: the real plug is known to be unplugged; don't ask
 #   tools/emulator/emu.sh --fresh    put the plug back to stock 1.2.0, and forget the run and the account
 #   tools/emulator/emu.sh --pcap     also record the plug's Wi-Fi traffic (captures/emulation/state/logs)
 #   tools/emulator/emu.sh --rebuild  rebuild the image first
@@ -29,17 +30,18 @@ PY=$ROOT/.venv/bin/python
 [ -x "$PY" ] || PY=$HOME/.local/share/s60-emu/venv/bin/python
 IMAGE=s60-emu
 
-cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 tty=-it
+cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 yes=0 tty=-it
 for arg in "$@"; do
     case "$arg" in
     --cloud) cloud=1 ;;
+    --yes) yes=1 ;;
     --fresh) fresh=1 ;;
     --pcap) pcap=1 ;;
     --rebuild) rebuild=1 ;;
     --detach) tty=-dt ;;
     --no-firewall) firewall=0 ;;
     --windows) windows=1 ;;
-    *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
 done
 
@@ -107,7 +109,9 @@ if [ "$fresh" = 0 ] && [ ! -f "$STATE/work/captures/settings.json" ] && [ -f "$R
 fi
 
 # -- the cloud ----------------------------------------------------------------
-if [ "$cloud" = 1 ]; then
+if [ "$cloud" = 1 ] && [ "$yes" = 1 ]; then
+    echo "  --yes: the real plug is taken to be unplugged, as it must be while this runs."
+elif [ "$cloud" = 1 ]; then
     cat <<EOF
 
   The emulated plug is a clone of your real plug: same eWeLink device id,

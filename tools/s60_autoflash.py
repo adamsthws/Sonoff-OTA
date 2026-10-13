@@ -30,7 +30,7 @@ from typing import Any, Callable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tools.autoflash import hostsys, output, setup_network  # noqa: E402
+from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
 from tools.autoflash import tasmota_settings  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
@@ -149,6 +149,10 @@ def require_word(word: str) -> bool:
     tell("")
     # Read directly: an empty answer must stop here, not be asked again.
     question = f"Type {word.upper()} to go ahead - anything else stops, changing nothing: "
+    if prompts.UNATTENDED:
+        # Given in advance by starting the run with --unattended.
+        prompts.answered_unattended(question.rstrip(": "), word.upper())
+        return True
     answer = input(output.question(question))
     output.answered(answer)
     return answer.strip().lower() == word.lower()
@@ -283,6 +287,7 @@ def resolve_run_name(
     if not ask:
         chosen = unfinished[0]
         say(f"Continuing {describe_run(chosen)}.")
+        RUN_CHOICE.append(f"Continuing {describe_run(chosen)}, the most recent unfinished run.")
         remember_current(chosen.name)
         return chosen.name
 
@@ -379,6 +384,9 @@ class Context:
             self.state.set_input("web_user", args.web_user)
         self.web_password = args.web_password
         self._ewelink_password: str | None = None
+        # From .env or the environment: tried once, then asked for if eWeLink refuses it.
+        self._given_ewelink_password = credentials.get("EWELINK_PASSWORD")
+        self._given_email = credentials.get("EWELINK_EMAIL")
         self._finder: PlugFinder | None = None
         # Held only in memory: the Wi-Fi details, and the recovery image built
         # from them.  Neither is ever written to disk.
@@ -473,6 +481,12 @@ class Context:
         command line.  It reaches the reviewed tools through EWELINK_PASSWORD,
         which serve_tasmota_ota.py already supported.
         """
+        # A password given in advance is tried once, and only for the account
+        # it was given with when one was named too.
+        given, self._given_ewelink_password = self._given_ewelink_password, None
+        if self._ewelink_password is None and given and self._given_email in (None, self.email()):
+            self._ewelink_password = given
+            say("The eWeLink password is the one given in advance (.env or EWELINK_PASSWORD).")
         if self._ewelink_password is None:
             email = self.email()
             output.transient_begin()
@@ -510,6 +524,7 @@ class Context:
         """Ask again which eWeLink account, and its password."""
         self.state.set_input("email", None)
         self._ewelink_password = None
+        self._given_email = self._given_ewelink_password = None
 
     def email(self) -> str:
         """The eWeLink account email, chosen once per run.
@@ -517,7 +532,7 @@ class Context:
         The last account used on this computer is offered first; a plug in
         another account needs that account's email instead.
         """
-        email = self.state.input("email")
+        email = self.state.input("email") or self._given_email
         if not email:
             output.transient_begin()
             last = load_settings().get("ewelink_email")
@@ -2573,7 +2588,11 @@ def run_steps(ctx: Context) -> int:
                 "Do that step again" + ("   <- recommended" if finished is False else ""),
                 "It did finish - move on to the next step",
             ]
-            choice = ask_choice("What would you like to do", options)
+            if prompts.UNATTENDED:
+                choice = 0  # doing it again is the safe answer, as above
+                prompts.answered_unattended("What would you like to do", options[0])
+            else:
+                choice = ask_choice("What would you like to do", options)
             output.transient_end()
             if choice == 1:
                 ctx.state.mark(step, DONE, note="operator confirmed it completed")
@@ -2861,9 +2880,27 @@ def main() -> int:
         print(flush=True)
 
 
+def admin_password() -> str:
+    """This computer's password for sudo (hostsys.password_asker): the one
+    given in advance if sudo takes it, else asked for in this tool's own
+    words, so every row on screen is its own.  An unattended run has nobody
+    to ask, so it says what to give instead (OSError, as for a refused one)."""
+    given = credentials.get("S60_SUDO_PASSWORD")
+    if given is None and prompts.UNATTENDED:
+        # Inside the emulator (tools/emulator) its password is known.
+        given = os.environ.get("S60_EMULATOR_SUDO_PASSWORD")
+    if given is not None:
+        if hostsys.check_sudo_password(given) is None:
+            return given
+        tell("    The sudo password given in advance (S60_SUDO_PASSWORD) was not accepted.")
+    if prompts.UNATTENDED:
+        raise OSError("sudo needs this computer's password, and an unattended run cannot "
+                      "ask for it: put it in .env as S60_SUDO_PASSWORD")
+    return ask_admin_password()
+
+
 def _main() -> int:
-    # Asked for in this tool's own words, so every row on screen is its own.
-    hostsys.password_asker = ask_admin_password
+    hostsys.password_asker = admin_password
     # Keep piping into head/less quiet rather than raising BrokenPipeError.
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
@@ -2895,13 +2932,22 @@ def _main() -> int:
     parser.add_argument("--wifi", action="store_true",
                         help="type the Wi-Fi details instead of reading them from the plug")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--unattended", action="store_true",
+                        help="nobody at the keyboard: go ahead past the point of no return "
+                        "without typing PROCEED, take the eWeLink details from .env, and "
+                        "stop at any question that has no safe answer")
+    parser.add_argument("--env-file", type=Path,
+                        help="answers given in advance (default: .env, if there is one); "
+                        "see .env.example")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="show every action as it happens (it is all in the run's log either way)")
     parser.add_argument("--bridge", help=argparse.SUPPRESS)  # research: archive/docs/reference/automatic-wifi.md
     args = parser.parse_args()
+    prompts.UNATTENDED = args.unattended
 
     try:
-        if args.command == "run" and not args.verbose:
+        given = credentials.load(args.env_file)
+        if args.command == "run" and not args.verbose and not args.unattended:
             wait_for_taller_window()  # before anything else is shown
         if args.command == "list":
             args.run = args.run or "-"
@@ -2913,7 +2959,7 @@ def _main() -> int:
                 return 0
         else:
             args.run = resolve_run_name(args.run, args.new, args.plug_ip,
-                                        ask=args.command == "run")
+                                        ask=args.command == "run" and not args.unattended)
         ctx = Context(args)
     except QuitRun:
         say("Stopped. Nothing was changed.")
@@ -2956,6 +3002,12 @@ def _main() -> int:
             output.finish()
     output.start(ctx.dir / "run.log", verbose=args.verbose)
     log_run_choice()
+    if args.unattended:
+        say("Unattended: PROCEED is taken as typed, yes/no questions take their "
+            "default, and any other question stops the run.")
+    if given:
+        say(f"Given in advance ({display_path(args.env_file or credentials.ENV_FILE)}): "
+            f"{', '.join(given)}")
     code = None  # 130 only when the operator chose to quit, not for Ctrl-C
     try:
         code = cmd_run(ctx)

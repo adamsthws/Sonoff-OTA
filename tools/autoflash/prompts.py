@@ -37,6 +37,16 @@ class QuitRun(SystemExit):
         self.reason = reason
 
 
+class NoOneToAnswer(QuitRun):
+    """An unattended run reached a question it cannot answer for itself."""
+
+
+# An unattended run (--unattended): nobody is at the keyboard.  A key to press
+# is not waited for, a yes/no question takes its default - the cautious answer
+# wherever there is one - and any other question stops the run, naming it,
+# rather than waiting for ever.
+UNATTENDED = False
+
 BULLET = "    "
 # A password field on a row of its own, below a prompt too long to share one.
 FIELD = output.MARGIN + "> "
@@ -79,7 +89,22 @@ def section(title: str, body: Sequence[str] = (), *, quiet: bool = False) -> Non
         say(f"{BULLET}{line}")
 
 
+def answered_unattended(question: str, answer: str) -> None:
+    """Show and log a question as an unattended run answered it."""
+    output.show(f"{question}: {answer}   (unattended)")
+
+
+def _no_one_to_answer(question: str) -> NoOneToAnswer:
+    output.show("")
+    output.show("! An unattended run cannot answer this, so it stops here:",
+                output.BOLD, output.RED)
+    output.show(f"{BULLET}{question.rstrip(': ')}")
+    return NoOneToAnswer(f"unattended: no answer for {question!r}")
+
+
 def _raw(question: str, default: str | None, private: str | None = None) -> str:
+    if UNATTENDED:
+        raise _no_one_to_answer(question)
     suffix = f" [{default}]" if default else ""
     answer = input(output.question(f"{question}{suffix}", ": ")).strip()
     if private:
@@ -138,6 +163,8 @@ def ask_secret(prompt: str, reveal_seconds: float = 1.0) -> str:
     scrollback never holds a readable character.  Without an interactive
     terminal it falls back to getpass, which shows nothing at all.
     """
+    if UNATTENDED:
+        raise _no_one_to_answer(prompt)
     prompt = prompt.rstrip().rstrip(":") + QUIT_HINT + ": "
     prompt = output.question(prompt)  # the question is logged; the answer never is
     value = ""
@@ -308,9 +335,10 @@ def wait_for_key(prompt: str = "Press any key to continue, or q to quit...", *,
     `until`: stop waiting without a key, too, once it is true - looked at a
     few times a second.
 
-    Without an interactive terminal there is nobody to wait for, so it returns.
+    Without an interactive terminal, or in an unattended run, there is nobody
+    to wait for, so it returns.
     """
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+    if UNATTENDED or not (sys.stdin.isatty() and sys.stdout.isatty()):
         return
     sys.stdout.write(output.question(prompt))
     sys.stdout.flush()
@@ -408,6 +436,9 @@ def ask_yes_no(
     if help_lines:
         _emit(help_lines)
     hint = {True: "Y/n", False: "y/N", None: "y/n"}[default] + ", q to quit"
+    if UNATTENDED and default is not None:
+        answered_unattended(f"{question} ({hint})", "y" if default else "n")
+        return default
     mark = output.transient_mark()
     while True:
         answer = _raw(f"{question} ({hint})", None).lower()

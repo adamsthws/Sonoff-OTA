@@ -137,6 +137,14 @@ run records about the plug. It stays in memory only while the run needs the
 account, and is gone when the run's processes exit. It stops mattering once
 the plug runs Tasmota.
 
+For an unattended run (testing, below), the email and password can be given
+in advance instead, in a `.env` file at the top of the checkout. Git ignores
+it, and so do the AI coding tools the repository has settings for (Claude
+Code, Copilot, Cursor, Windsurf, Aider, Gemini CLI). What it holds is read
+into the tool's memory only: it is not passed on to the helper tools'
+environment, and the passwords are kept out of the log. A password given
+this way is tried once; if eWeLink refuses it, it is asked for instead.
+
 A throwaway eWeLink account is fine, and limits what a mistake could expose:
 once the plug is converted, the account is no longer needed.
 
@@ -186,6 +194,15 @@ also runs the tool on Windows beside the plug, in a Windows that starts clean
 every run. What it needs, how to set it up, use it and start over, how it
 works, and what had to be changed in the emulator to get there are in
 **[emulator.md](emulator.md)**.
+
+For automated testing, `run --unattended` runs a conversion with nobody at
+the keyboard. The eWeLink account comes from `.env`, PROCEED is taken as
+typed, yes/no questions take their cautious default, and any other question
+stops the run, naming it. `tools/unattended_run.py` runs it on a
+pseudo-terminal, records everything it draws, and rebuilds the final screen,
+colours included, for review. `tools/emulator/unattended-test.sh` does all of
+that against the emulated plug in one command. How each piece works is in
+**[unattended.md](unattended.md)**.
 
 To build the temporary startup firmware yourself instead of using the
 published one, the local-build route is still there:

@@ -1280,14 +1280,15 @@ class WifiFallbackTests(unittest.TestCase):
 class EwelinkAccountTests(unittest.TestCase):
     """The last eWeLink account is offered, not assumed."""
 
-    def email(self, *, remembered=None, chosen=None, choice=0, typed="new@example.com"):
+    def email(self, *, remembered=None, chosen=None, choice=0, typed="new@example.com", given=None):
         from types import SimpleNamespace
         from unittest import mock
         import tools.s60_autoflash as autoflash
         inputs = {"email": chosen} if chosen else {}
         ctx = SimpleNamespace(state=SimpleNamespace(input=inputs.get,
                                                     set_input=inputs.__setitem__),
-                              remember_email=lambda e: inputs.__setitem__("email", e))
+                              remember_email=lambda e: inputs.__setitem__("email", e),
+                              _given_email=given)
         with mock.patch.object(autoflash, "load_settings",
                                return_value={"ewelink_email": remembered} if remembered else {}), \
              mock.patch.object(autoflash, "ask_choice", return_value=choice) as menu, \
@@ -1304,6 +1305,12 @@ class EwelinkAccountTests(unittest.TestCase):
         email, _, asked = self.email(remembered="old@example.com", choice=1)
         self.assertEqual(email, "new@example.com")
         asked.assert_called_once()
+
+    def test_one_given_in_advance_is_used_without_asking(self):
+        email, menu, asked = self.email(remembered="old@example.com", given="env@example.com")
+        self.assertEqual(email, "env@example.com")
+        menu.assert_not_called()
+        asked.assert_not_called()
 
     def test_with_none_remembered_it_is_simply_asked(self):
         email, menu, _ = self.email()

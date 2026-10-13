@@ -251,6 +251,8 @@ It is also done over the air, through Tasmota's Firmware Upgrade page.
   happens to the plug, step by step.
 - **[docs/troubleshooting.md](docs/troubleshooting.md)** - problems met so far
   and their fixes.
+- **[docs/unattended.md](docs/unattended.md)** - running a conversion with
+  nobody at the keyboard, for testing, and keeping the screen it drew.
 - **[archive/docs/reference/](archive/docs/reference/)** - the original
   research, the manual procedure and how the firmware format was decoded.
 

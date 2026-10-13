@@ -70,7 +70,7 @@ running on its battery `windows-test.sh` says to plug it in.
 |---|---|
 | The emulator starting, until the plug is on its Wi-Fi | under 10 seconds |
 | Windows from Linux: starting, until the link says Connected | 30-60 seconds |
-| A conversion | about 7 minutes on a real plug, through all 14 stages; the emulator's has not been timed end to end yet - expect about the same, and longer if the emulated flash writes are slower |
+| A conversion | about 7 minutes on a real plug, through all 14 stages; about 5 in the emulator (4m 35s for an unattended run from stock) |
 | Windows shutting down at the end | about 10 seconds |
 
 **After changing what Windows is set up with:** the layers whose scripts
@@ -95,6 +95,7 @@ On Linux or macOS (on Windows, see "On Windows" below):
 ```sh
 tools/emulator/emu.sh            # plug offline: nothing reaches the internet
 tools/emulator/emu.sh --cloud    # plug and tool online - asks you to confirm the real plug is unplugged
+tools/emulator/emu.sh --cloud --yes  # ... without asking: you have unplugged it (for unattended tests)
 tools/emulator/emu.sh --fresh    # put the plug back to stock, and forget the previous run and the eWeLink account
 tools/emulator/emu.sh --pcap     # also record the plug's Wi-Fi traffic
 tools/emulator/emu.sh --rebuild  # rebuild the image first
@@ -131,6 +132,33 @@ The tool knows when it runs in the emulator (`S60_EMULATOR_URL`), and its
 final link points at http://localhost:8080 instead of the plug's own address.
 Where it warns that sudo may ask for a password, it gives the emulator's
 (`S60_EMULATOR_SUDO_PASSWORD`); on a real computer it never knows one.
+
+### Unattended, for testing
+
+One command starts the emulator, converts the plug with nobody at the
+keyboard, prints the screen the run left, and stops the emulator again:
+
+```sh
+tools/emulator/unattended-test.sh --fresh    # from stock, as a new user would
+tools/emulator/unattended-test.sh            # from where the last run left the plug
+tools/emulator/unattended-test.sh --keep     # leave the emulator running afterwards
+tools/emulator/unattended-test.sh -- --new   # anything after -- goes to the run itself
+```
+
+It needs a `.env` with the eWeLink account the dump's plug is in (see
+[unattended.md](unattended.md)). It starts the emulator with `--cloud --yes`,
+so **the real plug must already be unplugged**: it is not asked. `--pcap`,
+`--rebuild` and `--no-firewall` are `emu.sh`'s.
+
+Once the plug answers on the emulated Wi-Fi, it runs
+`tools/unattended_run.py` in the container's copy of the repository, as your
+user. `.env` reaches that copy with the rest of the checkout. The run's sudo
+password is the emulator's, and everything else is answered as
+[unattended.md](unattended.md) describes. On a terminal the run is shown live;
+otherwise, as in a CI log, the final screen is printed at the end, colours
+and all. The recording stays in
+`captures/emulation/state/work/captures/unattended/<time>/`, beside the run's
+own `run.log`. The exit code is the run's: 0 when the plug was converted.
 
 ## On Windows
 
