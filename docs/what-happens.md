@@ -170,3 +170,16 @@ USB with the official release. Not equivalent, identical.
 
 From then on it is an ordinary Tasmota device: normal updates through its own
 web page, normal integrations, and none of it touching Sonoff's servers.
+
+
+## Safety, and why you can believe the checks
+
+- **Nothing is trusted, everything is checked.** Every firmware file is
+  checked against a known fingerprint before use, and the finished plug is
+  read back and compared against the official release.
+- **The risky steps need you to say yes.** The conversion only starts after
+  you type PROCEED - not a y/n - below a warning that spells out the risk.
+- **The plug checks too.** Every stage that writes refuses to run unless the
+  plug is in exactly the state it expects, and says so rather than guessing.
+- **Nothing private is published.** Each run keeps its records in `captures/`,
+  which git ignores.
