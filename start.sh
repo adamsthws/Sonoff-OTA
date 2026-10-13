@@ -70,7 +70,7 @@ portable_python() {  # Linux only: .python/<platform>/python/bin/python3
         mkdir -p "$PYTHON_HOME"
         archive=$PYTHON_HOME/python.tar.gz
         # The size, as there is nothing else to watch while it comes.
-        say "Downloading Python 3.12.10 (portable, about $size MB, into $PYTHON_HOME)..."
+        say "Downloading portable Python 3.12.10 (about $size MB, into $PYTHON_HOME)..."
         if ! fetch "$PBS_BASE/cpython-3.12.10%2B20250517-$arch-unknown-linux-gnu-install_only_stripped.tar.gz" "$archive"; then
             rm -f "$archive"; say "The portable Python could not be downloaded."; return 1
         fi

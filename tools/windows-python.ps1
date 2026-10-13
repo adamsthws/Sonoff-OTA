@@ -22,7 +22,7 @@ library. Get-ToolPython, in order:
 $ProgressPreference = "SilentlyContinue"
 
 $PortablePython = @{
-    Name = "Python 3.12.10 (python.org, portable)"
+    Name = "portable Python 3.12.10 (python.org)"
     Folder = "windows-3.12.10"
     Url = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
     Size = "about 11 MB"
