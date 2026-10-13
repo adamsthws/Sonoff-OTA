@@ -1,5 +1,4 @@
 # Sonoff S60 stock partition table (4 MiB flash, ESP32-C3)
-# Use with ESPHome platformio_options.board_build.partitions
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x10000,
 reserve,  data, nvs,     0x19000,  0x4000,

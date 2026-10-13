@@ -1,0 +1,182 @@
+# Prototype: a pre-built S60 ESPHome image with no Wi-Fi and no passwords.
+# The conversion tool imprints the plug's Wi-Fi into the placeholders in
+# s60_imprint.h; at boot, the imprinted values are handed to wifi.configure.
+
+esphome:
+  name: sonoff-s60
+  friendly_name: Sonoff S60
+  name_add_mac_suffix: true
+  includes:
+    - s60_imprint.h
+  on_boot:
+    # After Wi-Fi is set up (its priority is 250); on_boot's default, 600, is before.
+    priority: -100
+    then:
+      - if:
+          condition:
+            lambda: 'return s60_is_imprinted();'
+          then:
+            - wifi.configure:
+                ssid: !lambda 'return s60_imprinted(S60_IMPRINT_SSID);'
+                password: !lambda 'return s60_imprinted(S60_IMPRINT_PASS);'
+                save: true
+
+esp32:
+  variant: esp32c3
+  framework:
+    type: esp-idf
+  partitions: partitions_sonoff_stock.csv
+  flash_size: 4MB
+
+# avoid frequent NVS write to save flash
+preferences:
+  flash_write_interval: 60s
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+    #allow_partition_access: true
+
+web_server:
+  version: 3
+
+wifi:
+  ap: {}
+
+captive_portal:
+
+time:
+  - platform: sntp
+    id: time_sntp
+    #timezone: "CET-1CEST,M3.5.0,M10.5.0/3"
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        then:
+          - sensor.integration.reset: energy_daily
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        days_of_month: 1
+        then:
+          - sensor.integration.reset: energy_monthly
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        days_of_month: 1
+        months: 1
+        then:
+          - sensor.integration.reset: energy_yearly
+
+uart:
+  rx_pin: GPIO7
+  baud_rate: 4800
+  parity: EVEN
+
+status_led:
+  pin:
+    number: GPIO5
+    inverted: true
+
+switch:
+  - id: relay
+    platform: gpio
+    name: "Relay"
+    pin: GPIO4
+    restore_mode: ALWAYS_ON
+
+binary_sensor:
+  - platform: gpio
+    id: button
+    internal: true
+    pin:
+      number: GPIO9
+      inverted: true
+    on_press:
+      - switch.toggle: relay
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+
+sensor:
+  - platform: cse7766
+    current:
+      name: "Current"
+      filters:
+        - throttle_average: 1s
+    voltage:
+      name: "Voltage"
+      filters:
+        - throttle_average: 1s
+    power:
+      name: "Power"
+      id: power
+      filters:
+        - throttle_average: 1s
+    energy:
+      name: "Energy"
+      unit_of_measurement: Wh
+      device_class: energy
+      state_class: total_increasing
+      filters:
+        - throttle: 5s
+    apparent_power:
+      name: "Apparent power"
+      disabled_by_default: true
+      filters:
+        - throttle_average: 1s
+    reactive_power:
+      name: "Reactive power"
+      disabled_by_default: true
+      filters:
+        - throttle_average: 1s
+    power_factor:
+      name: "Power factor"
+      disabled_by_default: true
+      filters:
+        - throttle_average: 1s
+
+  # Energy statistics (preserved across reboots and OTA updates)
+  - platform: integration
+    name: "energia dzienna"
+    id: energy_daily
+    sensor: power
+    time_unit: h
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+    restore: true			# zapis w NVS – przetrwa flash
+    filters:
+      - multiply: 0.001			# W → kWh
+
+  - platform: integration
+    name: "energia miesięczna"
+    id: energy_monthly
+    sensor: power
+    time_unit: h
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+    restore: true			# zapis w NVS – przetrwa flash
+    filters:
+      - multiply: 0.001			# W → kWh
+
+  - platform: integration
+    name: "energia roczna"
+    id: energy_yearly
+    sensor: power
+    time_unit: h
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+    restore: true			# zapis w NVS – przetrwa flash
+    filters:
+      - multiply: 0.001			# W → kWh
+
