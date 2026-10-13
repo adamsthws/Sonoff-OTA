@@ -46,8 +46,11 @@ SECTOR = 4096
 SHOWN_RE = re.compile(r"RESULT:|PLUG SAYS|REFUS|TIMEOUT|ERROR|Traceback|Stopped", re.IGNORECASE)
 # The plug's own console lines worth showing when a phase fails: its Berry
 # prints and errors, which say why when it could not tell this computer.
-PLUG_CONSOLE_RE = re.compile(r"S60 |migration_refused|BRY:")
+PLUG_CONSOLE_RE = re.compile(r'S60 |migration_refused|BRY:|"Br":"\[')
 PLUG_SAYS_RE = re.compile(r"THE PLUG SAYS: (?P<reason>.+)")
+# A Berry error as Tasmota logs a console command's result:
+#   RSL: RESULT = {"Br":"[migration_refused] POST /capture/staged/22 returned HTTP -1 ..."}
+BERRY_ERROR_RE = re.compile(r'"Br":"\[(?P<kind>[^\]]+)\] (?P<message>.*)"\}')
 TIMEOUT_RE = re.compile(r"TIMEOUT: (?P<reason>.+)")
 
 
@@ -271,6 +274,13 @@ class PhaseRunner:
         try:
             code = self._drive(phase, process, captured, reader, confirm, exec_timeout,
                                lambda: url, lambda: arm)
+        except PhaseError as exc:
+            if isinstance(exc, PlugNeverConnected):  # it never started: nothing to say
+                raise
+            said = self._show_plug_console()
+            if said:
+                raise PhaseError(f"{exc}; the plug says: {said}") from exc
+            raise
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -278,23 +288,33 @@ class PhaseRunner:
             display.close()
             log_file.close()
         if code != 0:
-            self._show_plug_console()
+            said = self._show_plug_console()
+            if said and not any(PLUG_SAYS_RE.search(line) for line in captured):
+                captured.append(f"THE PLUG SAYS: {said}")  # what failure_reason() reports
             self.log(f"    The server's full output is in {log_path}")
         return code, "\n".join(captured)
 
-    def _show_plug_console(self) -> None:
-        """The plug's own last words on the phase, from its console.
+    def _show_plug_console(self) -> str | None:
+        """Show the plug's own last words on the phase, from its console, and
+        return its error if that is the last of them.
 
         When the plug could not reach this computer, its console is the only
-        place that says why; read it now rather than ask the owner to.
+        place that says why; read it now rather than ask the owner to.  An
+        error followed by more from the plug is an earlier attempt's, not why
+        this one stopped.
         """
         try:
             lines = self.device.console_log(timeout=5.0)
         except Exception:  # noqa: BLE001 - a plug that cannot answer adds nothing here
-            return
+            return None
         relevant = [line for line in lines if PLUG_CONSOLE_RE.search(line)][-8:]
         for line in relevant:
             self.log(f"    The plug's console: {line}")
+        error = BERRY_ERROR_RE.search(relevant[-1]) if relevant else None
+        if error is None:
+            return None
+        kind, message = error.group("kind"), error.group("message")
+        return message if kind == "migration_refused" else f"{kind}: {message}"
 
     def _drive(self, phase, process, captured, reader, confirm, exec_timeout,
                get_url, get_arm) -> int:
@@ -336,4 +356,6 @@ class PhaseRunner:
         try:
             return process.wait(timeout=exec_timeout)
         except subprocess.TimeoutExpired as exc:
-            raise PhaseError(f"{phase} did not complete within {exec_timeout:.0f}s") from exc
+            raise PhaseError(
+                f"{phase} did not complete within {exec_timeout / 60:.0f} minutes"
+            ) from exc

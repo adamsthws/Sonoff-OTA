@@ -597,9 +597,10 @@ class MigrationValidationTests(unittest.TestCase):
             for phase, source in rendered.items():
                 self.assertIn(f'"/fail/{phase}"', source, phase)
                 self.assertIn("report_failure(", source, phase)
-                self.assertNotIn("tasmota.millis(60000)", source, phase)
                 if phase != "commit":  # the commit fetches once, before writing
-                    self.assertIn("tasmota.millis(300000)", source, phase)
+                    self.assertIn("tasmota.millis(300000)", source, phase)  # Wi-Fi down
+                    self.assertIn("tasmota.millis(60000)", source, phase)   # Wi-Fi up
+                    self.assertIn("window.over()", source, phase)
             # Commit and restore still hand back their armed closure by name.
             self.assertTrue(rendered["commit"].rstrip().endswith("return commit"))
             self.assertTrue(rendered["restore"].rstrip().endswith("return restore"))
@@ -616,6 +617,32 @@ class MigrationValidationTests(unittest.TestCase):
             path.write_text(json.dumps(evidence), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "not fresh"):
                 fixture.state("stage")
+
+    def test_a_request_abandoned_part_way_does_not_stall_the_server(self):
+        # The plug's network went mid-POST in the emulator: the server sat on
+        # the half-read body, and never got back to its idle check.
+        import socket
+        import time as clock
+        from unittest import mock
+        import tools.serve_safeboot_migration as server_module
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            state = fixture.state("preflight")
+            with mock.patch.object(server_module.MigrationHandler, "timeout", 0.5):
+                server = MigrationServer(("127.0.0.1", 0), "127.0.0.1", state)
+                server.timeout = 0.2
+                try:
+                    stalled = socket.create_connection(server.server_address, timeout=2)
+                    stalled.sendall(b"POST /capture/table/0 HTTP/1.1\r\nHost: x\r\n"
+                                    b"Content-Length: 8192\r\n\r\n" + b"00" * 100)
+                    started = clock.monotonic()
+                    with mock.patch("builtins.print") as printed:
+                        server.handle_request()
+                    self.assertLess(clock.monotonic() - started, 5)
+                    self.assertRegex(printed.call_args.args[0], "timed out|request dropped")
+                    stalled.close()
+                finally:
+                    server.server_close()
 
     def test_http_server_exposes_only_the_selected_phase_to_the_selected_device(self):
         with tempfile.TemporaryDirectory() as directory:

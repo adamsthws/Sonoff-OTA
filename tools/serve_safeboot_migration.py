@@ -534,6 +534,10 @@ class MigrationState:
 class MigrationHandler(http.server.BaseHTTPRequestHandler):
     server_version = "S60SafebootMigration/1.0"
     protocol_version = "HTTP/1.1"
+    # A request the plug stopped sending part way - its network went, say - is
+    # dropped after this long, not waited on for ever: one request at a time is
+    # served, and the wait for the plug's result is checked between them.
+    timeout = 30
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"  [{self.client_address[0]}] {fmt % args}")
@@ -616,6 +620,12 @@ class MigrationServer(http.server.HTTPServer):
         super().__init__(address, MigrationHandler)
         self.device_ip = device_ip
         self.state = state
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        # One line, not socketserver's traceback: a request the plug abandoned
+        # (MigrationHandler.timeout) is expected when its network drops.
+        error = sys.exc_info()[1]
+        print(f"  [{client_address[0]}] request dropped: {type(error).__name__}: {error}")
 
     def server_bind(self) -> None:
         # Not HTTPServer's own, which looks the address up by name between

@@ -64,17 +64,38 @@ def pause(ms)
   end
 end
 
+# How long a failed request is worth trying again.  Up to five minutes while
+# the plug's Wi-Fi is down - a router restarting, say.  One minute while it is
+# up and the computer still does not answer: the computer has most likely
+# stopped, and while the plug keeps trying it answers nothing else.
+class retry_window
+  var deadline, up_deadline
+  def init()
+    self.deadline = tasmota.millis(300000)
+    self.up_deadline = nil
+  end
+  def over()
+    if tasmota.time_reached(self.deadline) return true end
+    if tasmota.wifi("up")
+      if self.up_deadline == nil self.up_deadline = tasmota.millis(60000) end
+      return tasmota.time_reached(self.up_deadline)
+    end
+    self.up_deadline = nil
+    return false
+  end
+end
+
 def post_text(path, body)
   var status
   var attempt = 0
-  var deadline = tasmota.millis(300000)  # long enough for a router to restart
+  var window = retry_window()
   while true
     var client = webclient()
     client.begin(base_url + path)
     status = client.POST(body)
     client.close()
     attempt += 1
-    if status >= 0 || tasmota.time_reached(deadline) break end
+    if status >= 0 || window.over() break end
     pause(1000)
   end
   guard(status == 200, format("POST %s returned HTTP %i after %i attempts", path, status, attempt))
@@ -85,13 +106,13 @@ def fetch_chunk(index, expected_length)
   var client
   var status
   var attempt = 0
-  var deadline = tasmota.millis(300000)  # long enough for a router to restart
+  var window = retry_window()
   while true
     client = webclient()
     client.begin(base_url + path)
     status = client.GET()
     attempt += 1
-    if status >= 0 || tasmota.time_reached(deadline) break end
+    if status >= 0 || window.over() break end
     client.close()
     pause(1000)
   end

@@ -88,6 +88,10 @@ class Device:
         The page answers only requests with a Referer, which _get sends.
         """
         body = self._get("/cs", {"c2": "0"}, timeout or self.timeout)
+        # Framed as "<index>}1<reset>}1<lines>}1": only the lines are the log.
+        parts = body.split("}1", 2)
+        if len(parts) == 3:
+            body = parts[2].removesuffix("}1")
         return [line.strip() for line in re.split(r"[\x1e\n]", body) if line.strip()]
 
     def command(self, command: str, timeout: float | None = None) -> Any:

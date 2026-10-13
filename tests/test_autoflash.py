@@ -565,22 +565,40 @@ class PhaseFailureTests(unittest.TestCase):
         self.assertEqual(str(error), "stage did not pass: the plug says: flash is not exactly 4 MiB")
         self.assertEqual(str(autoflash.phase_failed("stage", 3, "")), "stage did not pass (exit 3)")
 
-    def test_the_plugs_console_is_read_for_its_own_words(self):
+    def console(self, lines):
         from unittest import mock
         from tools.autoflash.phases import PhaseRunner
         runner = PhaseRunner.__new__(PhaseRunner)
         shown = []
         runner.log = shown.append
-        runner.device = mock.Mock(console_log=mock.Mock(return_value=[
-            "12:00:01.000 WIF: Connected",
-            "12:00:02.000 S60 STAGE: 65536/810672 bytes",
-            "12:00:09.000 BRY: Exception> 'migration_refused' - GET /chunk/safeboot/17 returned HTTP -1",
-            "12:00:10.000 MQT: Attempting connection",
-        ]))
-        runner._show_plug_console()
+        runner.device = mock.Mock(console_log=mock.Mock(return_value=lines))
+        return runner._show_plug_console(), shown
+
+    def test_the_plugs_console_is_read_for_its_own_words(self):
+        # As the emulated plug logged it, cut off from the computer mid-stage.
+        said, shown = self.console([
+            "13:56:01.000 WIF: Connected",
+            "13:56:03.251 S60 STAGE: 65536/811824 bytes",
+            "13:57:11.702 HTP: Connection timeout after -1 ms",
+            '13:57:11.702 RSL: RESULT = {"Br":"[migration_refused] POST /capture/staged/22 '
+            'returned HTTP -1 after 21 attempts"}',
+        ])
+        self.assertEqual(said, "POST /capture/staged/22 returned HTTP -1 after 21 attempts")
         self.assertEqual(len(shown), 2)
-        self.assertIn("HTTP -1", shown[1])
         self.assertTrue(all(line.startswith("    The plug's console: ") for line in shown))
+
+    def test_another_berry_error_keeps_its_kind(self):
+        said, _ = self.console(['RSL: RESULT = {"Br":"[index_error] list index out of range"}'])
+        self.assertEqual(said, "index_error: list index out of range")
+
+    def test_an_earlier_attempts_error_is_not_this_ones_reason(self):
+        said, shown = self.console([
+            '13:29:34.062 RSL: RESULT = {"Br":"[migration_refused] POST /capture/staged/2 '
+            'returned HTTP -1 after 107 attempts"}',
+            "13:31:03.251 S60 STAGE: 65536/811824 bytes",
+        ])
+        self.assertIsNone(said)
+        self.assertEqual(len(shown), 2)  # still shown, for whoever reads the log
 
     def test_a_plug_that_cannot_answer_adds_nothing(self):
         from unittest import mock

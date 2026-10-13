@@ -34,8 +34,9 @@ class FakeTasmotaHandler(http.server.BaseHTTPRequestHandler):
             self.reply(b"BACKUP")
         elif path == "/cs":
             server.referer = self.headers.get("Referer")
-            self.reply(b"47}1}1\x1e00:00:00.255 S60 recovery Wi-Fi defaults active\n"
-                       b"00:00:00.316 S60 recovery: Wi-Fi settings saved for the next firmware\n")
+            # As a real plug frames it: "<index>}1<reset>}1<lines>}1".
+            self.reply(b"47}11}100:00:00.255 S60 recovery Wi-Fi defaults active\n"
+                       b"00:00:00.316 S60 recovery: Wi-Fi settings saved for the next firmware}1")
         else:
             server.armed_for_settings = path == "/rs"  # Tasmota: HandleRestoreConfiguration
             self.reply(b"<title>Tasmota</title>")
@@ -62,6 +63,7 @@ class SettingsBackupTests(unittest.TestCase):
 
     def test_the_console_log_is_read_with_a_referer(self):
         lines = self.device.console_log()
+        self.assertEqual(lines[0], "00:00:00.255 S60 recovery Wi-Fi defaults active")
         self.assertEqual(lines[-1], "00:00:00.316 S60 recovery: Wi-Fi settings saved for the next firmware")
         self.assertTrue(self.server.referer)  # without one the page closes the connection
 
