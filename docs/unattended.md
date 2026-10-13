@@ -24,7 +24,10 @@ not ignored. The values stay in the tool's memory: they are not passed on to
 the helper tools' environment, and the passwords are kept out of the log.
 
 The file is also read on an ordinary run, where it saves typing the account
-details. If eWeLink refuses the password, it is asked for instead.
+details. If eWeLink refuses the password, it is asked for instead. The
+emulator is the exception: its copy of the repository leaves `.env` out, so a
+run you sit through there is asked everything, as a real one is, while
+`tools/emulator/unattended-test.sh` hands `.env` to its run alone.
 
 ## Run it
 

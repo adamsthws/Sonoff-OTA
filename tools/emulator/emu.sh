@@ -122,9 +122,12 @@ chmod 0600 "$STATE"/*.bin
 # -- the "computer": a copy of this repository ---------------------------------
 # A copy, so a run's lock renames and captures never touch the real checkout.
 # The code is refreshed on every start, and the run's captures are kept.
+# Not .env: a run you sit through asks for the eWeLink account, as a real
+# one does. unattended-test.sh hands it to its run alone.
 mkdir -p "$STATE/work/captures"
 rsync -a --delete --exclude /captures/ --exclude /.venv/ --exclude /.python/ --exclude /.git/ \
-      --exclude __pycache__/ "$ROOT/" "$STATE/work/"
+      --exclude /.env --exclude __pycache__/ "$ROOT/" "$STATE/work/"
+rm -f "$STATE/work/.env"  # one copied before it was left out: --delete spares excluded files
 # Not the firmware bundle in captures/safeboot-recovery-migration: a real
 # bundle is set up for the real home Wi-Fi. The run builds its own, as a new
 # user's would (it downloads the official files, so it needs --cloud).

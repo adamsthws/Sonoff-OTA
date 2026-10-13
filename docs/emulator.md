@@ -164,7 +164,11 @@ so **the real plug must already be unplugged**: it is not asked. `--pcap`,
 
 Once the plug answers on the emulated Wi-Fi, it runs
 `tools/unattended_run.py` in the container's copy of the repository, as your
-user. `.env` reaches that copy with the rest of the checkout. The run's sudo
+user. `.env` is handed to that run alone (`--env-file`, from the container's
+`/tmp`, removed afterwards): the copy of the repository never holds it, so a
+run you start yourself with `emu.sh` asks for the eWeLink account and
+everything else, as a real one does. The same goes for Windows: its copy of
+the checkout has no `.env`. The run's sudo
 password is the emulator's, and everything else is answered as
 [unattended.md](unattended.md) describes. On a terminal the run is shown live;
 otherwise, as in a CI log, the final screen is printed at the end, colours
