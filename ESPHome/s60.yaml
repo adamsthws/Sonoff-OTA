@@ -142,7 +142,7 @@ sensor:
 
   # Energy statistics (preserved across reboots and OTA updates)
   - platform: integration
-    name: "energia dzienna"
+    name: "Daily energy"
     id: energy_daily
     sensor: power
     time_unit: h
@@ -150,12 +150,12 @@ sensor:
     accuracy_decimals: 3
     device_class: energy
     state_class: total_increasing
-    restore: true			# zapis w NVS – przetrwa flash
+    restore: true
     filters:
-      - multiply: 0.001			# W → kWh
+      - multiply: 0.001	# W → kWh
 
   - platform: integration
-    name: "energia miesięczna"
+    name: "Monthly energy"
     id: energy_monthly
     sensor: power
     time_unit: h
@@ -163,12 +163,12 @@ sensor:
     accuracy_decimals: 3
     device_class: energy
     state_class: total_increasing
-    restore: true			# zapis w NVS – przetrwa flash
+    restore: true
     filters:
-      - multiply: 0.001			# W → kWh
+      - multiply: 0.001	# W → kWh
 
   - platform: integration
-    name: "energia roczna"
+    name: "Yearly energy"
     id: energy_yearly
     sensor: power
     time_unit: h
@@ -176,7 +176,19 @@ sensor:
     accuracy_decimals: 3
     device_class: energy
     state_class: total_increasing
-    restore: true			# zapis w NVS – przetrwa flash
+    restore: true
     filters:
-      - multiply: 0.001			# W → kWh
+      - multiply: 0.001	# W → kWh
 
+  - platform: integration
+    name: "Total energy"
+    id: energy_total
+    sensor: power
+    time_unit: h
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+    restore: true
+    filters:
+      - multiply: 0.001	# W → kWh
