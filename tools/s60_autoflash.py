@@ -410,6 +410,11 @@ class Context:
         # archive/docs/reference/automatic-wifi.md).  The plug goes back to stock on a power cycle.
         self.bridge = Path(getattr(args, "bridge", None) or BRIDGE_OTA)
         self.research_bridge = self.bridge != BRIDGE_OTA
+        # Optional path to an ESPHome application firmware.ota.bin. When set,
+        # the run stops after interim Tasmota on the *stock* partition table
+        # (no Safeboot / E3 repartition) and uploads this image via Tasmota OTA.
+        esphome = getattr(args, "esphome", None)
+        self.esphome_firmware = Path(esphome).expanduser().resolve() if esphome else None
         if args.plug_ip:
             self.state.set_input("plug_ip", args.plug_ip)
         if args.email:
@@ -2539,7 +2544,108 @@ STEP_VERIFIERS: dict[str, Callable[["Context"], tuple[bool, str]]] = {
 }
 
 
-STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = [
+def step_esphome_upload(ctx: Context) -> dict[str, Any]:
+    """I1 - flash ESPHome over interim Tasmota while the stock partition table is intact."""
+    path = ctx.esphome_firmware
+    if path is None:
+        raise Abort(
+            "ESPHome mode is active but no firmware path is set; pass --esphome /path/to/firmware.ota.bin"
+        )
+    if not path.is_file():
+        raise Abort(f"ESPHome firmware not found: {path}")
+    size = path.stat().st_size
+    # Stock ota_0/ota_1 are 0x1f0000 (1,984 KiB) each; leave a small margin.
+    max_size = 0x1F0000 - 0x1000
+    if size < 100_000:
+        raise Abort(
+            f"{path} is only {size} bytes - that does not look like an ESPHome ESP32 image"
+        )
+    if size > max_size:
+        raise Abort(
+            f"{path} is {size:,} bytes; the stock Sonoff OTA slot is only "
+            f"{max_size:,} bytes usable. Build a leaner ESPHome image "
+            "(esp-idf, no unused components)"
+        )
+    if ctx.state.is_done("E3"):
+        raise Abort(
+            "this run already committed the Tasmota Safeboot partition table (E3). "
+            "Stock-layout ESPHome mode cannot be used on it; start --new on another "
+            "plug, or finish with the normal Tasmota path / safeboot ESPHome migration "
+            "(https://esphome.io/guides/migrate_sonoff_tasmota/#esp32-partition-table-migration)"
+        )
+    output.transient_begin()
+    section("Installing ESPHome (stock Sonoff partitions)", [
+        "Interim Tasmota is running on the original Sonoff dual-OTA layout",
+        "(two ~1984 KiB slots, no Safeboot). The partition table is not changed.",
+        "",
+        f"File: {path}",
+        f"Size: {size:,} bytes (stock slot limit ~{max_size:,})",
+        "",
+        "Build ESPHome against a partitions.csv that matches stock S60 offsets",
+        "(ota_0 at 0x20000, ota_1 at 0x210000, size 0x1f0000 each).",
+        "Using the default ESPHome table will boot poorly or break later OTAs.",
+        "",
+        "Use firmware.ota.bin (app/OTA image), not firmware.factory.bin.",
+        "Put Wi-Fi credentials in the YAML - they are not copied from Tasmota.",
+    ])
+    device = ctx.device
+    device.wait_reachable(timeout=120)
+    if ctx.dry_run:
+        say(f"[dry-run] would upload ESPHome from {path}")
+        return {"path": str(path), "size": size, "dry_run": True, "layout": "stock"}
+    how = upload_or_prompt(ctx, path, "ESPHome firmware (stock layout)")
+    output.transient_end()
+    return {"path": str(path), "size": size, "upload": how, "layout": "stock"}
+
+
+def step_esphome_wait(ctx: Context, wait: float = 180.0) -> dict[str, Any]:
+    """I2 - wait until the plug no longer answers as Tasmota."""
+    host = ctx.state.input("plug_ip")
+    if not host:
+        raise Abort("plug address is not known")
+    say("Waiting for the plug to leave Tasmota and boot ESPHome...")
+    say("(Usually 30-90 seconds; the Tasmota web UI will stop answering.)")
+    started = time.monotonic()
+    saw_down = False
+    while time.monotonic() - started < wait:
+        time.sleep(3)
+        try:
+            body = setup_network.page(host, timeout=3.0)
+            if body is None:
+                raise
+        except Exception:
+            saw_down = True
+            output.progress(
+                f"plug offline while rebooting... {time.monotonic() - started:.0f}s"
+            )
+            continue
+        lower = body.lower()
+        if "tasmota" in lower:
+            output.progress(
+                f"still answering as Tasmota... {time.monotonic() - started:.0f}s"
+            )
+            continue
+        say(f"    Plug at {host} is no longer serving Tasmota.")
+        if saw_down:
+            say("    It went offline and came back - typical after a successful OTA.")
+        tell("")
+        tell("ESPHome should be running on the stock Sonoff partition table.")
+        tell("No Safeboot migration is required for this path.")
+        tell("Later ESPHome OTAs stay within the two ~1984 KiB slots.")
+        return {
+            "host": host,
+            "seconds": round(time.monotonic() - started, 1),
+            "layout": "stock",
+        }
+    raise Abort(
+        "after three minutes the plug still answers as Tasmota, or never came back. "
+        "Check the binary (stock partitions.csv, app image size), power-cycle once, "
+        "and re-run with the same --esphome path"
+    )
+
+
+# Shared prefix: stock Sonoff layout is still in place through D1 inclusive.
+COMMON_STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = [
     ("A0", "Before you start", step_prerequisites),
     ("A5", "Offline preconditions", step_check),
     ("A1", "Pair the plug in eWeLink", step_pair),
@@ -2547,6 +2653,9 @@ STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = [
     ("C2", "Stock to recovery bridge", step_bridge),
     ("C3", "Back up the Sonoff firmware", step_backup),
     ("D1", "Berry-capable Tasmota via bridge AP", step_berry_tasmota),
+]
+# Full Tasmota product: repartition to Safeboot layout, then official image.
+TASMOTA_FINAL_STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = [
     ("D4", "Promote to high slot and freeze NVS", step_promote),
     ("E1", "Preflight (read-only)", step_preflight),
     ("E2", "Stage Safeboot into the spare slot", step_stage),
@@ -2556,7 +2665,23 @@ STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = [
     ("G1", "Restore official Safeboot", step_restore),
     ("H1", "Verify the three regions", step_verify),
 ]
+# ESPHome product: stay on stock dual-OTA table; flash ESPHome from interim Tasmota.
+ESPHOME_FINAL_STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = [
+    ("I1", "Upload ESPHome on stock layout", step_esphome_upload),
+    ("I2", "Wait for ESPHome boot", step_esphome_wait),
+]
+# Default target is Tasmota; main() rebuilds this when --esphome is passed.
+STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = (
+    COMMON_STEPS + TASMOTA_FINAL_STEPS
+)
 STEP_INDEX = {step: (title, handler) for step, title, handler in STEPS}
+
+
+def apply_target(esphome: bool) -> None:
+    """Choose Tasmota (Safeboot layout) or ESPHome (stock layout) finish."""
+    global STEPS, STEP_INDEX
+    STEPS = COMMON_STEPS + (ESPHOME_FINAL_STEPS if esphome else TASMOTA_FINAL_STEPS)
+    STEP_INDEX = {step: (title, handler) for step, title, handler in STEPS}
 
 
 # ---------------------------------------------------------------------- CLI
@@ -2578,7 +2703,7 @@ def cmd_status(ctx: Context) -> int:
     return 0
 
 
-DESTRUCTIVE_STEPS = {"C2", "E2", "E3", "F2", "G1"}
+DESTRUCTIVE_STEPS = {"C2", "E2", "E3", "F2", "G1", "I1"}
 
 
 
@@ -2650,6 +2775,8 @@ STAGE_NAMES = {
     "F4": "Configuring Tasmota",
     "G1": "Installing Safeboot",
     "H1": "Verifying conversion",
+    "I1": "Installing ESPHome (stock layout)",
+    "I2": "Waiting for ESPHome",
 }
 
 
@@ -2670,6 +2797,8 @@ PLAIN_DESCRIPTION = {
     "F4": "sets up Wi-Fi, saves settings and applies the S60 plug template",
     "G1": "replaces the temporary startup firmware with the official one",
     "H1": "checks the finished plug against the official files",
+    "I1": "uploads ESPHome through interim Tasmota without changing the partition table",
+    "I2": "waits until the plug stops answering as Tasmota",
 }
 
 
@@ -2807,6 +2936,11 @@ def run_steps(ctx: Context) -> int:
     started = time.monotonic()
     resumed = any(ctx.state.is_done(step) for step, _, _ in STEPS)
     tell("")
+    if ctx.esphome_firmware:
+        tell("Target: ESPHome on the stock Sonoff partition table.")
+        tell("Interim Tasmota is only a vehicle - Safeboot repartition is skipped.")
+        tell(f"ESPHome image: {ctx.esphome_firmware}")
+        tell("")
     tell("Converting a plug usually takes under 10 minutes. Some stages take a")
     tell("minute or two with little to see - that's normal. Keep the plug plugged")
     tell("in, and this computer awake, until the last stage says complete.")
@@ -3200,6 +3334,13 @@ def _main() -> int:
                         help="type the Wi-Fi details instead of reading them from the plug")
     parser.add_argument("--no-backup", action="store_true",
                         help="keep no backup of the Sonoff firmware (it holds the Wi-Fi password)")
+    parser.add_argument(
+        "--esphome",
+        metavar="PATH",
+        help="after interim Tasmota on the stock partition table, upload this ESPHome "
+             "firmware.ota.bin and stop (no Safeboot repartition). Build the image against "
+             "stock S60 partitions (ota slots ~1984 KiB at 0x20000 / 0x210000)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--unattended", action="store_true",
                         help="nobody at the keyboard: go ahead past the point of no return "
@@ -3214,6 +3355,7 @@ def _main() -> int:
                         help=argparse.SUPPRESS)  # testing: the backup's first two reads fail
     parser.add_argument("--bridge", help=argparse.SUPPRESS)  # research: archive/docs/reference/automatic-wifi.md
     args = parser.parse_args()
+    apply_target(bool(getattr(args, "esphome", None)))
     prompts.UNATTENDED = args.unattended
     global SIMULATED_BACKUP_FAILURES
     SIMULATED_BACKUP_FAILURES = 2 if args.simulate_backup_failure else 0

@@ -1,0 +1,264 @@
+# Prototype: a pre-built S60 ESPHome image with no Wi-Fi and no passwords.
+# The conversion tool imprints the plug's Wi-Fi into the placeholders in
+# s60_imprint.h; at boot, the imprinted values are handed to wifi.configure.
+
+esphome:
+  name: sonoff-s60
+  friendly_name: Sonoff S60
+  name_add_mac_suffix: true
+  includes:
+    - s60_imprint.h
+  on_boot:
+    # After Wi-Fi is set up (its priority is 250); on_boot's default, 600, is before.
+    priority: -100
+    then:
+      - if:
+          condition:
+            lambda: 'return s60_is_imprinted();'
+          then:
+            - wifi.configure:
+                ssid: !lambda 'return s60_imprinted(S60_IMPRINT_SSID);'
+                password: !lambda 'return s60_imprinted(S60_IMPRINT_PASS);'
+                save: true
+
+esp32:
+  variant: esp32c3
+  framework:
+    type: esp-idf
+  partitions: partitions_sonoff_stock.csv
+  flash_size: 4MB
+
+# avoid frequent NVS write to save flash
+preferences:
+  flash_write_interval: 60s
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+    #allow_partition_access: true
+
+web_server:
+  version: 3
+
+wifi:
+  ap: {}
+
+captive_portal:
+
+time:
+  - platform: sntp
+    id: time_sntp
+    #timezone: "CET-1CEST,M3.5.0,M10.5.0/3"
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        then:
+          - sensor.integration.reset: energy_daily
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        days_of_month: 1
+        then:
+          - sensor.integration.reset: energy_monthly
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        days_of_month: 1
+        months: 1
+        then:
+          - sensor.integration.reset: energy_yearly
+
+uart:
+  rx_pin: GPIO7
+  baud_rate: 4800
+  parity: EVEN
+
+status_led:
+  pin:
+    number: GPIO5
+    inverted: true
+
+switch:
+  - id: relay
+    platform: gpio
+    name: "Relay"
+    pin: GPIO4
+    restore_mode: ALWAYS_ON
+
+number:
+  - platform: template
+    name: "Overload threshold"
+    id: overload_threshold
+    icon: mdi:flash-alert
+    unit_of_measurement: "W"
+    min_value: 100
+    max_value: 4000
+    step: 10
+    initial_value: 3500
+    optimistic: true
+    restore_value: true
+    mode: box
+  - platform: template
+    name: Countdown
+    id: countdown_seconds
+    icon: mdi:timer-outline
+    unit_of_measurement: "s"
+    min_value: 0
+    max_value: 86400
+    step: 1
+    initial_value: 0
+    optimistic: true
+    restore_value: false
+    mode: box
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return x > 0;'
+            then:
+              - script.execute: countdown_script
+            else:
+              - script.stop: countdown_script
+
+script:
+  - id: countdown_script
+    mode: restart
+    then:
+      - logger.log:
+          format: "Toggling in %.0f seconds"
+          args: [id(countdown_seconds).state]
+      - delay: !lambda "return id(countdown_seconds).state * 1000;"
+      - switch.toggle: relay
+      - number.set:
+          id: countdown_seconds
+          value: 0
+      - logger.log: "Countdown finished – toggling the relay"
+
+binary_sensor:
+  - platform: gpio
+    id: button_1
+    internal: true
+    pin:
+      number: GPIO9
+      inverted: true
+    on_press:
+      - switch.toggle: relay
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+  - platform: template
+    name: "Overload"
+    id: overload
+    device_class: problem
+    lambda: |-
+      return id(power).state > id(overload_threshold).state;
+  - platform: template
+    id: overload_delayed
+    internal: true
+    lambda: |-
+      return id(power).state > id(overload_threshold).state;
+    filters:
+      - delayed_on: 5s
+      - delayed_off: 1s
+    on_press:
+      then:
+        - switch.turn_off: relay
+        - logger.log:
+            level: WARN
+            format: "Overload > 5s (%.0f W > %.0f W) – turning off"
+            args: [id(power).state, id(overload_threshold).state]
+
+sensor:
+  - platform: cse7766
+    current:
+      name: "Current"
+      filters:
+        - throttle_average: 1s
+    voltage:
+      name: "Voltage"
+      filters:
+        - throttle_average: 1s
+    power:
+      name: "Power"
+      id: power
+      filters:
+        - throttle_average: 1s
+    energy:
+      name: "Energy"
+      unit_of_measurement: Wh
+      device_class: energy
+      state_class: total_increasing
+      filters:
+        - throttle: 5s
+    apparent_power:
+      name: "Apparent power"
+      disabled_by_default: true
+      filters:
+        - throttle_average: 1s
+    reactive_power:
+      name: "Reactive power"
+      disabled_by_default: true
+      filters:
+        - throttle_average: 1s
+    power_factor:
+      name: "Power factor"
+      disabled_by_default: true
+      filters:
+        - throttle_average: 1s
+
+  # Energy statistics (preserved across reboots and OTA updates)
+  - platform: integration
+    name: "Daily energy"
+    id: energy_daily
+    sensor: power
+    time_unit: h
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+    restore: true
+    filters:
+      - multiply: 0.001	# W → kWh
+
+  - platform: integration
+    name: "Monthly energy"
+    id: energy_monthly
+    sensor: power
+    time_unit: h
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+    restore: true
+    filters:
+      - multiply: 0.001	# W → kWh
+
+  - platform: integration
+    name: "Yearly energy"
+    id: energy_yearly
+    sensor: power
+    time_unit: h
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+    restore: true
+    filters:
+      - multiply: 0.001	# W → kWh
+
+  - platform: integration
+    name: "Total energy"
+    id: energy_total
+    sensor: power
+    time_unit: h
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+    restore: true
+    filters:
+      - multiply: 0.001	# W → kWh
