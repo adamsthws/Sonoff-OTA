@@ -676,7 +676,7 @@ class MigrationValidationTests(unittest.TestCase):
                     if "webclient()" in line:
                         above = "\n".join(lines[max(0, number - 2):number])
                         self.assertIn('if tasmota.wifi("up")', above, f"{phase} line {number + 1}")
-                self.assertIn("the plug's Wi-Fi was down for five minutes", source, phase)
+                self.assertIn("the plug's Wi-Fi went down and did not come back", source, phase)
             # Commit and restore still hand back their armed closure by name.
             self.assertTrue(rendered["commit"].rstrip().endswith("return commit"))
             self.assertTrue(rendered["restore"].rstrip().endswith("return restore"))

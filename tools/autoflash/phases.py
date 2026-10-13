@@ -290,6 +290,7 @@ class PhaseRunner:
             if isinstance(exc, PlugNeverConnected):  # it never started: nothing to say
                 raise
             said = self._show_plug_console()
+            self._advise_if_stuck()
             if said:
                 raise PhaseError(f"{exc}; its console says: {said}") from exc
             raise
@@ -301,10 +302,27 @@ class PhaseRunner:
             log_file.close()
         if code != 0:
             said = self._show_plug_console()
+            self._advise_if_stuck()
             if said and not any(PLUG_SAYS_RE.search(line) for line in captured):
                 captured.append(f"THE PLUG SAYS: {said}")  # what failure_reason() reports
             self.log(f"    The server's full output is in {log_path}")
         return code, "\n".join(captured)
+
+    def _advise_if_stuck(self) -> None:
+        """Say what to do when the plug does not answer at all after a phase.
+
+        Tasmota can be left waiting for ever on a download this computer
+        stopped sending part way (HTTPClientLight reads a body with no
+        timeout), and then answers nothing.  Switching it off and on is the
+        way out, and safe at every point a phase can be left there: staging
+        writes only the spare slot, the commit downloads before it writes and
+        reports after, and the restore carries on where it stopped.
+        """
+        if self._plug_answers():
+            return
+        self.log("    The plug is not answering at all - most likely stuck waiting for this computer.")
+        self.log("    Give it two minutes; if its web page still does not answer, switch it off")
+        self.log("    and on (at this stage that is safe), then run this again - it carries on.")
 
     def _show_plug_console(self) -> str | None:
         """Show the plug's own last words on the phase, from its console, and

@@ -114,7 +114,9 @@ def fetch_chunk(index, expected_length)
     if window.over() break end
     pause(1000)
   end
-  guard(attempt > 0, "the plug's Wi-Fi was down for five minutes")
+  # Given up with the Wi-Fi still down: that is the reason, whatever was tried first.
+  guard(attempt > 0 && (status >= 0 || tasmota.wifi("up")),
+        "the plug's Wi-Fi went down and did not come back within five minutes")
   if status != 200 client.close() end
   guard(status == 200, format("GET %s returned HTTP %i after %i attempts", path, status, attempt))
   guard(client.get_size() == expected_length * 2, "official Safeboot chunk HTTP length differs")
@@ -142,7 +144,9 @@ def post_text(path, body)
     if window.over() break end
     pause(1000)
   end
-  guard(attempt > 0, "the plug's Wi-Fi was down for five minutes")
+  # Given up with the Wi-Fi still down: that is the reason, whatever was tried first.
+  guard(attempt > 0 && (status >= 0 || tasmota.wifi("up")),
+        "the plug's Wi-Fi went down and did not come back within five minutes")
   guard(status == 200, format("POST %s returned HTTP %i after %i attempts", path, status, attempt))
 end
 
@@ -186,7 +190,9 @@ def fetch_text(path)
     if window.over() break end
     pause(1000)
   end
-  guard(attempt > 0, "the plug's Wi-Fi was down for five minutes")
+  # Given up with the Wi-Fi still down: that is the reason, whatever was tried first.
+  guard(attempt > 0 && (status >= 0 || tasmota.wifi("up")),
+        "the plug's Wi-Fi went down and did not come back within five minutes")
   var text = status >= 0 ? client.get_string() : ""
   if status >= 0 client.close() end
   guard(status == 200, format("GET %s returned HTTP %i: %s", path, status, text))

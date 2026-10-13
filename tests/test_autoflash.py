@@ -610,6 +610,19 @@ class PhaseFailureTests(unittest.TestCase):
         self.assertIsNone(said)
         self.assertEqual(len(shown), 2)  # still shown, for whoever reads the log
 
+    def test_a_plug_stuck_after_a_phase_is_to_be_switched_off_and_on(self):
+        # Tasmota waits for ever on a download cut off part way, answering
+        # nothing; switching it off and on is the way out, and safe here.
+        from unittest import mock
+        from tools.autoflash.phases import PhaseRunner
+        for answers, advised in ((False, True), (True, False)):
+            runner = PhaseRunner.__new__(PhaseRunner)
+            shown = []
+            runner.log = shown.append
+            runner._plug_answers = mock.Mock(return_value=answers)
+            runner._advise_if_stuck()
+            self.assertEqual(any("switch it off" in line for line in shown), advised, answers)
+
     def test_a_plug_that_cannot_answer_adds_nothing(self):
         from unittest import mock
         from tools.autoflash.phases import PhaseRunner

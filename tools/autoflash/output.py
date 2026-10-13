@@ -629,6 +629,11 @@ def stream(process: subprocess.Popen) -> int:
     return process.wait()
 
 
+def tool_said(text: str) -> bool:
+    """Whether the last helper tool's output (its kept tail) mentions `text`."""
+    return any(text in line for line in _s.tool_tail)
+
+
 def tool_problems(limit: int = 3) -> list[str]:
     """The last helper tool's own words on what went wrong: its lines that read
     like an error, or failing that its last few lines."""

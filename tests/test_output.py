@@ -913,5 +913,20 @@ class MarginTests(OutputTestCase):
         self.assertEqual(screen.strip("\n"), " " + text.strip())
 
 
+class ToolSaidTests(unittest.TestCase):
+    """What a helper tool said decides the advice: a part-served download is
+    the plug's Wi-Fi going, not the firewall."""
+
+    def test_it_finds_text_in_the_tools_kept_lines(self):
+        from tools.autoflash import output
+        output._s.tool_tail.clear()
+        output._s.tool_tail.extend(["  Served /user1.bin bytes 0-23 (24 bytes)",
+                                    "  WARNING: the device did not request every firmware byte."])
+        self.assertTrue(output.tool_said("Served /user"))
+        self.assertFalse(output.tool_said("Upgrade command sent"))
+        output._s.tool_tail.clear()
+
+
 if __name__ == "__main__":
     unittest.main()
+

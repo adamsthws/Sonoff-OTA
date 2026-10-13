@@ -727,7 +727,8 @@ def s60_template(product_model: str | None) -> str:
 
 # A phase server's line that says why it stopped, rather than how it is getting on.
 PHASE_PROBLEM_RE = re.compile(
-    r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in|PLUG SAYS|plug's console",
+    r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in|PLUG SAYS|plug's console|"
+    r"not answering at all|switch it off|and on \(at this stage",
     re.IGNORECASE,
 )
 
@@ -1773,11 +1774,19 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
             say(f"  {reason}")
             return {"seconds": round(time.monotonic() - started, 1), "confirmed_by": "bridge network"}
         reported = output.tool_problems()
+        # Some of it served means the plug reached this computer: not the
+        # firewall, but its Wi-Fi going part way (a router restarting, say).
+        started = output.tool_said("Served /user") or output.tool_said("did not request every")
         section("The bridge was not delivered", [
             *(["The sender reported:", *(f"  {line}" for line in reported), ""] if reported else []),
-            *firewall_hint(ctx),
+            *([
+                "The plug started downloading it from this computer, but stopped part",
+                "way - most likely its Wi-Fi dropped: a router restarting, or a weak",
+                "signal. It keeps its Sonoff firmware, so nothing is lost; run this",
+                "again once its Wi-Fi is steady.",
+            ] if started else firewall_hint(ctx)),
         ])
-        raise Abort("bridge delivery failed")
+        raise Abort("bridge delivery stopped part way" if started else "bridge delivery failed")
     return {"seconds": round(time.monotonic() - started, 1)}
 
 
@@ -2734,7 +2743,8 @@ def wait_while_plug_busy(ctx: Context) -> None:
             return
         time.sleep(3.0)
     output.progress_clear()
-    tell("    It is still not answering; carrying on, and each step will say what it finds.")
+    tell("    It is still not answering. Switch it off and on - at this point that is safe -")
+    tell("    and run this again; it carries on. Carrying on now, and each step says what it finds.")
 
 
 def execute_with_retries(ctx: Context, step: str) -> int:

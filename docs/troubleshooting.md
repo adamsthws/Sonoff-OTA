@@ -260,6 +260,16 @@ a plug that has stopped is noticed within about 20 seconds; no stage is waited
 on for more than 8 minutes in all. Waiting for you - to join a network, say -
 has no time limit.
 
+**"The plug is not answering at all"**
+
+A plug left waiting on a download this computer stopped sending part way can
+wait for ever, answering nothing - not even its web page - though it still
+answers ping. Give it two minutes; if its web page still does not answer,
+switch it off and on. At every point this can happen that is safe: staging
+writes only the spare half of memory, the rewrite downloads what it needs
+before it writes anything, and installing the official startup firmware
+carries on where it stopped. Then run this again.
+
 **"The plug is on the network but not answering yet"**
 
 A stage stopped part way (Ctrl-C, say) keeps the plug busy until it gives up,
