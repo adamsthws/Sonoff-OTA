@@ -75,8 +75,8 @@ afterwards - Tasmota needs no cloud.
 **Computer**
 
 - ✅ Linux - (fully tested end to end)
-- ⬜ Windows - (tested on an emulated plug, it's expected to work)
-- ⬜ macOS - (not tested yet - please test and report your results)
+- ✅ Windows - (fully tested end to end)
+- ⬜ macOS - (one tester reported issues - more testing required)
 
 ### Windows and macOS
 
@@ -251,6 +251,8 @@ It is also done over the air, through Tasmota's Firmware Upgrade page.
   happens to the plug, step by step.
 - **[docs/troubleshooting.md](docs/troubleshooting.md)** - problems met so far
   and their fixes.
+- **[docs/unattended.md](docs/unattended.md)** - running a conversion with
+  nobody at the keyboard, for testing, and keeping the screen it drew.
 - **[archive/docs/reference/](archive/docs/reference/)** - the original
   research, the manual procedure and how the firmware format was decoded.
 

@@ -17,6 +17,14 @@ if (Test-Path C:\S60\layer.txt) {
 $run = "C:\S60\run.json"
 if (-not (Test-Path $run)) { exit 0 }  # a layer itself, booted by hand: nothing to start
 $config = Get-Content $run -Raw | ConvertFrom-Json
+# The Linux side's key for SSH (vm-run.sh puts it here; rig.ps1 runs sshd).
+# s60 is an administrator, so sshd reads administrators' one file, and only
+# when no one but them and SYSTEM can change it.
+if (Test-Path C:\S60\authorized_keys) {
+    $keys = "$env:ProgramData\ssh\administrators_authorized_keys"
+    Copy-Item C:\S60\authorized_keys $keys -Force
+    icacls.exe $keys /inheritance:r /grant "*S-1-5-32-544:F" /grant "*S-1-5-18:F" | Out-Null
+}
 $repo = "C:\S60\repo"
 . "$repo\tools\windows-python.ps1"
 # The link's own Python (rig.ps1), never the tool's: in a --first-run there is

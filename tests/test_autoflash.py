@@ -426,6 +426,221 @@ class ModelGuardTests(unittest.TestCase):
             self.discover_with_model("SN-ESP32-MINIR4")
 
 
+class AlreadyConvertingTests(unittest.TestCase):
+    """A plug part way through a conversion is not a LAN Control problem."""
+
+    def silent_discover(self, page):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        from tools.autoflash import setup_network
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        state.set_input("plug_ip", "10.0.0.63")
+        ctx = SimpleNamespace(dir=Path(directory.name), state=state)
+        with mock.patch.object(autoflash, "discover", return_value={"packets": []}), \
+             mock.patch.object(setup_network, "page", return_value=page), \
+             mock.patch.object(autoflash.hostsys, "security_software_note", return_value=None), \
+             mock.patch.object(autoflash, "section"):
+            return autoflash.step_discover(ctx)
+
+    def test_the_bridge_is_named(self):
+        import tools.s60_autoflash as autoflash
+        with self.assertRaisesRegex(autoflash.Abort, "already running our installer firmware"):
+            self.silent_discover("<title>S60 OTA Bridge</title>")
+
+    def test_tasmota_is_named(self):
+        import tools.s60_autoflash as autoflash
+        with self.assertRaisesRegex(autoflash.Abort, "running Tasmota, not Sonoff's firmware"):
+            self.silent_discover("<title>Tasmota</title>")
+
+    def test_no_page_keeps_the_lan_control_advice(self):
+        import tools.s60_autoflash as autoflash
+        with self.assertRaisesRegex(autoflash.Abort, "LAN Control"):
+            self.silent_discover(None)
+
+
+class ConversionWifiTests(unittest.TestCase):
+    """G1 needs the Wi-Fi the plug was converted with, proven against the
+    commit's record of the startup firmware - never the bundle's say-so."""
+
+    def setUp(self):
+        import hashlib
+        import json
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        self.autoflash = autoflash
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        evidence = Path(directory.name)
+        image = lambda ssid, password: f"{ssid}/{password}".encode()  # noqa: E731
+        (evidence / "commit-report.json").write_text(json.dumps({
+            "phase": "commit", "status": "PASS",
+            "safeboot_sha256": hashlib.sha256(image("Home", "right")).hexdigest(),
+        }))
+        self.ctx = SimpleNamespace(evidence=evidence, manifest_path=Path("unused"),
+                                   args=SimpleNamespace(wifi=False),
+                                   remember_wifi=mock.Mock())
+        self.pinned = ("Home", "right")
+        self.pin = mock.Mock(side_effect=lambda _, ssid, pw: setattr(self, "pinned", (ssid, pw)))
+
+        def recovery(_, ssid, password):
+            if (ssid, password) != self.pinned:
+                raise autoflash.BundleError("not the pinned one")
+            return image(ssid, password)
+
+        for patch in (
+            mock.patch.object(autoflash, "startup_image", side_effect=image),
+            mock.patch.object(autoflash, "recovery_image", side_effect=recovery),
+            mock.patch.object(autoflash, "pin_wifi", self.pin),
+            mock.patch.object(autoflash, "section"),
+            mock.patch.object(autoflash, "say"),
+            mock.patch.object(autoflash, "tell"),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def run_with(self, on_plug, typed=()):
+        from unittest import mock
+        answers = iter(typed)
+        with mock.patch.object(self.autoflash, "read_wifi_from_plug", return_value=on_plug), \
+             mock.patch.object(self.autoflash, "ask_text", side_effect=lambda *_, **__: next(answers)), \
+             mock.patch.object(self.autoflash, "ask_secret", side_effect=lambda *_: next(answers)) as asked:
+            self.autoflash.conversion_wifi(self.ctx)
+        return asked
+
+    def test_the_plugs_own_details_are_used_when_they_match(self):
+        asked = self.run_with(("Home", "right"))
+        asked.assert_not_called()
+        self.pin.assert_not_called()
+        self.ctx.remember_wifi.assert_called_once_with("Home", "right", b"Home/right")
+
+    def test_changed_wifi_on_the_plug_asks_for_the_conversions(self):
+        asked = self.run_with(("NewNet", "new"), typed=["Home", "wrong", "Home", "right"])
+        self.assertEqual(asked.call_count, 2)  # a wrong password is asked again
+        self.ctx.remember_wifi.assert_called_once_with("Home", "right", b"Home/right")
+        self.pin.assert_not_called()  # the bundle was never moved off them
+
+    def test_a_bundle_set_up_for_other_wifi_is_put_back(self):
+        self.pinned = ("NewNet", "new")
+        self.run_with(("Home", "right"))
+        self.pin.assert_called_once_with(Path("unused"), "Home", "right")
+
+    def test_the_plugs_new_details_are_never_pinned(self):
+        self.run_with(("NewNet", "new"), typed=["Home", "right"])
+        for call in self.pin.call_args_list:
+            self.assertNotEqual(call.args[1:], ("NewNet", "new"))
+
+    def test_no_commit_record_stops_before_asking(self):
+        (self.ctx.evidence / "commit-report.json").unlink()
+        with self.assertRaisesRegex(self.autoflash.Abort, "no record of the new layout"):
+            self.run_with(("Home", "right"))
+
+
+class BerryFireTests(unittest.TestCase):
+    """A phase that restarts the plug cuts its own reply off: that is no reply,
+    not a crash (the E3 traceback on macOS)."""
+
+    def test_a_reply_cut_off_is_no_reply(self):
+        import http.client
+        from unittest import mock
+        from tools.autoflash.device import Device
+
+        device = Device("10.0.0.63")
+        for error in (http.client.IncompleteRead(b""), ConnectionResetError(54, "reset")):
+            with mock.patch.object(device, "berry", side_effect=error):
+                self.assertFalse(device.berry_fire('s60_commit("x")'))
+
+    def test_other_errors_still_surface(self):
+        from unittest import mock
+        from tools.autoflash.device import Device, DeviceError
+
+        device = Device("10.0.0.63")
+        with mock.patch.object(device, "berry", side_effect=DeviceError("password")):
+            with self.assertRaises(DeviceError):
+                device.berry_fire("x")
+
+
+class CommitEvidenceTests(unittest.TestCase):
+    """E3 interrupted after the plug reported is finished, not a question."""
+
+    def ctx(self, report):
+        import json
+        from types import SimpleNamespace
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        evidence = Path(directory.name)
+        if report is not None:
+            (evidence / "commit-report.json").write_text(json.dumps(report))
+        return SimpleNamespace(evidence=evidence)
+
+    def test_a_pass_report_means_finished(self):
+        import tools.s60_autoflash as autoflash
+        finished, _ = autoflash.evidence_commit_finished(
+            self.ctx({"phase": "commit", "status": "PASS"}))
+        self.assertTrue(finished)
+
+    def test_a_fail_report_means_not_finished(self):
+        import tools.s60_autoflash as autoflash
+        finished, _ = autoflash.evidence_commit_finished(
+            self.ctx({"phase": "commit", "status": "FAIL"}))
+        self.assertIs(finished, False)
+
+    def test_no_report_cannot_tell(self):
+        import tools.s60_autoflash as autoflash
+        finished, _ = autoflash.evidence_commit_finished(self.ctx(None))
+        self.assertIsNone(finished)
+
+    def test_another_phase_report_is_not_taken(self):
+        import tools.s60_autoflash as autoflash
+        finished, _ = autoflash.evidence_commit_finished(
+            self.ctx({"phase": "stage", "status": "PASS"}))
+        self.assertIsNone(finished)
+
+    def test_a_passed_commit_supersedes_the_high_slot_check(self):
+        # After the commit the plug runs from slot 0 of the new layout: asking
+        # to redo D4 then would put the interim Tasmota back over it.
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        ctx = self.ctx({"phase": "commit", "status": "PASS"})
+        ctx.state = SimpleNamespace(is_done=lambda step: False)
+        ctx.device = mock.Mock()
+        self.assertEqual(autoflash.verify_high_slot(ctx), (True, ""))
+        ctx.device.current_ota.assert_not_called()
+
+    def test_without_a_report_the_high_slot_is_still_checked(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        ctx = self.ctx(None)
+        ctx.state = SimpleNamespace(is_done=lambda step: False)
+        ctx.device = mock.Mock(current_ota=mock.Mock(return_value=0))
+        ok, message = autoflash.verify_high_slot(ctx)
+        self.assertFalse(ok)
+        self.assertIn("high slot", message)
+
+    def test_redoing_a_passed_commit_touches_nothing(self):
+        # The startup firmware cannot answer the network check: running it
+        # would fail and send the run back to E1 with no way forward.
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        ctx = self.ctx({"phase": "commit", "status": "PASS"})
+        with mock.patch.object(autoflash, "check_plug_network") as network, \
+             mock.patch.object(autoflash, "say"):
+            result = autoflash.step_commit(ctx)
+        network.assert_not_called()
+        self.assertTrue(result["already_written"])
+
+
 class RebootDetectionTests(unittest.TestCase):
     """A restart soon after another must still be seen - the D4 hang."""
 
@@ -567,6 +782,21 @@ class RunChoiceTests(unittest.TestCase):
         self.assertNotEqual(name, "half")
         self.assertNotIn("past the point of no return", menu.call_args.args[1][0])
         self.assertTrue((self.root / "half").is_dir())
+
+    def test_the_answer_reaches_the_new_runs_log(self):
+        # The menu is gone from the screen once answered and comes before the
+        # log opens: a part-converted plug left behind must still show in it.
+        from unittest import mock
+        self.run_dir("past", ["A0", "A5", "A1", "A2", "C2"])
+        self.autoflash.RUN_CHOICE.clear()
+        self.choose(1)
+        with mock.patch.object(self.autoflash, "say") as say:
+            self.autoflash.log_run_choice()
+        logged = "\n".join(call.args[0] for call in say.call_args_list)
+        self.assertIn("a new plug", logged)
+        self.assertIn("stopped at step D1", logged)
+        self.assertIn("past the point of no return", logged)
+        self.assertEqual(self.autoflash.RUN_CHOICE, [])
 
     def test_other_commands_continue_without_asking(self):
         from unittest import mock
@@ -795,6 +1025,42 @@ class BridgeOnHomeNetworkTests(unittest.TestCase):
         self.assertIsNone(self.find([None] * 20, {}))
 
 
+class WaitForBridgeTests(unittest.TestCase):
+    """While waiting for the bridge's own network, a late join of the home one
+    must still be noticed: the bridge then never raises its own."""
+
+    def wait(self, addresses, pages, timeout=60.0):
+        from types import SimpleNamespace
+        from unittest import mock
+        from tools import s60_autoflash
+        from tools.autoflash import setup_network
+
+        polls = iter(addresses)
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: next(polls, None)))
+        clock = iter(range(0, 10_000, 2))
+        with mock.patch.object(setup_network, "page", side_effect=lambda host, **_: pages.get(host)), \
+             mock.patch.object(s60_autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(s60_autoflash.time, "sleep"), \
+             mock.patch.object(s60_autoflash, "say"):
+            return s60_autoflash.wait_for_bridge(ctx, "S60-OTA-Bridge-A04D", timeout=timeout)
+
+    def test_a_late_join_of_the_home_network_is_taken(self):
+        bridge = "<title>S60 OTA Bridge</title>"
+        self.assertEqual(
+            self.wait([None, None, "192.168.1.51"], {"192.168.1.51": bridge}), "192.168.1.51"
+        )
+
+    def test_joining_the_bridge_network_still_works(self):
+        from tools.autoflash import setup_network
+        bridge = "<title>S60 OTA Bridge</title>"
+        self.assertIsNone(self.wait([None] * 50, {setup_network.SETUP_HOST: bridge}))
+
+    def test_neither_in_time_stops_with_a_reason(self):
+        from tools import s60_autoflash
+        with self.assertRaisesRegex(s60_autoflash.Abort, "did not appear on your network"):
+            self.wait([None] * 50, {}, timeout=20.0)
+
+
 class TasmotaWifiPresetTests(unittest.TestCase):
     """D1 gives Tasmota the Wi-Fi through the bridge when it safely can."""
 
@@ -1014,14 +1280,15 @@ class WifiFallbackTests(unittest.TestCase):
 class EwelinkAccountTests(unittest.TestCase):
     """The last eWeLink account is offered, not assumed."""
 
-    def email(self, *, remembered=None, chosen=None, choice=0, typed="new@example.com"):
+    def email(self, *, remembered=None, chosen=None, choice=0, typed="new@example.com", given=None):
         from types import SimpleNamespace
         from unittest import mock
         import tools.s60_autoflash as autoflash
         inputs = {"email": chosen} if chosen else {}
         ctx = SimpleNamespace(state=SimpleNamespace(input=inputs.get,
                                                     set_input=inputs.__setitem__),
-                              remember_email=lambda e: inputs.__setitem__("email", e))
+                              remember_email=lambda e: inputs.__setitem__("email", e),
+                              _given_email=given)
         with mock.patch.object(autoflash, "load_settings",
                                return_value={"ewelink_email": remembered} if remembered else {}), \
              mock.patch.object(autoflash, "ask_choice", return_value=choice) as menu, \
@@ -1038,6 +1305,12 @@ class EwelinkAccountTests(unittest.TestCase):
         email, _, asked = self.email(remembered="old@example.com", choice=1)
         self.assertEqual(email, "new@example.com")
         asked.assert_called_once()
+
+    def test_one_given_in_advance_is_used_without_asking(self):
+        email, menu, asked = self.email(remembered="old@example.com", given="env@example.com")
+        self.assertEqual(email, "env@example.com")
+        menu.assert_not_called()
+        asked.assert_not_called()
 
     def test_with_none_remembered_it_is_simply_asked(self):
         email, menu, _ = self.email()

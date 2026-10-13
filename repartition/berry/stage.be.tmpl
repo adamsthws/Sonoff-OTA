@@ -32,22 +32,51 @@ def sha_region(address, length)
   return hash.out()
 end
 
+# Wait without blocking Wi-Fi reconnects or tripping Berry's timeout.
+def pause(ms)
+  var wake = tasmota.millis(ms)
+  while !tasmota.time_reached(wake)
+    tasmota.delay(50)
+    tasmota.yield()
+  end
+end
+
 def post_text(path, body)
-  var client = webclient()
-  client.begin(base_url + path)
-  var status = client.POST(body)
-  client.close()
-  guard(status == 200, format("POST %s returned HTTP %i", path, status))
+  var status
+  var attempt = 0
+  var deadline = tasmota.millis(60000)
+  while true
+    var client = webclient()
+    client.begin(base_url + path)
+    status = client.POST(body)
+    client.close()
+    attempt += 1
+    if status >= 0 || tasmota.time_reached(deadline) break end
+    pause(1000)
+  end
+  guard(status == 200, format("POST %s returned HTTP %i after %i attempts", path, status, attempt))
 end
 
 def fetch_chunk(index, expected_length)
   var path = format("/chunk/safeboot/%i", index)
-  var client = webclient()
-  client.begin(base_url + path)
-  var status = client.GET()
-  guard(status == 200, format("GET %s returned HTTP %i", path, status))
+  var client
+  var status
+  var attempt = 0
+  var deadline = tasmota.millis(60000)
+  while true
+    client = webclient()
+    client.begin(base_url + path)
+    status = client.GET()
+    attempt += 1
+    if status >= 0 || tasmota.time_reached(deadline) break end
+    client.close()
+    pause(1000)
+  end
+  if status != 200 client.close() end
+  guard(status == 200, format("GET %s returned HTTP %i after %i attempts", path, status, attempt))
   guard(client.get_size() == expected_length * 2, "Safeboot chunk HTTP length differs")
   var encoded = client.get_string()
+  client.close()
   guard(size(encoded) == expected_length * 2, "Safeboot chunk body length differs")
   var data = bytes(encoded)
   guard(size(data) == expected_length, "Safeboot chunk hex is invalid")

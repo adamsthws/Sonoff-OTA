@@ -30,6 +30,8 @@ import time
 from pathlib import Path
 from typing import IO
 
+from . import __version__
+
 IS_WINDOWS = platform.system() == "Windows"
 
 GREEN, RED, YELLOW, BOLD, RESET = "\x1b[32m", "\x1b[31m", "\x1b[33m", "\x1b[1m", "\x1b[0m"
@@ -142,7 +144,7 @@ def start(log_path: Path | None, *, verbose: bool) -> None:
             log_path.parent.mkdir(parents=True, exist_ok=True)
             _s.log = log_path.open("a", encoding="utf-8")
             _s.log_path = log_path
-            _write_log(f"=== run started{' (verbose)' if verbose else ''} ===")
+            _write_log(f"=== run started, tool version {__version__}{' (verbose)' if verbose else ''} ===")
         _s.concise = not verbose
         _s.paused = False
         _s.run_waited = 0.0

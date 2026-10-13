@@ -70,7 +70,7 @@ running on its battery `windows-test.sh` says to plug it in.
 |---|---|
 | The emulator starting, until the plug is on its Wi-Fi | under 10 seconds |
 | Windows from Linux: starting, until the link says Connected | 30-60 seconds |
-| A conversion | about 7 minutes on a real plug, through all 14 stages; the emulator's has not been timed end to end yet - expect about the same, and longer if the emulated flash writes are slower |
+| A conversion | about 7 minutes on a real plug, through all 14 stages; about 5 in the emulator (4m 35s for an unattended run from stock) |
 | Windows shutting down at the end | about 10 seconds |
 
 **After changing what Windows is set up with:** the layers whose scripts
@@ -95,6 +95,7 @@ On Linux or macOS (on Windows, see "On Windows" below):
 ```sh
 tools/emulator/emu.sh            # plug offline: nothing reaches the internet
 tools/emulator/emu.sh --cloud    # plug and tool online - asks you to confirm the real plug is unplugged
+tools/emulator/emu.sh --cloud --yes  # ... without asking: you have unplugged it (for unattended tests)
 tools/emulator/emu.sh --fresh    # put the plug back to stock, and forget the previous run and the eWeLink account
 tools/emulator/emu.sh --pcap     # also record the plug's Wi-Fi traffic
 tools/emulator/emu.sh --rebuild  # rebuild the image first
@@ -131,6 +132,33 @@ The tool knows when it runs in the emulator (`S60_EMULATOR_URL`), and its
 final link points at http://localhost:8080 instead of the plug's own address.
 Where it warns that sudo may ask for a password, it gives the emulator's
 (`S60_EMULATOR_SUDO_PASSWORD`); on a real computer it never knows one.
+
+### Unattended, for testing
+
+One command starts the emulator, converts the plug with nobody at the
+keyboard, prints the screen the run left, and stops the emulator again:
+
+```sh
+tools/emulator/unattended-test.sh --fresh    # from stock, as a new user would
+tools/emulator/unattended-test.sh            # from where the last run left the plug
+tools/emulator/unattended-test.sh --keep     # leave the emulator running afterwards
+tools/emulator/unattended-test.sh -- --new   # anything after -- goes to the run itself
+```
+
+It needs a `.env` with the eWeLink account the dump's plug is in (see
+[unattended.md](unattended.md)). It starts the emulator with `--cloud --yes`,
+so **the real plug must already be unplugged**: it is not asked. `--pcap`,
+`--rebuild` and `--no-firewall` are `emu.sh`'s.
+
+Once the plug answers on the emulated Wi-Fi, it runs
+`tools/unattended_run.py` in the container's copy of the repository, as your
+user. `.env` reaches that copy with the rest of the checkout. The run's sudo
+password is the emulator's, and everything else is answered as
+[unattended.md](unattended.md) describes. On a terminal the run is shown live;
+otherwise, as in a CI log, the final screen is printed at the end, colours
+and all. The recording stays in
+`captures/emulation/state/work/captures/unattended/<time>/`, beside the run's
+own `run.log`. The exit code is the run's: 0 when the plug was converted.
 
 ## On Windows
 
@@ -189,7 +217,7 @@ to the one below:
 | Layer | What it adds | Set up by | Takes |
 |---|---|---|---|
 | `installed` | Windows Server Core, as Setup leaves it: the user `s60`, who logs on by itself, and a hook that runs `start.ps1` at logon | the ISO, `unattend.xml`, `firstlogon.ps1` | 5-10 min |
-| `rig` | what only the tests need: Remote Desktop, the clipboard over VNC (virtio-win's guest tools, pinned), no Windows Update or SConfig, and for the link OpenVPN's TAP driver, the "S60 emulator" adapter and a Python of its own, from the same `windows-bootstrap.ps1` a Windows computer uses | `rig.ps1` | a few min |
+| `rig` | what only the tests need: Remote Desktop, SSH, the clipboard over VNC (virtio-win's guest tools, pinned), no Windows Update or SConfig, and for the link OpenVPN's TAP driver, the "S60 emulator" adapter and a Python of its own, from the same `windows-bootstrap.ps1` a Windows computer uses | `rig.ps1` | a few min |
 | `tool` | what the tool's own first run leaves: its portable Python | `tool.ps1` | about a min |
 
 Every run starts from a throwaway layer on `tool`, with this checkout in
@@ -205,7 +233,7 @@ conversion - in **OpenConsole**, Windows Terminal's own console, as on Windows
 11, or with `--classic-console` in Windows' classic one, as on Windows 10. Work
 in it in your browser, at **http://localhost:6080** - nothing to install - or
 over Remote Desktop, `localhost:3389`, user `s60`, password `S60-emulator`, or
-with a VNC viewer on `localhost:5900`. Only this computer can reach any of them.
+with a VNC viewer on `localhost:5900`, or over SSH (below). Only this computer can reach any of them.
 Copy and paste works in all three: in the browser through the clipboard box in
 noVNC's side panel (the browser keeps pages from reading the clipboard
 directly; what you paste stays Windows' clipboard while the page is open), on VNC
@@ -221,6 +249,29 @@ at 192.168.60.0/24 - http://localhost:8080 works either way. The terminal you st
 restart` and the serial log; leaving it shuts Windows down. The conversion's
 captures are kept between runs (`~/.cache/s60-emu/windows/captures`), so an
 unfinished one can be resumed.
+
+#### SSH, to drive a run from a terminal
+
+Windows runs OpenSSH's server (set up in the `rig` layer) with PowerShell as
+its shell, on `127.0.0.1:2222` (`S60_WINDOWS_SSH_PORT` to change), logged on
+to as `s60` with a key `windows-test.sh` makes once in
+`~/.cache/s60-emu/windows/ssh`. `tools/emulator/windows-ssh.sh` wraps it:
+
+```sh
+tools/emulator/windows-ssh.sh --wait          # until Windows has logged on and lets the key in
+tools/emulator/windows-ssh.sh                 # PowerShell, in C:\Users\s60
+tools/emulator/windows-ssh.sh 'Get-ChildItem C:\S60\repo\captures'  # any PowerShell command
+tools/emulator/windows-ssh.sh log -f          # follow the conversion's latest run.log
+tools/emulator/windows-ssh.sh get C:/S60/repo/captures ./win-captures
+tools/emulator/windows-ssh.sh put tools/s60_autoflash.py C:/S60/repo/tools/
+```
+
+The key is let in at logon (`start.ps1`), so about a minute after a run
+starts. SSH is a session of its own, beside the console the run opens, not
+in it: what the conversion shows there is read through its `run.log`. A
+conversion can also be run over SSH itself (`windows-ssh.sh`, then
+`cd C:\S60\repo; .\start.ps1`), in the console SSH gives it, which is neither
+OpenConsole nor the classic one.
 
 Server Core has no desktop, which is what makes it quick to install and run,
 and leaves three things a person's Windows has untested here: the User

@@ -30,8 +30,8 @@ from typing import Any, Callable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tools.autoflash import hostsys, output, setup_network  # noqa: E402
-from tools.autoflash import tasmota_settings  # noqa: E402
+from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
+from tools.autoflash import __version__, tasmota_settings  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import PhaseError, PhaseRunner, PlugNeverConnected  # noqa: E402
@@ -63,6 +63,7 @@ from tools.prepare_imprinted_bundle import (  # noqa: E402
     forget_stored_password,
     pin_wifi,
     recovery_image,
+    startup_image,
     validate_bundle,
 )
 from tools.query_ota import ota_endpoints  # noqa: E402
@@ -148,6 +149,10 @@ def require_word(word: str) -> bool:
     tell("")
     # Read directly: an empty answer must stop here, not be asked again.
     question = f"Type {word.upper()} to go ahead - anything else stops, changing nothing: "
+    if prompts.UNATTENDED:
+        # Given in advance by starting the run with --unattended.
+        prompts.answered_unattended(question.rstrip(": "), word.upper())
+        return True
     answer = input(output.question(question))
     output.answered(answer)
     return answer.strip().lower() == word.lower()
@@ -243,6 +248,19 @@ def start_new_run(plug_ip: str | None) -> str:
     return name
 
 
+# The answer to the unfinished-run menu.  The menu is answered before the run's
+# log exists and leaves the screen once answered, so it is held here and
+# written into the log when it opens - otherwise a plug left part converted by
+# "start a new plug" leaves no trace of how.
+RUN_CHOICE: list[str] = []
+
+
+def log_run_choice() -> None:
+    for line in RUN_CHOICE:
+        say(line)
+    RUN_CHOICE.clear()
+
+
 def resolve_run_name(
     requested: str | None, force_new: bool, plug_ip: str | None, ask: bool = False
 ) -> str:
@@ -269,6 +287,7 @@ def resolve_run_name(
     if not ask:
         chosen = unfinished[0]
         say(f"Continuing {describe_run(chosen)}.")
+        RUN_CHOICE.append(f"Continuing {describe_run(chosen)}, the most recent unfinished run.")
         remember_current(chosen.name)
         return chosen.name
 
@@ -294,10 +313,13 @@ def resolve_run_name(
         )
         if chosen < len(unfinished):
             output.transient_end()
+            RUN_CHOICE.append(f"Chosen at the start: continue {describe_run(unfinished[chosen])}.")
             remember_current(unfinished[chosen].name)
             return unfinished[chosen].name
         if chosen == len(unfinished):
             output.transient_end()
+            RUN_CHOICE.append("Chosen at the start: a new plug. Left unfinished, on record:")
+            RUN_CHOICE.extend(f"    {describe_run(d)}" for d in unfinished)
             return start_new_run(plug_ip)
         target = unfinished[0] if len(unfinished) == 1 else unfinished[ask_choice(
             "Which run should be removed",
@@ -367,6 +389,9 @@ class Context:
             self.state.set_input("web_user", args.web_user)
         self.web_password = args.web_password
         self._ewelink_password: str | None = None
+        # From .env or the environment: tried once, then asked for if eWeLink refuses it.
+        self._given_ewelink_password = credentials.get("EWELINK_PASSWORD")
+        self._given_email = credentials.get("EWELINK_EMAIL")
         self._finder: PlugFinder | None = None
         # Held only in memory: the Wi-Fi details, and the recovery image built
         # from them.  Neither is ever written to disk.
@@ -461,6 +486,12 @@ class Context:
         command line.  It reaches the reviewed tools through EWELINK_PASSWORD,
         which serve_tasmota_ota.py already supported.
         """
+        # A password given in advance is tried once, and only for the account
+        # it was given with when one was named too.
+        given, self._given_ewelink_password = self._given_ewelink_password, None
+        if self._ewelink_password is None and given and self._given_email in (None, self.email()):
+            self._ewelink_password = given
+            say("The eWeLink password is the one given in advance (.env or EWELINK_PASSWORD).")
         if self._ewelink_password is None:
             email = self.email()
             output.transient_begin()
@@ -498,6 +529,7 @@ class Context:
         """Ask again which eWeLink account, and its password."""
         self.state.set_input("email", None)
         self._ewelink_password = None
+        self._given_email = self._given_ewelink_password = None
 
     def email(self) -> str:
         """The eWeLink account email, chosen once per run.
@@ -505,7 +537,7 @@ class Context:
         The last account used on this computer is offered first; a plug in
         another account needs that account's email instead.
         """
-        email = self.state.input("email")
+        email = self.state.input("email") or self._given_email
         if not email:
             output.transient_begin()
             last = load_settings().get("ewelink_email")
@@ -1471,6 +1503,31 @@ def find_ewelink_plugs(timeout: float = 6.0) -> list[tuple[str, str]]:
 
 
 
+def already_converting(plug_ip: str) -> None:
+    """Stop with the real reason when the plug no longer runs Sonoff's firmware.
+
+    eWeLink shows a plug part way through a conversion as offline, and it does
+    not answer eWeLink discovery; "check LAN Control" would send its owner the
+    wrong way.
+    """
+    body = setup_network.page(plug_ip, timeout=3.0)
+    if body is None:
+        return
+    if setup_network.BRIDGE_PAGE_MARKER.lower() in body.lower():
+        raise Abort(
+            f"the plug at {plug_ip} is already running our installer firmware, from "
+            "an earlier conversion. Run this again and choose to continue that "
+            "conversion. If none is offered, switch the plug off and on: it goes "
+            "back to its Sonoff firmware, and a new conversion can start"
+        )
+    if "tasmota" in body.lower():
+        raise Abort(
+            f"{plug_ip} is running Tasmota, not Sonoff's firmware. If that is this "
+            "plug, part way through an earlier conversion, run this again and "
+            "choose to continue that conversion"
+        )
+
+
 def step_discover(ctx: Context) -> dict[str, Any]:
     """A2/A3/A4 - identify the device and read its OTA metadata."""
     plug_ip = ctx.state.require("plug_ip")[0]
@@ -1480,6 +1537,7 @@ def step_discover(ctx: Context) -> dict[str, Any]:
     # The same report the discovery tool writes, without its console output.
     report = discover(8.0, None, plug_ip)
     if not report["packets"]:
+        already_converting(plug_ip)
         note = hostsys.security_software_note()
         if note:
             section("Something on this computer may be in the way", note)
@@ -1631,8 +1689,7 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
         ip = configure_plug_wifi(ctx, setup)
         return {"plug_ip": ip, "device_name": setup, "resumed": True}
 
-    address = bridge_on_home_network(ctx)
-    if address:
+    def through_home_network(address: str) -> dict[str, Any]:
         say(f"    The installer joined your network at {address}.")
         preset = give_tasmota_the_wifi(ctx, address)
         upload_tasmota(image, host=address)
@@ -1644,6 +1701,10 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
             section("Tasmota has not appeared on your network", QUICK_POWER_CYCLE_HINT)
             return finish_tasmota_setup(ctx, route="home network", wait=900.0)
         return finish_tasmota_setup(ctx, route="home network")
+
+    address = bridge_on_home_network(ctx)
+    if address:
+        return through_home_network(address)
     bridge = bridge or "S60-OTA-Bridge-XXXX   (the XXXX varies)"
     copied = hostsys.copy_to_clipboard(BRIDGE_PASSWORD)
     section("Join the bridge's Wi-Fi network", [
@@ -1655,10 +1716,46 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
         "",
         "Your Wi-Fi internet drops while joined - expected. A wired connection,",
         "if this computer has one, can stay connected. This carries on by itself.",
+        "",
+        "If that network is not there, wait: the installer may still be joining",
+        "your own Wi-Fi, and this carries on by itself when it does.",
     ])
-    wait_until_joined(bridge.split()[0], setup_network.BRIDGE_PAGE_MARKER)
+    address = wait_for_bridge(ctx, bridge.split()[0])
+    if address:
+        return through_home_network(address)
     upload_tasmota(image)
     return finish_tasmota_setup(ctx, route="bridge network")
+
+
+def wait_for_bridge(ctx: Context, network: str, *, timeout: float = 900.0) -> str | None:
+    """Wait for this computer to join the bridge's network, or for the bridge to
+    turn up on the home network instead.  The bridge's address on the home
+    network, or None once this computer has joined the bridge's own.
+
+    A bridge on a weak signal can take longer to join the home network than
+    the first look allows; it then never raises its own network, so waiting
+    only for that would wait forever.
+    """
+    marker = setup_network.BRIDGE_PAGE_MARKER.lower()
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        body = setup_network.page(setup_network.SETUP_HOST, timeout=2.0)
+        if body is not None and marker in body.lower():
+            output.progress_clear()
+            say(f"    Connected to {network}.")
+            return None
+        address = ctx.finder.poll()
+        if address:
+            body = setup_network.page(address, timeout=3.0)
+            if body is not None and marker in body.lower():
+                output.progress_clear()
+                return address
+        output.progress(f"waiting for this computer to join {network}, or the installer "
+                        f"to join your Wi-Fi... {time.monotonic() - started:.0f}s")
+        time.sleep(2.0)
+    output.progress_clear()
+    raise Abort(f"this computer did not join {network} within 15 minutes, and the "
+                "installer did not appear on your network")
 
 
 # Tasmota with Wi-Fi details that do not work keeps retrying them and never
@@ -1814,6 +1911,14 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         except (OSError, ValueError):
             return False
         return report.get("manifest_sha256") == sha256_bytes(ctx.manifest_path.read_bytes())
+
+    # Already written: the plug now runs the startup firmware, which cannot
+    # answer the checks below, so failing them would send the run back to E1
+    # with no way forward.
+    if commit_report(ctx) == "PASS":
+        say("The plug already reported the new layout written and checked;")
+        say("there is nothing to do again here.")
+        return {"exit": 0, "already_written": True}
 
     try:
         check_plug_network(ctx)  # may rebuild the bundle
@@ -2015,8 +2120,63 @@ def step_configure(ctx: Context) -> dict[str, Any]:
 
 
 
+def conversion_wifi(ctx: Context) -> None:
+    """Hold the Wi-Fi details the plug was converted with, for G1.
+
+    G1 needs the exact startup firmware on the plug, and only those details
+    rebuild it.  They are proven against the commit's record of the image it
+    put in place, not against the bundle: the bundle may have been set up for
+    other Wi-Fi since, and the plug's own Wi-Fi may have changed.  Only proven
+    details are pinned back into the bundle, which the migration server needs.
+    """
+    try:
+        report = json.loads((ctx.evidence / "commit-report.json").read_text(encoding="utf-8"))
+        wanted = str(report["safeboot_sha256"]).lower()
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise Abort(f"this run has no record of the new layout being written ({exc})") from exc
+
+    def proven(ssid: str, password: str) -> bytes | None:
+        try:
+            image = startup_image(ssid, password)
+        except BundleError:
+            return None
+        return image if sha256_bytes(image) == wanted else None
+
+    details = None if getattr(ctx.args, "wifi", False) else read_wifi_from_plug(ctx)
+    image = proven(*details) if details else None
+    if image is None:
+        output.transient_begin()  # until details that match are given
+        section("The Wi-Fi details the plug was converted with are needed", [
+            *(["The plug is on different Wi-Fi details now."] if details else []),
+            "Its temporary startup firmware was built with the Wi-Fi details",
+            "used during the conversion, and only those rebuild it exactly, so",
+            "it can be swapped for the official one. They are checked against",
+            "the plug's record before anything is used.",
+        ])
+        while image is None:
+            ssid = ask_text("Wi-Fi network name used during the conversion", private="wifi-name")
+            password = ask_secret(f"Wi-Fi password for '{ssid}' at the time: ")
+            output.private(password, "wifi-password")
+            details = (ssid, password)
+            image = proven(ssid, password)
+            if image is None:
+                tell("    Those are not the details the plug was converted with - try again.")
+        output.transient_end()
+    ssid, password = details
+    try:
+        recovery_image(ctx.manifest_path, ssid, password)
+    except BundleError:
+        say(f"Setting the firmware bundle back up for '{ssid}', the Wi-Fi the plug was converted with.")
+        try:
+            pin_wifi(ctx.manifest_path, ssid, password)
+        except BundleError as exc:
+            raise Abort(f"the bundle could not be set up for '{ssid}': {exc}") from exc
+    ctx.remember_wifi(ssid, password, image)
+
+
 def step_restore(ctx: Context) -> dict[str, Any]:
     """G - replace the private recovery Safeboot with official bytes."""
+    conversion_wifi(ctx)  # before the runner, which would otherwise pin the plug's own
     runner = ctx.phase_runner()
     say("== Restore official Safeboot")
 
@@ -2089,7 +2249,7 @@ def verify_high_slot(ctx: "Context") -> tuple[bool, str]:
     no Berry to ask.  Both are 'cannot check', which must not be reported as
     'the device disagrees'.
     """
-    if ctx.state.is_done("E3"):
+    if ctx.state.is_done("E3") or commit_report(ctx) == "PASS":
         return True, ""  # superseded: the old two-slot layout no longer exists
     slot = ctx.device.current_ota()
     if slot == 1:
@@ -2441,11 +2601,41 @@ def evidence_official_app_installed(ctx: "Context") -> tuple[bool | None, str]:
     )
 
 
+def commit_report(ctx: "Context") -> str | None:
+    """PASS or FAIL as the plug reported its commit, or None if it never did.
+
+    The plug sends its report only after reading the new layout back, and
+    restarts straight after, so a run stopped at that moment has the report
+    even though the command that started the commit never got its reply.
+    """
+    try:
+        report = json.loads((ctx.evidence / "commit-report.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(report, dict) or report.get("phase") != "commit":
+        return None
+    status = report.get("status")
+    return status if status in {"PASS", "FAIL"} else None
+
+
+def evidence_commit_finished(ctx: "Context") -> tuple[bool | None, str]:
+    status = commit_report(ctx)
+    if status == "PASS":
+        return True, (
+            "The plug reported the new layout written and checked, just before\n"
+            "  it restarted - so this step did finish."
+        )
+    if status == "FAIL":
+        return False, "The plug reported that this step failed."
+    return None, "The plug sent no report of this step."
+
+
 
 # Consulted when a step was interrupted, to answer "did it finish?" from the
 # device rather than from the operator's memory.
 ATTEMPTED_EVIDENCE: dict[str, Callable[["Context"], tuple[bool | None, str]]] = {
     "C2": evidence_bridge_installed,
+    "E3": evidence_commit_finished,
     "F2": evidence_official_app_installed,
 }
 
@@ -2502,6 +2692,10 @@ def run_steps(ctx: Context) -> int:
                 output.stage_end("already done")
                 continue
         if ctx.state.status(step) == ATTEMPTED:
+            # Under its own stage line, like every other stage; the check, and
+            # any question, are taken off the screen once settled.
+            begin_stage(step)
+            output.transient_begin()
             say("")
             tell(f"{step} was interrupted last time - checking whether it finished...")
             finished, reason = None, ""
@@ -2514,9 +2708,10 @@ def run_steps(ctx: Context) -> int:
                 tell(f"    {reason}")
             if finished is True:
                 # The plug itself shows the step completed: nothing to decide.
+                output.transient_end()
                 ctx.state.mark(step, DONE, note="the plug showed it had completed")
+                output.stage_end("already done")
                 continue
-            output.transient_begin()
             section("The last step was interrupted", [
                 f"The step that {PLAIN_DESCRIPTION.get(step, title.lower())} was",
                 "stopped part way through, and the plug does not show whether it",
@@ -2527,11 +2722,16 @@ def run_steps(ctx: Context) -> int:
                 "Do that step again" + ("   <- recommended" if finished is False else ""),
                 "It did finish - move on to the next step",
             ]
-            choice = ask_choice("What would you like to do", options)
+            if prompts.UNATTENDED:
+                choice = 0  # doing it again is the safe answer, as above
+                prompts.answered_unattended("What would you like to do", options[0])
+            else:
+                choice = ask_choice("What would you like to do", options)
             output.transient_end()
             if choice == 1:
                 ctx.state.mark(step, DONE, note="operator confirmed it completed")
-                tell(f"{step} marked done on your say-so.")
+                say(f"{step} marked done on your say-so.")
+                output.stage_end("already done")
                 continue
         code = execute(ctx, step)
         if code == 0 and step == POINT_OF_NO_RETURN and ctx.research_bridge:
@@ -2618,6 +2818,7 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     took = output.elapsed(seconds) + (" (this session; the run was resumed)" if resumed else "")
     fields = [
         ("Result", "converted"),
+        ("Tool version", __version__),
         ("Plug model", model or "__"),
         ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),
         ("Stock firmware", ctx.state.input("stock_version") or "__"),
@@ -2814,9 +3015,27 @@ def main() -> int:
         print(flush=True)
 
 
+def admin_password() -> str:
+    """This computer's password for sudo (hostsys.password_asker): the one
+    given in advance if sudo takes it, else asked for in this tool's own
+    words, so every row on screen is its own.  An unattended run has nobody
+    to ask, so it says what to give instead (OSError, as for a refused one)."""
+    given = credentials.get("S60_SUDO_PASSWORD")
+    if given is None and prompts.UNATTENDED:
+        # Inside the emulator (tools/emulator) its password is known.
+        given = os.environ.get("S60_EMULATOR_SUDO_PASSWORD")
+    if given is not None:
+        if hostsys.check_sudo_password(given) is None:
+            return given
+        tell("    The sudo password given in advance (S60_SUDO_PASSWORD) was not accepted.")
+    if prompts.UNATTENDED:
+        raise OSError("sudo needs this computer's password, and an unattended run cannot "
+                      "ask for it: put it in .env as S60_SUDO_PASSWORD")
+    return ask_admin_password()
+
+
 def _main() -> int:
-    # Asked for in this tool's own words, so every row on screen is its own.
-    hostsys.password_asker = ask_admin_password
+    hostsys.password_asker = admin_password
     # Keep piping into head/less quiet rather than raising BrokenPipeError.
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
@@ -2826,6 +3045,7 @@ def _main() -> int:
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, lambda *_: sys.exit(129))
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", action="version", version=f"S60 conversion tool {__version__}")
     parser.add_argument("command", choices=["run", "status", "step", "list", "cleanup"])
     parser.add_argument("step_id", nargs="?")
     parser.add_argument(
@@ -2855,14 +3075,23 @@ def _main() -> int:
              "stock S60 partitions (ota slots ~1984 KiB at 0x20000 / 0x210000)",
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--unattended", action="store_true",
+                        help="nobody at the keyboard: go ahead past the point of no return "
+                        "without typing PROCEED, take the eWeLink details from .env, and "
+                        "stop at any question that has no safe answer")
+    parser.add_argument("--env-file", type=Path,
+                        help="answers given in advance (default: .env, if there is one); "
+                        "see .env.example")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="show every action as it happens (it is all in the run's log either way)")
     parser.add_argument("--bridge", help=argparse.SUPPRESS)  # research: archive/docs/reference/automatic-wifi.md
     args = parser.parse_args()
     apply_target(bool(getattr(args, "esphome", None)))
+    prompts.UNATTENDED = args.unattended
 
     try:
-        if args.command == "run" and not args.verbose:
+        given = credentials.load(args.env_file)
+        if args.command == "run" and not args.verbose and not args.unattended:
             wait_for_taller_window()  # before anything else is shown
         if args.command == "list":
             args.run = args.run or "-"
@@ -2874,7 +3103,7 @@ def _main() -> int:
                 return 0
         else:
             args.run = resolve_run_name(args.run, args.new, args.plug_ip,
-                                        ask=args.command == "run")
+                                        ask=args.command == "run" and not args.unattended)
         ctx = Context(args)
     except QuitRun:
         say("Stopped. Nothing was changed.")
@@ -2916,6 +3145,13 @@ def _main() -> int:
                 release_firewall(ctx)
             output.finish()
     output.start(ctx.dir / "run.log", verbose=args.verbose)
+    log_run_choice()
+    if args.unattended:
+        say("Unattended: PROCEED is taken as typed, yes/no questions take their "
+            "default, and any other question stops the run.")
+    if given:
+        say(f"Given in advance ({display_path(args.env_file or credentials.ENV_FILE)}): "
+            f"{', '.join(given)}")
     code = None  # 130 only when the operator chose to quit, not for Ctrl-C
     try:
         code = cmd_run(ctx)

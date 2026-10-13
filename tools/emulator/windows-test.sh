@@ -18,7 +18,8 @@
 # again before the run, with those above it - a few minutes, or 5-10 for
 # installed; --rebuild-layer does it anyway. The first run lists what this
 # computer needs and gets it after one question. Windows gets 2 GB and 2 CPUs
-# (S60_WINDOWS_RAM=3G, S60_WINDOWS_CPUS=4). See docs/emulator.md.
+# (S60_WINDOWS_RAM=3G, S60_WINDOWS_CPUS=4). SSH reaches it on 127.0.0.1:2222
+# (S60_WINDOWS_SSH_PORT), with tools/emulator/windows-ssh.sh. See docs/emulator.md.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -50,6 +51,7 @@ elif [[ $RAM =~ ^([1-9][0-9]*)M$ ]]; then ram_mb=${BASH_REMATCH[1]}
 else echo "S60_WINDOWS_RAM is a size such as 2G or 3072M, not $RAM"; exit 2
 fi
 cap_mb=$(( ram_mb + 1024 ))
+SSH_PORT=${S60_WINDOWS_SSH_PORT:-2222}
 
 emu_flags=() rebuild=0 console=openconsole from=tool rebuild_layer="" fresh=0
 for arg in "$@"; do
@@ -60,7 +62,7 @@ for arg in "$@"; do
     --fresh) fresh=1; emu_flags+=("$arg") ;;
     --cloud|--no-firewall|--pcap) emu_flags+=("$arg") ;;
     --rebuild) rebuild=1; emu_flags+=("$arg") ;;
-    *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
 done
 
@@ -308,16 +310,23 @@ if [ -z "$existing" ] || [[ $existing == *"dev docker0"* ]]; then
 fi
 [ "$routed" = 1 ] || say "This computer has a network of its own at 192.168.60.0/24, so the plug's page is at http://localhost:8080 only."
 docker rm -f s60-win >/dev/null 2>&1 || true
+# The key windows-ssh.sh logs on with, made once and kept with the disks.
+if [ ! -f "$CACHE/ssh/id_ed25519" ]; then
+    mkdir -p "$CACHE/ssh" && chmod 700 "$CACHE/ssh"
+    ssh-keygen -q -t ed25519 -N "" -C "s60-emulator" -f "$CACHE/ssh/id_ed25519"
+fi
 vm -d --name s60-win --stop-timeout 150 -e "LINK_HOST=$emu_ip" -e "CONSOLE=$console" -e "LAYER=$from" -e "FRESH=$fresh" \
-    -p 127.0.0.1:3389:3389 -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080 -- run >/dev/null
+    -p 127.0.0.1:3389:3389 -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080 -p "127.0.0.1:$SSH_PORT:22" -- run >/dev/null
 
 [ "$routed" = 1 ] && say "The plug's page is at http://192.168.60.50, as the conversion's last link says (or http://localhost:8080)."
 say "Windows is starting (about a minute). Open it in your browser:"
 say "    http://localhost:6080    (copy and paste: the clipboard in noVNC's side panel)"
 say "or with Remote Desktop, localhost:3389, user s60, password $PASSWORD, e.g."
 say "    xfreerdp /v:localhost /u:s60 /p:$PASSWORD /cert:ignore /clipboard /dynamic-resolution"
-say "or a VNC viewer on localhost:5900. It opens the link and a window to run the"
-say "conversion in. This terminal is the emulator: plug restart, plug log, ... -"
+say "or a VNC viewer on localhost:5900, or SSH (PowerShell) from another terminal:"
+say "    tools/emulator/windows-ssh.sh     (windows-ssh.sh log -f follows the run's log)"
+say "Windows opens the link and a window to run the conversion in."
+say "This terminal is the emulator: plug restart, plug log, ... -"
 say "leaving it (exit, or Ctrl-b d) shuts Windows down too."
 read -r -p "Press Enter to open the emulator here. " _
 docker attach s60-emu || true

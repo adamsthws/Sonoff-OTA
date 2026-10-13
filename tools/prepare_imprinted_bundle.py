@@ -333,6 +333,18 @@ def bundle_ssid(manifest_path: Path) -> str | None:
     return imprinted_ssid(image, PUBLISHED_RECOVERY_FILE.read_bytes())
 
 
+def startup_image(ssid: str, password: str) -> bytes:
+    """The startup firmware with these Wi-Fi details written in, in memory only.
+
+    Not checked against any bundle and pins nothing: for comparing with a
+    record of the image a plug was actually given.
+    """
+    try:
+        return imprint(PUBLISHED_RECOVERY_FILE.read_bytes(), ssid, password)
+    except (OSError, ImprintError) as exc:
+        raise BundleError(str(exc)) from exc
+
+
 def recovery_image(manifest_path: Path, ssid: str, password: str) -> bytes:
     """Rebuild the recovery image in memory and prove it is the one pinned.
 

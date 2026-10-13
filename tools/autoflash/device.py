@@ -7,6 +7,7 @@ an expected outcome rather than an error.
 
 from __future__ import annotations
 
+import http.client
 import json
 import mimetypes
 import re
@@ -123,11 +124,15 @@ class Device:
         minutes will not answer its HTTP request even though it is running and
         yielding.  Completion is detected from the host phase server's evidence,
         never from this response.  Returns True when a response did arrive.
+
+        A phase that ends by restarting the plug (the commit does) cuts its own
+        reply off part way, which is the same: no response.
         """
         try:
             self.berry(code, timeout=timeout)
             return True
-        except (urllib.error.URLError, socket.timeout, TimeoutError):
+        except (urllib.error.URLError, socket.timeout, TimeoutError,
+                ConnectionError, http.client.HTTPException):
             return False
 
     def berry_value(self, code: str, name: str, timeout: float = 120.0) -> str:

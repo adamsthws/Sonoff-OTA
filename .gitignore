@@ -31,6 +31,9 @@ __pycache__/
 !artifacts/s60-recovery-safeboot-imprintable.bin
 !artifacts/tasmota32c3-bluetooth.bin
 
+# Answers for unattended runs: the eWeLink password, perhaps sudo's (see .env.example).
+.env
+
 # Local authorization markers must never replace the shipped safety lock.
 RECOVERY_LOCK.owner-authorized*
 REPARTITION_LOCK.owner-authorized*

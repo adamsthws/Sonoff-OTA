@@ -1,0 +1,11 @@
+{
+  // .env holds the eWeLink and sudo passwords for unattended runs: no
+  // completions from it, nor offered while it is open.
+  "github.copilot.enable": {
+    "*": true,
+    "dotenv": false
+  },
+  "files.associations": {
+    ".env": "dotenv"
+  }
+}

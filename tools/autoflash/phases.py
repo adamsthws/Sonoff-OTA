@@ -56,7 +56,7 @@ class PhaseDisplay:
         self.write = write
         self.log = log
         self.progress = False
-        self.copied = 0
+        self.copied_chunks: set[str] = set()
         self.read = 0
 
     def _line(self, text: str) -> None:
@@ -76,9 +76,11 @@ class PhaseDisplay:
             if path.startswith("/berry/"):
                 self._line("    The plug fetched its instructions.")
             elif path.startswith("/chunk/safeboot/"):
-                self.copied += 1
+                chunk_id = path.rsplit("/", 1)[-1]
+                self.copied_chunks.add(chunk_id)
+                copied = len(self.copied_chunks)
                 total = f"/{self.blocks}" if self.blocks else ""
-                self._status(f"    Copying the startup firmware: block {self.copied}{total}")
+                self._status(f"    Copying the startup firmware: block {copied}{total}")
             elif path.startswith("/capture/") and self.phase == "preflight":
                 self.read += 1
                 self._status(f"    Reading the plug's memory layout: {self.read} blocks")
