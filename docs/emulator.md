@@ -148,7 +148,7 @@ Wi-Fi:
 | On a real plug | In the emulator |
 |---|---|
 | Switch it off and on | `plug restart` (or `plug off`, `plug on`) |
-| Restart your router (not faithful - see `wifi-switch.patch` below) | `plug router off [SECS]`, `plug router on` |
+| Restart your router, so the plug's Wi-Fi goes | `plug router off [SECS]`, `plug router on` |
 | Power-cycle it quickly, N times | `plug cycle N` |
 | Your desktop's Wi-Fi menu | `wifi`, `wifi join NAME`, `wifi home` |
 | Your home Wi-Fi's name and password | `PICSimLabWifi`, empty password |
@@ -473,18 +473,25 @@ Copies only; the original dump is never written.
   fork drives no input pins, so they all read low. The S60's button (GPIO9)
   is active low, so Tasmota saw it held, and after 40 seconds reset itself to
   its defaults, losing its Wi-Fi. Inputs now idle high, as with pull-ups.
-- **`wifi-switch.patch` - the access points can be switched off.** The fork's
-  access points live inside QEMU, so blocking traffic outside it only cuts the
-  plug off from the computer; its Wi-Fi stays up. While the file
+- **`wifi-switch.patch` - the router can be restarted.** The fork's access
+  points live inside QEMU, so blocking traffic outside it only cuts the plug
+  off from the computer; its Wi-Fi stays up. While the file
   `$ESP32_WIFI_AP_OFF_FILE` exists (`plug router off`), they send no beacons
-  and answer nothing, and a plug joined to one is sent a deauthentication.
-  **This is not a faithful router restart.** The emulated plug does not see
-  its Wi-Fi go: Tasmota keeps reporting it up, its main loop stalls while the
-  access point is off, and it can take minutes to reconnect once it is back
-  - none of which a real plug does. Use it to try things out, not as evidence;
-  a router restart is tested on a real plug. To test the computer going out
-  of reach instead, which the emulator does show faithfully, block the plug's
+  and answer nothing, and deauthenticate the plug - a few times, and again
+  whenever it sends data, as a real access point does to a station that is
+  not joined. The plug sees its Wi-Fi go within a second or two, retries as
+  a real one does ("Connect failed with AP timeout"), and rejoins within
+  seconds of `plug router on`. The fork's frame builder leaves a frame's
+  destination and signal strength unset, so the patch sets both, or the plug
+  drops the frame. To cut the plug off from the computer instead, block its
   traffic in the container (`iptables -I INPUT -s 192.168.60.50 -j DROP`).
+- **`wifi-dma.patch` - frames go only where the hardware would put them.** The
+  fork wrote each received frame through the next receive descriptor whether
+  or not the driver had handed it over, and however big the buffer. Writing
+  into buffers the driver had taken back corrupted its heap, which then failed
+  in `free()` (`tlsf_free`) - seen as a crash when the plug's Wi-Fi stopped. A
+  frame is now written only into a descriptor the driver owns with room for it,
+  and dropped otherwise, as the hardware drops it.
 
 ### How QEMU is run (`container/bin/plug-supervisor`)
 
