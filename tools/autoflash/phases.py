@@ -43,7 +43,24 @@ REQUEST_RE = re.compile(r'"(?:GET|POST) (?P<path>/\S*) HTTP')
 SECTOR = 4096
 # Lines from the server worth showing as they are; everything else is folded
 # into a progress line and kept, in full, in the phase's log file.
-SHOWN_RE = re.compile(r"RESULT:|REFUS|TIMEOUT|ERROR|Traceback|Stopped", re.IGNORECASE)
+SHOWN_RE = re.compile(r"RESULT:|PLUG SAYS|REFUS|TIMEOUT|ERROR|Traceback|Stopped", re.IGNORECASE)
+# The plug's own console lines worth showing when a phase fails: its Berry
+# prints and errors, which say why when it could not tell this computer.
+PLUG_CONSOLE_RE = re.compile(r"S60 |migration_refused|BRY:")
+PLUG_SAYS_RE = re.compile(r"THE PLUG SAYS: (?P<reason>.+)")
+TIMEOUT_RE = re.compile(r"TIMEOUT: (?P<reason>.+)")
+
+
+def failure_reason(captured: str) -> str | None:
+    """Why a phase did not pass, in the server's words, if it said."""
+    for line in reversed(captured.splitlines()):
+        found = PLUG_SAYS_RE.search(line)
+        if found:
+            return "the plug says: " + found.group("reason").strip()
+        found = TIMEOUT_RE.search(line)
+        if found:
+            return found.group("reason").strip()
+    return None
 
 
 class PhaseDisplay:
@@ -196,7 +213,7 @@ class PhaseRunner:
         phase: str,
         extra_flags: list[str] | None = None,
         confirm: Callable[[str], bool] | None = None,
-        exec_timeout: float = 1800.0,
+        exec_timeout: float = 960.0,  # just over the server's own 15 minutes
     ) -> tuple[int, str]:
         """Run one phase end to end.  Returns (exit code, captured output)."""
         if phase in ARMED_PHASES and confirm is None:
@@ -261,8 +278,23 @@ class PhaseRunner:
             display.close()
             log_file.close()
         if code != 0:
+            self._show_plug_console()
             self.log(f"    The server's full output is in {log_path}")
         return code, "\n".join(captured)
+
+    def _show_plug_console(self) -> None:
+        """The plug's own last words on the phase, from its console.
+
+        When the plug could not reach this computer, its console is the only
+        place that says why; read it now rather than ask the owner to.
+        """
+        try:
+            lines = self.device.console_log(timeout=5.0)
+        except Exception:  # noqa: BLE001 - a plug that cannot answer adds nothing here
+            return
+        relevant = [line for line in lines if PLUG_CONSOLE_RE.search(line)][-8:]
+        for line in relevant:
+            self.log(f"    The plug's console: {line}")
 
     def _drive(self, phase, process, captured, reader, confirm, exec_timeout,
                get_url, get_arm) -> int:

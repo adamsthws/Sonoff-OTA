@@ -25,6 +25,29 @@ def guard(ok, message)
   end
 end
 
+# Tell the computer why this stopped, so it can say so at once instead of
+# waiting for a report that is never coming.  One quick try only: if the
+# computer cannot be reached, its own timeout says so instead.
+def report_failure(exception, message)
+  try
+    var text = bytes().fromstring(str(exception) + ": " + str(message))
+    var reason = bytes()
+    var i = 0
+    while i < size(text) && i < 200
+      var c = text[i]
+      if c < 0x20 || c > 0x7E c = 0x3F end
+      reason.add(c, 1)
+      i += 1
+    end
+    var client = webclient()
+    client.begin(base_url + "/fail/commit")
+    client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
+    client.close()
+  except .. as report_exception, report_message
+    print("S60 failure report not sent:", report_exception, report_message)
+  end
+end
+
 def sha_region(address, length)
   var hash = crypto.SHA256()
   var offset = 0
@@ -85,7 +108,7 @@ def restore_source_layout(old_table, old_otadata)
   end
 end
 
-def commit(provided_token)
+def run_commit(provided_token)
   guard(armed, "this commit closure has already been consumed")
   guard(provided_token == arm_token, "arming token differs")
   guard(tasmota.arch() == "esp32c3", "device is not ESP32-C3")
@@ -149,6 +172,18 @@ def commit(provided_token)
   best_effort_report("PASS", false)
   tasmota.cmd("Restart 99")
   return true
+end
+
+# The closure handed back: commit, reporting any failure before raising it.
+def commit(provided_token)
+  var result
+  try
+    result = run_commit(provided_token)
+  except .. as commit_exception, commit_message
+    report_failure(commit_exception, commit_message)
+    raise commit_exception, commit_message
+  end
+  return result
 end
 
 return commit

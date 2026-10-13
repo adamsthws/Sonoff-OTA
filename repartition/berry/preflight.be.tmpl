@@ -13,6 +13,29 @@ def guard(ok, message)
   end
 end
 
+# Tell the computer why this stopped, so it can say so at once instead of
+# waiting for a report that is never coming.  One quick try only: if the
+# computer cannot be reached, its own timeout says so instead.
+def report_failure(exception, message)
+  try
+    var text = bytes().fromstring(str(exception) + ": " + str(message))
+    var reason = bytes()
+    var i = 0
+    while i < size(text) && i < 200
+      var c = text[i]
+      if c < 0x20 || c > 0x7E c = 0x3F end
+      reason.add(c, 1)
+      i += 1
+    end
+    var client = webclient()
+    client.begin(base_url + "/fail/preflight")
+    client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
+    client.close()
+  except .. as report_exception, report_message
+    print("S60 failure report not sent:", report_exception, report_message)
+  end
+end
+
 def sha_region(address, length)
   var hash = crypto.SHA256()
   var offset = 0
@@ -26,12 +49,30 @@ def sha_region(address, length)
   return hash.out()
 end
 
+# Wait without blocking Wi-Fi reconnects or tripping Berry's timeout.
+def pause(ms)
+  var wake = tasmota.millis(ms)
+  while !tasmota.time_reached(wake)
+    tasmota.delay(50)
+    tasmota.yield()
+  end
+end
+
+# Retried for up to five minutes, long enough for a router to restart.
 def post_text(path, body)
-  var client = webclient()
-  client.begin(base_url + path)
-  var status = client.POST(body)
-  client.close()
-  guard(status == 200, format("POST %s returned HTTP %i", path, status))
+  var status
+  var attempt = 0
+  var deadline = tasmota.millis(300000)
+  while true
+    var client = webclient()
+    client.begin(base_url + path)
+    status = client.POST(body)
+    client.close()
+    attempt += 1
+    if status >= 0 || tasmota.time_reached(deadline) break end
+    pause(1000)
+  end
+  guard(status == 200, format("POST %s returned HTTP %i after %i attempts", path, status, attempt))
 end
 
 def upload_region(name, address, length)
@@ -72,4 +113,11 @@ def run_preflight()
   return true
 end
 
-return run_preflight()
+var result
+try
+  result = run_preflight()
+except .. as preflight_exception, preflight_message
+  report_failure(preflight_exception, preflight_message)
+  raise preflight_exception, preflight_message
+end
+return result

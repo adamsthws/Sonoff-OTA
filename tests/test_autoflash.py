@@ -541,6 +541,102 @@ class ConversionWifiTests(unittest.TestCase):
             self.run_with(("Home", "right"))
 
 
+class PhaseFailureTests(unittest.TestCase):
+    """A phase that does not pass says why: the plug's words, or the timeout's."""
+
+    def test_the_plugs_reason_is_given(self):
+        from tools.autoflash.phases import failure_reason
+        captured = "STAGE RESULT: FAIL\nTHE PLUG SAYS: migration_refused: GET /chunk/safeboot/2 returned HTTP -1\n"
+        self.assertEqual(failure_reason(captured),
+                         "the plug says: migration_refused: GET /chunk/safeboot/2 returned HTTP -1")
+
+    def test_a_timeout_is_given(self):
+        from tools.autoflash.phases import failure_reason
+        self.assertIn("sent nothing for 6 minutes",
+                      failure_reason("TIMEOUT: the plug has sent nothing for 6 minutes, and gave no reason."))
+
+    def test_nothing_known_is_none(self):
+        from tools.autoflash.phases import failure_reason
+        self.assertIsNone(failure_reason("  [10.0.0.63] \"GET /berry/stage.be HTTP/1.1\" 200 -"))
+
+    def test_the_step_abort_carries_the_reason(self):
+        import tools.s60_autoflash as autoflash
+        error = autoflash.phase_failed("stage", 4, "THE PLUG SAYS: flash is not exactly 4 MiB")
+        self.assertEqual(str(error), "stage did not pass: the plug says: flash is not exactly 4 MiB")
+        self.assertEqual(str(autoflash.phase_failed("stage", 3, "")), "stage did not pass (exit 3)")
+
+    def test_the_plugs_console_is_read_for_its_own_words(self):
+        from unittest import mock
+        from tools.autoflash.phases import PhaseRunner
+        runner = PhaseRunner.__new__(PhaseRunner)
+        shown = []
+        runner.log = shown.append
+        runner.device = mock.Mock(console_log=mock.Mock(return_value=[
+            "12:00:01.000 WIF: Connected",
+            "12:00:02.000 S60 STAGE: 65536/810672 bytes",
+            "12:00:09.000 BRY: Exception> 'migration_refused' - GET /chunk/safeboot/17 returned HTTP -1",
+            "12:00:10.000 MQT: Attempting connection",
+        ]))
+        runner._show_plug_console()
+        self.assertEqual(len(shown), 2)
+        self.assertIn("HTTP -1", shown[1])
+        self.assertTrue(all(line.startswith("    The plug's console: ") for line in shown))
+
+    def test_a_plug_that_cannot_answer_adds_nothing(self):
+        from unittest import mock
+        from tools.autoflash.phases import PhaseRunner
+        runner = PhaseRunner.__new__(PhaseRunner)
+        shown = []
+        runner.log = shown.append
+        runner.device = mock.Mock(console_log=mock.Mock(side_effect=OSError("unreachable")))
+        runner._show_plug_console()
+        self.assertEqual(shown, [])
+
+
+class UnexpectedErrorTests(unittest.TestCase):
+    """An error nothing anticipated is recorded and explained, not a traceback."""
+
+    def run_step(self, step, error):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        ctx = SimpleNamespace(state=state)
+        title, _ = autoflash.STEP_INDEX[step]
+        failing = mock.Mock(side_effect=error)
+        with mock.patch.dict(autoflash.STEP_INDEX, {step: (title, failing)}), \
+             mock.patch.object(autoflash, "begin_stage"), \
+             mock.patch.object(autoflash.output, "stage_end") as ended, \
+             mock.patch.object(autoflash.output, "log_only") as logged, \
+             mock.patch.object(autoflash, "tell") as told, \
+             mock.patch.object(autoflash, "say"):
+            code = autoflash.execute(ctx, step)
+        return code, state, ended, logged, told
+
+    def test_it_stops_the_step_with_a_message_and_the_traceback_in_the_log(self):
+        import http.client
+        code, state, ended, logged, told = self.run_step("E1", http.client.IncompleteRead(b""))
+        self.assertEqual(code, 1)
+        self.assertEqual(state.status("E1"), FAILED)
+        ended.assert_called_once_with("stopped")
+        self.assertIn("Traceback", logged.call_args.args[0])
+        self.assertIn("something unexpected went wrong: IncompleteRead", told.call_args.args[0])
+
+    def test_a_step_that_writes_stays_attempted(self):
+        # Whether the commit got as far as writing is for the next run to find
+        # out from the plug - so it must not be recorded as failed.
+        code, state, *_ = self.run_step("E3", RuntimeError("boom"))
+        self.assertEqual(code, 1)
+        self.assertEqual(state.status("E3"), "attempted")
+
+    def test_ctrl_c_is_not_swallowed(self):
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_step("E1", KeyboardInterrupt())
+
+
 class BerryFireTests(unittest.TestCase):
     """A phase that restarts the plug cuts its own reply off: that is no reply,
     not a crash (the E3 traceback on macOS)."""

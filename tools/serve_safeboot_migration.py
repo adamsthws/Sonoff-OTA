@@ -86,6 +86,10 @@ LOCK_PATH = ROOT / "REPARTITION_LOCK"
 COMMIT_FLAG = "--i-accept-power-loss-may-require-opening-the-plug"
 PHASES = ("preflight", "stage", "commit", "restore")
 MAX_POST_SIZE = 9000
+# Longer than the plug's own five minutes of retrying a request (the Berry
+# phases), so if the network comes back the plug's reason arrives first; and
+# long enough for a router to restart.
+IDLE_LIMIT = 360
 RESTORE_FLAG = "--i-confirm-normal-app-is-stable"
 
 
@@ -192,6 +196,11 @@ class MigrationState:
         self.arm_token = secrets.token_urlsafe(15)
         self.complete = False
         self.result_status: str | None = None
+        # Why the plug stopped, when it said so (receive_failure).
+        self.failure_reason: str | None = None
+        # When the plug last asked for anything: the server stops waiting once
+        # it has been silent too long, rather than for the whole --wait.
+        self.last_heard = time.monotonic()
         self.captures: dict[str, dict[int, bytes]] = {}
         self.manifest_sha256 = sha256_bytes(manifest_path.read_bytes())
 
@@ -372,6 +381,28 @@ class MigrationState:
         else:
             self._finish_restore(report)
 
+    def receive_failure(self, requested_phase: str, body: bytes) -> None:
+        """The plug stopped, and says why: record it and stop waiting.
+
+        A phase that already reported (a commit that failed while writing sends
+        its own FAIL report, with the rollback result) keeps that report.
+        """
+        if requested_phase != self.phase:
+            raise ValueError("failure phase differs from served phase")
+        report = parse_report(body)
+        if report.get("session") != self.session:
+            raise ValueError("failure session differs")
+        reason = report.get("reason") or "no reason given"
+        if self.complete:
+            print(f"  The plug also said: {reason}")
+            return
+        evidence = self._base_evidence(self.phase, "FAIL")
+        evidence["reason"] = reason
+        atomic_json(self.evidence_dir / f"{self.phase}-report.json", evidence)
+        self.failure_reason = reason
+        self.complete = True
+        self.result_status = "FAIL"
+
     def _base_evidence(self, phase: str, status: str) -> dict[str, Any]:
         return {
             "schema": 1,
@@ -520,6 +551,7 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
         if self.client_address[0] != self.server.device_ip:
             self._response(403, b"wrong source device\n")
             return False
+        self.server.state.last_heard = time.monotonic()
         return True
 
     def do_GET(self) -> None:
@@ -568,6 +600,11 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
                 state.receive_report(report.group(1), body)
                 self._response(200)
                 return
+            failure = re.fullmatch(r"/fail/([a-z]+)", path)
+            if failure:
+                state.receive_failure(failure.group(1), body)
+                self._response(200)
+                return
             self._response(404, b"not found\n")
         except ValueError as exc:
             print(f"  REFUSED {path}: {exc}")
@@ -611,6 +648,21 @@ def berry_loader(base_url: str, phase: str) -> str:
     return prefix + f"return s60_urlbeload('{url}')"
 
 
+def wait_for_result(server: Any, state: MigrationState, wait: float, idle: float) -> str:
+    """Serve the plug until its result: "complete", or "silent" once it has
+    sent nothing for `idle` seconds, or "timeout" after `wait` in all."""
+    deadline = time.monotonic() + wait
+    state.last_heard = time.monotonic()
+    while not state.complete:
+        now = time.monotonic()
+        if now - state.last_heard > idle:
+            return "silent"
+        if now >= deadline:
+            return "timeout"
+        server.handle_request()
+    return "complete"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=PHASES)
@@ -620,7 +672,10 @@ def main() -> int:
     parser.add_argument("--device-ip", required=True)
     parser.add_argument("--evidence-dir", type=Path)
     parser.add_argument("--max-evidence-age", type=int, default=7200)
-    parser.add_argument("--wait", type=int, default=1800, help="seconds to wait for a phase report")
+    parser.add_argument("--wait", type=int, default=900,
+                        help="seconds to wait at most for a phase report")
+    parser.add_argument("--idle", type=int, default=IDLE_LIMIT,
+                        help="seconds the plug may send nothing before waiting stops")
     parser.add_argument(COMMIT_FLAG, action="store_true")
     parser.add_argument(RESTORE_FLAG, action="store_true")
     parser.add_argument(
@@ -644,8 +699,8 @@ def main() -> int:
         parser.error(str(exc))
     if not 1 <= args.listen_port <= 65535:
         parser.error("--listen-port must be 1..65535")
-    if args.max_evidence_age <= 0 or args.wait <= 0:
-        parser.error("evidence age and wait must be positive")
+    if args.max_evidence_age <= 0 or args.wait <= 0 or args.idle <= 0:
+        parser.error("evidence age, wait and idle must be positive")
 
     manifest_path = args.manifest.resolve()
     evidence_dir = (args.evidence_dir or manifest_path.parent / "live").resolve()
@@ -698,20 +753,26 @@ def main() -> int:
         print("\nLoading performs no writes. After it prints a loaded closure, arm separately with:")
         print(f'{function_name}("{state.arm_token}")')
 
-    deadline = time.monotonic() + args.wait
     try:
-        while not state.complete and time.monotonic() < deadline:
-            server.handle_request()
+        outcome = wait_for_result(server, state, args.wait, args.idle)
     except KeyboardInterrupt:
         print("\nStopped; no phase result was recorded.")
         return 130
     finally:
         server.server_close()
 
-    if not state.complete:
-        print("TIMEOUT: no complete, validated phase report was received.", file=sys.stderr)
+    if outcome != "complete":
+        if outcome == "silent":
+            print(f"TIMEOUT: the plug has sent nothing for {args.idle // 60} minutes, and "
+                  "gave no reason. Its own console (Tools -> Console in its web page) "
+                  "says why it stopped.", file=sys.stderr)
+        else:
+            print(f"TIMEOUT: the plug was still busy after {args.wait // 60} minutes, "
+                  "with no result.", file=sys.stderr)
         return 3
     print(f"\n{args.phase.upper()} RESULT: {state.result_status}")
+    if state.failure_reason:
+        print(f"THE PLUG SAYS: {state.failure_reason}")
     print(f"Evidence: {evidence_dir / (args.phase + '-report.json')}")
     return 0 if state.result_status == "PASS" else 4
 

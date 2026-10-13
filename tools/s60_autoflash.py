@@ -24,6 +24,7 @@ import signal
 import subprocess
 import sys
 import time
+import traceback
 import urllib.error
 from pathlib import Path
 from typing import Any, Callable
@@ -35,7 +36,12 @@ from tools.autoflash import credentials, hostsys, output, prompts, setup_network
 from tools.autoflash import __version__, plugs, tasmota_settings  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
-from tools.autoflash.phases import PhaseError, PhaseRunner, PlugNeverConnected  # noqa: E402
+from tools.autoflash.phases import (  # noqa: E402
+    PhaseError,
+    PhaseRunner,
+    PlugNeverConnected,
+    failure_reason,
+)
 from tools.autoflash.prompts import (  # noqa: E402
     QuitRun,
     ask_admin_password,
@@ -720,7 +726,16 @@ def s60_template(product_model: str | None) -> str:
 
 
 # A phase server's line that says why it stopped, rather than how it is getting on.
-PHASE_PROBLEM_RE = re.compile(r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in", re.IGNORECASE)
+PHASE_PROBLEM_RE = re.compile(
+    r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in|PLUG SAYS|plug's console",
+    re.IGNORECASE,
+)
+
+
+def phase_failed(phase: str, code: int, captured: str) -> "Abort":
+    """The Abort for a phase that did not pass, with its reason when known."""
+    reason = failure_reason(captured)
+    return Abort(f"{phase} did not pass: {reason}" if reason else f"{phase} did not pass (exit {code})")
 
 
 def phase_log(text: str) -> None:
@@ -2136,17 +2151,17 @@ def step_preflight(ctx: Context) -> dict[str, Any]:
     """E1 - read-only inspection.  Re-runnable at any time."""
     ctx.wifi()  # read them off the plug first, so the check below compares the right network
     network = check_plug_network(ctx)
-    code, _ = ctx.phase_runner().run("preflight")
+    code, captured = ctx.phase_runner().run("preflight")
     if code != 0:
-        raise Abort(f"preflight did not pass (exit {code})")
+        raise phase_failed("preflight", code, captured)
     return {"exit": code, **network}
 
 
 def step_stage(ctx: Context) -> dict[str, Any]:
     """E2 - writes the inactive slot only.  Re-runnable; changes no boot state."""
-    code, _ = ctx.phase_runner().run("stage")
+    code, captured = ctx.phase_runner().run("stage")
     if code != 0:
-        raise Abort(f"stage did not pass (exit {code})")
+        raise phase_failed("stage", code, captured)
     return {"exit": code}
 
 
@@ -2199,7 +2214,7 @@ def step_commit(ctx: Context) -> dict[str, Any]:
     moved = ROOT / "REPARTITION_LOCK.owner-authorized"
     hostsys.replace_file(lock, moved)
     try:
-        code, _ = ctx.phase_runner().run(
+        code, captured = ctx.phase_runner().run(
             "commit",
             extra_flags=["--i-accept-power-loss-may-require-opening-the-plug"],
             confirm=gate,
@@ -2208,7 +2223,7 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         hostsys.replace_file(moved, lock)
         say("REPARTITION_LOCK restored")
     if code != 0:
-        raise Abort(f"commit did not pass (exit {code})")
+        raise phase_failed("commit", code, captured)
     say("The new layout is written. The plug restarts by itself, and the run carries on.")
     return {"exit": code}
 
@@ -2444,11 +2459,11 @@ def step_restore(ctx: Context) -> dict[str, Any]:
         tell("    under the official Tasmota, so nothing was written.")
         return False
 
-    code, _ = runner.run(
+    code, captured = runner.run(
         "restore", extra_flags=["--i-confirm-normal-app-is-stable"], confirm=gate
     )
     if code != 0:
-        raise Abort(f"restore did not pass (exit {code})")
+        raise phase_failed("restore", code, captured)
     return {"restore": code}
 
 
@@ -2613,6 +2628,15 @@ def execute(ctx: Context, step: str) -> int:
         ctx.state.mark(step, FAILED, error=str(exc))
         output.stage_end("stopped")
         tell(f"FAILED: {exc}")
+        return 1
+    except Exception as exc:  # noqa: BLE001 - recorded and explained, not a bare traceback
+        message = unexpected(exc)
+        # A step that writes to the plug stays "attempted": whether it got as
+        # far as writing is for the next run to find out from the plug.
+        if step not in DESTRUCTIVE_STEPS:
+            ctx.state.mark(step, FAILED, error=message)
+        output.stage_end("stopped")
+        tell(f"FAILED: {message}")
         return 1
     # A step may end its stage otherwise: "skipped" or "already done".
     outcome = captured.pop("stage_outcome", "complete") if captured else "complete"
@@ -2795,6 +2819,22 @@ def confirm_skip(ctx: Context, step: str, title: str) -> bool:
 
 
 
+def tell_how_to_carry_on() -> None:
+    tell("")
+    tell("Fix the cause, then carry on with the same command again:")
+    tell("    start.cmd, or .\\start.ps1 in PowerShell" if hostsys.IS_WINDOWS else "    sh start.sh")
+    if output.log_path():
+        tell(f"What happened, in full: {display_path(output.log_path())}")
+    tell("Stuck? Start a discussion or open an issue:")
+    output.show_links([(DISCUSSIONS_URL, "Start a discussion"), (ISSUES_URL, "Open an issue")])
+
+
+def unexpected(exc: BaseException) -> str:
+    """An error nothing here anticipated: in full in the log, in a line on screen."""
+    output.log_only(traceback.format_exc().rstrip())
+    return f"something unexpected went wrong: {type(exc).__name__}: {exc}"
+
+
 def cmd_run(ctx: Context) -> int:
     try:
         return run_steps(ctx)
@@ -2874,13 +2914,7 @@ def run_steps(ctx: Context) -> int:
             return code  # the operator chose to quit; main() cleans up and says so
         if code != 0:
             close_firewall_rules(ctx)
-            tell("")
-            tell("Fix the cause, then carry on with the same command again:")
-            tell("    start.cmd, or .\\start.ps1 in PowerShell" if hostsys.IS_WINDOWS else "    sh start.sh")
-            if output.log_path():
-                tell(f"What happened, in full: {display_path(output.log_path())}")
-            tell("Stuck? Start a discussion or open an issue:")
-            output.show_links([(DISCUSSIONS_URL, "Start a discussion"), (ISSUES_URL, "Open an issue")])
+            tell_how_to_carry_on()
             return code
     say("")
     close_firewall_rules(ctx)
@@ -3291,6 +3325,13 @@ def _main() -> int:
     except QuitRun:
         output.stage_end("stopped")
         code = 130
+        return code
+    except Exception as exc:  # noqa: BLE001 - recorded and explained, not a bare traceback
+        message = unexpected(exc)
+        output.stage_end("stopped")
+        tell(f"FAILED: {message}")
+        tell_how_to_carry_on()
+        code = 1
         return code
     except KeyboardInterrupt:
         output.stage_end("stopped")

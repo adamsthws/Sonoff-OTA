@@ -508,6 +508,102 @@ class MigrationValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match recovery Safeboot"):
             self.restore_with_commit_evidence(safeboot_sha256="0" * 64)
 
+    def staging(self, directory):
+        fixture = MigrationFixture(Path(directory))
+        nvs_hash = sha256_bytes(canonical_nvs())
+        fixture.write_preflight_evidence(nvs_hash)
+        return fixture, fixture.state("stage")
+
+    def test_a_failure_from_the_plug_ends_the_phase_with_its_reason(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture, state = self.staging(directory)
+            state.receive_failure(
+                "stage",
+                f"session={state.session}\nreason=migration_refused: GET /chunk/safeboot/2 "
+                "returned HTTP -1 after 290 attempts\n".encode(),
+            )
+            self.assertTrue(state.complete)
+            self.assertEqual(state.result_status, "FAIL")
+            self.assertIn("HTTP -1", state.failure_reason)
+            evidence = json.loads((fixture.evidence_dir / "stage-report.json").read_text())
+            self.assertEqual(evidence["status"], "FAIL")
+            self.assertIn("HTTP -1", evidence["reason"])
+
+    def test_a_failure_from_another_session_or_phase_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, state = self.staging(directory)
+            with self.assertRaisesRegex(ValueError, "session differs"):
+                state.receive_failure("stage", b"session=other\nreason=x\n")
+            with self.assertRaisesRegex(ValueError, "phase differs"):
+                state.receive_failure("commit", f"session={state.session}\nreason=x\n".encode())
+            self.assertFalse(state.complete)
+
+    def test_a_report_already_made_is_kept(self):
+        # A commit that failed while writing reports FAIL itself, with whether
+        # it rolled back; the wrapper's reason after it must not replace that.
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            nvs_hash = sha256_bytes(canonical_nvs())
+            fixture.write_preflight_evidence(nvs_hash)
+            fixture.write_stage_evidence(nvs_hash)
+            state = fixture.state("commit")
+            state.receive_report("commit", (
+                f"session={state.session}\nstatus=FAIL\nrollback=true\ncurrent_ota=1\n"
+                f"target_table_sha256={sha256_bytes(fixture.target_table)}\n"
+                f"safeboot_sha256={sha256_bytes(fixture.safeboot)}\n").encode())
+            state.receive_failure("commit", f"session={state.session}\nreason=later\n".encode())
+            evidence = json.loads((fixture.evidence_dir / "commit-report.json").read_text())
+            self.assertEqual(evidence["rollback"], "true")
+            self.assertNotIn("reason", evidence)
+
+    def test_waiting_stops_when_the_plug_falls_silent(self):
+        from unittest import mock
+        import tools.serve_safeboot_migration as server_module
+        with tempfile.TemporaryDirectory() as directory:
+            _, state = self.staging(directory)
+            clock = iter(range(0, 10_000, 30))
+            with mock.patch.object(server_module.time, "monotonic", side_effect=lambda: next(clock)):
+                server = mock.Mock()
+                self.assertEqual(server_module.wait_for_result(server, state, 900, 360), "silent")
+
+    def test_a_plug_still_talking_is_given_the_whole_wait(self):
+        from unittest import mock
+        import tools.serve_safeboot_migration as server_module
+        with tempfile.TemporaryDirectory() as directory:
+            _, state = self.staging(directory)
+            clock = iter(range(0, 10_000, 30))
+            server = mock.Mock()
+            # Every request is the plug asking for something: never silent.
+            server.handle_request.side_effect = lambda: setattr(state, "last_heard", now[0])
+            now = [0]
+
+            def tick():
+                now[0] = next(clock)
+                return now[0]
+            with mock.patch.object(server_module.time, "monotonic", side_effect=tick):
+                self.assertEqual(server_module.wait_for_result(server, state, 900, 360), "timeout")
+
+    def test_every_phase_reports_its_failures_and_retries_through_a_router_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            nvs_hash = sha256_bytes(canonical_nvs())
+            fixture.write_preflight_evidence(nvs_hash)
+            fixture.write_stage_evidence(nvs_hash)
+            rendered = {phase: fixture.state(phase).render_berry().decode()
+                        for phase in ("preflight", "stage", "commit")}
+            recovery = fixture.enable_recovery()
+            fixture.write_commit_evidence(sha256_bytes(recovery))
+            rendered["restore"] = fixture.state("restore").render_berry().decode()
+            for phase, source in rendered.items():
+                self.assertIn(f'"/fail/{phase}"', source, phase)
+                self.assertIn("report_failure(", source, phase)
+                self.assertNotIn("tasmota.millis(60000)", source, phase)
+                if phase != "commit":  # the commit fetches once, before writing
+                    self.assertIn("tasmota.millis(300000)", source, phase)
+            # Commit and restore still hand back their armed closure by name.
+            self.assertTrue(rendered["commit"].rstrip().endswith("return commit"))
+            self.assertTrue(rendered["restore"].rstrip().endswith("return restore"))
+
     def test_stage_still_refuses_stale_preflight_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = MigrationFixture(Path(directory))

@@ -25,6 +25,29 @@ def guard(ok, message)
   end
 end
 
+# Tell the computer why this stopped, so it can say so at once instead of
+# waiting for a report that is never coming.  One quick try only: if the
+# computer cannot be reached, its own timeout says so instead.
+def report_failure(exception, message)
+  try
+    var text = bytes().fromstring(str(exception) + ": " + str(message))
+    var reason = bytes()
+    var i = 0
+    while i < size(text) && i < 200
+      var c = text[i]
+      if c < 0x20 || c > 0x7E c = 0x3F end
+      reason.add(c, 1)
+      i += 1
+    end
+    var client = webclient()
+    client.begin(base_url + "/fail/restore")
+    client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
+    client.close()
+  except .. as report_exception, report_message
+    print("S60 failure report not sent:", report_exception, report_message)
+  end
+end
+
 def sha_region(address, length)
   var hash = crypto.SHA256()
   var offset = 0
@@ -52,7 +75,7 @@ def fetch_chunk(index, expected_length)
   var client
   var status
   var attempt = 0
-  var deadline = tasmota.millis(60000)
+  var deadline = tasmota.millis(300000)  # long enough for a router to restart
   while true
     client = webclient()
     client.begin(base_url + path)
@@ -76,7 +99,7 @@ end
 def post_text(path, body)
   var status
   var attempt = 0
-  var deadline = tasmota.millis(60000)
+  var deadline = tasmota.millis(300000)  # long enough for a router to restart
   while true
     var client = webclient()
     client.begin(base_url + path)
@@ -106,7 +129,7 @@ def best_effort_report(status)
   end
 end
 
-def restore(provided_token)
+def run_restore(provided_token)
   guard(armed, "this restore closure has already been consumed")
   guard(provided_token == arm_token, "arming token differs")
   guard(tasmota.arch() == "esp32c3", "device is not ESP32-C3")
@@ -154,6 +177,18 @@ def restore(provided_token)
   best_effort_report("PASS")
   print("S60 RESTORE PASS: factory partition now contains exact official Safeboot")
   return true
+end
+
+# The closure handed back: restore, reporting any failure before raising it.
+def restore(provided_token)
+  var result
+  try
+    result = run_restore(provided_token)
+  except .. as restore_exception, restore_message
+    report_failure(restore_exception, restore_message)
+    raise restore_exception, restore_message
+  end
+  return result
 end
 
 return restore
