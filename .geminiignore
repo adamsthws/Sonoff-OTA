@@ -1,0 +1,2 @@
+# Passwords for unattended runs (see .env.example): never read by AI tools.
+.env
