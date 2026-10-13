@@ -235,7 +235,7 @@ to the one below:
 |---|---|---|---|
 | `installed` | Windows Server Core, as Setup leaves it: the user `s60`, who logs on by itself, and a hook that runs `start.ps1` at logon | the ISO, `unattend.xml`, `firstlogon.ps1` | 5-10 min |
 | `rig` | what only the tests need: Remote Desktop, SSH, the clipboard over VNC (virtio-win's guest tools, pinned), no Windows Update or SConfig, and for the link OpenVPN's TAP driver, the "S60 emulator" adapter and a Python of its own, from the same `windows-bootstrap.ps1` a Windows computer uses | `rig.ps1` | a few min |
-| `tool` | what the tool's own first run leaves: its portable Python | `tool.ps1` | about a min |
+| `tool` | what the tool's own first run leaves: its portable Python - set up with progress bars on, as in a person's window, and failed if any shows | `tool.ps1` | about a min |
 
 Every run starts from a throwaway layer on `tool`, with this checkout in
 `C:\S60\repo`, in about a minute. `--first-run` starts it on `rig` instead:

@@ -56,8 +56,8 @@ sha256() {
 portable_python() {  # Linux only: .python/<platform>/python/bin/python3
     [ "$(uname -s)" = Linux ] || return 1
     case "$(uname -m)" in
-    x86_64|amd64) arch=x86_64 sum=$PBS_X86_64 ;;
-    aarch64|arm64) arch=aarch64 sum=$PBS_AARCH64 ;;
+    x86_64|amd64) arch=x86_64 sum=$PBS_X86_64 size=34 ;;
+    aarch64|arm64) arch=aarch64 sum=$PBS_AARCH64 size=27 ;;
     *) return 1 ;;
     esac
     dir=$PYTHON_HOME/linux-$arch-3.12.10
@@ -69,7 +69,8 @@ portable_python() {  # Linux only: .python/<platform>/python/bin/python3
         fi
         mkdir -p "$PYTHON_HOME"
         archive=$PYTHON_HOME/python.tar.gz
-        say "Downloading Python 3.12.10 (portable, into $PYTHON_HOME)..."
+        # The size, as there is nothing else to watch while it comes.
+        say "Downloading Python 3.12.10 (portable, about $size MB, into $PYTHON_HOME)..."
         if ! fetch "$PBS_BASE/cpython-3.12.10%2B20250517-$arch-unknown-linux-gnu-install_only_stripped.tar.gz" "$archive"; then
             rm -f "$archive"; say "The portable Python could not be downloaded."; return 1
         fi
