@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import http.server
 import ipaddress
 import json
@@ -117,6 +118,40 @@ def parse_report(body: bytes) -> dict[str, str]:
             raise ValueError(f"invalid report value for {key}")
         report[key] = value
     return report
+
+
+FACTORY_SECTORS = SAFEBOOT_SIZE // SECTOR_SIZE
+
+
+def sector_digests(image: bytes) -> list[bytes]:
+    """SHA-256 of each 4 KiB sector of the factory partition holding `image`,
+    erased (0xFF) after it - as the commit and the restore leave it."""
+    padded = image + b"\xff" * (SAFEBOOT_SIZE - len(image))
+    return [hashlib.sha256(padded[i:i + SECTOR_SIZE]).digest()
+            for i in range(0, SAFEBOOT_SIZE, SECTOR_SIZE)]
+
+
+def restore_resume_point(digests: list[bytes], official: bytes, recovery: bytes) -> int:
+    """How many leading sectors of the factory partition already hold the
+    official Safeboot, for a restore to carry on after.
+
+    A restore writes sector by sector from the start, so one cut off part way
+    leaves official sectors, then the recovery Safeboot's.  Anything else is
+    refused: the partition holds something this run did not put there.
+    """
+    official_sectors, recovery_sectors = sector_digests(official), sector_digests(recovery)
+    if len(digests) != len(official_sectors):
+        raise ValueError("factory partition sector count differs")
+    done = 0
+    while done < len(digests) and digests[done] == official_sectors[done]:
+        done += 1
+    for index in range(done, len(digests)):
+        if digests[index] != recovery_sectors[index]:
+            raise ValueError(
+                f"factory partition sector {index} holds neither the official nor "
+                "the recovery Safeboot"
+            )
+    return min(done, (len(official) + SECTOR_SIZE - 1) // SECTOR_SIZE)
 
 
 def require_report_fields(report: dict[str, str], expected: dict[str, str]) -> None:
@@ -250,13 +285,23 @@ class MigrationState:
             # does not care about (set up again for other Wi-Fi, say).  What
             # the restore relies on is held to the commit's record instead: the
             # table it wrote, and the exact recovery Safeboot it put in place.
-            self.commit_evidence = load_evidence(
-                evidence_dir / "commit-report.json", "commit", sys.maxsize
-            )
-            if self.commit_evidence.get("target_table_sha256") != self.target_table_sha256:
-                raise ValueError("commit evidence names a different partition table")
-            if self.commit_evidence.get("safeboot_sha256") != sha256_bytes(self.safeboot):
-                raise ValueError("commit evidence does not match recovery Safeboot")
+            #
+            # A commit whose report was lost (it is sent as the plug restarts)
+            # leaves the staging's record instead, of the image it then copied.
+            try:
+                self.commit_evidence = load_evidence(
+                    evidence_dir / "commit-report.json", "commit", sys.maxsize
+                )
+            except ValueError:
+                staged = load_evidence(evidence_dir / "stage-report.json", "stage", sys.maxsize)
+                if staged.get("staged_sha256") != sha256_bytes(self.safeboot):
+                    raise ValueError("neither commit nor stage evidence matches recovery Safeboot")
+                print("  The commit's report was lost; going by the staging's record of the image.")
+            else:
+                if self.commit_evidence.get("target_table_sha256") != self.target_table_sha256:
+                    raise ValueError("commit evidence names a different partition table")
+                if self.commit_evidence.get("safeboot_sha256") != sha256_bytes(self.safeboot):
+                    raise ValueError("commit evidence does not match recovery Safeboot")
 
     def replacements(self) -> dict[str, str]:
         safeboot_length = len(self.safeboot)
@@ -301,6 +346,7 @@ class MigrationState:
             ),
             "APP_SHA256": sha256_bytes(self.app),
             "APP_LENGTH": str(len(self.app)),
+            "FACTORY_SECTORS": str(FACTORY_SECTORS),
         }
 
     def render_berry(self) -> bytes:
@@ -333,7 +379,8 @@ class MigrationState:
             "preflight": {"table": TABLE_SIZE, "nvs": CANONICAL_NVS_SIZE, "otadata": OTADATA_SIZE},
             "stage": {"staged": len(self.safeboot)},
             "commit": {},
-            "restore": {"restored": len(self.official_safeboot)},
+            "restore": {"restored": len(self.official_safeboot),
+                        "factory-sha": FACTORY_SECTORS * 32},
         }[self.phase]
         if kind not in allowed:
             raise ValueError(f"capture {kind!r} is unavailable in {self.phase}")
@@ -354,6 +401,14 @@ class MigrationState:
         if index in chunks and chunks[index] != data:
             raise ValueError("duplicate capture chunk has different bytes")
         chunks[index] = data
+
+    def restore_from(self) -> int:
+        """Where the restore should carry on, from the plug's sector digests."""
+        raw = self.assembled_capture("factory-sha", FACTORY_SECTORS * 32)
+        digests = [raw[i:i + 32] for i in range(0, len(raw), 32)]
+        start = restore_resume_point(digests, self.official_safeboot, self.safeboot)
+        print(f"  The factory partition holds the official Safeboot up to sector {start}.")
+        return start
 
     def assembled_capture(self, kind: str, total: int) -> bytes:
         chunks = self.captures.get(kind, {})
@@ -571,6 +626,9 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
             if match:
                 chunk = state.safeboot_chunk(int(match.group(1)))
                 self._response(200, chunk.hex().encode("ascii"))
+                return
+            if path == "/restore-from" and state.phase == "restore":
+                self._response(200, str(state.restore_from()).encode("ascii"))
                 return
             if path == "/target-table" and state.phase == "commit":
                 self._response(200, state.target_table.hex().encode("ascii"))

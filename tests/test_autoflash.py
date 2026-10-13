@@ -535,9 +535,19 @@ class ConversionWifiTests(unittest.TestCase):
         for call in self.pin.call_args_list:
             self.assertNotEqual(call.args[1:], ("NewNet", "new"))
 
+    def test_a_lost_commit_report_falls_back_to_the_staging_record(self):
+        import hashlib
+        import json
+        (self.ctx.evidence / "commit-report.json").unlink()
+        (self.ctx.evidence / "stage-report.json").write_text(json.dumps({
+            "phase": "stage", "status": "PASS",
+            "staged_sha256": hashlib.sha256(b"Home/right").hexdigest()}))
+        self.run_with(("Home", "right"))
+        self.ctx.remember_wifi.assert_called_once_with("Home", "right", b"Home/right")
+
     def test_no_commit_record_stops_before_asking(self):
         (self.ctx.evidence / "commit-report.json").unlink()
-        with self.assertRaisesRegex(self.autoflash.Abort, "no record of the new layout"):
+        with self.assertRaisesRegex(self.autoflash.Abort, "no record of the startup firmware"):
             self.run_with(("Home", "right"))
 
 
@@ -892,16 +902,42 @@ class CommitEvidenceTests(unittest.TestCase):
             self.ctx({"phase": "commit", "status": "FAIL"}))
         self.assertIs(finished, False)
 
-    def test_no_report_cannot_tell(self):
+    def no_report(self, *, fetched, safeboot=False, slot=None):
+        # The emulated plug's PASS report lost on its way (the commit with the
+        # network cut as it finished): it then restarts into the startup firmware.
+        from unittest import mock
+        ctx = self.ctx(None)
+        if fetched:
+            (ctx.evidence / "commit-server.log").write_text(
+                '  [10.0.0.63] "GET /berry/commit.be HTTP/1.1" 200 -\n'
+                '  [10.0.0.63] "GET /target-table HTTP/1.1" 200 -\n')
+        ctx.device = mock.Mock(is_safeboot=mock.Mock(return_value=safeboot),
+                               current_ota=mock.Mock(return_value=slot))
         import tools.s60_autoflash as autoflash
-        finished, _ = autoflash.evidence_commit_finished(self.ctx(None))
+        return autoflash.evidence_commit_finished(ctx)
+
+    def test_no_report_and_no_table_fetched_means_nothing_written(self):
+        finished, _ = self.no_report(fetched=False)
+        self.assertIs(finished, False)
+
+    def test_no_report_but_on_the_startup_firmware_means_finished(self):
+        finished, reason = self.no_report(fetched=True, safeboot=True)
+        self.assertTrue(finished)
+        self.assertIn("temporary startup", reason)
+
+    def test_no_report_and_still_on_the_old_layout_means_not_finished(self):
+        finished, _ = self.no_report(fetched=True, slot=1)
+        self.assertIs(finished, False)
+
+    def test_no_report_and_no_telling_is_left_to_the_operator(self):
+        finished, _ = self.no_report(fetched=True, slot=None)
         self.assertIsNone(finished)
 
     def test_another_phase_report_is_not_taken(self):
         import tools.s60_autoflash as autoflash
         finished, _ = autoflash.evidence_commit_finished(
             self.ctx({"phase": "stage", "status": "PASS"}))
-        self.assertIsNone(finished)
+        self.assertIsNot(finished, True)  # never taken as the commit's
 
     def test_a_passed_commit_supersedes_the_high_slot_check(self):
         # After the commit the plug runs from slot 0 of the new layout: asking

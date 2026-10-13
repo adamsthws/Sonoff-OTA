@@ -33,10 +33,14 @@ def report_failure(exception, message)
       reason.add(c, 1)
       i += 1
     end
-    var client = webclient()
-    client.begin(base_url + "/fail/stage")
-    client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
-    client.close()
+    if tasmota.wifi("up")  # webclient can crash with the Wi-Fi down (Tasmota #18831)
+      var client = webclient()
+      client.begin(base_url + "/fail/stage")
+      client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
+      client.close()
+    else
+      print("S60 report not sent: the plug's Wi-Fi is down")
+    end
   except .. as report_exception, report_message
     print("S60 failure report not sent:", report_exception, report_message)
   end
@@ -86,36 +90,44 @@ class retry_window
 end
 
 def post_text(path, body)
-  var status
+  var status = -1
   var attempt = 0
   var window = retry_window()
   while true
-    var client = webclient()
-    client.begin(base_url + path)
-    status = client.POST(body)
-    client.close()
-    attempt += 1
-    if status >= 0 || window.over() break end
+    if tasmota.wifi("up")  # webclient can crash with the Wi-Fi down (Tasmota #18831)
+      var client = webclient()
+      client.begin(base_url + path)
+      status = client.POST(body)
+      client.close()
+      attempt += 1
+      if status >= 0 break end
+    end
+    if window.over() break end
     pause(1000)
   end
+  guard(attempt > 0, "the plug's Wi-Fi was down for five minutes")
   guard(status == 200, format("POST %s returned HTTP %i after %i attempts", path, status, attempt))
 end
 
 def fetch_chunk(index, expected_length)
   var path = format("/chunk/safeboot/%i", index)
   var client
-  var status
+  var status = -1
   var attempt = 0
   var window = retry_window()
   while true
-    client = webclient()
-    client.begin(base_url + path)
-    status = client.GET()
-    attempt += 1
-    if status >= 0 || window.over() break end
-    client.close()
+    if tasmota.wifi("up")  # webclient can crash with the Wi-Fi down (Tasmota #18831)
+      client = webclient()
+      client.begin(base_url + path)
+      status = client.GET()
+      attempt += 1
+      if status >= 0 break end
+      client.close()
+    end
+    if window.over() break end
     pause(1000)
   end
+  guard(attempt > 0, "the plug's Wi-Fi was down for five minutes")
   if status != 200 client.close() end
   guard(status == 200, format("GET %s returned HTTP %i after %i attempts", path, status, attempt))
   guard(client.get_size() == expected_length * 2, "Safeboot chunk HTTP length differs")

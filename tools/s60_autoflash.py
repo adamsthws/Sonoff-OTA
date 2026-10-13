@@ -2399,6 +2399,22 @@ def step_configure(ctx: Context) -> dict[str, Any]:
 
 
 
+def recovery_image_record(ctx: Context) -> str:
+    """The SHA-256 of the startup firmware this run put on the plug.
+
+    The commit's report records it; when that report was lost, the staging's
+    does, of the image the commit then copied as it was.
+    """
+    for name, key in (("commit-report.json", "safeboot_sha256"), ("stage-report.json", "staged_sha256")):
+        try:
+            report = json.loads((ctx.evidence / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(report, dict) and report.get("status") == "PASS" and report.get(key):
+            return str(report[key]).lower()
+    raise Abort("this run has no record of the startup firmware it put on the plug")
+
+
 def conversion_wifi(ctx: Context) -> None:
     """Hold the Wi-Fi details the plug was converted with, for G1.
 
@@ -2408,11 +2424,7 @@ def conversion_wifi(ctx: Context) -> None:
     other Wi-Fi since, and the plug's own Wi-Fi may have changed.  Only proven
     details are pinned back into the bundle, which the migration server needs.
     """
-    try:
-        report = json.loads((ctx.evidence / "commit-report.json").read_text(encoding="utf-8"))
-        wanted = str(report["safeboot_sha256"]).lower()
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise Abort(f"this run has no record of the new layout being written ({exc})") from exc
+    wanted = recovery_image_record(ctx)
 
     def proven(ssid: str, password: str) -> bytes | None:
         try:
@@ -2865,7 +2877,33 @@ def evidence_commit_finished(ctx: "Context") -> tuple[bool | None, str]:
         )
     if status == "FAIL":
         return False, "The plug reported that this step failed."
-    return None, "The plug sent no report of this step."
+    # No report: lost, or never sent (the plug's Wi-Fi was down as it
+    # finished).  The commit writes nothing before it has the new table, and
+    # the plug boots the startup firmware only once the new layout is in
+    # place - so together those two say how far it got.
+    try:
+        fetched = "GET /target-table" in (ctx.evidence / "commit-server.log").read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        fetched = False
+    if not fetched:
+        return False, (
+            "The plug never fetched the new layout, so it wrote nothing - it is safe\n"
+            "  to do this step again."
+        )
+    device = ctx.device
+    if device.is_safeboot():
+        return True, (
+            "The plug's report did not arrive, but it is running the temporary startup\n"
+            "  firmware, which starts only once the new layout is in place - so this\n"
+            "  step did finish."
+        )
+    if device.current_ota() == 1:
+        return False, (
+            "The plug is still running from the old layout, so the step did not get\n"
+            "  as far as switching to the new one; it is safe to do it again."
+        )
+    return None, "The plug sent no report of this step, and does not show how far it got."
 
 
 

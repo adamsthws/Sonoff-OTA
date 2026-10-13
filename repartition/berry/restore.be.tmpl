@@ -18,6 +18,7 @@ var official_copy_length = @OFFICIAL_SAFEBOOT_COPY_LENGTH@
 var official_pad_length = @OFFICIAL_STAGING_PAD_LENGTH@
 var official_tail_length = @OFFICIAL_ERASED_TAIL_LENGTH@
 var app_length = @APP_LENGTH@
+var factory_sectors = @FACTORY_SECTORS@
 
 def guard(ok, message)
   if !ok
@@ -39,10 +40,14 @@ def report_failure(exception, message)
       reason.add(c, 1)
       i += 1
     end
-    var client = webclient()
-    client.begin(base_url + "/fail/restore")
-    client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
-    client.close()
+    if tasmota.wifi("up")  # webclient can crash with the Wi-Fi down (Tasmota #18831)
+      var client = webclient()
+      client.begin(base_url + "/fail/restore")
+      client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
+      client.close()
+    else
+      print("S60 report not sent: the plug's Wi-Fi is down")
+    end
   except .. as report_exception, report_message
     print("S60 failure report not sent:", report_exception, report_message)
   end
@@ -94,18 +99,22 @@ end
 def fetch_chunk(index, expected_length)
   var path = format("/chunk/safeboot/%i", index)
   var client
-  var status
+  var status = -1
   var attempt = 0
   var window = retry_window()
   while true
-    client = webclient()
-    client.begin(base_url + path)
-    status = client.GET()
-    attempt += 1
-    if status >= 0 || window.over() break end
-    client.close()
+    if tasmota.wifi("up")  # webclient can crash with the Wi-Fi down (Tasmota #18831)
+      client = webclient()
+      client.begin(base_url + path)
+      status = client.GET()
+      attempt += 1
+      if status >= 0 break end
+      client.close()
+    end
+    if window.over() break end
     pause(1000)
   end
+  guard(attempt > 0, "the plug's Wi-Fi was down for five minutes")
   if status != 200 client.close() end
   guard(status == 200, format("GET %s returned HTTP %i after %i attempts", path, status, attempt))
   guard(client.get_size() == expected_length * 2, "official Safeboot chunk HTTP length differs")
@@ -118,18 +127,22 @@ def fetch_chunk(index, expected_length)
 end
 
 def post_text(path, body)
-  var status
+  var status = -1
   var attempt = 0
   var window = retry_window()
   while true
-    var client = webclient()
-    client.begin(base_url + path)
-    status = client.POST(body)
-    client.close()
-    attempt += 1
-    if status >= 0 || window.over() break end
+    if tasmota.wifi("up")  # webclient can crash with the Wi-Fi down (Tasmota #18831)
+      var client = webclient()
+      client.begin(base_url + path)
+      status = client.POST(body)
+      client.close()
+      attempt += 1
+      if status >= 0 break end
+    end
+    if window.over() break end
     pause(1000)
   end
+  guard(attempt > 0, "the plug's Wi-Fi was down for five minutes")
   guard(status == 200, format("POST %s returned HTTP %i after %i attempts", path, status, attempt))
 end
 
@@ -140,14 +153,67 @@ def best_effort_report(status)
       "app_sha256=%s\nofficial_safeboot_sha256=%s\nofficial_safeboot_size=%i\n",
       session, status, flash.current_ota(), target_table_hash.tohex(), app_hash.tohex(),
       official_safeboot_hash.tohex(), official_length)
-    var client = webclient()
-    client.begin(base_url + "/report/restore")
-    var code = client.POST(body)
-    client.close()
-    print(format("S60 RESTORE report HTTP %i", code))
+    if tasmota.wifi("up")  # webclient can crash with the Wi-Fi down (Tasmota #18831)
+      var client = webclient()
+      client.begin(base_url + "/report/restore")
+      var code = client.POST(body)
+      client.close()
+      print(format("S60 RESTORE report HTTP %i", code))
+    else
+      print("S60 report not sent: the plug's Wi-Fi is down")
+    end
   except .. as report_exception, report_message
     print("S60 RESTORE report failed:", report_exception, report_message)
   end
+end
+
+# Text from the computer, retried as a chunk is.  A refusal (HTTP 409) is
+# given with the computer's reason.
+def fetch_text(path)
+  var client
+  var status = -1
+  var attempt = 0
+  var window = retry_window()
+  while true
+    if tasmota.wifi("up")  # webclient can crash with the Wi-Fi down (Tasmota #18831)
+      client = webclient()
+      client.begin(base_url + path)
+      status = client.GET()
+      attempt += 1
+      if status >= 0 break end
+      client.close()
+    end
+    if window.over() break end
+    pause(1000)
+  end
+  guard(attempt > 0, "the plug's Wi-Fi was down for five minutes")
+  var text = status >= 0 ? client.get_string() : ""
+  if status >= 0 client.close() end
+  guard(status == 200, format("GET %s returned HTTP %i: %s", path, status, text))
+  return text
+end
+
+# How many leading sectors already hold the official Safeboot: a restore cut
+# off part way carries on after them.  The computer, holding both images,
+# judges the sector digests sent here, and refuses anything else.
+def resume_point()
+  var digests = bytes()
+  var sector = 0
+  while sector < factory_sectors
+    digests = digests + crypto.SHA256().update(flash.read(0x10000 + sector * 0x1000, 0x1000)).out()
+    sector += 1
+    tasmota.yield()
+  end
+  var offset = 0
+  var index = 0
+  while offset < size(digests)
+    var count = size(digests) - offset
+    if count > 4096 count = 4096 end
+    post_text(format("/capture/factory-sha/%i", index), digests[offset .. offset + count - 1].tohex())
+    offset += count
+    index += 1
+  end
+  return int(fetch_text("/restore-from"))
 end
 
 def run_restore(provided_token)
@@ -158,9 +224,9 @@ def run_restore(provided_token)
   guard(flash.current_ota() == 0, "official app0 must be running")
   guard(sha_region(0x8000, 0x1000) == target_table_hash, "canonical partition table differs")
   guard(sha_region(0xE0000, app_length) == app_hash, "running app0 differs from pinned official image")
-  guard(sha_region(0x10000, @SAFEBOOT_LENGTH@) == recovery_safeboot_hash,
-        "factory partition no longer contains the recovery Safeboot")
   armed = false
+  var start = resume_point()
+  if start > 0 print(format("S60 RESTORE: carrying on after %i sectors already restored", start)) end
 
   try
     var offset = 0
@@ -168,11 +234,16 @@ def run_restore(provided_token)
     while offset < official_length
       var count = official_length - offset
       if count > 4096 count = 4096 end
-      var data = fetch_chunk(index, count)
-      if count < 4096 flash.erase(0x10000 + offset, 0x1000) end
-      flash.write(0x10000 + offset, data)
-      var readback = flash.read(0x10000 + offset, count)
-      guard(readback == data, format("official Safeboot read-back differs at 0x%X", 0x10000 + offset))
+      var readback
+      if index < start
+        readback = flash.read(0x10000 + offset, count)  # official already; the computer checks it
+      else
+        var data = fetch_chunk(index, count)
+        if count < 4096 flash.erase(0x10000 + offset, 0x1000) end
+        flash.write(0x10000 + offset, data)
+        readback = flash.read(0x10000 + offset, count)
+        guard(readback == data, format("official Safeboot read-back differs at 0x%X", 0x10000 + offset))
+      end
       post_text(format("/capture/restored/%i", index), readback.tohex())
       offset += count
       index += 1

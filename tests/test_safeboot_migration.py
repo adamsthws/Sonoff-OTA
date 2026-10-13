@@ -465,6 +465,52 @@ class MigrationValidationTests(unittest.TestCase):
                 fixture.safeboot,
             )
 
+    def factory(self, official, recovery, official_sectors):
+        """The factory partition as a restore cut off after `official_sectors` leaves it."""
+        from tools.serve_safeboot_migration import SAFEBOOT_SIZE, SECTOR_SIZE
+        off = official + b"\xff" * (SAFEBOOT_SIZE - len(official))
+        rec = recovery + b"\xff" * (SAFEBOOT_SIZE - len(recovery))
+        cut = official_sectors * SECTOR_SIZE
+        return off[:cut] + rec[cut:]
+
+    def digests(self, partition):
+        import hashlib
+        return [hashlib.sha256(partition[i:i + SECTOR_SIZE]).digest()
+                for i in range(0, len(partition), SECTOR_SIZE)]
+
+    def test_a_restore_cut_off_part_way_carries_on_where_it_stopped(self):
+        from tools.serve_safeboot_migration import restore_resume_point
+        official = bytes((i * 7) & 0xFF for i in range(20_000))
+        recovery = bytes((i * 11 + 3) & 0xFF for i in range(21_000))
+        for done, expected in ((0, 0), (2, 2), (4, 4), (5, 5), (40, 5)):
+            partition = self.factory(official, recovery, done)
+            self.assertEqual(restore_resume_point(self.digests(partition), official, recovery),
+                             expected, done)
+
+    def test_anything_else_in_the_partition_is_refused(self):
+        from tools.serve_safeboot_migration import restore_resume_point
+        official = bytes((i * 7) & 0xFF for i in range(20_000))
+        recovery = bytes((i * 11 + 3) & 0xFF for i in range(21_000))
+        partition = bytearray(self.factory(official, recovery, 2))
+        partition[3 * SECTOR_SIZE + 10] ^= 0xFF  # a sector from neither image
+        with self.assertRaisesRegex(ValueError, "sector 3 holds neither"):
+            restore_resume_point(self.digests(bytes(partition)), official, recovery)
+
+    def test_the_plug_is_told_where_to_carry_on(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            recovery = fixture.enable_recovery()
+            fixture.evidence_dir.mkdir(parents=True, exist_ok=True)
+            fixture.write_commit_evidence(sha256_bytes(recovery))
+            state = fixture.state("restore")
+            rendered = state.render_berry().decode()
+            self.assertIn('fetch_text("/restore-from")', rendered)
+            self.assertIn("var factory_sectors = 208", rendered)
+            self.assertNotIn("no longer contains the recovery Safeboot", rendered)
+            raw = b"".join(self.digests(self.factory(fixture.safeboot, recovery, 1)))
+            send_chunks(state, "factory-sha", raw)
+            self.assertEqual(state.restore_from(), 1)
+
     def test_restore_accepts_commit_evidence_of_any_age(self):
         # A plug left on the recovery Safeboot must still be finishable later:
         # the restore closure re-checks the live plug before it writes.
@@ -493,6 +539,25 @@ class MigrationValidationTests(unittest.TestCase):
             evidence.update(changes)
             path.write_text(json.dumps(evidence), encoding="utf-8")
             return fixture.state("restore")
+
+    def test_a_lost_commit_report_falls_back_to_the_staging_record(self):
+        # The commit reports as the plug restarts; the emulated plug cut off
+        # then left no report, but the image the commit copied was staged here.
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            recovery = fixture.enable_recovery()
+            nvs_hash = sha256_bytes(canonical_nvs())
+            fixture.write_preflight_evidence(nvs_hash)
+            fixture.write_stage_evidence(nvs_hash)
+            path = fixture.evidence_dir / "stage-report.json"
+            evidence = json.loads(path.read_text())
+            evidence["staged_sha256"] = sha256_bytes(recovery)
+            path.write_text(json.dumps(evidence), encoding="utf-8")
+            self.assertIsNone(fixture.state("restore").commit_evidence)
+            evidence["staged_sha256"] = "0" * 64
+            path.write_text(json.dumps(evidence), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "neither commit nor stage evidence"):
+                fixture.state("restore")
 
     def test_restore_accepts_a_bundle_changed_since_the_commit(self):
         # Set up for other Wi-Fi since, say: the manifest differs, but the
@@ -600,9 +665,18 @@ class MigrationValidationTests(unittest.TestCase):
                 self.assertIn("tasmota.millis(300000)", source, phase)  # Wi-Fi down
                 self.assertIn("tasmota.millis(60000)", source, phase)   # Wi-Fi up
                 self.assertIn("window.over()", source, phase)
-                # Not set_timeouts(): on the emulated plug it left Tasmota's web
-                # server unable to answer after a phase gave up.
+                # Not set_timeouts(): a connect timeout above the default 2s left
+                # the emulated plug's web server dead once a phase gave up
+                # (the HTTP timeout alone did not); the default 2s is enough.
                 self.assertNotIn("set_timeouts", source, phase)
+                # No request with the Wi-Fi down: webclient can crash then
+                # (Tasmota #18831), and a router restart takes it down.
+                lines = source.splitlines()
+                for number, line in enumerate(lines):
+                    if "webclient()" in line:
+                        above = "\n".join(lines[max(0, number - 2):number])
+                        self.assertIn('if tasmota.wifi("up")', above, f"{phase} line {number + 1}")
+                self.assertIn("the plug's Wi-Fi was down for five minutes", source, phase)
             # Commit and restore still hand back their armed closure by name.
             self.assertTrue(rendered["commit"].rstrip().endswith("return commit"))
             self.assertTrue(rendered["restore"].rstrip().endswith("return restore"))
