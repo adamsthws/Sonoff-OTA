@@ -63,6 +63,7 @@ from tools.prepare_imprinted_bundle import (  # noqa: E402
     forget_stored_password,
     pin_wifi,
     recovery_image,
+    startup_image,
     validate_bundle,
 )
 from tools.query_ota import ota_endpoints  # noqa: E402
@@ -2099,8 +2100,63 @@ def step_configure(ctx: Context) -> dict[str, Any]:
 
 
 
+def conversion_wifi(ctx: Context) -> None:
+    """Hold the Wi-Fi details the plug was converted with, for G1.
+
+    G1 needs the exact startup firmware on the plug, and only those details
+    rebuild it.  They are proven against the commit's record of the image it
+    put in place, not against the bundle: the bundle may have been set up for
+    other Wi-Fi since, and the plug's own Wi-Fi may have changed.  Only proven
+    details are pinned back into the bundle, which the migration server needs.
+    """
+    try:
+        report = json.loads((ctx.evidence / "commit-report.json").read_text(encoding="utf-8"))
+        wanted = str(report["safeboot_sha256"]).lower()
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise Abort(f"this run has no record of the new layout being written ({exc})") from exc
+
+    def proven(ssid: str, password: str) -> bytes | None:
+        try:
+            image = startup_image(ssid, password)
+        except BundleError:
+            return None
+        return image if sha256_bytes(image) == wanted else None
+
+    details = None if getattr(ctx.args, "wifi", False) else read_wifi_from_plug(ctx)
+    image = proven(*details) if details else None
+    if image is None:
+        output.transient_begin()  # until details that match are given
+        section("The Wi-Fi details the plug was converted with are needed", [
+            *(["The plug is on different Wi-Fi details now."] if details else []),
+            "Its temporary startup firmware was built with the Wi-Fi details",
+            "used during the conversion, and only those rebuild it exactly, so",
+            "it can be swapped for the official one. They are checked against",
+            "the plug's record before anything is used.",
+        ])
+        while image is None:
+            ssid = ask_text("Wi-Fi network name used during the conversion", private="wifi-name")
+            password = ask_secret(f"Wi-Fi password for '{ssid}' at the time: ")
+            output.private(password, "wifi-password")
+            details = (ssid, password)
+            image = proven(ssid, password)
+            if image is None:
+                tell("    Those are not the details the plug was converted with - try again.")
+        output.transient_end()
+    ssid, password = details
+    try:
+        recovery_image(ctx.manifest_path, ssid, password)
+    except BundleError:
+        say(f"Setting the firmware bundle back up for '{ssid}', the Wi-Fi the plug was converted with.")
+        try:
+            pin_wifi(ctx.manifest_path, ssid, password)
+        except BundleError as exc:
+            raise Abort(f"the bundle could not be set up for '{ssid}': {exc}") from exc
+    ctx.remember_wifi(ssid, password, image)
+
+
 def step_restore(ctx: Context) -> dict[str, Any]:
     """G - replace the private recovery Safeboot with official bytes."""
+    conversion_wifi(ctx)  # before the runner, which would otherwise pin the plug's own
     runner = ctx.phase_runner()
     say("== Restore official Safeboot")
 

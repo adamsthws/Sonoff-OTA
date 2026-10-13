@@ -236,11 +236,16 @@ class MigrationState:
             # official table, the running official app0 and the recovery
             # Safeboot still in place - before it writes anything, so a plug
             # left for days on the recovery Safeboot can still be finished.
+            #
+            # Not the whole manifest either: it changes for reasons the restore
+            # does not care about (set up again for other Wi-Fi, say).  What
+            # the restore relies on is held to the commit's record instead: the
+            # table it wrote, and the exact recovery Safeboot it put in place.
             self.commit_evidence = load_evidence(
                 evidence_dir / "commit-report.json", "commit", sys.maxsize
             )
-            if self.commit_evidence.get("manifest_sha256") != self.manifest_sha256:
-                raise ValueError("commit evidence belongs to a different manifest")
+            if self.commit_evidence.get("target_table_sha256") != self.target_table_sha256:
+                raise ValueError("commit evidence names a different partition table")
             if self.commit_evidence.get("safeboot_sha256") != sha256_bytes(self.safeboot):
                 raise ValueError("commit evidence does not match recovery Safeboot")
 

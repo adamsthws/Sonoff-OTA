@@ -199,6 +199,7 @@ class MigrationFixture:
             "status": "PASS",
             "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
             "manifest_sha256": sha256_bytes(self.manifest_path.read_bytes()),
+            "target_table_sha256": sha256_bytes(self.target_table),
             "safeboot_sha256": safeboot_hash,
         }
         (self.evidence_dir / "commit-report.json").write_text(
@@ -480,6 +481,32 @@ class MigrationValidationTests(unittest.TestCase):
             path.write_text(json.dumps(evidence), encoding="utf-8")
             state = fixture.state("restore")
             self.assertEqual(state.commit_evidence["status"], "PASS")
+
+    def restore_with_commit_evidence(self, **changes):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            recovery = fixture.enable_recovery()
+            fixture.evidence_dir.mkdir(parents=True, exist_ok=True)
+            fixture.write_commit_evidence(sha256_bytes(recovery))
+            path = fixture.evidence_dir / "commit-report.json"
+            evidence = json.loads(path.read_text())
+            evidence.update(changes)
+            path.write_text(json.dumps(evidence), encoding="utf-8")
+            return fixture.state("restore")
+
+    def test_restore_accepts_a_bundle_changed_since_the_commit(self):
+        # Set up for other Wi-Fi since, say: the manifest differs, but the
+        # table and the recovery Safeboot the restore relies on do not.
+        state = self.restore_with_commit_evidence(manifest_sha256="0" * 64)
+        self.assertEqual(state.commit_evidence["status"], "PASS")
+
+    def test_restore_refuses_a_commit_of_another_table(self):
+        with self.assertRaisesRegex(ValueError, "different partition table"):
+            self.restore_with_commit_evidence(target_table_sha256="0" * 64)
+
+    def test_restore_refuses_a_commit_of_another_recovery_safeboot(self):
+        with self.assertRaisesRegex(ValueError, "does not match recovery Safeboot"):
+            self.restore_with_commit_evidence(safeboot_sha256="0" * 64)
 
     def test_stage_still_refuses_stale_preflight_evidence(self):
         with tempfile.TemporaryDirectory() as directory:

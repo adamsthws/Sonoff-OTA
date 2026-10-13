@@ -462,6 +462,85 @@ class AlreadyConvertingTests(unittest.TestCase):
             self.silent_discover(None)
 
 
+class ConversionWifiTests(unittest.TestCase):
+    """G1 needs the Wi-Fi the plug was converted with, proven against the
+    commit's record of the startup firmware - never the bundle's say-so."""
+
+    def setUp(self):
+        import hashlib
+        import json
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        self.autoflash = autoflash
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        evidence = Path(directory.name)
+        image = lambda ssid, password: f"{ssid}/{password}".encode()  # noqa: E731
+        (evidence / "commit-report.json").write_text(json.dumps({
+            "phase": "commit", "status": "PASS",
+            "safeboot_sha256": hashlib.sha256(image("Home", "right")).hexdigest(),
+        }))
+        self.ctx = SimpleNamespace(evidence=evidence, manifest_path=Path("unused"),
+                                   args=SimpleNamespace(wifi=False),
+                                   remember_wifi=mock.Mock())
+        self.pinned = ("Home", "right")
+        self.pin = mock.Mock(side_effect=lambda _, ssid, pw: setattr(self, "pinned", (ssid, pw)))
+
+        def recovery(_, ssid, password):
+            if (ssid, password) != self.pinned:
+                raise autoflash.BundleError("not the pinned one")
+            return image(ssid, password)
+
+        for patch in (
+            mock.patch.object(autoflash, "startup_image", side_effect=image),
+            mock.patch.object(autoflash, "recovery_image", side_effect=recovery),
+            mock.patch.object(autoflash, "pin_wifi", self.pin),
+            mock.patch.object(autoflash, "section"),
+            mock.patch.object(autoflash, "say"),
+            mock.patch.object(autoflash, "tell"),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def run_with(self, on_plug, typed=()):
+        from unittest import mock
+        answers = iter(typed)
+        with mock.patch.object(self.autoflash, "read_wifi_from_plug", return_value=on_plug), \
+             mock.patch.object(self.autoflash, "ask_text", side_effect=lambda *_, **__: next(answers)), \
+             mock.patch.object(self.autoflash, "ask_secret", side_effect=lambda *_: next(answers)) as asked:
+            self.autoflash.conversion_wifi(self.ctx)
+        return asked
+
+    def test_the_plugs_own_details_are_used_when_they_match(self):
+        asked = self.run_with(("Home", "right"))
+        asked.assert_not_called()
+        self.pin.assert_not_called()
+        self.ctx.remember_wifi.assert_called_once_with("Home", "right", b"Home/right")
+
+    def test_changed_wifi_on_the_plug_asks_for_the_conversions(self):
+        asked = self.run_with(("NewNet", "new"), typed=["Home", "wrong", "Home", "right"])
+        self.assertEqual(asked.call_count, 2)  # a wrong password is asked again
+        self.ctx.remember_wifi.assert_called_once_with("Home", "right", b"Home/right")
+        self.pin.assert_not_called()  # the bundle was never moved off them
+
+    def test_a_bundle_set_up_for_other_wifi_is_put_back(self):
+        self.pinned = ("NewNet", "new")
+        self.run_with(("Home", "right"))
+        self.pin.assert_called_once_with(Path("unused"), "Home", "right")
+
+    def test_the_plugs_new_details_are_never_pinned(self):
+        self.run_with(("NewNet", "new"), typed=["Home", "right"])
+        for call in self.pin.call_args_list:
+            self.assertNotEqual(call.args[1:], ("NewNet", "new"))
+
+    def test_no_commit_record_stops_before_asking(self):
+        (self.ctx.evidence / "commit-report.json").unlink()
+        with self.assertRaisesRegex(self.autoflash.Abort, "no record of the new layout"):
+            self.run_with(("Home", "right"))
+
+
 class BerryFireTests(unittest.TestCase):
     """A phase that restarts the plug cuts its own reply off: that is no reply,
     not a crash (the E3 traceback on macOS)."""
