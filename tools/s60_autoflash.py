@@ -2173,7 +2173,7 @@ def verify_high_slot(ctx: "Context") -> tuple[bool, str]:
     no Berry to ask.  Both are 'cannot check', which must not be reported as
     'the device disagrees'.
     """
-    if ctx.state.is_done("E3"):
+    if ctx.state.is_done("E3") or commit_report(ctx) == "PASS":
         return True, ""  # superseded: the old two-slot layout no longer exists
     slot = ctx.device.current_ota()
     if slot == 1:
@@ -2487,6 +2487,10 @@ def run_steps(ctx: Context) -> int:
                 output.stage_end("already done")
                 continue
         if ctx.state.status(step) == ATTEMPTED:
+            # Under its own stage line, like every other stage; the check, and
+            # any question, are taken off the screen once settled.
+            begin_stage(step)
+            output.transient_begin()
             say("")
             tell(f"{step} was interrupted last time - checking whether it finished...")
             finished, reason = None, ""
@@ -2499,9 +2503,10 @@ def run_steps(ctx: Context) -> int:
                 tell(f"    {reason}")
             if finished is True:
                 # The plug itself shows the step completed: nothing to decide.
+                output.transient_end()
                 ctx.state.mark(step, DONE, note="the plug showed it had completed")
+                output.stage_end("already done")
                 continue
-            output.transient_begin()
             section("The last step was interrupted", [
                 f"The step that {PLAIN_DESCRIPTION.get(step, title.lower())} was",
                 "stopped part way through, and the plug does not show whether it",
@@ -2516,7 +2521,8 @@ def run_steps(ctx: Context) -> int:
             output.transient_end()
             if choice == 1:
                 ctx.state.mark(step, DONE, note="operator confirmed it completed")
-                tell(f"{step} marked done on your say-so.")
+                say(f"{step} marked done on your say-so.")
+                output.stage_end("already done")
                 continue
         code = execute(ctx, step)
         if code == 0 and step == POINT_OF_NO_RETURN and ctx.research_bridge:

@@ -523,6 +523,31 @@ class CommitEvidenceTests(unittest.TestCase):
             self.ctx({"phase": "stage", "status": "PASS"}))
         self.assertIsNone(finished)
 
+    def test_a_passed_commit_supersedes_the_high_slot_check(self):
+        # After the commit the plug runs from slot 0 of the new layout: asking
+        # to redo D4 then would put the interim Tasmota back over it.
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        ctx = self.ctx({"phase": "commit", "status": "PASS"})
+        ctx.state = SimpleNamespace(is_done=lambda step: False)
+        ctx.device = mock.Mock()
+        self.assertEqual(autoflash.verify_high_slot(ctx), (True, ""))
+        ctx.device.current_ota.assert_not_called()
+
+    def test_without_a_report_the_high_slot_is_still_checked(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        ctx = self.ctx(None)
+        ctx.state = SimpleNamespace(is_done=lambda step: False)
+        ctx.device = mock.Mock(current_ota=mock.Mock(return_value=0))
+        ok, message = autoflash.verify_high_slot(ctx)
+        self.assertFalse(ok)
+        self.assertIn("high slot", message)
+
     def test_redoing_a_passed_commit_touches_nothing(self):
         # The startup firmware cannot answer the network check: running it
         # would fail and send the run back to E1 with no way forward.
