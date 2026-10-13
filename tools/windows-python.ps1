@@ -79,6 +79,10 @@ function Get-PythonCandidates {
         Get-Command $name -All -ErrorAction SilentlyContinue | ForEach-Object { & $add "PATH" $_.Source @() }
     }
     foreach ($root in "HKCU:\Software\Python", "HKLM:\Software\Python", "HKLM:\Software\WOW6432Node\Python") {
+        # Only a key that is there: for one that is not, -Recurse searches all
+        # of its parent (HKLM:\Software) for one of that name, deep enough to
+        # crash Windows PowerShell with a stack overflow.
+        if (-not (Test-Path $root)) { continue }
         Get-ChildItem $root -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -eq "InstallPath" } |
             ForEach-Object {
                 $key = Get-ItemProperty $_.PSPath
