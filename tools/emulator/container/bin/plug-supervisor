@@ -25,7 +25,8 @@ while true; do
         continue
     fi
     echo "===== plug powered on $(date '+%F %T') =====" >> "$LOG"
-    ESP32_WIFI_SOFTAP_FILE="$RUN/softap" /opt/qemu/bin/qemu-system-riscv32 \
+    ESP32_WIFI_SOFTAP_FILE="$RUN/softap" ESP32_WIFI_AP_OFF_FILE="$RUN/router-off" \
+        /opt/qemu/bin/qemu-system-riscv32 \
         -L /opt/qemu/pc-bios -machine esp32c3-picsimlab -display none -no-reboot \
         -serial file:/dev/stdout -monitor "unix:$RUN/monitor.sock,server,nowait" -pidfile "$RUN/qemu.pid" \
         -drive file=/state/flash.bin,if=mtd,format=raw \

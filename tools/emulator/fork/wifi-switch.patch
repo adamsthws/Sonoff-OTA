@@ -1,0 +1,44 @@
+--- a/hw/misc/esp32_wifi_ap.c
++++ b/hw/misc/esp32_wifi_ap.c
+@@ -103,10 +103,32 @@
+     }
+ }
+ 
++/* S60 emulation: the access points can be switched off, as a router is when
++ * it restarts. While the file named by ESP32_WIFI_AP_OFF_FILE exists, they
++ * send no beacons and answer nothing, and a guest station joined to one is
++ * told it has been disconnected, as a real one going away would. */
++static bool esp32_wifi_aps_off(void)
++{
++    const char *path = getenv("ESP32_WIFI_AP_OFF_FILE");
++    return path && access(path, F_OK) == 0;
++}
++
+ static void Esp32_WLAN_beacon_timer(void *opaque)
+ { 
+     struct mac80211_frame *frame;
+     Esp32WifiState *s = (Esp32WifiState *)opaque;
++    if (esp32_wifi_aps_off() && s->mode == Esp32_Mode_Station) {
++        if (s->ap_state == Esp32_WLAN__STATE_ASSOCIATED ||
++            s->ap_state == Esp32_WLAN__STATE_AUTHENTICATED) {
++            memcpy(s->ap_macaddr, s->associated_ap_macaddr, 6);
++            frame = Esp32_WLAN_create_deauthentication();
++            Esp32_WLAN_init_ap_frame(s, frame);
++            Esp32_WLAN_insert_frame(s, frame);
++            s->ap_state = Esp32_WLAN__STATE_NOT_AUTHENTICATED;
++        }
++        timer_mod(s->beacon_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + BEACON_TIME);
++        return;
++    }
+     // only send a beacon if we are an access point
+     if((ENABLE_BEACON)&&(s->mode == Esp32_Mode_Station)){
+       if(s->ap_state!=Esp32_WLAN__STATE_STA_ASSOCIATED) {
+@@ -732,7 +754,7 @@
+                 }
+                 break;
+         }
+-        if(ap_info) {
++        if(ap_info && !esp32_wifi_aps_off()) {
+             memcpy(s->ap_macaddr,ap_info->mac_address,6);
+             switch(frame->frame_control.sub_type) {
+                 case IEEE80211_TYPE_MGT_SUBTYPE_PROBE_REQ:

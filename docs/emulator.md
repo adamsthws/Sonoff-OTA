@@ -114,10 +114,24 @@ tools/emulator/emu.sh --rebuild  # rebuild the image first
 tools/emulator/emu.sh --detach   # start in the background; join with: docker attach s60-emu
 tools/emulator/emu.sh --no-firewall  # without the "computer's" firewall, which is on by default
 tools/emulator/emu.sh --windows  # Windows is the computer (see "On Windows"; started by emu.ps1 and windows-test.sh)
+tools/emulator/emu.sh --instance 2  # a second emulator beside the first (see "Several at once")
 ```
 
 A conversion needs `--cloud`: the upgrade to the bridge firmware is sent
 through eWeLink. The first start builds the image, which takes a few minutes.
+
+### Several at once
+
+`--instance N` (1-9, on `emu.sh` and `unattended-test.sh`) runs another
+emulator beside the first: its own container (`s60-emu-N`), state
+(`captures/emulation/state-N/`) and browser port (8080+N), so tests can run side
+by side. Each is its own small network, so the identical plugs do not meet.
+They do meet in eWeLink, though: every clone has the same device id, the cloud
+keeps one connection per id, and the upgrade at C2 is sent through it - so it can
+reach another instance's plug. Run the eWeLink stages, up to C2, one instance at
+a time; after C2 nothing uses the cloud. A new instance has no plug yet, so name
+it with `--plug MAC` when there is more than one backup. Each takes about 0.6 of
+a CPU and 115 MB.
 
 The terminal becomes a tmux session. Window **conversion** is "your computer
 on the home Wi-Fi": run the tool there exactly as on a real plug,
@@ -134,6 +148,7 @@ Wi-Fi:
 | On a real plug | In the emulator |
 |---|---|
 | Switch it off and on | `plug restart` (or `plug off`, `plug on`) |
+| Restart your router (not faithful - see `wifi-switch.patch` below) | `plug router off [SECS]`, `plug router on` |
 | Power-cycle it quickly, N times | `plug cycle N` |
 | Your desktop's Wi-Fi menu | `wifi`, `wifi join NAME`, `wifi home` |
 | Your home Wi-Fi's name and password | `PICSimLabWifi`, empty password |
@@ -458,6 +473,18 @@ Copies only; the original dump is never written.
   fork drives no input pins, so they all read low. The S60's button (GPIO9)
   is active low, so Tasmota saw it held, and after 40 seconds reset itself to
   its defaults, losing its Wi-Fi. Inputs now idle high, as with pull-ups.
+- **`wifi-switch.patch` - the access points can be switched off.** The fork's
+  access points live inside QEMU, so blocking traffic outside it only cuts the
+  plug off from the computer; its Wi-Fi stays up. While the file
+  `$ESP32_WIFI_AP_OFF_FILE` exists (`plug router off`), they send no beacons
+  and answer nothing, and a plug joined to one is sent a deauthentication.
+  **This is not a faithful router restart.** The emulated plug does not see
+  its Wi-Fi go: Tasmota keeps reporting it up, its main loop stalls while the
+  access point is off, and it can take minutes to reconnect once it is back
+  - none of which a real plug does. Use it to try things out, not as evidence;
+  a router restart is tested on a real plug. To test the computer going out
+  of reach instead, which the emulator does show faithfully, block the plug's
+  traffic in the container (`iptables -I INPUT -s 192.168.60.50 -j DROP`).
 
 ### How QEMU is run (`container/bin/plug-supervisor`)
 
