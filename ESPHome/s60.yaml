@@ -89,9 +89,23 @@ switch:
     pin: GPIO4
     restore_mode: ALWAYS_ON
 
+number:
+  - platform: template
+    name: "Overload threshold"
+    id: overload_threshold
+    icon: mdi:flash-alert
+    unit_of_measurement: "W"
+    min_value: 100
+    max_value: 4000
+    step: 10
+    initial_value: 3500
+    optimistic: true
+    restore_value: true
+    mode: box
+
 binary_sensor:
   - platform: gpio
-    id: button
+    id: button_1
     internal: true
     pin:
       number: GPIO9
@@ -101,6 +115,27 @@ binary_sensor:
     filters:
       - delayed_on: 10ms
       - delayed_off: 10ms
+  - platform: template
+    name: "Overload"
+    id: overload
+    device_class: problem
+    lambda: |-
+      return id(power).state > id(overload_threshold).state;
+  - platform: template
+    id: overload_delayed
+    internal: true
+    lambda: |-
+      return id(power).state > id(overload_threshold).state;
+    filters:
+      - delayed_on: 5s
+      - delayed_off: 1s
+    on_press:
+      then:
+        - switch.turn_off: relay
+        - logger.log:
+            level: WARN
+            format: "Overload > 5s (%.0f W > %.0f W) – turning off"
+            args: [id(power).state, id(overload_threshold).state]
 
 sensor:
   - platform: cse7766
