@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
-from tools.autoflash import tasmota_settings  # noqa: E402
+from tools.autoflash import __version__, tasmota_settings  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import PhaseError, PhaseRunner, PlugNeverConnected  # noqa: E402
@@ -2684,6 +2684,7 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     took = output.elapsed(seconds) + (" (this session; the run was resumed)" if resumed else "")
     fields = [
         ("Result", "converted"),
+        ("Tool version", __version__),
         ("Plug model", model or "__"),
         ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),
         ("Stock firmware", ctx.state.input("stock_version") or "__"),
@@ -2910,6 +2911,7 @@ def _main() -> int:
     if hasattr(signal, "SIGHUP"):
         signal.signal(signal.SIGHUP, lambda *_: sys.exit(129))
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", action="version", version=f"S60 conversion tool {__version__}")
     parser.add_argument("command", choices=["run", "status", "step", "list", "cleanup"])
     parser.add_argument("step_id", nargs="?")
     parser.add_argument(

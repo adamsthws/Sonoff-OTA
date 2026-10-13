@@ -1,0 +1,30 @@
+# Tag and release the tool's version, once, when a new one reaches main.
+# The version comes from tools/autoflash/__init__.py and the notes from
+# CHANGELOG.md (tools/release_notes.py), so a release is: add the notes,
+# change the number, merge.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag and release the version in the code, if it is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 tools/release_notes.py --version)
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+              echo "$tag is already released"
+              exit 0
+          fi
+          python3 tools/release_notes.py "$version" > notes.md
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md
