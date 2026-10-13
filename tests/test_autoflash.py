@@ -145,7 +145,9 @@ class ResumeTests(unittest.TestCase):
     def test_every_destructive_step_records_an_attempt_first(self):
         import tools.s60_autoflash as autoflash
 
-        known = {step for step, _, _ in autoflash.STEPS}
+        # Either firmware's steps: STEPS holds only the route chosen for the run.
+        every = autoflash.COMMON_STEPS + autoflash.TASMOTA_FINAL_STEPS + autoflash.ESPHOME_FINAL_STEPS
+        known = {step for step, _, _ in every}
         self.assertTrue(autoflash.DESTRUCTIVE_STEPS <= known)
         self.assertIn("E3", autoflash.DESTRUCTIVE_STEPS)
         self.assertIn("C2", autoflash.DESTRUCTIVE_STEPS)
