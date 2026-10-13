@@ -102,6 +102,41 @@ number:
     optimistic: true
     restore_value: true
     mode: box
+  - platform: template
+    name: Countdown
+    id: countdown_seconds
+    icon: mdi:timer-outline
+    unit_of_measurement: "s"
+    min_value: 0
+    max_value: 86400
+    step: 1
+    initial_value: 0
+    optimistic: true
+    restore_value: false
+    mode: box
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return x > 0;'
+            then:
+              - script.execute: countdown_script
+            else:
+              - script.stop: countdown_script
+
+script:
+  - id: countdown_script
+    mode: restart
+    then:
+      - logger.log:
+          format: "Toggling in %.0f seconds"
+          args: [id(countdown_seconds).state]
+      - delay: !lambda "return id(countdown_seconds).state * 1000;"
+      - switch.toggle: relay
+      - number.set:
+          id: countdown_seconds
+          value: 0
+      - logger.log: "Countdown finished – toggling the relay"
 
 binary_sensor:
   - platform: gpio
