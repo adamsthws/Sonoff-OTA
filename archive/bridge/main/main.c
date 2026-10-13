@@ -34,12 +34,16 @@
  * dropped out for seconds at a time while the bridge's own was up.  Without
  * stock details it raises its own network at once, as before.
  *
- * BRIDGE_FLASH_READOUT (research build, never shipped): GET /flash streams the
- * whole flash chip from address 0 and GET /efuse the eFuse read registers, so a
- * stock plug can be imaged without opening it.  This build registers neither
- * /update nor /tasmota-settings: the only flash it writes is the otadata
- * selection at startup, which returns the plug to stock on the next power
- * cycle.
+ * 4.4.2: GET /flash streams the whole flash chip from address 0, GET
+ * /flash-sha256 the SHA-256 of it worked out here, and GET /efuse the eFuse
+ * read registers, all read-only, so the run keeps a backup of the stock plug -
+ * checked byte for byte against the chip - before Tasmota is written over its
+ * Sonoff firmware.
+ *
+ * BRIDGE_FLASH_READOUT (research build, never shipped): the same reads without
+ * /update or /tasmota-settings, so a stock plug can be imaged without being
+ * converted.  The only flash it writes is the otadata selection at startup,
+ * which returns the plug to stock on the next power cycle.
  */
 
 #include <stdio.h>
@@ -61,11 +65,10 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "tasmota_settings.h"
-#ifdef BRIDGE_FLASH_READOUT
 #include "esp_flash.h"
+#include "mbedtls/sha256.h"
 #include "soc/efuse_reg.h"
 #include "soc/soc.h"
-#endif
 
 #define BRIDGE_AP_PASSWORD "s60-ota-bridge"
 #define BRIDGE_MAX_IMAGE_SIZE 0x1f0000
@@ -75,7 +78,7 @@
 #define STA_WINDOW_MS 45000
 /* The one version: the wrapper the updater is given and the app description
  * (PROJECT_VER in ../CMakeLists.txt) carry the same; a test keeps them equal. */
-#define BRIDGE_VERSION "4.4.1"
+#define BRIDGE_VERSION "4.4.2"
 #ifdef BRIDGE_FLASH_READOUT
 #define BRIDGE_NAME "bridge " BRIDGE_VERSION " flash readout"
 #else
@@ -156,9 +159,8 @@ static esp_err_t nvs_handler(httpd_req_t *req)
 }
 #endif
 
-#ifdef BRIDGE_FLASH_READOUT
-/* Research build only: stream the whole flash chip, bootloader and partition
- * table included, exactly as it reads.  Read-only. */
+/* Stream the whole flash chip, bootloader and partition table included,
+ * exactly as it reads.  Read-only. */
 static esp_err_t flash_handler(httpd_req_t *req)
 {
     uint32_t size = 0;
@@ -184,7 +186,47 @@ static esp_err_t flash_handler(httpd_req_t *req)
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
-/* Research build only: the eFuse read registers (EFUSE_RD_WR_DIS_REG to
+/* The SHA-256 of the whole flash chip, read here, in lower-case hex, so the
+ * host can check what /flash sent it byte for byte.  Read-only. */
+static esp_err_t flash_sha256_handler(httpd_req_t *req)
+{
+    uint32_t size = 0;
+    if (esp_flash_get_size(NULL, &size) != ESP_OK || size == 0) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        return httpd_resp_sendstr(req, "Could not read the flash size.\n");
+    }
+    mbedtls_sha256_context sha;
+    mbedtls_sha256_init(&sha);
+    mbedtls_sha256_starts(&sha, 0);
+    for (uint32_t offset = 0; offset < size; offset += sizeof(s_upload_buffer)) {
+        uint32_t length = size - offset < sizeof(s_upload_buffer)
+                              ? size - offset
+                              : sizeof(s_upload_buffer);
+        if (esp_flash_read(NULL, s_upload_buffer, offset, length) != ESP_OK) {
+            mbedtls_sha256_free(&sha);
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            return httpd_resp_sendstr(req, "Could not read the flash.\n");
+        }
+        mbedtls_sha256_update(&sha, (const unsigned char *)s_upload_buffer, length);
+    }
+    unsigned char digest[32];
+    mbedtls_sha256_finish(&sha, digest);
+    mbedtls_sha256_free(&sha);
+    char text[2 * sizeof(digest) + 2];
+    for (size_t i = 0; i < sizeof(digest); i++) {
+        snprintf(text + 2 * i, 3, "%02x", digest[i]);
+    }
+    text[2 * sizeof(digest)] = '\n';
+    text[2 * sizeof(digest) + 1] = 0;
+    char size_text[12];
+    snprintf(size_text, sizeof(size_text), "%lu", (unsigned long)size);
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "X-Flash-Size", size_text);
+    return httpd_resp_sendstr(req, text);
+}
+
+/* The eFuse read registers (EFUSE_RD_WR_DIS_REG to
  * EFUSE_RD_SYS_PART2_DATA7_REG), little-endian words in register order.
  * Reading them does not program anything. */
 static esp_err_t efuse_handler(httpd_req_t *req)
@@ -199,7 +241,6 @@ static esp_err_t efuse_handler(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, s_upload_buffer, length);
 }
-#endif
 
 /* Plain-text state for the host: which networks the bridge is on. */
 static esp_err_t status_handler(httpd_req_t *req)
@@ -554,6 +595,7 @@ static esp_err_t start_web_server(void)
     /* Deliberately unregistered in this build. */
     (void)update;
     (void)tasmota_settings;
+#endif
     const httpd_uri_t flash = {
         .uri = "/flash", .method = HTTP_GET, .handler = flash_handler, .user_ctx = NULL,
     };
@@ -562,7 +604,10 @@ static esp_err_t start_web_server(void)
         .uri = "/efuse", .method = HTTP_GET, .handler = efuse_handler, .user_ctx = NULL,
     };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &efuse));
-#endif
+    const httpd_uri_t flash_sha256 = {
+        .uri = "/flash-sha256", .method = HTTP_GET, .handler = flash_sha256_handler, .user_ctx = NULL,
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &flash_sha256));
     return ESP_OK;
 }
 

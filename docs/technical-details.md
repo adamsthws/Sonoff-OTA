@@ -68,23 +68,94 @@ If the details cannot be read or given automatically, the tool says why and
 asks for them - only then, and only once. With `--wifi` they are asked for
 instead, typed twice, since Tasmota never reports its password for checking.
 
-Your Wi-Fi password is never written to disk. It is held in memory for the run
-only; the temporary startup firmware built from it is built in memory and
+Apart from the Sonoff backup (below), your Wi-Fi password is never written
+to disk. It is held in memory for the run only; the temporary startup firmware built from it is built in memory and
 handed to the migration server through a pipe, never as a file. The plug loses
 the password at the end of the run, when the official startup firmware
 replaces the temporary one.
 
-Other secrets are not kept either: the plug's eWeLink LAN key is never
-saved, and the update links, the plug's settings memory and staged firmware
+Other secrets are not kept either, outside the backup: the plug's eWeLink
+LAN key is never saved, and the update links, the plug's settings memory and staged firmware
 are deleted or reduced to hashes as soon as they have been checked - however
 the run ends. `python3 tools/s60_autoflash.py cleanup` deletes any such file
-still on disk, such as after the computer lost power mid-run.
+still on disk, such as after the computer lost power mid-run. It leaves the
+backups alone.
+
+### Your Sonoff backup
+
+Stage 6 of the run, "Backing up the Sonoff firmware", comes straight after
+the installer is sent and before anything is written over the Sonoff
+firmware. It is covered by the PROCEED typed at stage 5, whose warning says
+the backup will be taken (or that the plug has one already); nothing reaches
+the plug before PROCEED. The stage reads the plug's whole 4 MB flash through the installer (bridge 4.4.2's read-only
+`GET /flash` and `GET /efuse`), checks it byte for byte against the plug -
+the installer works out the SHA-256 of its flash on the plug itself
+(`GET /flash-sha256`), and a backup whose hash differs is refused and read
+again - and keeps it with the plug's other records,
+under its MAC address - which no other plug has:
+
+```text
+captures/plugs/58-cf-79-01-02-03/
+    plug.json              the plug's eWeLink name and id, model, Sonoff version
+    sonoff-backup/         the backup
+    runs/20261013-031500/  each conversion of it: its state and its log
+```
+
+A run starts in `captures/plugs/unidentified/runs/` and moves under the MAC as
+soon as the plug is found, before anything is written to it. Runs from before
+this layout, kept straight under `captures/`, are moved there the next time
+the tool starts if they know their plug's MAC; the rest stay put and still
+work. The MAC is taken from the chip's own eFuses for the backup, so it is
+filed under the plug it came from even if the network reported another.
+
+The backup holds:
+
+- `flash.bin` - the whole chip: bootloader, partition table, the Sonoff
+  firmware, its settings and its eWeLink pairing;
+- `efuse.bin` - the chip's eFuse registers, which only the emulator needs;
+- `report.json` - what the backup holds, checked when it was taken;
+- `README.txt` - how to use it.
+
+It is the original: written once, read-only, never replaced. A plug that is
+converted again keeps its first backup, and the run says so in the warning
+before PROCEED rather than reading the plug again. Like every stage, the
+backup shows as one line on screen; what it found - the partitions, the
+Sonoff version, where it was kept - is in the run's log, and on screen with
+`--verbose`. Only a failure is shown: after two failed reads the run says
+the conversion can go on without a backup, though that is not recommended,
+and offers to try again, to carry on without one, or to quit - which leaves
+the plug on the installer, to carry on from there next time or go back to
+Sonoff with a power cycle. Carrying on marks the stage "Skipped", in green:
+the conversion is not affected. An unattended run carries on without one.
+The test report says how the backup went - completed, failed, or not taken -
+and never where it is or which plug it came from. `python3 tools/s60_autoflash.py list` shows
+every backed-up plug.
+
+It is for two things. **Going back to Sonoff:** writing `flash.bin` back
+over USB-serial (`esptool.py --chip esp32c3 write_flash 0x0 flash.bin`)
+returns the plug to the Sonoff version, settings and pairing it had - but
+that means opening the plug, which is what the over-the-air route avoids.
+One of the two app slots holds the installer rather than an older Sonoff
+version; the plug boots the other. Restoring it over the air, from Tasmota,
+is not built yet. **The emulator:** `tools/emulator/emu.sh` offers every
+backed-up plug by its MAC and runs a copy of the one you choose
+([docs/emulator.md](emulator.md)).
+
+**It holds secrets in plain text:** your Wi-Fi password, as the Sonoff
+firmware saved it, and the plug's eWeLink keys. The directory and files can
+be read by your user only, `cleanup` keeps them, and they never belong in
+an issue or a discussion. Delete them if you do not want them, or convert
+with `--no-backup` to keep none. Reading the flash takes under a minute.
 
 ### What crosses the network
 
 Not written to disk is not the same as never exposed. The password crosses
-your local network up to twice during a run, in plain HTTP:
+your local network up to three times during a run, in plain HTTP:
 
+- inside the Sonoff backup, as the installer sends the plug's flash to the
+  tool (not with `--no-backup`). While it runs, the installer answers anyone
+  on your network - it also takes any firmware it is sent, which could read
+  the same memory, so reading it adds no new way in;
 - when the tool reads it, in the plug's configuration backup (skipped if you
   typed the details instead). This is the same `/dl` download as
   Configuration → Backup Configuration in Tasmota's web UI. The file is only

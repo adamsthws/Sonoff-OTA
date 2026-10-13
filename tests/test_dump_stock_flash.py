@@ -102,3 +102,41 @@ class DumpStockFlashTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlugHashTests(unittest.TestCase):
+    """A backup is checked byte for byte against the plug's own hash of its flash."""
+
+    def read(self, on_plug):
+        import hashlib
+        import urllib.error
+        from unittest import mock
+        from tools import dump_stock_flash
+        image = bytes(flash())
+        answers = {
+            "/flash": (image, {"X-Flash-Size": str(len(image))}),
+            "/efuse": (b"E" * 16, {}),
+        }
+
+        def fetch(host, path, timeout=60.0):
+            if path == "/flash-sha256":
+                if on_plug is None:
+                    raise urllib.error.HTTPError(path, 404, "Not Found", {}, None)
+                return (on_plug(hashlib.sha256(image).hexdigest()) + "\n").encode(), {}
+            return answers[path]
+
+        with mock.patch.object(dump_stock_flash, "fetch", side_effect=fetch):
+            return dump_stock_flash.read_dump("bridge")
+
+    def test_a_backup_that_matches_the_plug_says_so(self):
+        _, _, report = self.read(lambda digest: digest.upper())
+        self.assertIs(report["matches_plug"], True)
+
+    def test_a_backup_that_differs_from_the_plug_is_refused(self):
+        from tools.dump_stock_flash import IncompleteDump
+        with self.assertRaises(IncompleteDump):
+            self.read(lambda digest: "0" * 64)
+
+    def test_an_older_bridge_leaves_it_unchecked(self):
+        _, _, report = self.read(None)
+        self.assertIsNone(report["matches_plug"])

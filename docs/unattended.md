@@ -68,7 +68,7 @@ terminal (a CI log, say), and is kept in `captures/unattended/<time>/`
 The terminal is the same size as the one running it, or 100x40 with none.
 `--size 120x50` sets it. Exit codes are the run's: 0 finished, 130 stopped
 at a question, 143 stopped by `--timeout`, anything else failed. The run's
-full log is in `captures/<run>/run.log` as usual.
+full log is in the run's `run.log`, under `captures/plugs/<MAC>/runs/`, as usual.
 
 ## In the emulator
 

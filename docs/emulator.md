@@ -14,9 +14,18 @@ another regional version's power meter.
 
 - **Docker,** on Linux, macOS, or Windows through WSL 2. Everything that is
   built or run lives in containers; nothing is installed on the host.
-- **A flash dump of a stock plug,** taken with `tools/s60_readout.py` (over
-  Wi-Fi; the plug is put back to stock afterwards). Copy `flash.bin` and
-  `efuse.bin` into `captures/emulation/`.
+- **A Sonoff backup of a stock plug.** Every conversion keeps one for each
+  plug, in `captures/plugs/<MAC>/sonoff-backup/`;
+  `tools/s60_readout.py` takes one without converting (over Wi-Fi; the plug is
+  put back to stock afterwards). `emu.sh` lists them by MAC address - on the
+  plug's label, and in your router and the eWeLink app - and asks which plug
+  to run when there are several (`--plug <MAC>` says beforehand; with nobody
+  at the keyboard the plug run last is used). It runs a copy: the backup is
+  never written. A dump set up the older way, `flash.bin` and `efuse.bin` in
+  `captures/emulation/`, is offered too. Each plug's emulated flash is kept
+  in `captures/emulation/state/` between runs, so switching plugs and back
+  carries on where each was; `--fresh` puts the chosen one back to its
+  backup.
 - **The NVS partition generator** in the repository's `.venv`:
 
   ```sh
@@ -70,7 +79,7 @@ running on its battery `windows-test.sh` says to plug it in.
 |---|---|
 | The emulator starting, until the plug is on its Wi-Fi | under 10 seconds |
 | Windows from Linux: starting, until the link says Connected | 30-60 seconds |
-| A conversion | about 7 minutes on a real plug, through all 14 stages; about 5 in the emulator (4m 35s for an unattended run from stock) |
+| A conversion | about 7 minutes on a real plug, through all 15 stages; about 5 in the emulator (4m 35s for an unattended run from stock) |
 | Windows shutting down at the end | about 10 seconds |
 
 **After changing what Windows is set up with:** the layers whose scripts
@@ -81,7 +90,9 @@ changed are set up again before the run starts - about a minute for `tool`,
 **The dump is private.** It holds the home Wi-Fi password and the plug's
 eWeLink keys in cleartext. Keep it, and everything the emulator writes, under
 `captures/` (Git-ignored): the emulator puts all its state in
-`captures/emulation/state/`.
+`captures/emulation/state/`, and reads the backups without changing them. A
+conversion run in the emulator keeps a backup of the emulated plug too, in
+the emulator's own copy of the repository, never beside your real ones.
 
 **The emulated plug is a clone of the real one** - same eWeLink device id,
 keys and MAC. If both are online, they fight over one device in the account,
@@ -96,7 +107,8 @@ On Linux or macOS (on Windows, see "On Windows" below):
 tools/emulator/emu.sh            # plug offline: nothing reaches the internet
 tools/emulator/emu.sh --cloud    # plug and tool online - asks you to confirm the real plug is unplugged
 tools/emulator/emu.sh --cloud --yes  # ... without asking: you have unplugged it (for unattended tests)
-tools/emulator/emu.sh --fresh    # put the plug back to stock, and forget the previous run and the eWeLink account
+tools/emulator/emu.sh --plug 58:cf:79:01:02:03  # run that backed-up plug, without asking which
+tools/emulator/emu.sh --fresh    # put the plug back to its Sonoff backup, and forget the previous run and the eWeLink account
 tools/emulator/emu.sh --pcap     # also record the plug's Wi-Fi traffic
 tools/emulator/emu.sh --rebuild  # rebuild the image first
 tools/emulator/emu.sh --detach   # start in the background; join with: docker attach s60-emu
@@ -206,7 +218,8 @@ tools/emulator/windows-test.sh --cloud --fresh            # ... with the plug ba
 tools/emulator/windows-test.sh --rebuild-layer=rig        # set Windows' rig layer (and tool) up again first
 ```
 
-`--fresh`, `--pcap`, `--no-firewall` and `--rebuild` are `emu.sh`'s.
+`--fresh`, `--pcap`, `--no-firewall`, `--rebuild` and `--plug=<MAC>` are `emu.sh`'s;
+which plug runs is asked before Windows starts, when there are several.
 
 The first run fetches Microsoft's **Windows Server 2025 evaluation ISO** - 8.2
 GB, straight from Microsoft's Evaluation Center link, no sign-up, checked
