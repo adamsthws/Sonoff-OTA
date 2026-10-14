@@ -768,6 +768,46 @@ class RetryTests(unittest.TestCase):
             self.assertEqual(state.status(step), expected, step)
 
 
+class StageTimingTests(unittest.TestCase):
+    """Every stage's time is kept for the report, however it ends."""
+
+    def test_a_stage_that_fails_has_its_time_and_the_plugs_busy_time_kept(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        from tools.autoflash.phases import PhaseError
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        ctx = SimpleNamespace(state=state)
+
+        def stage(context):
+            context.last_runner = SimpleNamespace(busy_seconds=41.5)
+            raise PhaseError("the plug stopped the stage without reaching this computer")
+        title, _ = autoflash.STEP_INDEX["E2"]
+        with mock.patch.dict(autoflash.STEP_INDEX, {"E2": (title, stage)}), \
+             mock.patch.object(autoflash, "begin_stage"), \
+             mock.patch.object(autoflash.output, "stage_end"), \
+             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
+            self.assertEqual(autoflash.execute(ctx, "E2"), 1)
+        captures = state.data["captures"]
+        self.assertIsInstance(captures["E2.seconds"], int)
+        self.assertEqual(captures["E2.plug_busy_seconds"], 41.5)
+        self.assertIn("without reaching", ctx.last_failure)
+
+        # A quicker try after it keeps the longest: how near the plug came to stopping.
+        def quicker(context):
+            context.last_runner = SimpleNamespace(busy_seconds=3.0)
+            raise PhaseError("the plug did not fetch the stage instructions")
+        with mock.patch.dict(autoflash.STEP_INDEX, {"E2": (title, quicker)}), \
+             mock.patch.object(autoflash, "begin_stage"), \
+             mock.patch.object(autoflash.output, "stage_end"), \
+             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
+            autoflash.execute(ctx, "E2")
+        self.assertEqual(state.data["captures"]["E2.plug_busy_seconds"], 41.5)
+
+
 class PlugBackTests(unittest.TestCase):
     """Before a step is tried again, a plug that is not answering is waited for."""
 

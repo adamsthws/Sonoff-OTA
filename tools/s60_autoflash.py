@@ -434,6 +434,13 @@ class Context:
         # from them.  Neither is ever written to disk.
         self._wifi: tuple[str, str] | None = None
         self._recovery: bytes | None = None
+        # For the report: the phase runner a step used (its plug-busy time), when
+        # this session started, and whether the report has been offered.
+        self.last_runner: PhaseRunner | None = None
+        self.run_started = time.monotonic()
+        self.run_resumed = False
+        self.reported = False
+        self.last_failure = ""  # what the last stage to fail said, for the report
         try:
             output.private(bundle_ssid(self.manifest_path), "wifi-name")
         except (BundleError, OSError, ValueError):
@@ -683,7 +690,7 @@ class Context:
     def phase_runner(self) -> PhaseRunner:
         port = choose_port(self, "phase_port", PHASE_PORTS, "the migration steps")
         ensure_firewall(self)
-        return PhaseRunner(
+        self.last_runner = PhaseRunner(
             repo_root=ROOT,
             manifest=self.manifest_path,
             evidence_dir=self.evidence,
@@ -694,6 +701,7 @@ class Context:
             # Piped, never a file; and only hashes of captures that hold secrets.
             recovery=self.recovery_bytes(),
         )
+        return self.last_runner
 
 
 def load_settings() -> dict[str, Any]:
@@ -2643,6 +2651,24 @@ def begin_stage(step: str) -> None:
 
 
 def execute(ctx: Context, step: str) -> int:
+    ctx.last_runner = None
+    started, waited = time.monotonic(), output.waited()
+    try:
+        return _execute(ctx, step)
+    finally:
+        # For the report, however the stage ended: its time without the
+        # keyboard waits, and how long a Berry phase kept the plug busy.
+        ctx.state.capture(f"{step}.seconds",
+                          round(time.monotonic() - started - (output.waited() - waited)))
+        busy = getattr(ctx.last_runner, "busy_seconds", None)
+        if busy is not None:
+            # The longest of its tries: how near the plug came to stopping.
+            before = ctx.state.data.get("captures", {}).get(f"{step}.plug_busy_seconds")
+            ctx.state.capture(f"{step}.plug_busy_seconds",
+                              max(busy, before) if isinstance(before, (int, float)) else busy)
+
+
+def _execute(ctx: Context, step: str) -> int:
     title, handler = STEP_INDEX[step]
     begin_stage(step)
     say(f"{step}  {title}")
@@ -2657,6 +2683,7 @@ def execute(ctx: Context, step: str) -> int:
         ctx.state.mark(step, FAILED, error=str(exc))
         output.stage_end("stopped")
         section(f"{step} could not start", firewall_hint(ctx))
+        ctx.last_failure = str(exc)
         tell(f"FAILED: {exc}")
         return 1
     except (Abort, DeviceError, ValueError, PhaseError) as exc:
@@ -2666,6 +2693,7 @@ def execute(ctx: Context, step: str) -> int:
         if not (isinstance(exc, PhaseError) and step in ATTEMPTED_EVIDENCE):
             ctx.state.mark(step, FAILED, error=str(exc))
         output.stage_end("stopped")
+        ctx.last_failure = str(exc)
         tell(f"FAILED: {exc}")
         return 1
     except Exception as exc:  # noqa: BLE001 - recorded and explained, not a bare traceback
@@ -2674,6 +2702,7 @@ def execute(ctx: Context, step: str) -> int:
         if step not in ATTEMPTED_EVIDENCE:
             ctx.state.mark(step, FAILED, error=message)
         output.stage_end("stopped")
+        ctx.last_failure = message
         tell(f"FAILED: {message}")
         return 1
     # A step may end its stage otherwise: "skipped" or "already done".
@@ -2753,6 +2782,7 @@ def wait_while_plug_busy(ctx: Context) -> None:
 def execute_with_retries(ctx: Context, step: str) -> int:
     for attempt in range(1, ATTEMPTS + 1):
         code = execute(ctx, step)
+        ctx.state.capture(f"{step}.attempts", attempt)
         if code != 1 or step not in RETRY_STEPS or attempt == ATTEMPTS:
             return code
         error = str(ctx.state.data.get("steps", {}).get(step, {}).get("error", ""))
@@ -3002,6 +3032,7 @@ def cmd_run(ctx: Context) -> int:
 def run_steps(ctx: Context) -> int:
     started = time.monotonic()
     resumed = any(ctx.state.is_done(step) for step, _, _ in STEPS)
+    ctx.run_started, ctx.run_resumed = started, resumed
     tell("")
     tell("Converting a plug usually takes under 10 minutes. Some stages take a")
     tell("minute or two with little to see - that's normal. Keep the plug plugged")
@@ -3109,15 +3140,67 @@ def computer_description() -> str:
         except OSError:
             system = ""
         system = system or f"Linux {platform.release()}"
-    return f"{system}, Python {platform.python_version()}"
+    return system
+
+
+def python_description() -> str:
+    """The Python the tool ran on, and where it came from (start.sh, start.ps1)."""
+    running = Path(sys.executable).resolve()
+    portable = Path(os.environ.get("S60_PYTHON_HOME") or ROOT / ".python").resolve()
+    if portable in running.parents:
+        source = "portable, downloaded by this tool"
+    elif (hostsys.IS_MAC and (portable / "installed-by-s60").exists()
+          and "Python.framework" in running.parts):
+        source = "python.org's, installed by this tool"
+    elif sys.prefix != sys.base_prefix:
+        source = "in a virtual environment"
+    else:
+        source = "already installed on this computer"
+    return f"{platform.python_version()} ({source})"
 
 
 # The plug type and region each S60 model letter stands for.
 REGIONS = {"G": "UK (Type G)", "F": "Europe (Type E/F)"}
 
 
+def public_text(text: str, limit: int = 240) -> str:
+    """`text` fit for a public post: on one line, with nothing that identifies
+    the plug, the network or the person - not even a private address."""
+    text = output.scrub(" ".join(str(text).split()))
+    text = re.sub(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w])", "<address>", text)
+    return text if len(text) <= limit else text[:limit - 3].rstrip() + "..."
+
+
+def run_result(ctx: Context, ending: str) -> str:
+    """How the run ended, for the report: "converted", or where and why it stopped.
+
+    ending: "converted", "failed" or "crashed".
+    """
+    if ending == "converted":
+        return "converted"
+    stopped = next(((number, step) for number, (step, _, _) in enumerate(STEPS, 1)
+                    if not ctx.state.is_done(step)), None)
+    where = (f"stage {stopped[0]} of {len(STEPS)} ({stage_name(stopped[1])})"
+             if stopped else "the end")
+    reason = ctx.last_failure or (
+        ctx.state.data.get("steps", {}).get(stopped[1], {}).get("error", "") if stopped else "")
+    head = "crashed" if ending == "crashed" else "stopped"
+    return f"{head} at {where}" + (f": {public_text(reason)}" if reason else "")
+
+
+def stage_timings(ctx: Context, key: str) -> str:
+    """Each stage's `key` capture as "10=36s, 14=43s", by stage number - with no
+    space inside a pair, so the screen never wraps one across two lines."""
+    captures = ctx.state.data.get("captures", {})
+    timings = [f"{number}={output.elapsed(captures[f'{step}.{key}']).replace(' ', '')}"
+               for number, (step, _, _) in enumerate(STEPS, 1)
+               if isinstance(captures.get(f"{step}.{key}"), (int, float))]
+    return ", ".join(timings) or "not recorded"  # a run from before they were
+
+
 def report_fields(ctx: Context, seconds: float, resumed: bool,
-                  hardware: dict[str, str] | None = None) -> list[tuple[str, str]]:
+                  hardware: dict[str, str] | None = None,
+                  result: str = "converted") -> list[tuple[str, str]]:
     """This run's answers for a Test reports post, as (label, value) - nothing private.
 
     No addresses, Wi-Fi name, account or device id: only what is useful to
@@ -3133,8 +3216,17 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
               or (captures.get("D1.upload_route") == "home network" and captures.get("D1.wifi") != "preset")
               or captures.get("F4.wifi_route") == "setup network")
     took = output.elapsed(seconds) + (" (this session; the run was resumed)" if resumed else "")
+    retries = {number: captures[f"{step}.attempts"] - 1 for number, (step, _, _) in enumerate(STEPS, 1)
+               if isinstance(captures.get(f"{step}.attempts"), int) and captures[f"{step}.attempts"] > 1}
+    retried = [f"{number} ({count} {'retry' if count == 1 else 'retries'})"
+               for number, count in retries.items()]
+    signal = captures.get("E1.signal_dbm")
+    try:
+        name = json.loads(s60_template(product))["NAME"]
+    except (ValueError, KeyError, TypeError):
+        name = "__"
     fields = [
-        ("Result", "converted"),
+        ("Result", result),
         ("Tool version", __version__),
         ("Plug model", model or "__"),
         ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),
@@ -3142,13 +3234,22 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         # How it went, never where it is or which plug: the path holds the MAC.
         ("Sonoff backup", BACKUP_OUTCOMES.get(ctx.state.input("backup_outcome") or "not taken")[1]),
         ("Computer", computer_description()),
+        ("Python", python_description()),
         ("Time taken", took),
+        # By stage number.  Busy is how long a Berry stage kept the plug from
+        # anything else: at 70-90s a real S60TPG stops answering for good.
+        ("Stage times", stage_timings(ctx, "seconds")),
+        ("Plug busy", stage_timings(ctx, "plug_busy_seconds")),
+        ("Retries", ", ".join(retried) or "none"),
+        ("Plug Wi-Fi signal", f"{signal} dBm" if isinstance(signal, int) else "not recorded"),
         ("Typed the Wi-Fi", "yes" if ctx.state.input("wifi_typed") else "no"),
         ("Joined setup network", "yes" if joined else "no"),
-        ("Name in Tasmota", json.loads(s60_template(product))["NAME"]),
+        ("Name in Tasmota", name),
         ("Relay", hardware.get("Relay", "not checked")),
         ("Power meter", hardware.get("Power meter", "not checked")),
     ]
+    if os.environ.get("S60_EMULATOR_URL"):
+        fields.append(("Ran in the emulator", "yes"))
     # Each answer starts with a capital: "No", "Converted".  Only the first
     # letter, so "S60TPG" and "6m 32s" stay as they are.
     return [(label, value[:1].upper() + value[1:]) for label, value in fields]
@@ -3249,9 +3350,41 @@ def check_hardware(ctx: Context) -> dict[str, str]:
 def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     """Ask for a report, with this run's details ready to paste."""
     fields = report_fields(ctx, seconds, resumed, check_hardware(ctx))
+    offer_report(ctx, fields, "Please share how it went!")
+    tell("")
+    output.show("You've reached the bit where I hold out my hat!", output.GREEN)
+    tell("Free software, not free biscuits... Throw your friendly neighbourhood dev a biscuit:")
+    output.show_links([(KOFI_URL, "Ko-fi"), (DONATE_URL, "PayPal")], hint=True)
+
+
+def report_ending(code: int | None, ending: str | None) -> str | None:
+    """Which stopped run offers its report: "failed" or "crashed", else None.
+
+    A run that failed offers it as one that converted does (that one already
+    has).  Not one the operator stopped - quit at a question (130) or Ctrl-C -
+    nor one this computer stopped (the terminal closed: nobody to read it).
+    """
+    if ending in ("crashed", "cancelled"):
+        return "crashed" if ending == "crashed" else None
+    return "failed" if code not in (None, 0, 130) else None
+
+
+def invite_stopped_report(ctx: Context, ending: str) -> None:
+    """A run that failed asks for its report too: the runs that fail say most
+    about what to fix, and leaving them out would make the tool look better than
+    it is.  Not one the operator stopped - that says nothing about the tool.
+    ending: "failed" or "crashed"."""
+    seconds = time.monotonic() - ctx.run_started - output.waited()
+    fields = report_fields(ctx, seconds, ctx.run_resumed, result=run_result(ctx, ending))
+    offer_report(ctx, fields, "Please share how it went - a run that stopped helps as much "
+                              "as one that worked.")
+
+
+def offer_report(ctx: Context, fields: list[tuple[str, str]], heading: str) -> None:
+    ctx.reported = True
     copied = hostsys.copy_to_clipboard(report_markdown(fields))
     tell("")
-    output.show("Please share how it went!", output.GREEN)
+    output.show(heading, output.GREEN)
     if copied:
         tell("Paste your results into the thread (they're already on your clipboard):")
     else:
@@ -3263,10 +3396,6 @@ def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     if any(value == "__" for _, value in fields):
         tell("")
         tell("Fill in the blanks (__) if you know them.")
-    tell("")
-    output.show("You've reached the bit where I hold out my hat!", output.GREEN)
-    tell("Free software, not free biscuits... Throw your friendly neighbourhood dev a biscuit:")
-    output.show_links([(KOFI_URL, "Ko-fi"), (DONATE_URL, "PayPal")], hint=True)
 
 
 def display_path(path: Path) -> str:
@@ -3476,6 +3605,7 @@ def _main() -> int:
         say(f"Given in advance ({display_path(args.env_file or credentials.ENV_FILE)}): "
             f"{', '.join(given)}")
     code = None  # 130 only when the operator chose to quit, not for Ctrl-C
+    ending = None  # "crashed", or "cancelled" by the operator: see run_result()
     try:
         code = cmd_run(ctx)
         return code
@@ -3485,22 +3615,30 @@ def _main() -> int:
         return code
     except Exception as exc:  # noqa: BLE001 - recorded and explained, not a bare traceback
         message = unexpected(exc)
+        ctx.last_failure = message
         output.stage_end("stopped")
         tell(f"FAILED: {message}")
         tell_how_to_carry_on()
-        code = 1
+        code, ending = 1, "crashed"
         return code
     except KeyboardInterrupt:
         output.stage_end("stopped")
         tell("")
         tell("Stopped with Ctrl-C. Run again to pick up where you left off or to start again")
         tell("(Every step checks the plug first, so running again is safe.)")
+        ending = "cancelled"
         return 130
     finally:
         if code == 130:
             say_quit(ctx)
         else:
             release_firewall(ctx)
+        reported = report_ending(code, ending)
+        if reported and not ctx.reported:
+            try:
+                invite_stopped_report(ctx, reported)
+            except Exception as exc:  # noqa: BLE001 - never let the report hide how it ended
+                output.log_only(f"The report could not be made: {type(exc).__name__}: {exc}")
         output.finish()
 
 

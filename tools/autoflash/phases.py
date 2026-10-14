@@ -186,6 +186,10 @@ class PhaseRunner:
         self.log = log
         # The credential-carrying recovery image: piped to the server, never a file.
         self.recovery = recovery
+        # How long the last phase kept the plug busy: from telling it to start
+        # to its last request.  Busy for 70-90s, a real S60TPG stops answering.
+        self.busy_seconds: float | None = None
+        self._started_at: float | None = None
 
     def _blocks(self, phase: str) -> int | None:
         """How many 4 KiB blocks of startup firmware a phase copies, for progress."""
@@ -230,6 +234,7 @@ class PhaseRunner:
         """Run one phase end to end.  Returns (exit code, captured output)."""
         if phase in ARMED_PHASES and confirm is None:
             raise PhaseError(f"{phase} requires an explicit confirmation callback")
+        self.busy_seconds, self._started_at = None, None
 
         process = subprocess.Popen(
             self._command(phase, extra_flags or []),
@@ -251,6 +256,7 @@ class PhaseRunner:
         url: str | None = None
         arm: tuple[str, str] | None = None
         heard = [time.monotonic()]  # the server's last line: the plug's last request
+        requested: list[float | None] = [None]  # the plug's last request, exactly
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
         log_path = self.evidence_dir / f"{phase}-server.log"
         log_file = log_path.open("w", encoding="utf-8")
@@ -265,6 +271,8 @@ class PhaseRunner:
             assert process.stdout is not None
             for line in process.stdout:
                 heard[0] = time.monotonic()
+                if REQUEST_RE.search(line):
+                    requested[0] = heard[0]
                 captured.append(line.rstrip("\n"))
                 if not log_file.closed:
                     log_file.write(output.scrub(line))
@@ -299,6 +307,9 @@ class PhaseRunner:
             reader.join(5.0)
             display.close()
             log_file.close()
+            if (self._started_at is not None and requested[0] is not None
+                    and requested[0] >= self._started_at):
+                self.busy_seconds = round(requested[0] - self._started_at, 1)
         if code != 0:
             said = self._show_plug_console()
             self._advise_if_stuck()
@@ -352,6 +363,8 @@ class PhaseRunner:
         can come only when the phase ends - or never, when it ends by
         restarting the plug, as the commit does.
         """
+        self._started_at = time.monotonic()
+
         def fire() -> None:
             try:
                 self.device.berry_fire(code, timeout=60.0)

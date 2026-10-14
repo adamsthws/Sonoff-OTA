@@ -575,11 +575,101 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Plug model"], "S60TPG")
         self.assertEqual(fields["Plug type / region"], "UK (Type G)")
         self.assertEqual(fields["Stock firmware"], "1.2.0")
-        self.assertIn("Python ", fields["Computer"])
+        self.assertNotIn("Python", fields["Computer"])
+        self.assertRegex(fields["Python"], r"^3\.\d+\.\d+ \(")
         self.assertEqual(fields["Time taken"], "7m 21s")
         self.assertEqual(fields["Typed the Wi-Fi"], "No")
         self.assertEqual(fields["Joined setup network"], "No")
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60TPG")
+
+    def test_the_report_has_each_stages_time_and_how_long_the_plug_was_busy(self):
+        import tools.s60_autoflash as af
+        ctx = self.ctx()
+        for key, value in {"E2.seconds": 36, "E2.plug_busy_seconds": 34.2, "E2.attempts": 2,
+                           "G1.seconds": 43, "G1.plug_busy_seconds": 61, "G1.attempts": 1,
+                           "E1.signal_dbm": -61}.items():
+            ctx.state.capture(key, value)
+        fields = dict(af.report_fields(ctx, 441, False))
+        number = {step: n for n, (step, _, _) in enumerate(af.STEPS, 1)}
+        self.assertEqual(fields["Stage times"], f"{number['E2']}=36s, {number['G1']}=43s")
+        self.assertEqual(fields["Plug busy"], f"{number['E2']}=34s, {number['G1']}=1m01s")
+        self.assertEqual(fields["Retries"], f"{number['E2']} (1 retry)")
+        self.assertEqual(fields["Plug Wi-Fi signal"], "-61 dBm")
+
+    def test_a_run_from_before_the_timings_says_so(self):
+        import tools.s60_autoflash as af
+        fields = dict(af.report_fields(self.ctx(), 441, False))
+        self.assertEqual(fields["Stage times"], "Not recorded")
+        self.assertEqual(fields["Retries"], "None")
+
+    def test_the_result_says_where_and_why_a_run_stopped(self):
+        import tools.s60_autoflash as af
+        from tools.autoflash.state import DONE
+        # Values other tests made private ("wrong", as a password) are not this run's.
+        self.enterContext(mock.patch.dict(af.output._private, {}, clear=True))
+        ctx = self.ctx()
+        ctx.last_failure = ""
+        for step, _, _ in af.STEPS[:9]:
+            ctx.state.mark(step, DONE)
+        step = af.STEPS[9][0]
+        where = f"stage 10 of {len(af.STEPS)} ({af.stage_name(step)})"
+        ctx.state.mark(step, "failed", error="GET /chunk/safeboot/20 from 192.168.0.50 "
+                                             "(58:cf:79:01:02:03) returned HTTP -1 after 8 attempts")
+        self.assertEqual(af.run_result(ctx, "failed"),
+                         f"stopped at {where}: GET /chunk/safeboot/20 from <address> (<mac>) "
+                         "returned HTTP -1 after 8 attempts")
+        ctx.last_failure = "something unexpected went wrong: KeyError: 'x'"
+        self.assertEqual(af.run_result(ctx, "crashed"),
+                         f"crashed at {where}: something unexpected went wrong: KeyError: 'x'")
+        self.assertEqual(af.run_result(ctx, "converted"), "converted")
+
+    def test_only_a_run_that_failed_offers_its_report_not_one_the_operator_stopped(self):
+        import tools.s60_autoflash as af
+        self.assertEqual(af.report_ending(1, None), "failed")       # a stage failed
+        self.assertEqual(af.report_ending(1, "crashed"), "crashed")  # something unexpected
+        self.assertIsNone(af.report_ending(130, None))               # quit at a question
+        self.assertIsNone(af.report_ending(None, "cancelled"))       # Ctrl-C
+        self.assertIsNone(af.report_ending(0, None))                 # converted: offered already
+        self.assertIsNone(af.report_ending(None, None))              # the terminal was closed
+
+    def test_a_long_reason_is_cut_short_on_one_line(self):
+        import tools.s60_autoflash as af
+        text = af.public_text("first line\n" + "x" * 500)
+        self.assertNotIn("\n", text)
+        self.assertLessEqual(len(text), 240)
+        self.assertTrue(text.endswith("..."))
+
+    def test_python_says_where_it_came_from(self):
+        import tools.s60_autoflash as af
+        portable = Path(self.tmp.name) / ".python"
+        with mock.patch.dict(os.environ, {"S60_PYTHON_HOME": str(portable)}):
+            with mock.patch.object(af.sys, "executable", str(portable / "linux-x86_64/python/bin/python3")):
+                self.assertIn("(portable, downloaded by this tool)", af.python_description())
+            with mock.patch.object(af.sys, "executable", "/usr/bin/python3"), \
+                 mock.patch.object(af.sys, "prefix", "/usr"), mock.patch.object(af.sys, "base_prefix", "/usr"):
+                self.assertIn("(already installed on this computer)", af.python_description())
+            with mock.patch.object(af.sys, "executable", "/home/me/venv/bin/python3"), \
+                 mock.patch.object(af.sys, "prefix", "/home/me/venv"), \
+                 mock.patch.object(af.sys, "base_prefix", "/usr"):
+                self.assertIn("(in a virtual environment)", af.python_description())
+
+    def test_a_run_that_stopped_offers_its_report_without_the_hat(self):
+        import tools.s60_autoflash as af
+        ctx = self.ctx()
+        ctx.last_failure, ctx.run_resumed, ctx.reported = "timed out", False, False
+        ctx.run_started = af.time.monotonic() - 60
+        copied = []
+        with mock.patch.object(af.hostsys, "copy_to_clipboard",
+                               side_effect=lambda text: copied.append(text) or True), \
+             mock.patch.object(af, "tell") as told, mock.patch.object(af.output, "show") as shown, \
+             mock.patch.object(af.output, "show_link"), mock.patch.object(af.output, "show_links") as links:
+            af.invite_stopped_report(ctx, "failed")
+        self.assertTrue(ctx.reported)
+        self.assertIn("**Result:** Stopped at stage 1 of", copied[0])
+        self.assertIn("timed out", copied[0])
+        self.assertIn("a run that stopped helps", shown.call_args_list[0].args[0])
+        links.assert_not_called()  # no donation links after a failure
+        self.assertFalse(any("hold out my hat" in str(call) for call in told.call_args_list + shown.call_args_list))
 
     def test_the_report_says_how_the_backup_went_but_not_where_it_is(self):
         import tools.s60_autoflash as af
