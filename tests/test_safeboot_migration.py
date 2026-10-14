@@ -677,10 +677,10 @@ class MigrationValidationTests(unittest.TestCase):
                         above = "\n".join(lines[max(0, number - 2):number])
                         self.assertIn('if tasmota.wifi("up")', above, f"{phase} line {number + 1}")
                 self.assertIn("the plug's Wi-Fi went down and did not come back", source, phase)
-            # Stage and commit read their downloads by hand, giving up on one
-            # that goes silent: webclient's get_string() waits for ever on a
-            # reply that stops part way (arendst/Tasmota#25139).
-            for phase in ("stage", "commit"):
+            # Stage, commit and restore read their downloads by hand, giving
+            # up on one that goes silent: webclient's get_string() waits for
+            # ever on a reply that stops part way (arendst/Tasmota#25139).
+            for phase in ("stage", "commit", "restore"):
                 source = rendered[phase]
                 code = [line for line in source.splitlines() if not line.lstrip().startswith("#")]
                 self.assertFalse([line for line in code if "get_string(" in line], phase)
