@@ -2,6 +2,7 @@
 # This phase does not change the partition table or boot selection.
 import flash
 import crypto
+import string
 
 var base_url = "@BASE_URL@"
 var session = "@SESSION@"
@@ -89,6 +90,62 @@ class retry_window
   end
 end
 
+# webclient's get_string() waits for ever on a reply that stops part way with
+# the connection still open - a router restarting mid-block, say - and the
+# plug then answers nothing until it is switched off and on (Tasmota reads a
+# body with no time limit: arendst/Tasmota#25139).  So replies are read here
+# by hand, and one silent for five seconds is given up, to be asked for again.
+# This computer's replies always say how long they are.
+var server = string.split(base_url, "/")[2]
+var server_ip = string.split(server, ":")[0]
+var server_port = int(string.split(server, ":")[1])
+
+# [HTTP status, body]; status -1 when the computer could not be reached, or
+# its reply stopped or was cut short.
+def get_body(path)
+  var client = tcpclient()
+  if !client.connect(server_ip, server_port)
+    client.close()
+    return [-1, nil]
+  end
+  client.write(format("GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path, server))
+  var reply = ""
+  var head = -1
+  var length = -1
+  var quiet = tasmota.millis(5000)
+  while true
+    var piece = client.read()
+    if size(piece) > 0
+      reply += piece
+      quiet = tasmota.millis(5000)
+      if head < 0
+        head = string.find(reply, "\r\n\r\n")
+        if head >= 0
+          var fields = string.tolower(reply[0 .. head + 1])
+          var at = string.find(fields, "\r\ncontent-length:")
+          if at < 0 break end
+          var i = at + 17
+          while fields[i] == " " i += 1 end
+          length = int(fields[i .. string.find(fields, "\r", i) - 1])
+        end
+      end
+      if head >= 0 && size(reply) - head - 4 >= length
+        client.close()
+        return [int(reply[9 .. 11]), reply[head + 4 ..]]
+      end
+    elif !client.connected() && client.available() == 0
+      break  # closed before the whole reply came
+    elif tasmota.time_reached(quiet)
+      break
+    else
+      tasmota.delay(5)
+      tasmota.yield()
+    end
+  end
+  client.close()
+  return [-1, nil]
+end
+
 def post_text(path, body)
   var status = -1
   var attempt = 0
@@ -113,30 +170,23 @@ end
 
 def fetch_chunk(index, expected_length)
   var path = format("/chunk/safeboot/%i", index)
-  var client
-  var status = -1
+  var reply = [-1, nil]
   var attempt = 0
   var window = retry_window()
   while true
-    if tasmota.wifi("up")  # webclient can crash with the Wi-Fi down (Tasmota #18831)
-      client = webclient()
-      client.begin(base_url + path)
-      status = client.GET()
+    if tasmota.wifi("up")  # no request with the Wi-Fi down: it can crash Tasmota (#18831)
+      reply = get_body(path)
       attempt += 1
-      if status >= 0 break end
-      client.close()
+      if reply[0] >= 0 break end
     end
     if window.over() break end
     pause(1000)
   end
   # Given up with the Wi-Fi still down: that is the reason, whatever was tried first.
-  guard(attempt > 0 && (status >= 0 || tasmota.wifi("up")),
+  guard(attempt > 0 && (reply[0] >= 0 || tasmota.wifi("up")),
         "the plug's Wi-Fi went down and did not come back within five minutes")
-  if status != 200 client.close() end
-  guard(status == 200, format("GET %s returned HTTP %i after %i attempts", path, status, attempt))
-  guard(client.get_size() == expected_length * 2, "Safeboot chunk HTTP length differs")
-  var encoded = client.get_string()
-  client.close()
+  guard(reply[0] == 200, format("GET %s returned HTTP %i after %i attempts", path, reply[0], attempt))
+  var encoded = reply[1]
   guard(size(encoded) == expected_length * 2, "Safeboot chunk body length differs")
   var data = bytes(encoded)
   guard(size(data) == expected_length, "Safeboot chunk hex is invalid")

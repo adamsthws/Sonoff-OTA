@@ -673,10 +673,21 @@ class MigrationValidationTests(unittest.TestCase):
                 # (Tasmota #18831), and a router restart takes it down.
                 lines = source.splitlines()
                 for number, line in enumerate(lines):
-                    if "webclient()" in line:
+                    if "webclient()" in line or ("get_body(" in line and "def get_body" not in line):
                         above = "\n".join(lines[max(0, number - 2):number])
                         self.assertIn('if tasmota.wifi("up")', above, f"{phase} line {number + 1}")
                 self.assertIn("the plug's Wi-Fi went down and did not come back", source, phase)
+            # Stage and commit read their downloads by hand, giving up on one
+            # that goes silent: webclient's get_string() waits for ever on a
+            # reply that stops part way (arendst/Tasmota#25139).
+            for phase in ("stage", "commit"):
+                source = rendered[phase]
+                code = [line for line in source.splitlines() if not line.lstrip().startswith("#")]
+                self.assertFalse([line for line in code if "get_string(" in line], phase)
+                self.assertIn("quiet = tasmota.millis(5000)", source, phase)
+                self.assertEqual(source.count("tcpclient()"), 1, phase)
+                inside = source[source.index("def get_body(path)"):]
+                self.assertIn("tcpclient()", inside[:inside.index("\nend\n")], phase)
             # Commit and restore still hand back their armed closure by name.
             self.assertTrue(rendered["commit"].rstrip().endswith("return commit"))
             self.assertTrue(rendered["restore"].rstrip().endswith("return restore"))
