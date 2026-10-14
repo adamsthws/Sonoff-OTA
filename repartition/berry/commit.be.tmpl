@@ -75,24 +75,17 @@ def pause(ms)
   end
 end
 
-# How long a failed request is worth trying again.  Up to five minutes while
-# the plug's Wi-Fi is down - a router restarting, say.  One minute while it is
-# up and the computer still does not answer: the computer has most likely
-# stopped, and while the plug keeps trying it answers nothing else.
+# How long failed requests are worth trying again: 20 seconds in all, for the
+# whole phase.  While a phase runs the plug does nothing else - not even read
+# its energy meter, whose readings then pile up until its web server stops
+# answering for good, after 70-90 seconds busy (a real S60TPG).  A phase takes
+# under a minute, so retrying stops well short of that.  A router restart takes
+# longer: this computer runs the step again once the plug is back.
+var retry_until = nil
 class retry_window
-  var deadline, up_deadline
-  def init()
-    self.deadline = tasmota.millis(300000)
-    self.up_deadline = nil
-  end
   def over()
-    if tasmota.time_reached(self.deadline) return true end
-    if tasmota.wifi("up")
-      if self.up_deadline == nil self.up_deadline = tasmota.millis(60000) end
-      return tasmota.time_reached(self.up_deadline)
-    end
-    self.up_deadline = nil
-    return false
+    if retry_until == nil retry_until = tasmota.millis(20000) end
+    return tasmota.time_reached(retry_until)
   end
 end
 
@@ -167,7 +160,7 @@ def fetch_target_table()
   end
   # Given up with the Wi-Fi still down: that is the reason, whatever was tried first.
   guard(attempt > 0 && (reply[0] >= 0 || tasmota.wifi("up")),
-        "the plug's Wi-Fi went down and did not come back within five minutes")
+        "the plug's Wi-Fi went down and was not back within 20 seconds")
   guard(reply[0] == 200, format("target table GET returned HTTP %i after %i attempts", reply[0], attempt))
   var encoded = reply[1]
   guard(size(encoded) == 8192, "target table body length differs")

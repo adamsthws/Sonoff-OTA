@@ -125,13 +125,12 @@ class PlugNeverConnected(PhaseError):
 FETCH_RE = re.compile(r'"GET /berry/')
 # While a phase runs, the plug answers nothing else: Berry holds it.  So once
 # it has been this quiet, an answer from its web page means it has stopped -
-# with nothing more to send.  Without that, only the server's own six-minute
-# silence limit (the plug's five of retrying through a router restart) ends
-# the wait.
+# with nothing more to send.  Without that, only the server's own two-minute
+# silence limit ends the wait.
 SILENCE_CHECK = 20.0
-# A backstop only: a stage takes up to about 90s, plus up to five minutes
-# riding out a router restart.  Just over the server's own eight minutes.
-EXEC_TIMEOUT = 540.0
+# A backstop only: a phase keeps the plug busy for about a minute at most,
+# retrying included; the server's silence limit is two minutes.
+EXEC_TIMEOUT = 300.0
 # Long enough for a slow plug, short enough not to look hung.
 FETCH_DEADLINE = 30.0
 

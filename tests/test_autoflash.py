@@ -728,6 +728,13 @@ class RetryTests(unittest.TestCase):
                                           "returned HTTP -1 after 21 attempts", None])
         self.assertEqual((code, runs), (0, 2))
 
+    def test_a_wifi_drop_is_tried_again(self):
+        # The plug now gives up after 20s, and this computer waits out the rest.
+        code, runs = self.run_with("E2", ["stage did not pass: the plug says: migration_refused: "
+                                          "the plug's Wi-Fi went down and was not back within "
+                                          "20 seconds", None])
+        self.assertEqual((code, runs), (0, 2))
+
     def test_three_attempts_at_most(self):
         code, runs = self.run_with("E1", ["timed out"] * 5)
         self.assertEqual((code, runs), (1, 3))
@@ -759,6 +766,48 @@ class RetryTests(unittest.TestCase):
                  mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
                 autoflash.execute(SimpleNamespace(state=state), step)
             self.assertEqual(state.status(step), expected, step)
+
+
+class PlugBackTests(unittest.TestCase):
+    """Before a step is tried again, a plug that is not answering is waited for."""
+
+    def wait(self, answers, d1_done=True):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        state.set_input("plug_ip", "10.0.0.63")
+        if d1_done:
+            state.mark("D1", DONE)
+        device = mock.Mock(answers=mock.Mock(side_effect=list(answers)))
+        clock = iter(range(0, 100_000, 3))
+        with mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(autoflash.time, "sleep"), \
+             mock.patch.object(autoflash, "tell") as told, \
+             mock.patch.object(autoflash.output, "progress"), \
+             mock.patch.object(autoflash.output, "progress_clear"):
+            autoflash.wait_for_plug_back(SimpleNamespace(state=state, device=device))
+        return device, told
+
+    def test_an_answering_plug_is_tried_again_at_once(self):
+        device, told = self.wait([True])
+        told.assert_not_called()
+
+    def test_a_plug_back_after_a_router_restart_is_tried_again_then(self):
+        device, told = self.wait([False] * 30 + [True])
+        self.assertEqual(device.answers.call_count, 31)
+        self.assertIn("answering again", told.call_args.args[0])
+
+    def test_one_that_never_answers_is_tried_anyway_after_five_minutes(self):
+        device, told = self.wait([False] * 1000)
+        self.assertIn("trying anyway", told.call_args.args[0])
+        self.assertLess(device.answers.call_count, 1000)
+
+    def test_before_tasmota_nothing_is_waited_for(self):
+        device, _ = self.wait([], d1_done=False)
+        device.answers.assert_not_called()
 
 
 class BusyPlugTests(unittest.TestCase):

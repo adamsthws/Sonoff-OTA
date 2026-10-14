@@ -2708,14 +2708,17 @@ RETRY_PAUSE = 10.0
 TRANSIENT_RE = re.compile(
     r"HTTP -1|timed out|timeout|sent nothing|did not answer|not answering|unreachable|"
     r"connection (refused|reset|aborted)|ConnectionError|IncompleteRead|URLError|"
-    r"No route|stopped the \w+ without|did not complete within",
+    r"No route|stopped the \w+ without|did not complete within|Wi-Fi went down",
     re.IGNORECASE,
 )
+# A router restart takes a minute or two.  The plug gives up on a step within
+# about a minute - busier for longer, it stops answering for good (its energy
+# meter's readings pile up) - so this computer does the waiting, between tries.
+PLUG_BACK_WAIT = 300.0
 
 
-# Up to the plug's five minutes of retrying a request with its Wi-Fi down, plus
-# the minute it gives a computer that does not answer.
-BUSY_PLUG_WAIT = 360.0
+# A step keeps the plug busy for about a minute at most, retrying included.
+BUSY_PLUG_WAIT = 120.0
 
 
 def wait_while_plug_busy(ctx: Context) -> None:
@@ -2733,7 +2736,7 @@ def wait_while_plug_busy(ctx: Context) -> None:
     if device.answers(timeout=3.0) or not hostsys.ping_ok(host):
         return  # answering, or not on the network at all: the steps say which
     tell("    The plug is on the network but not answering yet. It is most likely still")
-    tell("    finishing the step that was stopped, and gives up within a few minutes.")
+    tell("    finishing the step that was stopped, and gives up within a minute or two.")
     started = time.monotonic()
     while time.monotonic() - started < BUSY_PLUG_WAIT:
         output.progress(f"waiting for the plug to finish... {time.monotonic() - started:.0f}s")
@@ -2758,7 +2761,29 @@ def execute_with_retries(ctx: Context, step: str) -> int:
         tell(f"    That may have been the network - trying again in {RETRY_PAUSE:.0f}s "
              f"(attempt {attempt + 1} of {ATTEMPTS}).")
         time.sleep(RETRY_PAUSE)
+        wait_for_plug_back(ctx)
     return code
+
+
+def wait_for_plug_back(ctx: Context) -> None:
+    """Before a step is tried again, wait for a plug running Tasmota to answer:
+    after a router restart it is back within a minute or two."""
+    if not ctx.state.input("plug_ip") or not ctx.state.is_done("D1"):
+        return
+    device = ctx.device
+    if device.answers(timeout=3.0):
+        return
+    tell("    The plug is not answering yet - waiting for it (a router restarting, say).")
+    started = time.monotonic()
+    while time.monotonic() - started < PLUG_BACK_WAIT:
+        output.progress(f"waiting for the plug... {time.monotonic() - started:.0f}s")
+        if device.answers(timeout=3.0):
+            output.progress_clear()
+            tell("    It is answering again.")
+            return
+        time.sleep(3.0)
+    output.progress_clear()
+    tell(f"    It has not answered for {PLUG_BACK_WAIT / 60:.0f} minutes - trying anyway.")
 
 
 # Each step's name on its stage line, in words that need no knowledge of the

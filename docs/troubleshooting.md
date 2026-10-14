@@ -243,7 +243,7 @@ The plug's own reason. Two kinds:
   again by itself, up to three times, before stopping.
 
 **"the plug stopped the ... without reaching this computer"** or **"the plug
-has sent nothing for 6 minutes"**
+has sent nothing for 2 minutes"**
 
 The plug lost its connection to this computer, so its reason could not arrive.
 The tool then reads the plug's own console and shows the last lines, marked
@@ -252,20 +252,23 @@ says: ..."). Then as above.
 
 **How long it waits**
 
-A stage normally takes under 90 seconds. If the plug's Wi-Fi drops - a router
-restarting, say - the plug keeps trying for up to 5 minutes and carries on when
-the network is back. If its Wi-Fi stays up but this computer does not answer, it
-gives up after a minute. The tool checks on the plug whenever it goes quiet, so
-a plug that has stopped is noticed within about 20 seconds; no stage is waited
-on for more than 8 minutes in all. Waiting for you - to join a network, say -
-has no time limit.
+A stage keeps the plug busy for under a minute, and while it does the plug
+answers nothing else. Kept busy for much longer, a real plug stops answering
+until it is switched off and on (its energy meter's readings pile up), so the
+plug never spends more than 20 seconds in all trying a request again. If its
+Wi-Fi drops - a router restarting, say - the stage stops, and the tool waits up
+to 5 minutes for the plug to answer again, then runs it again by itself (three
+tries in all). The tool checks on the plug whenever it goes quiet, so a plug
+that has stopped is noticed within about 20 seconds; no stage is waited on for
+more than 5 minutes in all. Waiting for you - to join a network, say - has no
+time limit.
 
 **"The plug is not answering at all"**
 
-A plug left waiting on a download this computer stopped sending part way can
-wait for ever, answering nothing - not even its web page - though it still
-answers ping. Give it two minutes; if its web page still does not answer,
-switch it off and on. At every point this can happen that is safe: staging
+A plug can be left answering nothing - not even its web page - though it
+still answers ping: kept busy too long, or left waiting on this computer when
+the tool was stopped mid-stage. Give it two minutes; if its web page still does
+not answer, switch it off and on. At every point this can happen that is safe: staging
 writes only the spare half of memory, the rewrite downloads what it needs
 before it writes anything, and installing the official startup firmware
 carries on where it stopped. Then run this again.
@@ -273,8 +276,7 @@ carries on where it stopped. Then run this again.
 **"The plug is on the network but not answering yet"**
 
 A stage stopped part way (Ctrl-C, say) keeps the plug busy until it gives up,
-for up to a minute, or five with its Wi-Fi down - and while busy, the plug
-answers nothing else. Run again straight away and the tool waits for it, then
+for up to a minute - and while busy, the plug answers nothing else. Run again straight away and the tool waits for it, then
 carries on.
 
 ## Slots and restarts

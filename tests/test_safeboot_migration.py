@@ -648,7 +648,7 @@ class MigrationValidationTests(unittest.TestCase):
             with mock.patch.object(server_module.time, "monotonic", side_effect=tick):
                 self.assertEqual(server_module.wait_for_result(server, state, 900, 360), "timeout")
 
-    def test_every_phase_reports_its_failures_and_retries_through_a_router_restart(self):
+    def test_every_phase_reports_its_failures_and_keeps_its_retrying_short(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = MigrationFixture(Path(directory))
             nvs_hash = sha256_bytes(canonical_nvs())
@@ -662,8 +662,11 @@ class MigrationValidationTests(unittest.TestCase):
             for phase, source in rendered.items():
                 self.assertIn(f'"/fail/{phase}"', source, phase)
                 self.assertIn("report_failure(", source, phase)
-                self.assertIn("tasmota.millis(300000)", source, phase)  # Wi-Fi down
-                self.assertIn("tasmota.millis(60000)", source, phase)   # Wi-Fi up
+                # 20s of retrying in all, for the whole phase: busy for 70-90s,
+                # a real S60TPG stops answering for good (its energy meter's
+                # readings pile up).  The tool waits out a router restart.
+                self.assertIn("retry_until = tasmota.millis(20000)", source, phase)
+                self.assertNotIn("tasmota.millis(300000)", source, phase)
                 self.assertIn("window.over()", source, phase)
                 # Not set_timeouts(): a connect timeout above the default 2s left
                 # the emulated plug's web server dead once a phase gave up
@@ -676,7 +679,7 @@ class MigrationValidationTests(unittest.TestCase):
                     if "webclient()" in line or ("get_body(" in line and "def get_body" not in line):
                         above = "\n".join(lines[max(0, number - 2):number])
                         self.assertIn('if tasmota.wifi("up")', above, f"{phase} line {number + 1}")
-                self.assertIn("the plug's Wi-Fi went down and did not come back", source, phase)
+                self.assertIn("the plug's Wi-Fi went down and was not back", source, phase)
             # Stage, commit and restore read their downloads by hand, giving
             # up on one that goes silent: webclient's get_string() waits for
             # ever on a reply that stops part way (arendst/Tasmota#25139).
