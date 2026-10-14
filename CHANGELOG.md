@@ -9,6 +9,24 @@ The version is set in one place, `tools/autoflash/__init__.py`. Merging a new
 one to `main` tags it and publishes a release with its notes from here, so add
 the section below before changing the number.
 
+## 1.1.1
+
+Fixes the ways a plug could be left answering nothing, not even its web
+page, until it was switched off and on.
+
+- A download that stops part way, as a router restarting mid-transfer leaves
+  it, is given up after five seconds and fetched again. The plug used to wait
+  on it for ever.
+- Never gives up on a request the plug has not answered yet: a plug that
+  found one given up on stopped answering altogether.
+- No stage keeps the plug busy for more than about a minute. Busy for much
+  longer, a real plug stops answering (its energy meter's readings pile up),
+  so the plug now spends at most 20 seconds retrying, and this computer waits
+  out a router restart instead - up to five minutes - and runs the stage again
+  by itself.
+- Notices a stage that has stopped sooner; no stage waits more than five
+  minutes.
+
 ## 1.1.0
 
 Keeps going through a router restart or a dropped network, says why when it
