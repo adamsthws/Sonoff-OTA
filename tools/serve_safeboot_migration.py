@@ -851,9 +851,14 @@ def main() -> int:
     evidence_dir = (args.evidence_dir or manifest_path.parent / "live").resolve()
     try:
         manifest = load_manifest(manifest_path)
-        verify_manifest_files(manifest_path, manifest)
+        # The esphome phase is given its own image, not the recovery Safeboot,
+        # which only the migration phases use: that one is absent here, and
+        # its provenance, proved from its bytes, is not this phase's concern.
+        esphome = args.phase == "esphome"
+        verify_manifest_files(manifest_path, manifest, allow_unprovided=esphome)
         require_pinned_artifacts(manifest)
-        require_recovery_manifest(manifest_path, manifest)
+        if not esphome:
+            require_recovery_manifest(manifest_path, manifest)
     except (KeyError, ValueError) as exc:
         print(f"REFUSING: {exc}", file=sys.stderr)
         return 2

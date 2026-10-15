@@ -75,6 +75,34 @@ class MemoryOnlyBundleTests(unittest.TestCase):
         self.assertIn(b"/berry/preflight.be", output, output.decode(errors="replace"))
         self.assertFalse((self.out / bundle.RECOVERY_FILE).exists())
 
+    def test_the_esphome_server_takes_its_image_through_a_pipe_alone(self):
+        # Not the recovery Safeboot: only ESPHome, with the Wi-Fi written in.
+        from tools.autoflash import esphome
+        image = esphome.image_for("TestNet-2G", "correct-horse-battery")
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        process = subprocess.Popen(
+            [sys.executable, "-u", str(ROOT / "tools" / "serve_safeboot_migration.py"), "esphome",
+             "--manifest", str(self.manifest), "--evidence-dir", str(self.out / "live"),
+             "--listen-ip", "127.0.0.1", "--listen-port", str(port), "--device-ip", "127.0.0.1",
+             "--image-from-stdin", "--no-sensitive-captures", "--wait", "5"],
+            cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        process.stdin.write(image)
+        process.stdin.close()
+        output, deadline = b"", time.monotonic() + 15
+        while time.monotonic() < deadline and b"/berry/esphome.be" not in output:
+            chunk = process.stdout.read1(4096) if hasattr(process.stdout, "read1") else b""
+            if not chunk:
+                break
+            output += chunk
+        process.terminate()
+        process.wait(timeout=10)
+        self.assertIn(b"/berry/esphome.be", output, output.decode(errors="replace"))
+        for path in self.out.rglob("*"):
+            if path.is_file():
+                self.assertNotIn(b"correct-horse-battery", path.read_bytes(), path.name)
+
     def test_an_old_bundle_is_converted_and_its_image_deleted(self):
         manifest = json.loads(self.manifest.read_text())
         del manifest["artifacts"][RECOVERY_ARTIFACT]["memory_only"]
