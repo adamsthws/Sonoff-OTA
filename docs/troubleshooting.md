@@ -167,6 +167,19 @@ internet connection first.
   at the start and finds it again on a new address by itself; it only asks
   when the plug cannot be found at all. Your router's device list shows it
   under a name starting `tasmota-`.
+- Your Wi-Fi may have gone, a router restarting, say. Part way through, the
+  plug has no network of its own to fall back on: it keeps trying yours and
+  rejoins within seconds of it coming back, and the tool waits for it.
+
+**The plug's own network**
+
+Wherever the tool asks you to join the plug's own network, it names it. Tasmota
+names it after the plug, `tasmota-` and six characters from its hardware
+address, such as `tasmota-ABCDEF-1234`. Sometimes it shows up instead as
+`ESP_` and six characters one higher, such as `ESP_ABCDF0`: that is the same
+network, and the tool looks for both. ESPHome's is `sonoff-s60-` and six
+characters, such as `sonoff-s60-abcdef`. All of them are open, with no
+password, and the plug's page on them is at `http://192.168.4.1`.
 
 ## The first install
 
@@ -204,7 +217,7 @@ plug), Tasmota keeps retrying them and never opens its setup network.
 
 Switch the plug off and on 7 times in a row, leaving it on for only 2-3
 seconds each time, then leave it on. Tasmota counts quick restarts like that,
-clears its settings on the seventh, and opens `tasmota-XXXXXX-NNNN` as on a
+clears its settings on the seventh, and opens its setup network as on a
 first install. The tool, still waiting, carries on with the setup network.
 
 ## Uploading firmware
@@ -302,9 +315,11 @@ know better.
 Normally Tasmota joins your Wi-Fi by itself after the rebuild: the temporary
 startup firmware saves your details where it reads them. If it could not (it
 saves nothing when its own settings write fails, and the plug then behaves as
-before), Tasmota starts up asking to be configured. The tool names the
-`tasmota-XXXXXX-NNNN` network; join it (open, no password) and the tool sends
-your Wi-Fi details itself.
+before), Tasmota starts up asking to be configured. The tool names its setup
+network; join it (open, no password) and the tool sends your Wi-Fi details
+itself. If this computer cannot see Wi-Fi networks, the tool cannot spot it
+either: when it asks what to do about a plug it cannot find, choose *It is
+showing its own Wi-Fi network*.
 If the plug cannot connect with them it says so and leaves the plug waiting -
 nothing is saved - and you can set the Wi-Fi up at `http://192.168.4.1`.
 
@@ -329,6 +344,20 @@ chip inside. See
 
 This is the risk you accepted at the start, and it is the only failure in this
 process that cannot be fixed by running the tool again.
+
+## A converted plug that has lost your Wi-Fi
+
+After a new router or a changed Wi-Fi password, the plug cannot join any more.
+
+- **ESPHome** opens its own network by itself after a minute and a half
+  without your Wi-Fi (`sonoff-s60-` and six characters). Join it, and its page
+  asks for your Wi-Fi. It keeps trying your Wi-Fi meanwhile, so after a router
+  restart it simply rejoins.
+- **Tasmota** keeps trying your Wi-Fi and never opens a network by itself, so
+  a router restart cannot leave it waiting on one. Press its button 6 times
+  quickly: it opens its setup network for 3 minutes (`tasmota-` and the plug's
+  name, or `ESP_` and six characters). Join it, browse to `http://192.168.4.1`
+  and choose your Wi-Fi.
 
 ## Checking a finished plug at any time
 

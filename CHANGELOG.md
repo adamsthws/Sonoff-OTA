@@ -27,6 +27,14 @@ end up running.
   advance, as an unattended run must.
 - The report says which firmware the plug ended up with, and the relay and
   meter are checked through ESPHome on its route.
+- The plug's own network is looked for by this plug's names only - Tasmota's,
+  and the `ESP_` name it sometimes shows instead, which was missed before - so
+  a neighbour's Tasmota is never mistaken for it. Wherever you are asked to
+  join it, its exact name is given.
+- A plug that cannot be found can be set up through its own network by
+  choice, for a computer that cannot see Wi-Fi networks. While waiting for a
+  plug whose Wi-Fi went, the run says it will rejoin by itself, and that it has
+  no network of its own at that stage.
 
 ## 1.2.0
 

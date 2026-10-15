@@ -128,6 +128,48 @@ DONATE_URL = "https://www.paypal.me/adamsthws"
 TASMOTA_AP_PREFIX = "tasmota-"
 
 
+def _mac_tail(mac: str, add: int = 0) -> str:
+    """The last three bytes of `mac` (plus `add`), as six hex digits."""
+    value = int(hostsys.normalise_mac(mac).replace(":", ""), 16) + add
+    return f"{value & 0xFFFFFF:06X}"
+
+
+def setup_networks(ctx: "Context") -> tuple[str, ...]:
+    """What this plug's own setup network can be called, to look for.
+
+    Tasmota names it after itself (tasmota-ABCDEF-1234, from the plug's MAC),
+    but has been seen broadcasting ESP-IDF's default name instead: ESP_ and the
+    MAC of its hotspot, one more than the plug's (ESP_ABCDF0).  Knowing the
+    MAC, only this plug's are matched, never a neighbour's Tasmota; without
+    it, any Tasmota's.
+    """
+    mac = ctx.state.input("plug_mac")
+    if not mac:
+        return (TASMOTA_AP_PREFIX,)
+    return (f"{TASMOTA_AP_PREFIX}{_mac_tail(mac)}-", f"ESP_{_mac_tail(mac, 1)}")
+
+
+def setup_network_hint(ctx: "Context") -> str:
+    """The setup network's name as a person should look for it in a list."""
+    mac = ctx.state.input("plug_mac")
+    if not mac:
+        return "tasmota-XXXXXX-NNNN"
+    return f"tasmota-{_mac_tail(mac)}-NNNN, or ESP_{_mac_tail(mac, 1)}"
+
+
+def note_setup_network(ctx: "Context", network: str) -> None:
+    """Keep the plug's name, from its setup network - only when that is
+    Tasmota's own name for it, which its router shows too, not ESP-IDF's."""
+    if network.startswith(TASMOTA_AP_PREFIX):
+        ctx.state.set_input("device_name", network)
+
+
+def esphome_network_hint(ctx: "Context") -> str:
+    """ESPHome's own network, named after the plug (name_add_mac_suffix)."""
+    mac = ctx.state.input("plug_mac")
+    return f"sonoff-s60-{_mac_tail(mac).lower()}" if mac else "sonoff-s60-xxxxxx"
+
+
 class Abort(RuntimeError):
     pass
 
@@ -988,8 +1030,13 @@ class PlugFinder:
         return None
 
 
-def locate_plug(ctx: Context, *, timeout: float = 300.0) -> str:
-    """Wait for the plug on the home network; ask only if it cannot be found."""
+def locate_plug(ctx: Context, *, timeout: float = 300.0, setup: bool = False) -> str:
+    """Wait for the plug on the home network; ask only if it cannot be found.
+
+    With `setup`, the plug may instead be waiting on its own setup network,
+    which this computer could not see (not every system can scan): offered as
+    a way on, it takes the person through joining it by hand.
+    """
     started = time.monotonic()
     while time.monotonic() - started < timeout:
         found = ctx.finder.poll()
@@ -1000,7 +1047,11 @@ def locate_plug(ctx: Context, *, timeout: float = 300.0) -> str:
         output.progress(f"looking for the plug on your network... {time.monotonic() - started:.0f}s")
         time.sleep(5)
     output.progress_clear()
-    found = wait_or_ask(ctx.state.input("plug_ip"), what="the plug", timeout=60.0)
+    other = None
+    if setup:
+        other = (f"It is showing its own Wi-Fi network ({setup_network_hint(ctx)})",
+                 lambda: configure_plug_wifi(ctx, None))
+    found = wait_or_ask(ctx.state.input("plug_ip"), what="the plug", timeout=60.0, other=other)
     ctx.set_plug_ip(found)
     return found
 
@@ -1046,7 +1097,7 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
     saves them only after it has connected with them, so a failure leaves the
     plug waiting to be set up, never lost.
     """
-    network = network or "tasmota-XXXXXX-NNNN"
+    network = network or setup_network_hint(ctx)
     credentials = ctx.wifi(why=[
         "Tasmota could not be given them automatically, so it is waiting on its",
         "own setup network for them. Type them here and this sends them to the",
@@ -1889,11 +1940,11 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
     image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
     say("Looking for the plug's Wi-Fi network...")
     bridge = find_ssid(BRIDGE_AP_PREFIX)
-    setup = None if bridge else find_ssid(TASMOTA_AP_PREFIX)
+    setup = None if bridge else find_ssid(setup_networks(ctx))
     if setup:
         # Resuming after the upload: Tasmota is already installed and waiting.
         say(f"    Tasmota is already installed and waiting on {setup}.")
-        ctx.state.set_input("device_name", setup)
+        note_setup_network(ctx, setup)
         ip = configure_plug_wifi(ctx, setup)
         return {"plug_ip": ip, "device_name": setup, "resumed": True}
 
@@ -1908,7 +1959,7 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
         if found:
             return {"plug_ip": found, "upload_route": "home network", "wifi": "preset",
                     "device_name": ctx.state.input("device_name")}
-        section("Tasmota has not appeared on your network", QUICK_POWER_CYCLE_HINT)
+        section("Tasmota has not appeared on your network", quick_power_cycle_hint(ctx))
         return finish_tasmota_setup(ctx, route="home network", wait=900.0)
     return finish_tasmota_setup(ctx, route="home network")
 
@@ -2066,16 +2117,17 @@ def wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None)
 # opens its setup network.  Its quick power-cycle reset is the way out:
 # settings.ino UpdateQuickPowerCycle, 7 boots in a row each under
 # POWER_CYCLE_TIME (8 s), erases its settings and it starts as new.
-QUICK_POWER_CYCLE_HINT = [
-    "It was given the Wi-Fi details the installer had just joined with, so",
-    "this is unusual. If a few more minutes pass and it still has not appeared:",
-    "",
-    "  Switch the plug off and on 7 times in a row, leaving it on for only",
-    "  2-3 seconds each time, then leave it on.",
-    "",
-    "That makes Tasmota clear its settings and open its setup network",
-    "(tasmota-XXXXXX-NNNN). This carries on from there by itself.",
-]
+def quick_power_cycle_hint(ctx: Context) -> list[str]:
+    return [
+        "It was given the Wi-Fi details the installer had just joined with, so",
+        "this is unusual. If a few more minutes pass and it still has not appeared:",
+        "",
+        "  Switch the plug off and on 7 times in a row, leaving it on for only",
+        "  2-3 seconds each time, then leave it on.",
+        "",
+        "That makes Tasmota clear its settings and open its setup network",
+        f"({setup_network_hint(ctx)}). This carries on from there by itself.",
+    ]
 
 
 def give_tasmota_the_wifi(ctx: Context, address: str) -> bool:
@@ -2133,9 +2185,9 @@ def upload_tasmota(image: Path, host: str = setup_network.SETUP_HOST) -> None:
 def finish_tasmota_setup(ctx: Context, *, route: str, wait: float = 120.0) -> dict[str, Any]:
     say("")
     say("Waiting for Tasmota to start and make its setup network...")
-    device_name = wait_for_ssid(TASMOTA_AP_PREFIX, timeout=wait)
-    if device_name:
-        ctx.state.set_input("device_name", device_name)
+    device_name = wait_for_ssid(setup_networks(ctx), timeout=wait)
+    if device_name and device_name.startswith(TASMOTA_AP_PREFIX):
+        note_setup_network(ctx, device_name)
         say(f"    This plug is {device_name} - the same name shows in your router.")
     ip = configure_plug_wifi(ctx, device_name)
     return {"plug_ip": ip, "device_name": device_name, "upload_route": route}
@@ -2339,16 +2391,16 @@ def step_canonical(ctx: Context) -> dict[str, Any]:
             outcome = "rejoined the network"
             say(f"    The plug is back at {ctx.device.host} running the full Tasmota.")
             break
-        setup = find_ssid(TASMOTA_AP_PREFIX, timeout=10)
+        setup = find_ssid(setup_networks(ctx), timeout=10)
         if setup:
             outcome = f"raised its setup network {setup}"
             say(f"    The plug has started and is asking to be set up on {setup}.")
-            ctx.state.set_input("device_name", setup)
+            note_setup_network(ctx, setup)
             break
     if outcome is None:
         raise Abort(
             "the plug neither rejoined the network nor put up a setup network "
-            "within five minutes"
+            f"({setup_network_hint(ctx)}) within five minutes"
         )
     return {"safeboot_seconds": round(waited, 1), "app_upload": how, "outcome": outcome,
             "startup_settings": saved}
@@ -2393,7 +2445,7 @@ def step_configure(ctx: Context) -> dict[str, Any]:
         say("Official Tasmota joined your Wi-Fi by itself, with the details the")
         say("startup firmware saved - no setup network needed.")
     else:
-        setup = find_ssid(TASMOTA_AP_PREFIX, timeout=15)
+        setup = find_ssid(setup_networks(ctx), timeout=15)
         if setup:
             route = "setup network"
             tell("    Official Tasmota did not join your Wi-Fi by itself, so it is set up")
@@ -2401,7 +2453,7 @@ def step_configure(ctx: Context) -> dict[str, Any]:
             configure_plug_wifi(ctx, setup)
         else:
             route = "located"
-            locate_plug(ctx)
+            locate_plug(ctx, setup=True)
     device = ctx.device
     device.wait_reachable(timeout=300)
     # Tasmota may be running on the record the startup firmware saved, which
@@ -2660,7 +2712,7 @@ def step_esphome_check(ctx: Context, wait: float = 180.0) -> dict[str, Any]:
     raise Abort(
         "ESPHome was written and checked, but has not answered on your Wi-Fi within "
         "three minutes - most likely it cannot join it. When it cannot, it puts up its "
-        "own network, named like sonoff-s60-xxxxxx: join that, and its page asks for "
+        f"own network, {esphome_network_hint(ctx)}: join that, and its page asks for "
         "your Wi-Fi. Or switch the plug off and on, and run the same command again"
     )
 
@@ -2949,11 +3001,14 @@ def execute_with_retries(ctx: Context, step: str) -> int:
         tell(f"    That may have been the network - trying again in {RETRY_PAUSE:.0f}s "
              f"(attempt {attempt + 1} of {ATTEMPTS}).")
         time.sleep(RETRY_PAUSE)
-        wait_for_plug_back(ctx)
+        wait_for_plug_back(ctx, step)
     return code
 
 
-def wait_for_plug_back(ctx: Context) -> None:
+PLUG_BACK_HINT_AFTER = 45.0
+
+
+def wait_for_plug_back(ctx: Context, step: str | None = None) -> None:
     """Before a step is tried again, wait for a plug running Tasmota to answer:
     after a router restart it is back within a minute or two."""
     if not ctx.state.input("plug_ip") or not ctx.state.is_done("D1"):
@@ -2970,7 +3025,18 @@ def wait_for_plug_back(ctx: Context) -> None:
         return
     tell("    The plug is not answering yet - waiting for it (a router restarting, say).")
     started = time.monotonic()
+    hinted = False
     while time.monotonic() - started < PLUG_BACK_WAIT:
+        # Part way through, the plug runs a Tasmota holding your Wi-Fi details,
+        # which keeps trying them and never opens a network of its own - all but
+        # F4's official Tasmota, which may not have them yet (F4 looks for its
+        # setup network itself).
+        if not hinted and step != "F4" and time.monotonic() - started > PLUG_BACK_HINT_AFTER:
+            output.progress_clear()
+            tell("    At this stage the plug has no setup network of its own: it rejoins")
+            tell("    your Wi-Fi by itself as soon as it can. Check your router is on and")
+            tell("    the plug is plugged in; this keeps waiting.")
+            hinted = True
         output.progress(f"waiting for the plug... {time.monotonic() - started:.0f}s")
         if back():
             output.progress_clear()
@@ -3060,7 +3126,7 @@ def evidence_official_app_installed(ctx: "Context") -> tuple[bool | None, str]:
     if not ctx.finder.poll():
         # Not answering may simply mean it is waiting to be set up: the migration
         # clears its Wi-Fi details, so the new firmware comes up asking for them.
-        setup = find_ssid(TASMOTA_AP_PREFIX)
+        setup = find_ssid(setup_networks(ctx))
         if setup:
             return True, (
                 f"The plug is not on your network, but it is broadcasting '{setup}'.\n"

@@ -134,6 +134,9 @@ in the technical details.
 
 You also keep a full backup of the plug's Sonoff firmware.
 
+If you later change your Wi-Fi, the plug can be told the new one through its
+own network: see [a converted plug that has lost your Wi-Fi](docs/troubleshooting.md#a-converted-plug-that-has-lost-your-wi-fi).
+
 ## When something goes wrong
 
 Start with **[docs/troubleshooting.md](docs/troubleshooting.md)** - it covers

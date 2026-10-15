@@ -813,7 +813,7 @@ class StageTimingTests(unittest.TestCase):
 class PlugBackTests(unittest.TestCase):
     """Before a step is tried again, a plug that is not answering is waited for."""
 
-    def wait(self, answers, d1_done=True):
+    def wait(self, answers, d1_done=True, step=None):
         from types import SimpleNamespace
         from unittest import mock
         import tools.s60_autoflash as autoflash
@@ -830,7 +830,7 @@ class PlugBackTests(unittest.TestCase):
              mock.patch.object(autoflash, "tell") as told, \
              mock.patch.object(autoflash.output, "progress"), \
              mock.patch.object(autoflash.output, "progress_clear"):
-            autoflash.wait_for_plug_back(SimpleNamespace(state=state, device=device))
+            autoflash.wait_for_plug_back(SimpleNamespace(state=state, device=device), step)
         return device, told
 
     def test_an_answering_plug_is_tried_again_at_once(self):
@@ -841,6 +841,16 @@ class PlugBackTests(unittest.TestCase):
         device, told = self.wait([False] * 30 + [True])
         self.assertEqual(device.answers.call_count, 31)
         self.assertIn("answering again", told.call_args.args[0])
+
+    def test_a_long_wait_says_the_plug_has_no_network_of_its_own_now(self):
+        said = lambda told: " ".join(call.args[0] for call in told.call_args_list)
+        device, told = self.wait([False] * 30 + [True], step="E2")
+        self.assertIn("no setup network of its own", said(told))
+        device, told = self.wait([False] * 5 + [True], step="E2")
+        self.assertNotIn("no setup network", said(told))  # back before it was worth saying
+        # F4's official Tasmota may not have the Wi-Fi yet, so may have one.
+        device, told = self.wait([False] * 30 + [True], step="F4")
+        self.assertNotIn("no setup network", said(told))
 
     def test_one_that_never_answers_is_tried_anyway_after_five_minutes(self):
         device, told = self.wait([False] * 1000)

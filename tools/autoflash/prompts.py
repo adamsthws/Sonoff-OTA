@@ -582,8 +582,10 @@ def wait_or_ask(
     what: str = "the plug",
     timeout: float = 240.0,
     help_lines: Sequence[str] = (),
+    other: tuple[str, Callable[[], str]] | None = None,
 ) -> str:
-    """Wait for `address`; if it never answers, offer the sensible ways out."""
+    """Wait for `address`; if it never answers, offer the sensible ways out -
+    and `other`, a further one: its label, and what to do, giving the address."""
     while True:
         # "No answer" and the question leave the screen once answered, so
         # keeping on waiting does not stack another copy of them.
@@ -596,6 +598,7 @@ def wait_or_ask(
             [
                 "Keep waiting",
                 f"{what.capitalize()} is on a different address - let me type it",
+                *([other[0]] if other else []),
             ],
             help_lines=help_lines or [
                 "It may still be starting up, or it may have been given a new",
@@ -609,6 +612,9 @@ def wait_or_ask(
             found = ask_ipv4(f"What address is {what} on now", must_respond=True)
             output.transient_end()
             return found
+        if other and choice == 2:
+            output.transient_end()
+            return other[1]()
         raise QuitRun(f"{what} did not come back")
 
 
@@ -621,15 +627,17 @@ def scan_wifi_ssids(timeout: float = 20.0) -> list[str]:
     return hostsys.wifi_ssids(timeout=timeout)
 
 
-def find_ssid(prefix: str, timeout: float = 20.0) -> str | None:
-    """The first visible network whose name starts with `prefix`, if any."""
+def find_ssid(prefix: str | tuple[str, ...], timeout: float = 20.0) -> str | None:
+    """The first visible network whose name starts with `prefix` (or any of
+    several), if any."""
     for name in scan_wifi_ssids(timeout=timeout):
         if name.startswith(prefix):
             return name
     return None
 
 
-def wait_for_ssid(prefix: str, *, timeout: float = 90.0, poll: float = 8.0) -> str | None:
+def wait_for_ssid(prefix: str | tuple[str, ...], *, timeout: float = 90.0,
+                  poll: float = 8.0) -> str | None:
     """Watch for a network to appear, e.g. a device rebooting into setup mode."""
     started = time.monotonic()
     while time.monotonic() - started < timeout:
@@ -637,7 +645,8 @@ def wait_for_ssid(prefix: str, *, timeout: float = 90.0, poll: float = 8.0) -> s
         if found:
             return found
         elapsed = int(time.monotonic() - started)
-        output.progress(f"looking for a '{prefix}' network... {elapsed}s")
+        shown = prefix if isinstance(prefix, str) else prefix[0]
+        output.progress(f"looking for a '{shown}' network... {elapsed}s")
         time.sleep(poll)
     output.progress_clear()
     return None
