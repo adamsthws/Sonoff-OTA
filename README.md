@@ -129,7 +129,7 @@ over USB. That means normal Tasmota upgrades from then on.
 **ESPHome:** ESPHome for the S60, on your Wi-Fi, ready for Home Assistant to find
 ([Choosing ESPHome](#choosing-esphome)).
 
- [layout itself](docs/technical-details.md#the-finished-memory-layout) is
+The Tasmota [layout itself](docs/technical-details.md#the-finished-memory-layout) is
 in the technical details.
 
 You also keep a full backup of the plug's Sonoff firmware.
