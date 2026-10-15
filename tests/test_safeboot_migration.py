@@ -465,6 +465,52 @@ class MigrationValidationTests(unittest.TestCase):
                 fixture.safeboot,
             )
 
+    def factory(self, official, recovery, official_sectors):
+        """The factory partition as a restore cut off after `official_sectors` leaves it."""
+        from tools.serve_safeboot_migration import SAFEBOOT_SIZE, SECTOR_SIZE
+        off = official + b"\xff" * (SAFEBOOT_SIZE - len(official))
+        rec = recovery + b"\xff" * (SAFEBOOT_SIZE - len(recovery))
+        cut = official_sectors * SECTOR_SIZE
+        return off[:cut] + rec[cut:]
+
+    def digests(self, partition):
+        import hashlib
+        return [hashlib.sha256(partition[i:i + SECTOR_SIZE]).digest()
+                for i in range(0, len(partition), SECTOR_SIZE)]
+
+    def test_a_restore_cut_off_part_way_carries_on_where_it_stopped(self):
+        from tools.serve_safeboot_migration import restore_resume_point
+        official = bytes((i * 7) & 0xFF for i in range(20_000))
+        recovery = bytes((i * 11 + 3) & 0xFF for i in range(21_000))
+        for done, expected in ((0, 0), (2, 2), (4, 4), (5, 5), (40, 5)):
+            partition = self.factory(official, recovery, done)
+            self.assertEqual(restore_resume_point(self.digests(partition), official, recovery),
+                             expected, done)
+
+    def test_anything_else_in_the_partition_is_refused(self):
+        from tools.serve_safeboot_migration import restore_resume_point
+        official = bytes((i * 7) & 0xFF for i in range(20_000))
+        recovery = bytes((i * 11 + 3) & 0xFF for i in range(21_000))
+        partition = bytearray(self.factory(official, recovery, 2))
+        partition[3 * SECTOR_SIZE + 10] ^= 0xFF  # a sector from neither image
+        with self.assertRaisesRegex(ValueError, "sector 3 holds neither"):
+            restore_resume_point(self.digests(bytes(partition)), official, recovery)
+
+    def test_the_plug_is_told_where_to_carry_on(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            recovery = fixture.enable_recovery()
+            fixture.evidence_dir.mkdir(parents=True, exist_ok=True)
+            fixture.write_commit_evidence(sha256_bytes(recovery))
+            state = fixture.state("restore")
+            rendered = state.render_berry().decode()
+            self.assertIn('fetch_text("/restore-from")', rendered)
+            self.assertIn("var factory_sectors = 208", rendered)
+            self.assertNotIn("no longer contains the recovery Safeboot", rendered)
+            raw = b"".join(self.digests(self.factory(fixture.safeboot, recovery, 1)))
+            send_chunks(state, "factory-sha", raw)
+            self.assertEqual(state.restore_from(), 1)
+
     def test_restore_accepts_commit_evidence_of_any_age(self):
         # A plug left on the recovery Safeboot must still be finishable later:
         # the restore closure re-checks the live plug before it writes.
@@ -494,6 +540,25 @@ class MigrationValidationTests(unittest.TestCase):
             path.write_text(json.dumps(evidence), encoding="utf-8")
             return fixture.state("restore")
 
+    def test_a_lost_commit_report_falls_back_to_the_staging_record(self):
+        # The commit reports as the plug restarts; the emulated plug cut off
+        # then left no report, but the image the commit copied was staged here.
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            recovery = fixture.enable_recovery()
+            nvs_hash = sha256_bytes(canonical_nvs())
+            fixture.write_preflight_evidence(nvs_hash)
+            fixture.write_stage_evidence(nvs_hash)
+            path = fixture.evidence_dir / "stage-report.json"
+            evidence = json.loads(path.read_text())
+            evidence["staged_sha256"] = sha256_bytes(recovery)
+            path.write_text(json.dumps(evidence), encoding="utf-8")
+            self.assertIsNone(fixture.state("restore").commit_evidence)
+            evidence["staged_sha256"] = "0" * 64
+            path.write_text(json.dumps(evidence), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "neither commit nor stage evidence"):
+                fixture.state("restore")
+
     def test_restore_accepts_a_bundle_changed_since_the_commit(self):
         # Set up for other Wi-Fi since, say: the manifest differs, but the
         # table and the recovery Safeboot the restore relies on do not.
@@ -508,6 +573,128 @@ class MigrationValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match recovery Safeboot"):
             self.restore_with_commit_evidence(safeboot_sha256="0" * 64)
 
+    def staging(self, directory):
+        fixture = MigrationFixture(Path(directory))
+        nvs_hash = sha256_bytes(canonical_nvs())
+        fixture.write_preflight_evidence(nvs_hash)
+        return fixture, fixture.state("stage")
+
+    def test_a_failure_from_the_plug_ends_the_phase_with_its_reason(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture, state = self.staging(directory)
+            state.receive_failure(
+                "stage",
+                f"session={state.session}\nreason=migration_refused: GET /chunk/safeboot/2 "
+                "returned HTTP -1 after 290 attempts\n".encode(),
+            )
+            self.assertTrue(state.complete)
+            self.assertEqual(state.result_status, "FAIL")
+            self.assertIn("HTTP -1", state.failure_reason)
+            evidence = json.loads((fixture.evidence_dir / "stage-report.json").read_text())
+            self.assertEqual(evidence["status"], "FAIL")
+            self.assertIn("HTTP -1", evidence["reason"])
+
+    def test_a_failure_from_another_session_or_phase_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _, state = self.staging(directory)
+            with self.assertRaisesRegex(ValueError, "session differs"):
+                state.receive_failure("stage", b"session=other\nreason=x\n")
+            with self.assertRaisesRegex(ValueError, "phase differs"):
+                state.receive_failure("commit", f"session={state.session}\nreason=x\n".encode())
+            self.assertFalse(state.complete)
+
+    def test_a_report_already_made_is_kept(self):
+        # A commit that failed while writing reports FAIL itself, with whether
+        # it rolled back; the wrapper's reason after it must not replace that.
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            nvs_hash = sha256_bytes(canonical_nvs())
+            fixture.write_preflight_evidence(nvs_hash)
+            fixture.write_stage_evidence(nvs_hash)
+            state = fixture.state("commit")
+            state.receive_report("commit", (
+                f"session={state.session}\nstatus=FAIL\nrollback=true\ncurrent_ota=1\n"
+                f"target_table_sha256={sha256_bytes(fixture.target_table)}\n"
+                f"safeboot_sha256={sha256_bytes(fixture.safeboot)}\n").encode())
+            state.receive_failure("commit", f"session={state.session}\nreason=later\n".encode())
+            evidence = json.loads((fixture.evidence_dir / "commit-report.json").read_text())
+            self.assertEqual(evidence["rollback"], "true")
+            self.assertNotIn("reason", evidence)
+
+    def test_waiting_stops_when_the_plug_falls_silent(self):
+        from unittest import mock
+        import tools.serve_safeboot_migration as server_module
+        with tempfile.TemporaryDirectory() as directory:
+            _, state = self.staging(directory)
+            clock = iter(range(0, 10_000, 30))
+            with mock.patch.object(server_module.time, "monotonic", side_effect=lambda: next(clock)):
+                server = mock.Mock()
+                self.assertEqual(server_module.wait_for_result(server, state, 900, 360), "silent")
+
+    def test_a_plug_still_talking_is_given_the_whole_wait(self):
+        from unittest import mock
+        import tools.serve_safeboot_migration as server_module
+        with tempfile.TemporaryDirectory() as directory:
+            _, state = self.staging(directory)
+            clock = iter(range(0, 10_000, 30))
+            server = mock.Mock()
+            # Every request is the plug asking for something: never silent.
+            server.handle_request.side_effect = lambda: setattr(state, "last_heard", now[0])
+            now = [0]
+
+            def tick():
+                now[0] = next(clock)
+                return now[0]
+            with mock.patch.object(server_module.time, "monotonic", side_effect=tick):
+                self.assertEqual(server_module.wait_for_result(server, state, 900, 360), "timeout")
+
+    def test_every_phase_reports_its_failures_and_keeps_its_retrying_short(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            nvs_hash = sha256_bytes(canonical_nvs())
+            fixture.write_preflight_evidence(nvs_hash)
+            fixture.write_stage_evidence(nvs_hash)
+            rendered = {phase: fixture.state(phase).render_berry().decode()
+                        for phase in ("preflight", "stage", "commit")}
+            recovery = fixture.enable_recovery()
+            fixture.write_commit_evidence(sha256_bytes(recovery))
+            rendered["restore"] = fixture.state("restore").render_berry().decode()
+            for phase, source in rendered.items():
+                self.assertIn(f'"/fail/{phase}"', source, phase)
+                self.assertIn("report_failure(", source, phase)
+                # 20s of retrying in all, for the whole phase: busy for 70-90s,
+                # a real S60TPG stops answering for good (its energy meter's
+                # readings pile up).  The tool waits out a router restart.
+                self.assertIn("retry_until = tasmota.millis(20000)", source, phase)
+                self.assertNotIn("tasmota.millis(300000)", source, phase)
+                self.assertIn("window.over()", source, phase)
+                # Not set_timeouts(): a connect timeout above the default 2s left
+                # the emulated plug's web server dead once a phase gave up
+                # (the HTTP timeout alone did not); the default 2s is enough.
+                self.assertNotIn("set_timeouts", source, phase)
+                # No request with the Wi-Fi down: webclient can crash then
+                # (Tasmota #18831), and a router restart takes it down.
+                lines = source.splitlines()
+                for number, line in enumerate(lines):
+                    if "webclient()" in line or ("get_body(" in line and "def get_body" not in line):
+                        above = "\n".join(lines[max(0, number - 2):number])
+                        self.assertIn('if tasmota.wifi("up")', above, f"{phase} line {number + 1}")
+                self.assertIn("the plug's Wi-Fi went down and was not back", source, phase)
+            # Stage, commit and restore read their downloads by hand, giving
+            # up on one that goes silent: webclient's get_string() waits for
+            # ever on a reply that stops part way (arendst/Tasmota#25139).
+            for phase in ("stage", "commit", "restore"):
+                source = rendered[phase]
+                code = [line for line in source.splitlines() if not line.lstrip().startswith("#")]
+                self.assertFalse([line for line in code if "get_string(" in line], phase)
+                self.assertIn("quiet = tasmota.millis(5000)", source, phase)
+                self.assertEqual(source.count("tcpclient()"), 1, phase)
+                inside = source[source.index("def get_body(path)"):]
+                self.assertIn("tcpclient()", inside[:inside.index("\nend\n")], phase)
+            # Commit and restore still hand back their armed closure by name.
+            self.assertTrue(rendered["commit"].rstrip().endswith("return commit"))
+            self.assertTrue(rendered["restore"].rstrip().endswith("return restore"))
+
     def test_stage_still_refuses_stale_preflight_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = MigrationFixture(Path(directory))
@@ -520,6 +707,32 @@ class MigrationValidationTests(unittest.TestCase):
             path.write_text(json.dumps(evidence), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "not fresh"):
                 fixture.state("stage")
+
+    def test_a_request_abandoned_part_way_does_not_stall_the_server(self):
+        # The plug's network went mid-POST in the emulator: the server sat on
+        # the half-read body, and never got back to its idle check.
+        import socket
+        import time as clock
+        from unittest import mock
+        import tools.serve_safeboot_migration as server_module
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            state = fixture.state("preflight")
+            with mock.patch.object(server_module.MigrationHandler, "timeout", 0.5):
+                server = MigrationServer(("127.0.0.1", 0), "127.0.0.1", state)
+                server.timeout = 0.2
+                try:
+                    stalled = socket.create_connection(server.server_address, timeout=2)
+                    stalled.sendall(b"POST /capture/table/0 HTTP/1.1\r\nHost: x\r\n"
+                                    b"Content-Length: 8192\r\n\r\n" + b"00" * 100)
+                    started = clock.monotonic()
+                    with mock.patch("builtins.print") as printed:
+                        server.handle_request()
+                    self.assertLess(clock.monotonic() - started, 5)
+                    self.assertRegex(printed.call_args.args[0], "timed out|request dropped")
+                    stalled.close()
+                finally:
+                    server.server_close()
 
     def test_http_server_exposes_only_the_selected_phase_to_the_selected_device(self):
         with tempfile.TemporaryDirectory() as directory:

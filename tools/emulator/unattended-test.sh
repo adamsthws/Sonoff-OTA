@@ -6,6 +6,7 @@
 #   tools/emulator/unattended-test.sh --fresh    the plug back to stock first, and no earlier run
 #   tools/emulator/unattended-test.sh --keep     leave the emulator running afterwards
 #   tools/emulator/unattended-test.sh --plug=MAC which backed-up plug (else the one run last)
+#   tools/emulator/unattended-test.sh --instance=N  on emulator N, beside others (emu.sh --instance)
 #   tools/emulator/unattended-test.sh -- --new   anything after -- goes to the run itself
 #
 # Needs .env with the eWeLink account the dump's plug is in. It starts the
@@ -16,16 +17,19 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 STATE=$ROOT/captures/emulation/state
 case "$ROOT" in /mnt/[a-z]/*) STATE=$HOME/.local/share/s60-emu/state ;; esac
-NAME=s60-emu
+NAME=s60-emu PORT=8080
 PLUG=192.168.60.50
 
 emu_args=(--cloud --yes --detach) keep=0 run_args=()
 while [ $# -gt 0 ]; do
     case "$1" in
     --fresh|--pcap|--rebuild|--no-firewall|--plug=*) emu_args+=("$1") ;;
+    --instance=[1-9])  # another emulator beside the first: see emu.sh
+        n=${1#--instance=}; emu_args+=("$1")
+        NAME=s60-emu-$n PORT=$((8080 + n)) STATE=$STATE-$n ;;
     --keep) keep=1 ;;
     --) shift; run_args=("$@"); break ;;
-    *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
     shift
 done
@@ -55,10 +59,10 @@ answers=/tmp/s60-unattended.env
 [ -t 1 ] && as_you+=(-t)
 stamp=$(date +%Y%m%d-%H%M%S)
 status=0
-"${as_you[@]}" -e S60_EMULATOR_URL=http://localhost:8080 -e S60_EMULATOR_SUDO_PASSWORD=s60 \
+"${as_you[@]}" -e S60_EMULATOR_URL="http://localhost:$PORT" -e S60_EMULATOR_SUDO_PASSWORD=s60 \
     -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/unattended_run.py --size 100x40 \
     --save "captures/unattended/$stamp" -- --env-file "$answers" "${run_args[@]}" || status=$?
 
 echo "On this computer: ${STATE#"$ROOT/"}/work/captures/unattended/$stamp/"
-[ "$keep" = 1 ] && echo "The emulator is still running: http://localhost:8080, or docker attach $NAME"
+[ "$keep" = 1 ] && echo "The emulator is still running: http://localhost:$PORT, or docker attach $NAME"
 exit "$status"

@@ -13,6 +13,7 @@ import json
 import re
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -43,7 +44,27 @@ REQUEST_RE = re.compile(r'"(?:GET|POST) (?P<path>/\S*) HTTP')
 SECTOR = 4096
 # Lines from the server worth showing as they are; everything else is folded
 # into a progress line and kept, in full, in the phase's log file.
-SHOWN_RE = re.compile(r"RESULT:|REFUS|TIMEOUT|ERROR|Traceback|Stopped", re.IGNORECASE)
+SHOWN_RE = re.compile(r"RESULT:|PLUG SAYS|REFUS|TIMEOUT|ERROR|Traceback|Stopped", re.IGNORECASE)
+# The plug's own console lines worth showing when a phase fails: its Berry
+# prints and errors, which say why when it could not tell this computer.
+PLUG_CONSOLE_RE = re.compile(r'S60 |migration_refused|BRY:|"Br":"\[')
+PLUG_SAYS_RE = re.compile(r"THE PLUG SAYS: (?P<reason>.+)")
+# A Berry error as Tasmota logs a console command's result:
+#   RSL: RESULT = {"Br":"[migration_refused] POST /capture/staged/22 returned HTTP -1 ..."}
+BERRY_ERROR_RE = re.compile(r'"Br":"\[(?P<kind>[^\]]+)\] (?P<message>.*)"\}')
+TIMEOUT_RE = re.compile(r"TIMEOUT: (?P<reason>.+)")
+
+
+def failure_reason(captured: str) -> str | None:
+    """Why a phase did not pass, in the server's words, if it said."""
+    for line in reversed(captured.splitlines()):
+        found = PLUG_SAYS_RE.search(line)
+        if found:
+            return "the plug says: " + found.group("reason").strip()
+        found = TIMEOUT_RE.search(line)
+        if found:
+            return found.group("reason").strip()
+    return None
 
 
 class PhaseDisplay:
@@ -102,6 +123,14 @@ class PlugNeverConnected(PhaseError):
 
 # The server logs each request; the plug fetching its program is the first.
 FETCH_RE = re.compile(r'"GET /berry/')
+# While a phase runs, the plug answers nothing else: Berry holds it.  So once
+# it has been this quiet, an answer from its web page means it has stopped -
+# with nothing more to send.  Without that, only the server's own two-minute
+# silence limit ends the wait.
+SILENCE_CHECK = 20.0
+# A backstop only: a phase keeps the plug busy for about a minute at most,
+# retrying included; the server's silence limit is two minutes.
+EXEC_TIMEOUT = 300.0
 # Long enough for a slow plug, short enough not to look hung.
 FETCH_DEADLINE = 30.0
 
@@ -157,6 +186,10 @@ class PhaseRunner:
         self.log = log
         # The credential-carrying recovery image: piped to the server, never a file.
         self.recovery = recovery
+        # How long the last phase kept the plug busy: from telling it to start
+        # to its last request.  Busy for 70-90s, a real S60TPG stops answering.
+        self.busy_seconds: float | None = None
+        self._started_at: float | None = None
 
     def _blocks(self, phase: str) -> int | None:
         """How many 4 KiB blocks of startup firmware a phase copies, for progress."""
@@ -196,11 +229,12 @@ class PhaseRunner:
         phase: str,
         extra_flags: list[str] | None = None,
         confirm: Callable[[str], bool] | None = None,
-        exec_timeout: float = 1800.0,
+        exec_timeout: float = EXEC_TIMEOUT,
     ) -> tuple[int, str]:
         """Run one phase end to end.  Returns (exit code, captured output)."""
         if phase in ARMED_PHASES and confirm is None:
             raise PhaseError(f"{phase} requires an explicit confirmation callback")
+        self.busy_seconds, self._started_at = None, None
 
         process = subprocess.Popen(
             self._command(phase, extra_flags or []),
@@ -221,6 +255,8 @@ class PhaseRunner:
         captured: list[str] = []
         url: str | None = None
         arm: tuple[str, str] | None = None
+        heard = [time.monotonic()]  # the server's last line: the plug's last request
+        requested: list[float | None] = [None]  # the plug's last request, exactly
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
         log_path = self.evidence_dir / f"{phase}-server.log"
         log_file = log_path.open("w", encoding="utf-8")
@@ -234,6 +270,9 @@ class PhaseRunner:
             nonlocal url, arm
             assert process.stdout is not None
             for line in process.stdout:
+                heard[0] = time.monotonic()
+                if REQUEST_RE.search(line):
+                    requested[0] = heard[0]
                 captured.append(line.rstrip("\n"))
                 if not log_file.closed:
                     log_file.write(output.scrub(line))
@@ -253,19 +292,112 @@ class PhaseRunner:
         reader.start()
         try:
             code = self._drive(phase, process, captured, reader, confirm, exec_timeout,
-                               lambda: url, lambda: arm)
+                               lambda: url, lambda: arm, lambda: heard[0])
+        except PhaseError as exc:
+            if isinstance(exc, PlugNeverConnected):  # it never started: nothing to say
+                raise
+            said = self._show_plug_console()
+            self._advise_if_stuck()
+            if said:
+                raise PhaseError(f"{exc}; its console says: {said}") from exc
+            raise
         finally:
             if process.poll() is None:
                 process.terminate()
             reader.join(5.0)
             display.close()
             log_file.close()
+            if (self._started_at is not None and requested[0] is not None
+                    and requested[0] >= self._started_at):
+                self.busy_seconds = round(requested[0] - self._started_at, 1)
         if code != 0:
+            said = self._show_plug_console()
+            self._advise_if_stuck()
+            if said and not any(PLUG_SAYS_RE.search(line) for line in captured):
+                captured.append(f"THE PLUG SAYS: {said}")  # what failure_reason() reports
             self.log(f"    The server's full output is in {log_path}")
         return code, "\n".join(captured)
 
+    def _advise_if_stuck(self) -> None:
+        """Say what to do when the plug does not answer at all after a phase.
+
+        Tasmota can be left waiting for ever on a download this computer
+        stopped sending part way (HTTPClientLight reads a body with no
+        timeout), and then answers nothing.  Switching it off and on is the
+        way out, and safe at every point a phase can be left there: staging
+        writes only the spare slot, the commit downloads before it writes and
+        reports after, and the restore carries on where it stopped.
+        """
+        if self._plug_answers():
+            return
+        self.log("    The plug is not answering at all - most likely stuck waiting for this computer.")
+        self.log("    Give it two minutes; if its web page still does not answer, switch it off")
+        self.log("    and on (at this stage that is safe), then run this again - it carries on.")
+
+    def _show_plug_console(self) -> str | None:
+        """Show the plug's own last words on the phase, from its console, and
+        return its error if that is the last of them.
+
+        When the plug could not reach this computer, its console is the only
+        place that says why; read it now rather than ask the owner to.  An
+        error followed by more from the plug is an earlier attempt's, not why
+        this one stopped.
+        """
+        try:
+            lines = self.device.console_log(timeout=5.0)
+        except Exception:  # noqa: BLE001 - a plug that cannot answer adds nothing here
+            return None
+        relevant = [line for line in lines if PLUG_CONSOLE_RE.search(line)][-8:]
+        for line in relevant:
+            self.log(f"    The plug's console: {line}")
+        error = BERRY_ERROR_RE.search(relevant[-1]) if relevant else None
+        if error is None:
+            return None
+        kind, message = error.group("kind"), error.group("message")
+        return message if kind == "migration_refused" else f"{kind}: {message}"
+
+    def _start(self, code: str) -> None:
+        """Send the command that starts the phase, without waiting on its reply.
+
+        The phase reports to the server, which is what is waited on; the reply
+        can come only when the phase ends - or never, when it ends by
+        restarting the plug, as the commit does.
+        """
+        self._started_at = time.monotonic()
+
+        def fire() -> None:
+            try:
+                self.device.berry_fire(code, timeout=60.0)
+            except Exception as exc:  # noqa: BLE001 - the server's evidence decides
+                self.log(f"    Starting it on the plug: {exc}")
+        threading.Thread(target=fire, daemon=True).start()
+
+    def _plug_answers(self) -> bool:
+        try:
+            return self.device.answers(timeout=3.0)
+        except Exception:  # noqa: BLE001 - not answering, however it fails
+            return False
+
+    def _wait(self, phase, process, exec_timeout, get_heard) -> int:
+        started = time.monotonic()
+        checked = 0.0
+        while True:
+            try:
+                return process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                pass
+            now = time.monotonic()
+            if now - started > exec_timeout:
+                raise PhaseError(f"{phase} did not complete within {exec_timeout / 60:.0f} minutes")
+            if now - get_heard() >= SILENCE_CHECK and now - checked >= SILENCE_CHECK:
+                checked = now
+                if self._plug_answers() and process.poll() is None:
+                    raise PhaseError(
+                        f"the plug stopped the {phase} without reaching this computer"
+                    )
+
     def _drive(self, phase, process, captured, reader, confirm, exec_timeout,
-               get_url, get_arm) -> int:
+               get_url, get_arm, get_heard=time.monotonic) -> int:
         deadline = 30.0
         waited = 0.0
         while get_url() is None and waited < deadline and process.poll() is None:
@@ -295,13 +427,10 @@ class PhaseRunner:
 
             name, token = arm
             self.log("Telling the plug to start. Leave it powered and connected.")
-            self.device.berry_fire(f'{name}("{token}")', timeout=60.0)
+            self._start(f'{name}("{token}")')
         else:
             self.log("Sending the instructions to the plug and starting.")
-            self.device.berry_fire(short_loader(url), timeout=60.0)
+            self._start(short_loader(url))
             self._require_fetch(process, captured, reader, phase)
 
-        try:
-            return process.wait(timeout=exec_timeout)
-        except subprocess.TimeoutExpired as exc:
-            raise PhaseError(f"{phase} did not complete within {exec_timeout:.0f}s") from exc
+        return self._wait(phase, process, exec_timeout, get_heard)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import http.server
 import ipaddress
 import json
@@ -86,6 +87,10 @@ LOCK_PATH = ROOT / "REPARTITION_LOCK"
 COMMIT_FLAG = "--i-accept-power-loss-may-require-opening-the-plug"
 PHASES = ("preflight", "stage", "commit", "restore")
 MAX_POST_SIZE = 9000
+# Longer than a phase keeps the plug busy, retrying included (about a minute),
+# so a plug that could report has reported.  A router restart is waited out
+# by the tool between tries, not here.
+IDLE_LIMIT = 120
 RESTORE_FLAG = "--i-confirm-normal-app-is-stable"
 
 
@@ -113,6 +118,40 @@ def parse_report(body: bytes) -> dict[str, str]:
             raise ValueError(f"invalid report value for {key}")
         report[key] = value
     return report
+
+
+FACTORY_SECTORS = SAFEBOOT_SIZE // SECTOR_SIZE
+
+
+def sector_digests(image: bytes) -> list[bytes]:
+    """SHA-256 of each 4 KiB sector of the factory partition holding `image`,
+    erased (0xFF) after it - as the commit and the restore leave it."""
+    padded = image + b"\xff" * (SAFEBOOT_SIZE - len(image))
+    return [hashlib.sha256(padded[i:i + SECTOR_SIZE]).digest()
+            for i in range(0, SAFEBOOT_SIZE, SECTOR_SIZE)]
+
+
+def restore_resume_point(digests: list[bytes], official: bytes, recovery: bytes) -> int:
+    """How many leading sectors of the factory partition already hold the
+    official Safeboot, for a restore to carry on after.
+
+    A restore writes sector by sector from the start, so one cut off part way
+    leaves official sectors, then the recovery Safeboot's.  Anything else is
+    refused: the partition holds something this run did not put there.
+    """
+    official_sectors, recovery_sectors = sector_digests(official), sector_digests(recovery)
+    if len(digests) != len(official_sectors):
+        raise ValueError("factory partition sector count differs")
+    done = 0
+    while done < len(digests) and digests[done] == official_sectors[done]:
+        done += 1
+    for index in range(done, len(digests)):
+        if digests[index] != recovery_sectors[index]:
+            raise ValueError(
+                f"factory partition sector {index} holds neither the official nor "
+                "the recovery Safeboot"
+            )
+    return min(done, (len(official) + SECTOR_SIZE - 1) // SECTOR_SIZE)
 
 
 def require_report_fields(report: dict[str, str], expected: dict[str, str]) -> None:
@@ -192,6 +231,11 @@ class MigrationState:
         self.arm_token = secrets.token_urlsafe(15)
         self.complete = False
         self.result_status: str | None = None
+        # Why the plug stopped, when it said so (receive_failure).
+        self.failure_reason: str | None = None
+        # When the plug last asked for anything: the server stops waiting once
+        # it has been silent too long, rather than for the whole --wait.
+        self.last_heard = time.monotonic()
         self.captures: dict[str, dict[int, bytes]] = {}
         self.manifest_sha256 = sha256_bytes(manifest_path.read_bytes())
 
@@ -241,13 +285,23 @@ class MigrationState:
             # does not care about (set up again for other Wi-Fi, say).  What
             # the restore relies on is held to the commit's record instead: the
             # table it wrote, and the exact recovery Safeboot it put in place.
-            self.commit_evidence = load_evidence(
-                evidence_dir / "commit-report.json", "commit", sys.maxsize
-            )
-            if self.commit_evidence.get("target_table_sha256") != self.target_table_sha256:
-                raise ValueError("commit evidence names a different partition table")
-            if self.commit_evidence.get("safeboot_sha256") != sha256_bytes(self.safeboot):
-                raise ValueError("commit evidence does not match recovery Safeboot")
+            #
+            # A commit whose report was lost (it is sent as the plug restarts)
+            # leaves the staging's record instead, of the image it then copied.
+            try:
+                self.commit_evidence = load_evidence(
+                    evidence_dir / "commit-report.json", "commit", sys.maxsize
+                )
+            except ValueError:
+                staged = load_evidence(evidence_dir / "stage-report.json", "stage", sys.maxsize)
+                if staged.get("staged_sha256") != sha256_bytes(self.safeboot):
+                    raise ValueError("neither commit nor stage evidence matches recovery Safeboot")
+                print("  The commit's report was lost; going by the staging's record of the image.")
+            else:
+                if self.commit_evidence.get("target_table_sha256") != self.target_table_sha256:
+                    raise ValueError("commit evidence names a different partition table")
+                if self.commit_evidence.get("safeboot_sha256") != sha256_bytes(self.safeboot):
+                    raise ValueError("commit evidence does not match recovery Safeboot")
 
     def replacements(self) -> dict[str, str]:
         safeboot_length = len(self.safeboot)
@@ -292,6 +346,7 @@ class MigrationState:
             ),
             "APP_SHA256": sha256_bytes(self.app),
             "APP_LENGTH": str(len(self.app)),
+            "FACTORY_SECTORS": str(FACTORY_SECTORS),
         }
 
     def render_berry(self) -> bytes:
@@ -324,7 +379,8 @@ class MigrationState:
             "preflight": {"table": TABLE_SIZE, "nvs": CANONICAL_NVS_SIZE, "otadata": OTADATA_SIZE},
             "stage": {"staged": len(self.safeboot)},
             "commit": {},
-            "restore": {"restored": len(self.official_safeboot)},
+            "restore": {"restored": len(self.official_safeboot),
+                        "factory-sha": FACTORY_SECTORS * 32},
         }[self.phase]
         if kind not in allowed:
             raise ValueError(f"capture {kind!r} is unavailable in {self.phase}")
@@ -345,6 +401,14 @@ class MigrationState:
         if index in chunks and chunks[index] != data:
             raise ValueError("duplicate capture chunk has different bytes")
         chunks[index] = data
+
+    def restore_from(self) -> int:
+        """Where the restore should carry on, from the plug's sector digests."""
+        raw = self.assembled_capture("factory-sha", FACTORY_SECTORS * 32)
+        digests = [raw[i:i + 32] for i in range(0, len(raw), 32)]
+        start = restore_resume_point(digests, self.official_safeboot, self.safeboot)
+        print(f"  The factory partition holds the official Safeboot up to sector {start}.")
+        return start
 
     def assembled_capture(self, kind: str, total: int) -> bytes:
         chunks = self.captures.get(kind, {})
@@ -371,6 +435,28 @@ class MigrationState:
             self._finish_commit(report)
         else:
             self._finish_restore(report)
+
+    def receive_failure(self, requested_phase: str, body: bytes) -> None:
+        """The plug stopped, and says why: record it and stop waiting.
+
+        A phase that already reported (a commit that failed while writing sends
+        its own FAIL report, with the rollback result) keeps that report.
+        """
+        if requested_phase != self.phase:
+            raise ValueError("failure phase differs from served phase")
+        report = parse_report(body)
+        if report.get("session") != self.session:
+            raise ValueError("failure session differs")
+        reason = report.get("reason") or "no reason given"
+        if self.complete:
+            print(f"  The plug also said: {reason}")
+            return
+        evidence = self._base_evidence(self.phase, "FAIL")
+        evidence["reason"] = reason
+        atomic_json(self.evidence_dir / f"{self.phase}-report.json", evidence)
+        self.failure_reason = reason
+        self.complete = True
+        self.result_status = "FAIL"
 
     def _base_evidence(self, phase: str, status: str) -> dict[str, Any]:
         return {
@@ -503,6 +589,10 @@ class MigrationState:
 class MigrationHandler(http.server.BaseHTTPRequestHandler):
     server_version = "S60SafebootMigration/1.0"
     protocol_version = "HTTP/1.1"
+    # A request the plug stopped sending part way - its network went, say - is
+    # dropped after this long, not waited on for ever: one request at a time is
+    # served, and the wait for the plug's result is checked between them.
+    timeout = 30
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"  [{self.client_address[0]}] {fmt % args}")
@@ -520,6 +610,7 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
         if self.client_address[0] != self.server.device_ip:
             self._response(403, b"wrong source device\n")
             return False
+        self.server.state.last_heard = time.monotonic()
         return True
 
     def do_GET(self) -> None:
@@ -535,6 +626,9 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
             if match:
                 chunk = state.safeboot_chunk(int(match.group(1)))
                 self._response(200, chunk.hex().encode("ascii"))
+                return
+            if path == "/restore-from" and state.phase == "restore":
+                self._response(200, str(state.restore_from()).encode("ascii"))
                 return
             if path == "/target-table" and state.phase == "commit":
                 self._response(200, state.target_table.hex().encode("ascii"))
@@ -568,6 +662,11 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
                 state.receive_report(report.group(1), body)
                 self._response(200)
                 return
+            failure = re.fullmatch(r"/fail/([a-z]+)", path)
+            if failure:
+                state.receive_failure(failure.group(1), body)
+                self._response(200)
+                return
             self._response(404, b"not found\n")
         except ValueError as exc:
             print(f"  REFUSED {path}: {exc}")
@@ -579,6 +678,12 @@ class MigrationServer(http.server.HTTPServer):
         super().__init__(address, MigrationHandler)
         self.device_ip = device_ip
         self.state = state
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        # One line, not socketserver's traceback: a request the plug abandoned
+        # (MigrationHandler.timeout) is expected when its network drops.
+        error = sys.exc_info()[1]
+        print(f"  [{client_address[0]}] request dropped: {type(error).__name__}: {error}")
 
     def server_bind(self) -> None:
         # Not HTTPServer's own, which looks the address up by name between
@@ -611,6 +716,21 @@ def berry_loader(base_url: str, phase: str) -> str:
     return prefix + f"return s60_urlbeload('{url}')"
 
 
+def wait_for_result(server: Any, state: MigrationState, wait: float, idle: float) -> str:
+    """Serve the plug until its result: "complete", or "silent" once it has
+    sent nothing for `idle` seconds, or "timeout" after `wait` in all."""
+    deadline = time.monotonic() + wait
+    state.last_heard = time.monotonic()
+    while not state.complete:
+        now = time.monotonic()
+        if now - state.last_heard > idle:
+            return "silent"
+        if now >= deadline:
+            return "timeout"
+        server.handle_request()
+    return "complete"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=PHASES)
@@ -620,7 +740,11 @@ def main() -> int:
     parser.add_argument("--device-ip", required=True)
     parser.add_argument("--evidence-dir", type=Path)
     parser.add_argument("--max-evidence-age", type=int, default=7200)
-    parser.add_argument("--wait", type=int, default=1800, help="seconds to wait for a phase report")
+    parser.add_argument("--wait", type=int, default=240,
+                        help="seconds to wait at most for a phase report: a phase keeps "
+                        "the plug busy for about a minute, retrying included")
+    parser.add_argument("--idle", type=int, default=IDLE_LIMIT,
+                        help="seconds the plug may send nothing before waiting stops")
     parser.add_argument(COMMIT_FLAG, action="store_true")
     parser.add_argument(RESTORE_FLAG, action="store_true")
     parser.add_argument(
@@ -644,8 +768,8 @@ def main() -> int:
         parser.error(str(exc))
     if not 1 <= args.listen_port <= 65535:
         parser.error("--listen-port must be 1..65535")
-    if args.max_evidence_age <= 0 or args.wait <= 0:
-        parser.error("evidence age and wait must be positive")
+    if args.max_evidence_age <= 0 or args.wait <= 0 or args.idle <= 0:
+        parser.error("evidence age, wait and idle must be positive")
 
     manifest_path = args.manifest.resolve()
     evidence_dir = (args.evidence_dir or manifest_path.parent / "live").resolve()
@@ -698,20 +822,26 @@ def main() -> int:
         print("\nLoading performs no writes. After it prints a loaded closure, arm separately with:")
         print(f'{function_name}("{state.arm_token}")')
 
-    deadline = time.monotonic() + args.wait
     try:
-        while not state.complete and time.monotonic() < deadline:
-            server.handle_request()
+        outcome = wait_for_result(server, state, args.wait, args.idle)
     except KeyboardInterrupt:
         print("\nStopped; no phase result was recorded.")
         return 130
     finally:
         server.server_close()
 
-    if not state.complete:
-        print("TIMEOUT: no complete, validated phase report was received.", file=sys.stderr)
+    if outcome != "complete":
+        if outcome == "silent":
+            print(f"TIMEOUT: the plug has sent nothing for {args.idle // 60} minutes, and "
+                  "gave no reason. Its own console (Tools -> Console in its web page) "
+                  "says why it stopped.", file=sys.stderr)
+        else:
+            print(f"TIMEOUT: the plug was still busy after {args.wait // 60} minutes, "
+                  "with no result.", file=sys.stderr)
         return 3
     print(f"\n{args.phase.upper()} RESULT: {state.result_status}")
+    if state.failure_reason:
+        print(f"THE PLUG SAYS: {state.failure_reason}")
     print(f"Evidence: {evidence_dir / (args.phase + '-report.json')}")
     return 0 if state.result_status == "PASS" else 4
 

@@ -16,10 +16,16 @@ library. Get-ToolPython, in order:
    to remove it again when the tool exits.
 #>
 
+# No progress bars while it sets up: not the download's, not PowerShell's own
+# "Preparing modules for first use" - nothing a person needs to watch. (Each
+# file that dot-sources this one is quiet with it, to its end.)
+$ProgressPreference = "SilentlyContinue"
+
 $PortablePython = @{
-    Name = "Python 3.12.10 (python.org, portable)"
+    Name = "portable Python 3.12.10 (python.org)"
     Folder = "windows-3.12.10"
     Url = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip"
+    Size = "about 11 MB"
     # python.org publishes MD5 (fe8ef205f2e9c3ba44d0cf9954e1abd3), which this file matches.
     Sha256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
 }
@@ -30,6 +36,7 @@ $InstalledMarker = Join-Path $PythonHome "installed-by-s60.json"
 $PythonInstaller = @{
     Name = "Python 3.12 (64-bit, from python.org)"
     Url = "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
+    Size = "about 27 MB"
     # python.org publishes MD5 (5eddb0b6f12c852725de071ae681dde4), which this
     # file matches, and winget's manifest has this same SHA-256.
     Sha256 = "67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb"
@@ -45,10 +52,10 @@ function Get-Pinned($what, $pin, $dir = (Join-Path $env:TEMP "s60-downloads")) {
     New-Item -ItemType Directory -Force $dir | Out-Null
     $file = Join-Path $dir ([IO.Path]::GetFileName($pin.Url))
     if (-not ((Test-Path $file) -and (Get-FileHash $file).Hash -eq $pin.Sha256)) {
-        Write-Host " Downloading $what..."   # not Write-Output: that would join the returned path
-        $progress, $global:ProgressPreference = $global:ProgressPreference, "SilentlyContinue"
-        try { Invoke-WebRequest -Uri $pin.Url -OutFile $file -UseBasicParsing }
-        finally { $global:ProgressPreference = $progress }   # many times slower with it shown
+        # The size, as there is nothing else to watch while it comes. Not
+        # Write-Output: that would join the returned path.
+        Write-Host " Downloading $what$(if ($pin.Size) { ", $($pin.Size)" })..."
+        Invoke-WebRequest -Uri $pin.Url -OutFile $file -UseBasicParsing   # quiet, as above: many times slower with a bar
     }
     $hash = (Get-FileHash $file).Hash
     if ($hash -ne $pin.Sha256) {
@@ -72,6 +79,10 @@ function Get-PythonCandidates {
         Get-Command $name -All -ErrorAction SilentlyContinue | ForEach-Object { & $add "PATH" $_.Source @() }
     }
     foreach ($root in "HKCU:\Software\Python", "HKLM:\Software\Python", "HKLM:\Software\WOW6432Node\Python") {
+        # Only a key that is there: for one that is not, -Recurse searches all
+        # of its parent (HKLM:\Software) for one of that name, deep enough to
+        # crash Windows PowerShell with a stack overflow.
+        if (-not (Test-Path $root)) { continue }
         Get-ChildItem $root -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -eq "InstallPath" } |
             ForEach-Object {
                 $key = Get-ItemProperty $_.PSPath
@@ -125,16 +136,14 @@ function Show-PythonCandidates {
 function Install-Python {
     # For this account only: no administrator rights, and nothing changed for
     # anyone else on the computer. It adds itself, and the py launcher, to PATH.
-    # The installer is kept beside the record of it: it is what removes it.
-    $installer = Get-Pinned $PythonInstaller.Name $PythonInstaller
+    # The installer is downloaded into .python\ and kept there, beside the
+    # record of it: it is what removes it. Nothing of it outside that folder.
+    $installer = Get-Pinned $PythonInstaller.Name $PythonInstaller $PythonHome
     Write-Host " Installing $($PythonInstaller.Name), for your account..."
     $p = Start-Process $installer -Wait -PassThru -ArgumentList `
         "/quiet", "InstallAllUsers=0", "PrependPath=1", "Include_launcher=1", "InstallLauncherAllUsers=0", "Include_test=0"
     if ($p.ExitCode -ne 0) { throw "the Python installer failed (exit $($p.ExitCode))" }
-    New-Item -ItemType Directory -Force $PythonHome | Out-Null
-    $kept = Join-Path $PythonHome ([IO.Path]::GetFileName($installer))
-    Copy-Item $installer $kept -Force
-    @{ name = $PythonInstaller.Name; installer = $kept } | ConvertTo-Json | Set-Content $InstalledMarker
+    @{ name = $PythonInstaller.Name; installer = $installer } | ConvertTo-Json | Set-Content $InstalledMarker
     Update-SessionPath
 }
 
@@ -150,7 +159,10 @@ function Get-PortablePython {
             $zip = Get-Pinned $PortablePython.Name $PortablePython $PythonHome
             $partial = "$dir.partial"
             Remove-Item $partial -Recurse -Force -ErrorAction SilentlyContinue
-            Expand-Archive $zip $partial -Force
+            # Not Expand-Archive: it shows a progress bar of its own, and is
+            # slow with it.
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [IO.Compression.ZipFile]::ExtractToDirectory($zip, $partial)
             Move-Item $partial $dir
             Remove-Item $zip -Force
         }

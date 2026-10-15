@@ -24,6 +24,7 @@ import signal
 import subprocess
 import sys
 import time
+import traceback
 import urllib.error
 from pathlib import Path
 from typing import Any, Callable
@@ -35,7 +36,12 @@ from tools.autoflash import credentials, hostsys, output, prompts, setup_network
 from tools.autoflash import __version__, plugs, tasmota_settings  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
-from tools.autoflash.phases import PhaseError, PhaseRunner, PlugNeverConnected  # noqa: E402
+from tools.autoflash.phases import (  # noqa: E402
+    PhaseError,
+    PhaseRunner,
+    PlugNeverConnected,
+    failure_reason,
+)
 from tools.autoflash.prompts import (  # noqa: E402
     QuitRun,
     ask_admin_password,
@@ -433,6 +439,13 @@ class Context:
         # from them.  Neither is ever written to disk.
         self._wifi: tuple[str, str] | None = None
         self._recovery: bytes | None = None
+        # For the report: the phase runner a step used (its plug-busy time), when
+        # this session started, and whether the report has been offered.
+        self.last_runner: PhaseRunner | None = None
+        self.run_started = time.monotonic()
+        self.run_resumed = False
+        self.reported = False
+        self.last_failure = ""  # what the last stage to fail said, for the report
         try:
             output.private(bundle_ssid(self.manifest_path), "wifi-name")
         except (BundleError, OSError, ValueError):
@@ -682,7 +695,7 @@ class Context:
     def phase_runner(self) -> PhaseRunner:
         port = choose_port(self, "phase_port", PHASE_PORTS, "the migration steps")
         ensure_firewall(self)
-        return PhaseRunner(
+        self.last_runner = PhaseRunner(
             repo_root=ROOT,
             manifest=self.manifest_path,
             evidence_dir=self.evidence,
@@ -693,6 +706,7 @@ class Context:
             # Piped, never a file; and only hashes of captures that hold secrets.
             recovery=self.recovery_bytes(),
         )
+        return self.last_runner
 
 
 def load_settings() -> dict[str, Any]:
@@ -725,7 +739,17 @@ def s60_template(product_model: str | None) -> str:
 
 
 # A phase server's line that says why it stopped, rather than how it is getting on.
-PHASE_PROBLEM_RE = re.compile(r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in", re.IGNORECASE)
+PHASE_PROBLEM_RE = re.compile(
+    r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in|PLUG SAYS|plug's console|"
+    r"not answering at all|switch it off|and on \(at this stage",
+    re.IGNORECASE,
+)
+
+
+def phase_failed(phase: str, code: int, captured: str) -> "Abort":
+    """The Abort for a phase that did not pass, with its reason when known."""
+    reason = failure_reason(captured)
+    return Abort(f"{phase} did not pass: {reason}" if reason else f"{phase} did not pass (exit {code})")
 
 
 def phase_log(text: str) -> None:
@@ -981,6 +1005,17 @@ def locate_plug(ctx: Context, *, timeout: float = 300.0) -> str:
 # --------------------------------------------------- the plug's own networks
 
 
+# Waiting on something only a person can do - join a network, say - has no
+# time limit: they may have walked away, and the run should still be there
+# when they come back.  Ctrl-C stops it.  Nobody comes back to an unattended
+# run, so that one gives up.
+UNATTENDED_ACTION_LIMIT = 900.0
+
+
+def user_action_limit() -> float:
+    return UNATTENDED_ACTION_LIMIT if prompts.UNATTENDED else float("inf")
+
+
 def wait_until_joined(network: str, marker: str | None = None) -> None:
     """Block until this computer has joined the plug's network.
 
@@ -991,11 +1026,12 @@ def wait_until_joined(network: str, marker: str | None = None) -> None:
     def tick(elapsed: float) -> None:
         output.progress(f"waiting for this computer to join {network}... {elapsed:.0f}s")
 
-    joined = (setup_network.wait_for_page(marker, tick=tick) if marker
-              else setup_network.wait_for_port(tick=tick))
+    limit = user_action_limit()
+    joined = (setup_network.wait_for_page(marker, timeout=limit, tick=tick) if marker
+              else setup_network.wait_for_port(timeout=limit, tick=tick))
     if not joined:
         output.progress_clear()
-        raise Abort(f"this computer did not join {network} within 15 minutes")
+        raise Abort(f"this computer did not join {network} within {limit / 60:.0f} minutes")
     output.progress_clear()
     say(f"    Connected to {network}.")
 
@@ -1751,11 +1787,19 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
             say(f"  {reason}")
             return {"seconds": round(time.monotonic() - started, 1), "confirmed_by": "bridge network"}
         reported = output.tool_problems()
+        # Some of it served means the plug reached this computer: not the
+        # firewall, but its Wi-Fi going part way (a router restarting, say).
+        started = output.tool_said("Served /user") or output.tool_said("did not request every")
         section("The bridge was not delivered", [
             *(["The sender reported:", *(f"  {line}" for line in reported), ""] if reported else []),
-            *firewall_hint(ctx),
+            *([
+                "The plug started downloading it from this computer, but stopped part",
+                "way - most likely its Wi-Fi dropped: a router restarting, or a weak",
+                "signal. It keeps its Sonoff firmware, so nothing is lost; run this",
+                "again once its Wi-Fi is steady.",
+            ] if started else firewall_hint(ctx)),
         ])
-        raise Abort("bridge delivery failed")
+        raise Abort("bridge delivery stopped part way" if started else "bridge delivery failed")
     return {"seconds": round(time.monotonic() - started, 1)}
 
 
@@ -1982,7 +2026,7 @@ def back_up_stock(ctx: Context, host: str) -> str:
     return "saved"
 
 
-def wait_for_bridge(ctx: Context, network: str, *, timeout: float = 900.0) -> str | None:
+def wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None) -> str | None:
     """Wait for this computer to join the bridge's network, or for the bridge to
     turn up on the home network instead.  The bridge's address on the home
     network, or None once this computer has joined the bridge's own.
@@ -1991,6 +2035,8 @@ def wait_for_bridge(ctx: Context, network: str, *, timeout: float = 900.0) -> st
     the first look allows; it then never raises its own network, so waiting
     only for that would wait forever.
     """
+    if timeout is None:
+        timeout = user_action_limit()
     marker = setup_network.BRIDGE_PAGE_MARKER.lower()
     started = time.monotonic()
     while time.monotonic() - started < timeout:
@@ -2009,8 +2055,8 @@ def wait_for_bridge(ctx: Context, network: str, *, timeout: float = 900.0) -> st
                         f"to join your Wi-Fi... {time.monotonic() - started:.0f}s")
         time.sleep(2.0)
     output.progress_clear()
-    raise Abort(f"this computer did not join {network} within 15 minutes, and the "
-                "installer did not appear on your network")
+    raise Abort(f"this computer did not join {network} within {timeout / 60:.0f} minutes, "
+                "and the installer did not appear on your network")
 
 
 # Tasmota with Wi-Fi details that do not work keeps retrying them and never
@@ -2141,17 +2187,17 @@ def step_preflight(ctx: Context) -> dict[str, Any]:
     """E1 - read-only inspection.  Re-runnable at any time."""
     ctx.wifi()  # read them off the plug first, so the check below compares the right network
     network = check_plug_network(ctx)
-    code, _ = ctx.phase_runner().run("preflight")
+    code, captured = ctx.phase_runner().run("preflight")
     if code != 0:
-        raise Abort(f"preflight did not pass (exit {code})")
+        raise phase_failed("preflight", code, captured)
     return {"exit": code, **network}
 
 
 def step_stage(ctx: Context) -> dict[str, Any]:
     """E2 - writes the inactive slot only.  Re-runnable; changes no boot state."""
-    code, _ = ctx.phase_runner().run("stage")
+    code, captured = ctx.phase_runner().run("stage")
     if code != 0:
-        raise Abort(f"stage did not pass (exit {code})")
+        raise phase_failed("stage", code, captured)
     return {"exit": code}
 
 
@@ -2204,7 +2250,7 @@ def step_commit(ctx: Context) -> dict[str, Any]:
     moved = ROOT / "REPARTITION_LOCK.owner-authorized"
     hostsys.replace_file(lock, moved)
     try:
-        code, _ = ctx.phase_runner().run(
+        code, captured = ctx.phase_runner().run(
             "commit",
             extra_flags=["--i-accept-power-loss-may-require-opening-the-plug"],
             confirm=gate,
@@ -2213,7 +2259,7 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         hostsys.replace_file(moved, lock)
         say("REPARTITION_LOCK restored")
     if code != 0:
-        raise Abort(f"commit did not pass (exit {code})")
+        raise phase_failed("commit", code, captured)
     say("The new layout is written. The plug restarts by itself, and the run carries on.")
     return {"exit": code}
 
@@ -2375,6 +2421,22 @@ def step_configure(ctx: Context) -> dict[str, Any]:
 
 
 
+def recovery_image_record(ctx: Context) -> str:
+    """The SHA-256 of the startup firmware this run put on the plug.
+
+    The commit's report records it; when that report was lost, the staging's
+    does, of the image the commit then copied as it was.
+    """
+    for name, key in (("commit-report.json", "safeboot_sha256"), ("stage-report.json", "staged_sha256")):
+        try:
+            report = json.loads((ctx.evidence / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(report, dict) and report.get("status") == "PASS" and report.get(key):
+            return str(report[key]).lower()
+    raise Abort("this run has no record of the startup firmware it put on the plug")
+
+
 def conversion_wifi(ctx: Context) -> None:
     """Hold the Wi-Fi details the plug was converted with, for G1.
 
@@ -2384,11 +2446,7 @@ def conversion_wifi(ctx: Context) -> None:
     other Wi-Fi since, and the plug's own Wi-Fi may have changed.  Only proven
     details are pinned back into the bundle, which the migration server needs.
     """
-    try:
-        report = json.loads((ctx.evidence / "commit-report.json").read_text(encoding="utf-8"))
-        wanted = str(report["safeboot_sha256"]).lower()
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise Abort(f"this run has no record of the new layout being written ({exc})") from exc
+    wanted = recovery_image_record(ctx)
 
     def proven(ssid: str, password: str) -> bytes | None:
         try:
@@ -2449,11 +2507,11 @@ def step_restore(ctx: Context) -> dict[str, Any]:
         tell("    under the official Tasmota, so nothing was written.")
         return False
 
-    code, _ = runner.run(
+    code, captured = runner.run(
         "restore", extra_flags=["--i-confirm-normal-app-is-stable"], confirm=gate
     )
     if code != 0:
-        raise Abort(f"restore did not pass (exit {code})")
+        raise phase_failed("restore", code, captured)
     return {"restore": code}
 
 
@@ -2718,6 +2776,24 @@ def begin_stage(step: str) -> None:
 
 
 def execute(ctx: Context, step: str) -> int:
+    ctx.last_runner = None
+    started, waited = time.monotonic(), output.waited()
+    try:
+        return _execute(ctx, step)
+    finally:
+        # For the report, however the stage ended: its time without the
+        # keyboard waits, and how long a Berry phase kept the plug busy.
+        ctx.state.capture(f"{step}.seconds",
+                          round(time.monotonic() - started - (output.waited() - waited)))
+        busy = getattr(ctx.last_runner, "busy_seconds", None)
+        if busy is not None:
+            # The longest of its tries: how near the plug came to stopping.
+            before = ctx.state.data.get("captures", {}).get(f"{step}.plug_busy_seconds")
+            ctx.state.capture(f"{step}.plug_busy_seconds",
+                              max(busy, before) if isinstance(before, (int, float)) else busy)
+
+
+def _execute(ctx: Context, step: str) -> int:
     title, handler = STEP_INDEX[step]
     begin_stage(step)
     say(f"{step}  {title}")
@@ -2732,12 +2808,27 @@ def execute(ctx: Context, step: str) -> int:
         ctx.state.mark(step, FAILED, error=str(exc))
         output.stage_end("stopped")
         section(f"{step} could not start", firewall_hint(ctx))
+        ctx.last_failure = str(exc)
         tell(f"FAILED: {exc}")
         return 1
     except (Abort, DeviceError, ValueError, PhaseError) as exc:
-        ctx.state.mark(step, FAILED, error=str(exc))
+        # A phase that ended with no result may have got as far as writing:
+        # where the plug can show whether the step finished, the step stays
+        # "attempted" and the next run asks it.
+        if not (isinstance(exc, PhaseError) and step in ATTEMPTED_EVIDENCE):
+            ctx.state.mark(step, FAILED, error=str(exc))
         output.stage_end("stopped")
+        ctx.last_failure = str(exc)
         tell(f"FAILED: {exc}")
+        return 1
+    except Exception as exc:  # noqa: BLE001 - recorded and explained, not a bare traceback
+        message = unexpected(exc)
+        # As above: whether it got as far as writing is for the plug to say.
+        if step not in ATTEMPTED_EVIDENCE:
+            ctx.state.mark(step, FAILED, error=message)
+        output.stage_end("stopped")
+        ctx.last_failure = message
+        tell(f"FAILED: {message}")
         return 1
     # A step may end its stage otherwise: "skipped" or "already done".
     outcome = captured.pop("stage_outcome", "complete") if captured else "complete"
@@ -2754,7 +2845,100 @@ def cmd_step(ctx: Context, step: str) -> int:
     if step not in STEP_INDEX:
         say(f"unknown step {step}; known: {', '.join(s for s, _, _ in STEPS)}")
         return 2
-    return execute(ctx, step)
+    wait_while_plug_busy(ctx)
+    return execute_with_retries(ctx, step)
+
+
+# Steps run again by themselves when they fail for a reason that may pass -
+# the network, mostly.  Each is safe to repeat: it only reads, or writes only
+# what it checks first (D4 the slot it is in, E2 the spare slot, G1 only over
+# the recovery Safeboot), or sets what it sets again.  Not the steps that ask
+# for anything, nor C2 or E3, which must happen once.
+RETRY_STEPS = {"A2", "D4", "E1", "E2", "F4", "G1", "H1"}
+ATTEMPTS = 3
+RETRY_PAUSE = 10.0
+# A failure worth another go: the plug or the network not answering.  A refusal
+# - the plug's checks, a password, the wrong model - would only say it again.
+TRANSIENT_RE = re.compile(
+    r"HTTP -1|timed out|timeout|sent nothing|did not answer|not answering|unreachable|"
+    r"connection (refused|reset|aborted)|ConnectionError|IncompleteRead|URLError|"
+    r"No route|stopped the \w+ without|did not complete within|Wi-Fi went down",
+    re.IGNORECASE,
+)
+# A router restart takes a minute or two.  The plug gives up on a step within
+# about a minute - busier for longer, it stops answering for good (its energy
+# meter's readings pile up) - so this computer does the waiting, between tries.
+PLUG_BACK_WAIT = 300.0
+
+
+# A step keeps the plug busy for about a minute at most, retrying included.
+BUSY_PLUG_WAIT = 120.0
+
+
+def wait_while_plug_busy(ctx: Context) -> None:
+    """Give a plug still running a stopped step the time to finish it.
+
+    A migration step keeps the plug busy, answering nothing else, until it
+    succeeds or gives up - for a while after this computer stopped waiting
+    (Ctrl-C, say).  Run again at once, the plug looks unreadable, and the
+    run would go on as if it were.  It is told apart by answering ping.
+    """
+    host = ctx.state.input("plug_ip")
+    if not host or not ctx.state.is_done("D1") or ctx.state.is_done(STEPS[-1][0]):
+        return  # not running Tasmota yet, or finished
+    device = ctx.device
+    if device.answers(timeout=3.0) or not hostsys.ping_ok(host):
+        return  # answering, or not on the network at all: the steps say which
+    tell("    The plug is on the network but not answering yet. It is most likely still")
+    tell("    finishing the step that was stopped, and gives up within a minute or two.")
+    started = time.monotonic()
+    while time.monotonic() - started < BUSY_PLUG_WAIT:
+        output.progress(f"waiting for the plug to finish... {time.monotonic() - started:.0f}s")
+        if device.answers(timeout=3.0):
+            output.progress_clear()
+            tell("    It is answering again.")
+            return
+        time.sleep(3.0)
+    output.progress_clear()
+    tell("    It is still not answering. Switch it off and on - at this point that is safe -")
+    tell("    and run this again; it carries on. Carrying on now, and each step says what it finds.")
+
+
+def execute_with_retries(ctx: Context, step: str) -> int:
+    for attempt in range(1, ATTEMPTS + 1):
+        code = execute(ctx, step)
+        ctx.state.capture(f"{step}.attempts", attempt)
+        if code != 1 or step not in RETRY_STEPS or attempt == ATTEMPTS:
+            return code
+        error = str(ctx.state.data.get("steps", {}).get(step, {}).get("error", ""))
+        if not TRANSIENT_RE.search(error):
+            return code
+        tell(f"    That may have been the network - trying again in {RETRY_PAUSE:.0f}s "
+             f"(attempt {attempt + 1} of {ATTEMPTS}).")
+        time.sleep(RETRY_PAUSE)
+        wait_for_plug_back(ctx)
+    return code
+
+
+def wait_for_plug_back(ctx: Context) -> None:
+    """Before a step is tried again, wait for a plug running Tasmota to answer:
+    after a router restart it is back within a minute or two."""
+    if not ctx.state.input("plug_ip") or not ctx.state.is_done("D1"):
+        return
+    device = ctx.device
+    if device.answers(timeout=3.0):
+        return
+    tell("    The plug is not answering yet - waiting for it (a router restarting, say).")
+    started = time.monotonic()
+    while time.monotonic() - started < PLUG_BACK_WAIT:
+        output.progress(f"waiting for the plug... {time.monotonic() - started:.0f}s")
+        if device.answers(timeout=3.0):
+            output.progress_clear()
+            tell("    It is answering again.")
+            return
+        time.sleep(3.0)
+    output.progress_clear()
+    tell(f"    It has not answered for {PLUG_BACK_WAIT / 60:.0f} minutes - trying anyway.")
 
 
 # Each step's name on its stage line, in words that need no knowledge of the
@@ -2887,7 +3071,33 @@ def evidence_commit_finished(ctx: "Context") -> tuple[bool | None, str]:
         )
     if status == "FAIL":
         return False, "The plug reported that this step failed."
-    return None, "The plug sent no report of this step."
+    # No report: lost, or never sent (the plug's Wi-Fi was down as it
+    # finished).  The commit writes nothing before it has the new table, and
+    # the plug boots the startup firmware only once the new layout is in
+    # place - so together those two say how far it got.
+    try:
+        fetched = "GET /target-table" in (ctx.evidence / "commit-server.log").read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        fetched = False
+    if not fetched:
+        return False, (
+            "The plug never fetched the new layout, so it wrote nothing - it is safe\n"
+            "  to do this step again."
+        )
+    device = ctx.device
+    if device.is_safeboot():
+        return True, (
+            "The plug's report did not arrive, but it is running the temporary startup\n"
+            "  firmware, which starts only once the new layout is in place - so this\n"
+            "  step did finish."
+        )
+    if device.current_ota() == 1:
+        return False, (
+            "The plug is still running from the old layout, so the step did not get\n"
+            "  as far as switching to the new one; it is safe to do it again."
+        )
+    return None, "The plug sent no report of this step, and does not show how far it got."
 
 
 
@@ -2924,6 +3134,22 @@ def confirm_skip(ctx: Context, step: str, title: str) -> bool:
 
 
 
+def tell_how_to_carry_on() -> None:
+    tell("")
+    tell("Fix the cause, then carry on with the same command again:")
+    tell("    start.cmd, or .\\start.ps1 in PowerShell" if hostsys.IS_WINDOWS else "    sh start.sh")
+    if output.log_path():
+        tell(f"What happened, in full: {display_path(output.log_path())}")
+    tell("Stuck? Start a discussion or open an issue:")
+    output.show_links([(DISCUSSIONS_URL, "Start a discussion"), (ISSUES_URL, "Open an issue")])
+
+
+def unexpected(exc: BaseException) -> str:
+    """An error nothing here anticipated: in full in the log, in a line on screen."""
+    output.log_only(traceback.format_exc().rstrip())
+    return f"something unexpected went wrong: {type(exc).__name__}: {exc}"
+
+
 def cmd_run(ctx: Context) -> int:
     try:
         return run_steps(ctx)
@@ -2935,6 +3161,7 @@ def cmd_run(ctx: Context) -> int:
 def run_steps(ctx: Context) -> int:
     started = time.monotonic()
     resumed = any(ctx.state.is_done(step) for step, _, _ in STEPS)
+    ctx.run_started, ctx.run_resumed = started, resumed
     tell("")
     if ctx.esphome_firmware:
         tell("Target: ESPHome on the stock Sonoff partition table.")
@@ -2945,6 +3172,7 @@ def run_steps(ctx: Context) -> int:
     tell("minute or two with little to see - that's normal. Keep the plug plugged")
     tell("in, and this computer awake, until the last stage says complete.")
     tell("")
+    wait_while_plug_busy(ctx)
     for step, title, _ in STEPS:
         if ctx.state.is_done(step):
             begin_stage(step)
@@ -2993,7 +3221,7 @@ def run_steps(ctx: Context) -> int:
                 say(f"{step} marked done on your say-so.")
                 output.stage_end("already done")
                 continue
-        code = execute(ctx, step)
+        code = execute_with_retries(ctx, step)
         if code == 0 and step == POINT_OF_NO_RETURN and ctx.research_bridge:
             section("Research bridge installed - stopping here", [
                 f"{ctx.bridge.name} is on the plug. Join the bridge's network",
@@ -3008,13 +3236,7 @@ def run_steps(ctx: Context) -> int:
             return code  # the operator chose to quit; main() cleans up and says so
         if code != 0:
             close_firewall_rules(ctx)
-            tell("")
-            tell("Fix the cause, then carry on with the same command again:")
-            tell("    start.cmd, or .\\start.ps1 in PowerShell" if hostsys.IS_WINDOWS else "    sh start.sh")
-            if output.log_path():
-                tell(f"What happened, in full: {display_path(output.log_path())}")
-            tell("Stuck? Start a discussion or open an issue:")
-            output.show_links([(DISCUSSIONS_URL, "Start a discussion"), (ISSUES_URL, "Open an issue")])
+            tell_how_to_carry_on()
             return code
     say("")
     close_firewall_rules(ctx)
@@ -3052,15 +3274,67 @@ def computer_description() -> str:
         except OSError:
             system = ""
         system = system or f"Linux {platform.release()}"
-    return f"{system}, Python {platform.python_version()}"
+    return system
+
+
+def python_description() -> str:
+    """The Python the tool ran on, and where it came from (start.sh, start.ps1)."""
+    running = Path(sys.executable).resolve()
+    portable = Path(os.environ.get("S60_PYTHON_HOME") or ROOT / ".python").resolve()
+    if portable in running.parents:
+        source = "portable, downloaded by this tool"
+    elif (hostsys.IS_MAC and (portable / "installed-by-s60").exists()
+          and "Python.framework" in running.parts):
+        source = "python.org's, installed by this tool"
+    elif sys.prefix != sys.base_prefix:
+        source = "in a virtual environment"
+    else:
+        source = "already installed on this computer"
+    return f"{platform.python_version()} ({source})"
 
 
 # The plug type and region each S60 model letter stands for.
 REGIONS = {"G": "UK (Type G)", "F": "Europe (Type E/F)"}
 
 
+def public_text(text: str, limit: int = 240) -> str:
+    """`text` fit for a public post: on one line, with nothing that identifies
+    the plug, the network or the person - not even a private address."""
+    text = output.scrub(" ".join(str(text).split()))
+    text = re.sub(r"(?<![\w.])\d{1,3}(?:\.\d{1,3}){3}(?![\w])", "<address>", text)
+    return text if len(text) <= limit else text[:limit - 3].rstrip() + "..."
+
+
+def run_result(ctx: Context, ending: str) -> str:
+    """How the run ended, for the report: "converted", or where and why it stopped.
+
+    ending: "converted", "failed" or "crashed".
+    """
+    if ending == "converted":
+        return "converted"
+    stopped = next(((number, step) for number, (step, _, _) in enumerate(STEPS, 1)
+                    if not ctx.state.is_done(step)), None)
+    where = (f"stage {stopped[0]} of {len(STEPS)} ({stage_name(stopped[1])})"
+             if stopped else "the end")
+    reason = ctx.last_failure or (
+        ctx.state.data.get("steps", {}).get(stopped[1], {}).get("error", "") if stopped else "")
+    head = "crashed" if ending == "crashed" else "stopped"
+    return f"{head} at {where}" + (f": {public_text(reason)}" if reason else "")
+
+
+def stage_timings(ctx: Context, key: str) -> str:
+    """Each stage's `key` capture as "10=36s, 14=43s", by stage number - with no
+    space inside a pair, so the screen never wraps one across two lines."""
+    captures = ctx.state.data.get("captures", {})
+    timings = [f"{number}={output.elapsed(captures[f'{step}.{key}']).replace(' ', '')}"
+               for number, (step, _, _) in enumerate(STEPS, 1)
+               if isinstance(captures.get(f"{step}.{key}"), (int, float))]
+    return ", ".join(timings) or "not recorded"  # a run from before they were
+
+
 def report_fields(ctx: Context, seconds: float, resumed: bool,
-                  hardware: dict[str, str] | None = None) -> list[tuple[str, str]]:
+                  hardware: dict[str, str] | None = None,
+                  result: str = "converted") -> list[tuple[str, str]]:
     """This run's answers for a Test reports post, as (label, value) - nothing private.
 
     No addresses, Wi-Fi name, account or device id: only what is useful to
@@ -3076,8 +3350,17 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
               or (captures.get("D1.upload_route") == "home network" and captures.get("D1.wifi") != "preset")
               or captures.get("F4.wifi_route") == "setup network")
     took = output.elapsed(seconds) + (" (this session; the run was resumed)" if resumed else "")
+    retries = {number: captures[f"{step}.attempts"] - 1 for number, (step, _, _) in enumerate(STEPS, 1)
+               if isinstance(captures.get(f"{step}.attempts"), int) and captures[f"{step}.attempts"] > 1}
+    retried = [f"{number} ({count} {'retry' if count == 1 else 'retries'})"
+               for number, count in retries.items()]
+    signal = captures.get("E1.signal_dbm")
+    try:
+        name = json.loads(s60_template(product))["NAME"]
+    except (ValueError, KeyError, TypeError):
+        name = "__"
     fields = [
-        ("Result", "converted"),
+        ("Result", result),
         ("Tool version", __version__),
         ("Plug model", model or "__"),
         ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),
@@ -3085,13 +3368,22 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         # How it went, never where it is or which plug: the path holds the MAC.
         ("Sonoff backup", BACKUP_OUTCOMES.get(ctx.state.input("backup_outcome") or "not taken")[1]),
         ("Computer", computer_description()),
+        ("Python", python_description()),
         ("Time taken", took),
+        # By stage number.  Busy is how long a Berry stage kept the plug from
+        # anything else: at 70-90s a real S60TPG stops answering for good.
+        ("Stage times", stage_timings(ctx, "seconds")),
+        ("Plug busy", stage_timings(ctx, "plug_busy_seconds")),
+        ("Retries", ", ".join(retried) or "none"),
+        ("Plug Wi-Fi signal", f"{signal} dBm" if isinstance(signal, int) else "not recorded"),
         ("Typed the Wi-Fi", "yes" if ctx.state.input("wifi_typed") else "no"),
         ("Joined setup network", "yes" if joined else "no"),
-        ("Name in Tasmota", json.loads(s60_template(product))["NAME"]),
+        ("Name in Tasmota", name),
         ("Relay", hardware.get("Relay", "not checked")),
         ("Power meter", hardware.get("Power meter", "not checked")),
     ]
+    if os.environ.get("S60_EMULATOR_URL"):
+        fields.append(("Ran in the emulator", "yes"))
     # Each answer starts with a capital: "No", "Converted".  Only the first
     # letter, so "S60TPG" and "6m 32s" stay as they are.
     return [(label, value[:1].upper() + value[1:]) for label, value in fields]
@@ -3192,9 +3484,41 @@ def check_hardware(ctx: Context) -> dict[str, str]:
 def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     """Ask for a report, with this run's details ready to paste."""
     fields = report_fields(ctx, seconds, resumed, check_hardware(ctx))
+    offer_report(ctx, fields, "Please share how it went!")
+    tell("")
+    output.show("You've reached the bit where I hold out my hat!", output.GREEN)
+    tell("Free software, not free biscuits... Throw your friendly neighbourhood dev a biscuit:")
+    output.show_links([(KOFI_URL, "Ko-fi"), (DONATE_URL, "PayPal")], hint=True)
+
+
+def report_ending(code: int | None, ending: str | None) -> str | None:
+    """Which stopped run offers its report: "failed" or "crashed", else None.
+
+    A run that failed offers it as one that converted does (that one already
+    has).  Not one the operator stopped - quit at a question (130) or Ctrl-C -
+    nor one this computer stopped (the terminal closed: nobody to read it).
+    """
+    if ending in ("crashed", "cancelled"):
+        return "crashed" if ending == "crashed" else None
+    return "failed" if code not in (None, 0, 130) else None
+
+
+def invite_stopped_report(ctx: Context, ending: str) -> None:
+    """A run that failed asks for its report too: the runs that fail say most
+    about what to fix, and leaving them out would make the tool look better than
+    it is.  Not one the operator stopped - that says nothing about the tool.
+    ending: "failed" or "crashed"."""
+    seconds = time.monotonic() - ctx.run_started - output.waited()
+    fields = report_fields(ctx, seconds, ctx.run_resumed, result=run_result(ctx, ending))
+    offer_report(ctx, fields, "Please share how it went - a run that stopped helps as much "
+                              "as one that worked.")
+
+
+def offer_report(ctx: Context, fields: list[tuple[str, str]], heading: str) -> None:
+    ctx.reported = True
     copied = hostsys.copy_to_clipboard(report_markdown(fields))
     tell("")
-    output.show("Please share how it went!", output.GREEN)
+    output.show(heading, output.GREEN)
     if copied:
         tell("Paste your results into the thread (they're already on your clipboard):")
     else:
@@ -3206,10 +3530,6 @@ def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     if any(value == "__" for _, value in fields):
         tell("")
         tell("Fill in the blanks (__) if you know them.")
-    tell("")
-    output.show("You've reached the bit where I hold out my hat!", output.GREEN)
-    tell("Free software, not free biscuits... Throw your friendly neighbourhood dev a biscuit:")
-    output.show_links([(KOFI_URL, "Ko-fi"), (DONATE_URL, "PayPal")], hint=True)
 
 
 def display_path(path: Path) -> str:
@@ -3427,6 +3747,7 @@ def _main() -> int:
         say(f"Given in advance ({display_path(args.env_file or credentials.ENV_FILE)}): "
             f"{', '.join(given)}")
     code = None  # 130 only when the operator chose to quit, not for Ctrl-C
+    ending = None  # "crashed", or "cancelled" by the operator: see run_result()
     try:
         code = cmd_run(ctx)
         return code
@@ -3434,17 +3755,32 @@ def _main() -> int:
         output.stage_end("stopped")
         code = 130
         return code
+    except Exception as exc:  # noqa: BLE001 - recorded and explained, not a bare traceback
+        message = unexpected(exc)
+        ctx.last_failure = message
+        output.stage_end("stopped")
+        tell(f"FAILED: {message}")
+        tell_how_to_carry_on()
+        code, ending = 1, "crashed"
+        return code
     except KeyboardInterrupt:
         output.stage_end("stopped")
         tell("")
         tell("Stopped with Ctrl-C. Run again to pick up where you left off or to start again")
         tell("(Every step checks the plug first, so running again is safe.)")
+        ending = "cancelled"
         return 130
     finally:
         if code == 130:
             say_quit(ctx)
         else:
             release_firewall(ctx)
+        reported = report_ending(code, ending)
+        if reported and not ctx.reported:
+            try:
+                invite_stopped_report(ctx, reported)
+            except Exception as exc:  # noqa: BLE001 - never let the report hide how it ended
+                output.log_only(f"The report could not be made: {type(exc).__name__}: {exc}")
         output.finish()
 
 

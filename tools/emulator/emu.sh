@@ -12,6 +12,9 @@
 #   tools/emulator/emu.sh --no-firewall  without the "computer's" firewall (ufw), on by default
 #   tools/emulator/emu.sh --windows  Windows is the computer, wired in by windows_link.py
 #                                    (from Windows, start it all with tools/emulator/emu.ps1)
+#   tools/emulator/emu.sh --instance N  another emulator beside the first (N = 1-9): its own
+#                                    container (s60-emu-N), state (state-N) and browser
+#                                    port (8080+N), so tests can run side by side
 #
 # Runs a plug from its Sonoff backup, which every conversion keeps in
 # captures/plugs/<MAC>/sonoff-backup/ (or a dump in captures/emulation/; see
@@ -32,13 +35,16 @@ PY=$ROOT/.venv/bin/python
 # A Windows checkout's .venv is Windows' own: under WSL the NVS generator lives here.
 [ -x "$PY" ] || PY=$HOME/.local/share/s60-emu/venv/bin/python
 IMAGE=s60-emu
+NAME=s60-emu PORT=8080 LINK_PORT=7860
 
-cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 yes=0 tty=-it plug=""
+cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 yes=0 tty=-it plug="" instance=""
 while [ $# -gt 0 ]; do
     arg=$1
     case "$arg" in
     --plug) [ $# -ge 2 ] || { echo "--plug needs a MAC address" >&2; exit 2; }; plug=$2; shift ;;
     --plug=*) plug=${arg#--plug=} ;;
+    --instance) [ $# -ge 2 ] || { echo "--instance needs a number, 1-9" >&2; exit 2; }; instance=$2; shift ;;
+    --instance=*) instance=${arg#--instance=} ;;
     --cloud) cloud=1 ;;
     --yes) yes=1 ;;
     --fresh) fresh=1 ;;
@@ -47,18 +53,23 @@ while [ $# -gt 0 ]; do
     --detach) tty=-dt ;;
     --no-firewall) firewall=0 ;;
     --windows) windows=1 ;;
-    *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
     shift
 done
+if [ -n "$instance" ]; then
+    case "$instance" in [1-9]) ;; *) echo "--instance needs a number, 1-9" >&2; exit 2 ;; esac
+    STATE=$STATE-$instance NAME=s60-emu-$instance
+    PORT=$((8080 + instance)) LINK_PORT=$((7860 + instance))
+fi
 "$PY" -c 'import esp_idf_nvs_partition_gen' 2>/dev/null || {
     venv=$(dirname "$(dirname "$PY")")
     echo "The emulator needs ESP-IDF's NVS generator in $venv:" >&2
     echo "    python3 -m venv $venv && $PY -m pip install esp-idf-nvs-partition-gen" >&2
     exit 1
 }
-if docker ps -q --filter "name=^s60-emu$" | grep -q .; then
-    echo "The emulator is already running. Attach to it with: docker attach s60-emu" >&2
+if docker ps -q --filter "name=^$NAME$" | grep -q .; then
+    echo "The emulator is already running. Attach to it with: docker attach $NAME" >&2
     exit 1
 fi
 
@@ -156,8 +167,8 @@ EOF
 fi
 
 # Your browser, and with --windows the wire windows_link.py connects to.
-publish=(-p 127.0.0.1:8080:8080)
-[ "$windows" = 1 ] && publish+=(-p 127.0.0.1:7860:7860)
+publish=(-p "127.0.0.1:$PORT:8080")
+[ "$windows" = 1 ] && publish+=(-p "127.0.0.1:$LINK_PORT:7860")
 # Awake while you are in it, so a conversion is not cut off by sleep: a lock
 # held only while this runs (systemd-inhibit), changing no setting.
 awake=()
@@ -165,7 +176,7 @@ if [ "$tty" = -it ] && systemd-inhibit --what=sleep:idle true 2>/dev/null; then
     awake=(systemd-inhibit --what=sleep:idle --who="S60 emulator" --why="the emulated plug's conversion" --mode=block)
 fi
 # Capped: the plug, its router and the tool used about 80 MB between them.
-exec "${awake[@]}" docker run --rm $tty --name s60-emu --hostname s60-emu-computer \
+exec "${awake[@]}" docker run --rm $tty --name "$NAME" --hostname s60-emu-computer \
     --memory "${S60_EMU_MEMORY:-256m}" --cpus "${S60_EMU_CPUS:-2}" \
     --cap-add NET_ADMIN --device /dev/net/tun \
     --sysctl net.ipv4.ip_forward="$(( cloud || windows ))" \
@@ -173,5 +184,5 @@ exec "${awake[@]}" docker run --rm $tty --name s60-emu --hostname s60-emu-comput
     -v "$STATE:/state" -v "$SRC/flash.bin:/secrets/stock-flash.bin:ro" \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e PLUG_MAC="$mac" \
     -e CLOUD="$cloud" -e PCAP="$pcap" -e FIREWALL="$firewall" -e WINDOWS="$windows" \
-    -e S60_EMULATOR_URL=http://localhost:8080 \
+    -e S60_EMULATOR_URL="http://localhost:$PORT" \
     "$IMAGE"

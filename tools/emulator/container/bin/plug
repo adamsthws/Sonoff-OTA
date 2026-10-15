@@ -6,6 +6,10 @@
 #   plug off | plug on   switch it off / on
 #   plug cycle N [SECS]  N quick power cycles, SECS (default 2) on each time -
 #                        Tasmota's settings reset is 7 in a row
+#   plug router off [SECS]  the access point goes, as when the router restarts (not
+#                        faithful: see docs/emulator.md); back after
+#                        SECS if given
+#   plug router on       the Wi-Fi is back, and the plug rejoins by itself
 set -euo pipefail
 RUN=/run/s60emu
 LOG=/state/logs/uart.log
@@ -36,6 +40,7 @@ status)
     echo "Its own network: ${softap:-(none)}"
     lease=$(awk '{print $3}' "$RUN/leases" 2>/dev/null | head -1)
     echo "Address on the home network: ${lease:-(none yet)}"
+    [ -e "$RUN/router-off" ] && echo "Router:   off - the plug's Wi-Fi is down (plug router on)"
     ;;
 log)
     touch "$LOG"
@@ -69,8 +74,26 @@ cycle)
     done
     echo "Done; the plug stays on."
     ;;
+router)
+    case "${2:-}" in
+    off)
+        touch "$RUN/router-off"
+        if [ -n "${3:-}" ]; then
+            (sleep "$3"; rm -f "$RUN/router-off") >/dev/null 2>&1 &
+            echo "Router off: the plug's Wi-Fi is down for ${3}s."
+        else
+            echo "Router off: the plug's Wi-Fi is down until: plug router on"
+        fi
+        ;;
+    on)
+        rm -f "$RUN/router-off"
+        echo "Router on: the plug rejoins by itself."
+        ;;
+    *) echo "usage: plug router off [SECS] | plug router on" >&2; exit 2 ;;
+    esac
+    ;;
 *)
-    sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac

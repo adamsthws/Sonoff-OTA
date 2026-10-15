@@ -222,6 +222,63 @@ The message includes what the plug said. Usually it means the file is wrong -
 check `sha256sum -c SHA256SUMS` passes and that you are uploading the file the
 tool named, not the `.factory.bin`.
 
+## When a migration stage stops
+
+The stages that check, stage and rewrite the plug's memory run on the plug
+itself, and report back to this computer. When one stops, the plug says why,
+and the tool shows it:
+
+**"... did not pass: the plug says: ..."**
+
+The plug's own reason. Two kinds:
+
+- **One of its checks refused** - "NVS changed since preflight", "source table
+  changed", and the like. Nothing was written. Something changed on the plug
+  between stages; run again, and the earlier checks are done again first. If
+  the same refusal comes back, report it rather than forcing past it.
+- **"... returned HTTP -1 after N attempts"** - the plug could not reach this
+  computer. Usually security software or a firewall that changed mid-run, the
+  computer going to sleep, or a weak Wi-Fi signal (the tool warns when it is
+  below -75 dBm). These stages are safe to repeat, so the tool tries them
+  again by itself, up to three times, before stopping.
+
+**"the plug stopped the ... without reaching this computer"** or **"the plug
+has sent nothing for 2 minutes"**
+
+The plug lost its connection to this computer, so its reason could not arrive.
+The tool then reads the plug's own console and shows the last lines, marked
+`The plug's console:`, and gives the plug's reason from there ("its console
+says: ..."). Then as above.
+
+**How long it waits**
+
+A stage keeps the plug busy for under a minute, and while it does the plug
+answers nothing else. Kept busy for much longer, a real plug stops answering
+until it is switched off and on (its energy meter's readings pile up), so the
+plug never spends more than 20 seconds in all trying a request again. If its
+Wi-Fi drops - a router restarting, say - the stage stops, and the tool waits up
+to 5 minutes for the plug to answer again, then runs it again by itself (three
+tries in all). The tool checks on the plug whenever it goes quiet, so a plug
+that has stopped is noticed within about 20 seconds; no stage is waited on for
+more than 5 minutes in all. Waiting for you - to join a network, say - has no
+time limit.
+
+**"The plug is not answering at all"**
+
+A plug can be left answering nothing - not even its web page - though it
+still answers ping: kept busy too long, or left waiting on this computer when
+the tool was stopped mid-stage. Give it two minutes; if its web page still does
+not answer, switch it off and on. At every point this can happen that is safe: staging
+writes only the spare half of memory, the rewrite downloads what it needs
+before it writes anything, and installing the official startup firmware
+carries on where it stopped. Then run this again.
+
+**"The plug is on the network but not answering yet"**
+
+A stage stopped part way (Ctrl-C, say) keeps the plug busy until it gives up,
+for up to a minute - and while busy, the plug answers nothing else. Run again straight away and the tool waits for it, then
+carries on.
+
 ## Slots and restarts
 
 **"the plug is still running from slot 0 after 2 uploads"**

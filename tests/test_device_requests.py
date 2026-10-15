@@ -1,0 +1,158 @@
+import http.server
+import select
+import socket
+import threading
+import time
+import unittest
+import urllib.error
+
+from tools.autoflash import device
+from tools.autoflash.device import Device, DeviceError
+
+
+class BusyTasmota(http.server.ThreadingHTTPServer):
+    """Answers as a Tasmota plug does - /slow only after `delay` seconds, as
+    while Berry runs - and notes whether the client closed a request first."""
+    daemon_threads = True
+
+    def __init__(self, delay: float = 0.0):
+        super().__init__(("127.0.0.1", 0), BusyTasmotaHandler)
+        self.delay = delay
+        self.slow_page = False
+        self.closed_unanswered: list[bool] = []
+        self.answered = threading.Event()
+
+
+class BusyTasmotaHandler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def reply(self, status: int, body: bytes = b"ok", headers: dict[str, str] | None = None):
+        self.send_response(status)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        server: BusyTasmota = self.server
+        if self.path.startswith("/slow") or (server.slow_page and self.path == "/"):
+            time.sleep(server.delay)
+            # A client that gave up and closed has sent its FIN by now.
+            readable, _, _ = select.select([self.connection], [], [], 0)
+            closed = bool(readable) and self.connection.recv(1, socket.MSG_PEEK) == b""
+            server.closed_unanswered.append(closed)
+            self.reply(200, b"late")
+            server.answered.set()
+        elif self.path.startswith("/missing"):
+            self.reply(404, b"not found")
+        elif self.path.startswith("/moved"):
+            self.reply(302, b"", {"Location": "/cm?cmnd=Status"})
+        elif self.path.startswith("/cm"):
+            self.reply(200, b'{"Status":{}}')
+        else:
+            self.reply(200, b"<title>Tasmota</title>")
+
+
+class HeldRequestTests(unittest.TestCase):
+    def start(self, delay: float = 0.0) -> Device:
+        server = BusyTasmota(delay)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(lambda: (server.shutdown(), server.server_close()))
+        self.server = server
+        return Device(f"127.0.0.1:{server.server_address[1]}")
+
+    def test_a_request_the_plug_has_not_answered_is_held_open_not_closed(self):
+        # Closing it is what leaves a busy plug's web server stuck for good.
+        plug = self.start(delay=1.5)
+        with self.assertRaises(TimeoutError):
+            plug._get("/slow", {}, timeout=0.3)
+        self.assertEqual(device.held_requests(), 1)
+        self.assertTrue(self.server.answered.wait(5))
+        time.sleep(0.2)
+        self.assertEqual(self.server.closed_unanswered, [False])
+        self.assertEqual(device.held_requests(), 0)
+
+    def test_a_plug_with_requests_held_is_not_sent_more_than_a_few(self):
+        plug = self.start(delay=1.5)
+        for _ in range(device.MOST_HELD + 2):
+            with self.assertRaises(TimeoutError):
+                plug._get("/slow", {}, timeout=0.2)
+        self.assertEqual(device.held_requests(plug.host), device.MOST_HELD)
+        deadline = time.monotonic() + 10
+        while device.held_requests() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertEqual(self.server.closed_unanswered, [False] * device.MOST_HELD)
+        self.assertEqual(plug._get("/slow", {}, timeout=5), "late")  # answered: sent again
+
+    def test_a_held_request_is_kept_alive_and_ends_when_the_plug_restarts(self):
+        # The commit restarts the plug, cutting off the reply to the request that
+        # started it: that hold must end, or it counts against the plug for ever.
+        from unittest import mock
+        import struct
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        self.addCleanup(listener.close)
+        accepted = []
+        threading.Thread(target=lambda: accepted.append(listener.accept()[0]), daemon=True).start()
+        plug = Device(f"127.0.0.1:{listener.getsockname()[1]}")
+        with mock.patch.object(device, "_keep_alive", wraps=device._keep_alive) as kept:
+            with self.assertRaises(TimeoutError):
+                plug._get("/cm", {"cmnd": "Br s60_busy(600000)"}, timeout=0.3)
+        kept.assert_called_once()
+        self.assertTrue(kept.call_args.args[0].getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE))
+        self.assertEqual(device.held_requests(plug.host), 1)
+        # A restarted plug refuses the old connection: here, reset at once.
+        connection = accepted[0]
+        connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        connection.close()
+        deadline = time.monotonic() + 5
+        while device.held_requests(plug.host) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(device.held_requests(plug.host), 0)
+
+    def test_the_web_page_check_still_says_no_at_once(self):
+        plug = self.start(delay=1.5)
+        self.server.slow_page = True
+        started = time.monotonic()
+        self.assertFalse(plug.answers(timeout=0.3))
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertTrue(self.server.answered.wait(5))
+
+    def test_errors_reach_the_caller_as_before(self):
+        plug = self.start()
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            plug._get("/missing", {}, timeout=5)
+        self.assertEqual(caught.exception.code, 404)
+        self.assertEqual(caught.exception.read(), b"not found")
+        self.assertTrue(plug.answers(timeout=5))  # any answer is an answer
+        self.assertEqual(plug.command("Status"), {"Status": {}})
+
+    def test_a_redirect_is_followed(self):
+        plug = self.start()
+        self.assertEqual(plug._get("/moved", {}, timeout=5), '{"Status":{}}')
+
+    def test_nobody_there_is_a_url_error_and_nothing_is_held(self):
+        with socket.socket() as spare:
+            spare.bind(("127.0.0.1", 0))
+            port = spare.getsockname()[1]
+        with self.assertRaises(urllib.error.URLError):
+            Device(f"127.0.0.1:{port}")._get("/", {}, timeout=2)
+        self.assertEqual(device.held_requests(), 0)
+
+    def test_a_web_password_is_still_reported(self):
+        class Refusing(BusyTasmotaHandler):
+            def do_GET(self):
+                self.reply(401, b"")
+        server = BusyTasmota()
+        server.RequestHandlerClass = Refusing
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(lambda: (server.shutdown(), server.server_close()))
+        with self.assertRaisesRegex(DeviceError, "web UI has a password"):
+            Device(f"127.0.0.1:{server.server_address[1]}")._get("/", {}, timeout=5)
+
+
+if __name__ == "__main__":
+    unittest.main()

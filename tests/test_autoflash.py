@@ -537,10 +537,423 @@ class ConversionWifiTests(unittest.TestCase):
         for call in self.pin.call_args_list:
             self.assertNotEqual(call.args[1:], ("NewNet", "new"))
 
+    def test_a_lost_commit_report_falls_back_to_the_staging_record(self):
+        import hashlib
+        import json
+        (self.ctx.evidence / "commit-report.json").unlink()
+        (self.ctx.evidence / "stage-report.json").write_text(json.dumps({
+            "phase": "stage", "status": "PASS",
+            "staged_sha256": hashlib.sha256(b"Home/right").hexdigest()}))
+        self.run_with(("Home", "right"))
+        self.ctx.remember_wifi.assert_called_once_with("Home", "right", b"Home/right")
+
     def test_no_commit_record_stops_before_asking(self):
         (self.ctx.evidence / "commit-report.json").unlink()
-        with self.assertRaisesRegex(self.autoflash.Abort, "no record of the new layout"):
+        with self.assertRaisesRegex(self.autoflash.Abort, "no record of the startup firmware"):
             self.run_with(("Home", "right"))
+
+
+class PhaseFailureTests(unittest.TestCase):
+    """A phase that does not pass says why: the plug's words, or the timeout's."""
+
+    def test_the_plugs_reason_is_given(self):
+        from tools.autoflash.phases import failure_reason
+        captured = "STAGE RESULT: FAIL\nTHE PLUG SAYS: migration_refused: GET /chunk/safeboot/2 returned HTTP -1\n"
+        self.assertEqual(failure_reason(captured),
+                         "the plug says: migration_refused: GET /chunk/safeboot/2 returned HTTP -1")
+
+    def test_a_timeout_is_given(self):
+        from tools.autoflash.phases import failure_reason
+        self.assertIn("sent nothing for 6 minutes",
+                      failure_reason("TIMEOUT: the plug has sent nothing for 6 minutes, and gave no reason."))
+
+    def test_nothing_known_is_none(self):
+        from tools.autoflash.phases import failure_reason
+        self.assertIsNone(failure_reason("  [10.0.0.63] \"GET /berry/stage.be HTTP/1.1\" 200 -"))
+
+    def test_the_step_abort_carries_the_reason(self):
+        import tools.s60_autoflash as autoflash
+        error = autoflash.phase_failed("stage", 4, "THE PLUG SAYS: flash is not exactly 4 MiB")
+        self.assertEqual(str(error), "stage did not pass: the plug says: flash is not exactly 4 MiB")
+        self.assertEqual(str(autoflash.phase_failed("stage", 3, "")), "stage did not pass (exit 3)")
+
+    def console(self, lines):
+        from unittest import mock
+        from tools.autoflash.phases import PhaseRunner
+        runner = PhaseRunner.__new__(PhaseRunner)
+        shown = []
+        runner.log = shown.append
+        runner.device = mock.Mock(console_log=mock.Mock(return_value=lines))
+        return runner._show_plug_console(), shown
+
+    def test_the_plugs_console_is_read_for_its_own_words(self):
+        # As the emulated plug logged it, cut off from the computer mid-stage.
+        said, shown = self.console([
+            "13:56:01.000 WIF: Connected",
+            "13:56:03.251 S60 STAGE: 65536/811824 bytes",
+            "13:57:11.702 HTP: Connection timeout after -1 ms",
+            '13:57:11.702 RSL: RESULT = {"Br":"[migration_refused] POST /capture/staged/22 '
+            'returned HTTP -1 after 21 attempts"}',
+        ])
+        self.assertEqual(said, "POST /capture/staged/22 returned HTTP -1 after 21 attempts")
+        self.assertEqual(len(shown), 2)
+        self.assertTrue(all(line.startswith("    The plug's console: ") for line in shown))
+
+    def test_another_berry_error_keeps_its_kind(self):
+        said, _ = self.console(['RSL: RESULT = {"Br":"[index_error] list index out of range"}'])
+        self.assertEqual(said, "index_error: list index out of range")
+
+    def test_an_earlier_attempts_error_is_not_this_ones_reason(self):
+        said, shown = self.console([
+            '13:29:34.062 RSL: RESULT = {"Br":"[migration_refused] POST /capture/staged/2 '
+            'returned HTTP -1 after 107 attempts"}',
+            "13:31:03.251 S60 STAGE: 65536/811824 bytes",
+        ])
+        self.assertIsNone(said)
+        self.assertEqual(len(shown), 2)  # still shown, for whoever reads the log
+
+    def test_a_plug_stuck_after_a_phase_is_to_be_switched_off_and_on(self):
+        # Tasmota waits for ever on a download cut off part way, answering
+        # nothing; switching it off and on is the way out, and safe here.
+        from unittest import mock
+        from tools.autoflash.phases import PhaseRunner
+        for answers, advised in ((False, True), (True, False)):
+            runner = PhaseRunner.__new__(PhaseRunner)
+            shown = []
+            runner.log = shown.append
+            runner._plug_answers = mock.Mock(return_value=answers)
+            runner._advise_if_stuck()
+            self.assertEqual(any("switch it off" in line for line in shown), advised, answers)
+
+    def test_a_plug_that_cannot_answer_adds_nothing(self):
+        from unittest import mock
+        from tools.autoflash.phases import PhaseRunner
+        runner = PhaseRunner.__new__(PhaseRunner)
+        shown = []
+        runner.log = shown.append
+        runner.device = mock.Mock(console_log=mock.Mock(side_effect=OSError("unreachable")))
+        runner._show_plug_console()
+        self.assertEqual(shown, [])
+
+
+class PhaseWaitTests(unittest.TestCase):
+    """A phase is waited on only while the plug may still be working on it."""
+
+    class Server:
+        def __init__(self, exits_after=None):
+            self.calls = 0
+            self.exits_after = exits_after
+
+        def wait(self, timeout):
+            import subprocess
+            self.calls += 1
+            if self.exits_after is not None and self.calls >= self.exits_after:
+                return 0
+            raise subprocess.TimeoutExpired("server", timeout)
+
+        def poll(self):
+            return None
+
+    def wait(self, server, answers, heard_ago=60.0, exec_timeout=540.0):
+        from unittest import mock
+        from tools.autoflash import phases
+        runner = phases.PhaseRunner.__new__(phases.PhaseRunner)
+        runner._plug_answers = mock.Mock(side_effect=answers)
+        clock = iter(range(1000, 100_000, 2))
+        with mock.patch.object(phases.time, "monotonic", side_effect=lambda: next(clock)):
+            return runner._wait("stage", server, exec_timeout, lambda: 1000 - heard_ago), runner
+
+    def test_a_plug_that_answers_after_going_quiet_has_stopped(self):
+        from tools.autoflash.phases import PhaseError
+        with self.assertRaisesRegex(PhaseError, "stopped the stage without reaching this computer"):
+            self.wait(self.Server(), answers=[True])
+
+    def test_a_busy_plug_is_waited_on(self):
+        # Not answering: still at it (or offline, riding out a router restart).
+        code, runner = self.wait(self.Server(exits_after=40), answers=[False] * 100)
+        self.assertEqual(code, 0)
+        self.assertGreater(runner._plug_answers.call_count, 1)
+
+    def test_a_plug_still_sending_is_not_disturbed(self):
+        code, runner = self.wait(self.Server(exits_after=20), answers=[True] * 100, heard_ago=-10_000)
+        self.assertEqual(code, 0)
+        runner._plug_answers.assert_not_called()
+
+    def test_the_backstop_still_ends_it(self):
+        from tools.autoflash.phases import PhaseError
+        with self.assertRaisesRegex(PhaseError, "did not complete within 1 minutes"):
+            self.wait(self.Server(), answers=[False] * 1000, exec_timeout=60.0)
+
+    def test_starting_does_not_wait_for_a_reply(self):
+        # The commit restarts the plug: its reply never comes, and the result
+        # is already in - this used to cost a minute per conversion.
+        import threading
+        from unittest import mock
+        from tools.autoflash.phases import PhaseRunner
+        runner = PhaseRunner.__new__(PhaseRunner)
+        release = threading.Event()
+        runner.device = mock.Mock(berry_fire=mock.Mock(side_effect=lambda *a, **k: release.wait(5)))
+        runner.log = mock.Mock()
+        runner._start('s60_commit("x")')
+        release.set()
+        runner.device.berry_fire.assert_called_once()
+
+
+class RetryTests(unittest.TestCase):
+    """Safe steps that failed for a reason that may pass are run again."""
+
+    def run_with(self, step, errors):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        ctx = SimpleNamespace(state=state)
+        outcomes = iter(errors)
+
+        def fake_execute(_, name):
+            error = next(outcomes)
+            if error is None:
+                state.mark(name, DONE)
+                return 0
+            state.mark(name, FAILED, error=error)
+            return 1
+        with mock.patch.object(autoflash, "execute", side_effect=fake_execute) as ran, \
+             mock.patch.object(autoflash.time, "sleep"), mock.patch.object(autoflash, "tell"):
+            code = autoflash.execute_with_retries(ctx, step)
+        return code, ran.call_count
+
+    def test_a_network_failure_is_tried_again(self):
+        code, runs = self.run_with("E2", ["stage did not pass: the plug says: POST /capture/staged/22 "
+                                          "returned HTTP -1 after 21 attempts", None])
+        self.assertEqual((code, runs), (0, 2))
+
+    def test_a_wifi_drop_is_tried_again(self):
+        # The plug now gives up after 20s, and this computer waits out the rest.
+        code, runs = self.run_with("E2", ["stage did not pass: the plug says: migration_refused: "
+                                          "the plug's Wi-Fi went down and was not back within "
+                                          "20 seconds", None])
+        self.assertEqual((code, runs), (0, 2))
+
+    def test_three_attempts_at_most(self):
+        code, runs = self.run_with("E1", ["timed out"] * 5)
+        self.assertEqual((code, runs), (1, 3))
+
+    def test_a_refusal_is_not_tried_again(self):
+        code, runs = self.run_with("E2", ["stage did not pass: the plug says: "
+                                          "migration_refused: NVS changed since preflight"])
+        self.assertEqual((code, runs), (1, 1))
+
+    def test_the_commit_is_never_tried_again(self):
+        code, runs = self.run_with("E3", ["timed out", None])
+        self.assertEqual((code, runs), (1, 1))
+
+    def test_a_phase_with_no_result_keeps_the_commit_attempted(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        from tools.autoflash.phases import PhaseError
+
+        for step, expected in (("E3", "attempted"), ("E2", FAILED)):
+            directory = tempfile.TemporaryDirectory()
+            self.addCleanup(directory.cleanup)
+            state = RunState.open(Path(directory.name))
+            title, _ = autoflash.STEP_INDEX[step]
+            failing = mock.Mock(side_effect=PhaseError("the plug stopped the commit without reaching this computer"))
+            with mock.patch.dict(autoflash.STEP_INDEX, {step: (title, failing)}), \
+                 mock.patch.object(autoflash, "begin_stage"), \
+                 mock.patch.object(autoflash.output, "stage_end"), \
+                 mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
+                autoflash.execute(SimpleNamespace(state=state), step)
+            self.assertEqual(state.status(step), expected, step)
+
+
+class StageTimingTests(unittest.TestCase):
+    """Every stage's time is kept for the report, however it ends."""
+
+    def test_a_stage_that_fails_has_its_time_and_the_plugs_busy_time_kept(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        from tools.autoflash.phases import PhaseError
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        ctx = SimpleNamespace(state=state)
+
+        def stage(context):
+            context.last_runner = SimpleNamespace(busy_seconds=41.5)
+            raise PhaseError("the plug stopped the stage without reaching this computer")
+        title, _ = autoflash.STEP_INDEX["E2"]
+        with mock.patch.dict(autoflash.STEP_INDEX, {"E2": (title, stage)}), \
+             mock.patch.object(autoflash, "begin_stage"), \
+             mock.patch.object(autoflash.output, "stage_end"), \
+             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
+            self.assertEqual(autoflash.execute(ctx, "E2"), 1)
+        captures = state.data["captures"]
+        self.assertIsInstance(captures["E2.seconds"], int)
+        self.assertEqual(captures["E2.plug_busy_seconds"], 41.5)
+        self.assertIn("without reaching", ctx.last_failure)
+
+        # A quicker try after it keeps the longest: how near the plug came to stopping.
+        def quicker(context):
+            context.last_runner = SimpleNamespace(busy_seconds=3.0)
+            raise PhaseError("the plug did not fetch the stage instructions")
+        with mock.patch.dict(autoflash.STEP_INDEX, {"E2": (title, quicker)}), \
+             mock.patch.object(autoflash, "begin_stage"), \
+             mock.patch.object(autoflash.output, "stage_end"), \
+             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
+            autoflash.execute(ctx, "E2")
+        self.assertEqual(state.data["captures"]["E2.plug_busy_seconds"], 41.5)
+
+
+class PlugBackTests(unittest.TestCase):
+    """Before a step is tried again, a plug that is not answering is waited for."""
+
+    def wait(self, answers, d1_done=True):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        state.set_input("plug_ip", "10.0.0.63")
+        if d1_done:
+            state.mark("D1", DONE)
+        device = mock.Mock(answers=mock.Mock(side_effect=list(answers)))
+        clock = iter(range(0, 100_000, 3))
+        with mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(autoflash.time, "sleep"), \
+             mock.patch.object(autoflash, "tell") as told, \
+             mock.patch.object(autoflash.output, "progress"), \
+             mock.patch.object(autoflash.output, "progress_clear"):
+            autoflash.wait_for_plug_back(SimpleNamespace(state=state, device=device))
+        return device, told
+
+    def test_an_answering_plug_is_tried_again_at_once(self):
+        device, told = self.wait([True])
+        told.assert_not_called()
+
+    def test_a_plug_back_after_a_router_restart_is_tried_again_then(self):
+        device, told = self.wait([False] * 30 + [True])
+        self.assertEqual(device.answers.call_count, 31)
+        self.assertIn("answering again", told.call_args.args[0])
+
+    def test_one_that_never_answers_is_tried_anyway_after_five_minutes(self):
+        device, told = self.wait([False] * 1000)
+        self.assertIn("trying anyway", told.call_args.args[0])
+        self.assertLess(device.answers.call_count, 1000)
+
+    def test_before_tasmota_nothing_is_waited_for(self):
+        device, _ = self.wait([], d1_done=False)
+        device.answers.assert_not_called()
+
+
+class BusyPlugTests(unittest.TestCase):
+    """A plug still finishing a stopped step is waited for, not misread."""
+
+    def ctx(self, *, d1_done=True, answers=(), pings=True):
+        from types import SimpleNamespace
+        from unittest import mock
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        state.set_input("plug_ip", "10.0.0.63")
+        if d1_done:
+            state.mark("D1", DONE)
+        device = mock.Mock(answers=mock.Mock(side_effect=list(answers)))
+        return SimpleNamespace(state=state, device=device), pings
+
+    def wait(self, ctx, pings):
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        clock = iter(range(0, 100_000, 3))
+        with mock.patch.object(autoflash.hostsys, "ping_ok", return_value=pings), \
+             mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(autoflash.time, "sleep"), \
+             mock.patch.object(autoflash, "tell") as told, \
+             mock.patch.object(autoflash.output, "progress"), \
+             mock.patch.object(autoflash.output, "progress_clear"):
+            autoflash.wait_while_plug_busy(ctx)
+        return told
+
+    def test_a_plug_that_answers_is_not_waited_for(self):
+        ctx, pings = self.ctx(answers=[True])
+        self.wait(ctx, pings).assert_not_called()
+
+    def test_a_busy_plug_is_waited_for_until_it_answers(self):
+        ctx, pings = self.ctx(answers=[False, False, False, True])
+        told = self.wait(ctx, pings)
+        self.assertEqual(ctx.device.answers.call_count, 4)
+        self.assertIn("answering again", told.call_args.args[0])
+
+    def test_a_plug_off_the_network_is_left_to_the_steps(self):
+        ctx, _ = self.ctx(answers=[False])
+        self.wait(ctx, False).assert_not_called()
+
+    def test_before_tasmota_nothing_is_checked(self):
+        ctx, pings = self.ctx(d1_done=False)
+        self.wait(ctx, pings)
+        ctx.device.answers.assert_not_called()
+
+
+class UserActionWaitTests(unittest.TestCase):
+    """Waiting on a person has no time limit - unless nobody is coming."""
+
+    def test_a_person_is_waited_for_as_long_as_it_takes(self):
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        with mock.patch.object(autoflash.prompts, "UNATTENDED", False):
+            self.assertEqual(autoflash.user_action_limit(), float("inf"))
+        with mock.patch.object(autoflash.prompts, "UNATTENDED", True):
+            self.assertEqual(autoflash.user_action_limit(), 900.0)
+
+
+class UnexpectedErrorTests(unittest.TestCase):
+    """An error nothing anticipated is recorded and explained, not a traceback."""
+
+    def run_step(self, step, error):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        ctx = SimpleNamespace(state=state)
+        title, _ = autoflash.STEP_INDEX[step]
+        failing = mock.Mock(side_effect=error)
+        with mock.patch.dict(autoflash.STEP_INDEX, {step: (title, failing)}), \
+             mock.patch.object(autoflash, "begin_stage"), \
+             mock.patch.object(autoflash.output, "stage_end") as ended, \
+             mock.patch.object(autoflash.output, "log_only") as logged, \
+             mock.patch.object(autoflash, "tell") as told, \
+             mock.patch.object(autoflash, "say"):
+            code = autoflash.execute(ctx, step)
+        return code, state, ended, logged, told
+
+    def test_it_stops_the_step_with_a_message_and_the_traceback_in_the_log(self):
+        import http.client
+        code, state, ended, logged, told = self.run_step("E1", http.client.IncompleteRead(b""))
+        self.assertEqual(code, 1)
+        self.assertEqual(state.status("E1"), FAILED)
+        ended.assert_called_once_with("stopped")
+        self.assertIn("Traceback", logged.call_args.args[0])
+        self.assertIn("something unexpected went wrong: IncompleteRead", told.call_args.args[0])
+
+    def test_a_step_that_writes_stays_attempted(self):
+        # Whether the commit got as far as writing is for the next run to find
+        # out from the plug - so it must not be recorded as failed.
+        code, state, *_ = self.run_step("E3", RuntimeError("boom"))
+        self.assertEqual(code, 1)
+        self.assertEqual(state.status("E3"), "attempted")
+
+    def test_ctrl_c_is_not_swallowed(self):
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_step("E1", KeyboardInterrupt())
 
 
 class BerryFireTests(unittest.TestCase):
@@ -593,16 +1006,42 @@ class CommitEvidenceTests(unittest.TestCase):
             self.ctx({"phase": "commit", "status": "FAIL"}))
         self.assertIs(finished, False)
 
-    def test_no_report_cannot_tell(self):
+    def no_report(self, *, fetched, safeboot=False, slot=None):
+        # The emulated plug's PASS report lost on its way (the commit with the
+        # network cut as it finished): it then restarts into the startup firmware.
+        from unittest import mock
+        ctx = self.ctx(None)
+        if fetched:
+            (ctx.evidence / "commit-server.log").write_text(
+                '  [10.0.0.63] "GET /berry/commit.be HTTP/1.1" 200 -\n'
+                '  [10.0.0.63] "GET /target-table HTTP/1.1" 200 -\n')
+        ctx.device = mock.Mock(is_safeboot=mock.Mock(return_value=safeboot),
+                               current_ota=mock.Mock(return_value=slot))
         import tools.s60_autoflash as autoflash
-        finished, _ = autoflash.evidence_commit_finished(self.ctx(None))
+        return autoflash.evidence_commit_finished(ctx)
+
+    def test_no_report_and_no_table_fetched_means_nothing_written(self):
+        finished, _ = self.no_report(fetched=False)
+        self.assertIs(finished, False)
+
+    def test_no_report_but_on_the_startup_firmware_means_finished(self):
+        finished, reason = self.no_report(fetched=True, safeboot=True)
+        self.assertTrue(finished)
+        self.assertIn("temporary startup", reason)
+
+    def test_no_report_and_still_on_the_old_layout_means_not_finished(self):
+        finished, _ = self.no_report(fetched=True, slot=1)
+        self.assertIs(finished, False)
+
+    def test_no_report_and_no_telling_is_left_to_the_operator(self):
+        finished, _ = self.no_report(fetched=True, slot=None)
         self.assertIsNone(finished)
 
     def test_another_phase_report_is_not_taken(self):
         import tools.s60_autoflash as autoflash
         finished, _ = autoflash.evidence_commit_finished(
             self.ctx({"phase": "stage", "status": "PASS"}))
-        self.assertIsNone(finished)
+        self.assertIsNot(finished, True)  # never taken as the commit's
 
     def test_a_passed_commit_supersedes_the_high_slot_check(self):
         # After the commit the plug runs from slot 0 of the new layout: asking

@@ -114,10 +114,24 @@ tools/emulator/emu.sh --rebuild  # rebuild the image first
 tools/emulator/emu.sh --detach   # start in the background; join with: docker attach s60-emu
 tools/emulator/emu.sh --no-firewall  # without the "computer's" firewall, which is on by default
 tools/emulator/emu.sh --windows  # Windows is the computer (see "On Windows"; started by emu.ps1 and windows-test.sh)
+tools/emulator/emu.sh --instance 2  # a second emulator beside the first (see "Several at once")
 ```
 
 A conversion needs `--cloud`: the upgrade to the bridge firmware is sent
 through eWeLink. The first start builds the image, which takes a few minutes.
+
+### Several at once
+
+`--instance N` (1-9, on `emu.sh` and `unattended-test.sh`) runs another
+emulator beside the first: its own container (`s60-emu-N`), state
+(`captures/emulation/state-N/`) and browser port (8080+N), so tests can run side
+by side. Each is its own small network, so the identical plugs do not meet.
+They do meet in eWeLink, though: every clone has the same device id, the cloud
+keeps one connection per id, and the upgrade at C2 is sent through it - so it can
+reach another instance's plug. Run the eWeLink stages, up to C2, one instance at
+a time; after C2 nothing uses the cloud. A new instance has no plug yet, so name
+it with `--plug MAC` when there is more than one backup. Each takes about 0.6 of
+a CPU and 115 MB.
 
 The terminal becomes a tmux session. Window **conversion** is "your computer
 on the home Wi-Fi": run the tool there exactly as on a real plug,
@@ -134,6 +148,7 @@ Wi-Fi:
 | On a real plug | In the emulator |
 |---|---|
 | Switch it off and on | `plug restart` (or `plug off`, `plug on`) |
+| Restart your router, so the plug's Wi-Fi goes | `plug router off [SECS]`, `plug router on` |
 | Power-cycle it quickly, N times | `plug cycle N` |
 | Your desktop's Wi-Fi menu | `wifi`, `wifi join NAME`, `wifi home` |
 | Your home Wi-Fi's name and password | `PICSimLabWifi`, empty password |
@@ -235,7 +250,7 @@ to the one below:
 |---|---|---|---|
 | `installed` | Windows Server Core, as Setup leaves it: the user `s60`, who logs on by itself, and a hook that runs `start.ps1` at logon | the ISO, `unattend.xml`, `firstlogon.ps1` | 5-10 min |
 | `rig` | what only the tests need: Remote Desktop, SSH, the clipboard over VNC (virtio-win's guest tools, pinned), no Windows Update or SConfig, and for the link OpenVPN's TAP driver, the "S60 emulator" adapter and a Python of its own, from the same `windows-bootstrap.ps1` a Windows computer uses | `rig.ps1` | a few min |
-| `tool` | what the tool's own first run leaves: its portable Python | `tool.ps1` | about a min |
+| `tool` | what the tool's own first run leaves: its portable Python - set up with progress bars on, as in a person's window, and failed if any shows | `tool.ps1` | about a min |
 
 Every run starts from a throwaway layer on `tool`, with this checkout in
 `C:\S60\repo`, in about a minute. `--first-run` starts it on `rig` instead:
@@ -458,6 +473,25 @@ Copies only; the original dump is never written.
   fork drives no input pins, so they all read low. The S60's button (GPIO9)
   is active low, so Tasmota saw it held, and after 40 seconds reset itself to
   its defaults, losing its Wi-Fi. Inputs now idle high, as with pull-ups.
+- **`wifi-switch.patch` - the router can be restarted.** The fork's access
+  points live inside QEMU, so blocking traffic outside it only cuts the plug
+  off from the computer; its Wi-Fi stays up. While the file
+  `$ESP32_WIFI_AP_OFF_FILE` exists (`plug router off`), they send no beacons
+  and answer nothing, and deauthenticate the plug - a few times, and again
+  whenever it sends data, as a real access point does to a station that is
+  not joined. The plug sees its Wi-Fi go within a second or two, retries as
+  a real one does ("Connect failed with AP timeout"), and rejoins within
+  seconds of `plug router on`. The fork's frame builder leaves a frame's
+  destination and signal strength unset, so the patch sets both, or the plug
+  drops the frame. To cut the plug off from the computer instead, block its
+  traffic in the container (`iptables -I INPUT -s 192.168.60.50 -j DROP`).
+- **`wifi-dma.patch` - frames go only where the hardware would put them.** The
+  fork wrote each received frame through the next receive descriptor whether
+  or not the driver had handed it over, and however big the buffer. Writing
+  into buffers the driver had taken back corrupted its heap, which then failed
+  in `free()` (`tlsf_free`) - seen as a crash when the plug's Wi-Fi stopped. A
+  frame is now written only into a descriptor the driver owns with room for it,
+  and dropped otherwise, as the hardware drops it.
 
 ### How QEMU is run (`container/bin/plug-supervisor`)
 

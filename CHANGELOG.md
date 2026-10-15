@@ -9,6 +9,75 @@ The version is set in one place, `tools/autoflash/__init__.py`. Merging a new
 one to `main` tags it and publishes a release with its notes from here, so add
 the section below before changing the number.
 
+## 1.2.0
+
+The report at the end now comes from every run that converted or failed, and
+says how long each stage took.
+
+- A run that failed - a stage that stopped, or something unexpected - offers
+  its report too, saying where it stopped and why, with nothing private in
+  it. A run you stopped yourself, at a question or with Ctrl-C, offers none.
+- The report gives each stage's time, how long each stage that runs on the
+  plug kept it busy, which stages needed retries, and the plug's Wi-Fi
+  signal.
+- Python has a line of its own in the report, saying where it came from:
+  the tool's portable one, one it installed, a virtual environment, or one
+  already on the computer.
+- Fixes a plug that had just restarted, after the memory-layout rewrite say,
+  being taken for one not answering: a request it could never answer was
+  waited on for up to 20 minutes.
+
+## 1.1.1
+
+Fixes the ways a plug could be left answering nothing, not even its web
+page, until it was switched off and on.
+
+- A download that stops part way, as a router restarting mid-transfer leaves
+  it, is given up after five seconds and fetched again. The plug used to wait
+  on it for ever.
+- Never gives up on a request the plug has not answered yet: a plug that
+  found one given up on stopped answering altogether.
+- No stage keeps the plug busy for more than about a minute. Busy for much
+  longer, a real plug stops answering (its energy meter's readings pile up),
+  so the plug now spends at most 20 seconds retrying, and this computer waits
+  out a router restart instead - up to five minutes - and runs the stage again
+  by itself.
+- Notices a stage that has stopped sooner; no stage waits more than five
+  minutes.
+
+## 1.1.0
+
+Keeps going through a router restart or a dropped network, says why when it
+cannot, and backs up each plug's Sonoff firmware before it is replaced.
+
+- Backs up the plug's whole flash - Sonoff firmware, settings and eWeLink
+  identity - as a stage of its own before Tasmota is written, so it can go
+  back to Sonoff over USB-serial one day (`--no-backup` keeps none). Uses the
+  installer firmware 4.4.2.
+- Keeps each plug's records under its own MAC address.
+- Rides out a router restart: the plug waits up to five minutes for its
+  Wi-Fi to come back and carries on, and makes no request while it is down.
+- When a stage on the plug stops, it says why straight away, in the plug's
+  own words, instead of waiting half an hour; and if the plug could not tell
+  this computer, its console is read for the reason.
+- Notices a plug that has stopped within seconds; no stage waits more than
+  eight minutes.
+- Tries again by itself, up to three times, a stage that failed for a
+  network reason and is safe to repeat.
+- Picks up where it left off when the memory-layout rewrite's report was
+  lost, or the official startup firmware's install was cut off part way -
+  both used to leave a plug that could not be finished.
+- Says what to do with a plug that answers nothing - switch it off and on,
+  which is safe at that point - and waits for one still finishing a stage
+  that was stopped.
+- Waiting for you, to join a network say, no longer times out.
+- Says when the installer download stopped part way, rather than blaming a
+  firewall.
+- Windows: sets up Python without progress bars, and no longer crashes
+  looking for an installed Python that is not there.
+- The emulator: runs several plugs side by side (`--instance N`), and
+  restarts the router faithfully (`plug router off/on`).
+
 ## 1.0.0
 
 The first numbered release: a stock Sonoff S60 to the official Tasmota, over

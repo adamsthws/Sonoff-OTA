@@ -2,21 +2,23 @@
 
 Only stdlib.  Every method is deliberately explicit about timeouts, because the
 long Berry phases hold the HTTP request open until they finish and a timeout is
-an expected outcome rather than an error.
+an expected outcome rather than an error.  A request that times out is not
+closed, though: see HOLD_SECONDS.
 """
 
 from __future__ import annotations
 
 import http.client
+import io
 import json
 import mimetypes
 import re
 import secrets
 import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -25,10 +27,100 @@ class DeviceError(RuntimeError):
     pass
 
 
-# A plug is on the LAN.  Never let http_proxy/HTTPS_PROXY from the environment
-# capture these requests: a proxy cannot route to 192.168.x.x and the failure
-# looks exactly like the device being absent.
-_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+# A plug is on the LAN, so requests go straight to it: never through a proxy
+# from http_proxy/HTTPS_PROXY in the environment, which cannot route to
+# 192.168.x.x and fails exactly as if the device were absent.
+
+# How long a request the plug has not answered is kept open after its caller
+# has stopped waiting.  Tasmota answers nothing while Berry runs, and a request
+# it then finds given up on - closed, or forgotten by this computer (Linux
+# forgets a closed one after a minute) - leaves its web server stuck for good:
+# the plug answers ping and nothing else until it is switched off and on.  One
+# such request was enough, on a real plug with Tasmota 15.6.0.  So a request
+# that reached the plug is never closed unanswered: it is held open here, and
+# the plug's late answer read and dropped.  Longer than any phase can run.
+HOLD_SECONDS = 20 * 60
+# A held request to a plug that has since restarted - the commit restarts it,
+# cutting off the reply to the request that started it - will never be
+# answered.  Keepalive tells the two apart: a busy plug's network answers it,
+# as it answers ping, and a restarted one refuses the old connection, which
+# ends the hold within seconds.  Checked every 10s, given up after 5 minutes
+# of no answer at all (the plug off the network for that long).
+KEEPALIVE_IDLE, KEEPALIVE_INTERVAL, KEEPALIVE_COUNT = 10, 10, 30
+# A plug that has not answered this many requests will not answer another one
+# sooner: it is not sent, only added to the plug's queue, and fails at once.
+MOST_HELD = 3
+_held: list[tuple[str, threading.Thread]] = []
+
+
+def held_requests(host: str | None = None) -> int:
+    """How many requests a plug has not answered yet, held open for it."""
+    return sum(1 for to, worker in _held if worker.is_alive() and host in (None, to))
+
+
+def _keep_alive(sock: socket.socket) -> None:
+    """Turn on keepalive, at the pace above where the system allows it."""
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    for name, value in (("TCP_KEEPIDLE", KEEPALIVE_IDLE), ("TCP_KEEPALIVE", KEEPALIVE_IDLE),
+                        ("TCP_KEEPINTVL", KEEPALIVE_INTERVAL), ("TCP_KEEPCNT", KEEPALIVE_COUNT)):
+        option = getattr(socket, name, None)
+        if option is not None:
+            try:
+                sock.setsockopt(socket.IPPROTO_TCP, option, value)
+            except OSError:
+                pass  # not settable here: the system's own pace, then
+    if hasattr(socket, "SIO_KEEPALIVE_VALS") and not hasattr(socket, "TCP_KEEPIDLE"):
+        try:  # older Windows: on, idle and interval in milliseconds
+            sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, KEEPALIVE_IDLE * 1000, KEEPALIVE_INTERVAL * 1000))
+        except OSError:
+            pass
+
+
+def _exchange(host: str, method: str, target: str, headers: dict[str, str],
+              body: bytes | None, timeout: float) -> tuple[int, str, Any, bytes]:
+    """One HTTP request and its (status, reason, headers, body).
+
+    Connecting is given `timeout`, and a failure raises URLError, as urllib
+    does.  A request that reached the plug and is not answered within the rest
+    of `timeout` raises socket.timeout, as urllib's does - and is held open.
+    """
+    if held_requests(host) >= MOST_HELD:
+        raise socket.timeout(f"{host} has not answered {MOST_HELD} requests yet")
+    name, _, port = host.partition(":")
+    connection = http.client.HTTPConnection(name, int(port) if port else 80, timeout=timeout)
+    started = time.monotonic()
+    try:
+        connection.connect()
+    except OSError as exc:
+        connection.close()
+        raise urllib.error.URLError(exc) from exc
+    outcome: dict[str, Any] = {}
+    answered = threading.Event()
+
+    def converse() -> None:
+        try:
+            connection.sock.settimeout(HOLD_SECONDS)
+            _keep_alive(connection.sock)
+            try:
+                connection.request(method, target, body=body, headers=headers)
+            except OSError as exc:
+                raise urllib.error.URLError(exc) from exc
+            response = connection.getresponse()
+            outcome["reply"] = (response.status, response.reason, response.headers, response.read())
+        except BaseException as exc:  # noqa: BLE001 - the caller's, if it is still waiting
+            outcome["error"] = exc
+        finally:
+            connection.close()
+            answered.set()
+
+    worker = threading.Thread(target=converse, daemon=True)
+    worker.start()
+    if not answered.wait(max(0.0, timeout - (time.monotonic() - started))):
+        _held[:] = [held for held in _held if held[1].is_alive()] + [(host, worker)]
+        raise socket.timeout(f"{host} did not answer within {timeout:g}s")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["reply"]
 
 
 class Device:
@@ -55,23 +147,39 @@ class Device:
             return {"user": self.user, "password": self.password}
         return {}
 
-    def _get(self, path: str, params: dict[str, str], timeout: float) -> str:
+    def _request(self, method: str, path: str, params: dict[str, str], timeout: float,
+                 body: bytes | None = None, headers: dict[str, str] | None = None) -> bytes:
+        """The reply's body; an error status raises HTTPError, and a redirect
+        is followed, as urllib does."""
         query = urllib.parse.urlencode({**self._auth_params(), **params})
-        url = f"{self.base_url}{path}?{query}" if query else f"{self.base_url}{path}"
+        target = f"{path}?{query}" if query else path
         # Tasmota refuses /cm requests with no Referer as CSRF protection and
         # answers by closing the connection, which looks exactly like the device
         # being absent.  Presenting the device's own page satisfies the check
         # without asking the operator to set SetOption128.
-        request = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "S60Autoflash/1",
-                "Referer": f"{self.base_url}/",
-            },
-        )
+        sent = {"User-Agent": "S60Autoflash/1", "Referer": f"{self.base_url}/",
+                "Connection": "close", **(headers or {})}
+        deadline = time.monotonic() + timeout
+        for _ in range(4):
+            status, reason, replied, data = _exchange(
+                self.host, method, target, sent, body, max(0.1, deadline - time.monotonic()))
+            location = urllib.parse.urlsplit(replied.get("Location") or "")
+            if (status in (301, 302, 303, 307, 308) and location.path
+                    and location.netloc in ("", self.host)
+                    and (method == "GET" or status in (301, 302, 303))):
+                target = urllib.parse.urlunsplit(("", "", location.path, location.query, ""))
+                method, body = "GET", None
+                sent = {name: value for name, value in sent.items() if name != "Content-Type"}
+                continue
+            if status >= 400:
+                raise urllib.error.HTTPError(
+                    f"{self.base_url}{target}", status, reason, replied, io.BytesIO(data))
+            return data
+        raise DeviceError(f"{self.host} redirected {path} too many times")
+
+    def _get(self, path: str, params: dict[str, str], timeout: float) -> str:
         try:
-            with _OPENER.open(request, timeout=timeout) as response:
-                return response.read().decode("utf-8", errors="replace")
+            return self._request("GET", path, params, timeout).decode("utf-8", errors="replace")
         except urllib.error.HTTPError as exc:
             if exc.code in (401, 403):
                 raise DeviceError(
@@ -88,6 +196,10 @@ class Device:
         The page answers only requests with a Referer, which _get sends.
         """
         body = self._get("/cs", {"c2": "0"}, timeout or self.timeout)
+        # Framed as "<index>}1<reset>}1<lines>}1": only the lines are the log.
+        parts = body.split("}1", 2)
+        if len(parts) == 3:
+            body = parts[2].removesuffix("}1")
         return [line.strip() for line in re.split(r"[\x1e\n]", body) if line.strip()]
 
     def command(self, command: str, timeout: float | None = None) -> Any:
@@ -249,6 +361,22 @@ class Device:
         except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError):
             return False
 
+    def answers(self, timeout: float = 3.0) -> bool:
+        """True when the plug's web page answers - without a trace on the plug.
+
+        Not a console command, as reachable() sends: its output goes into the
+        plug's console log, which keeps only the last few kilobytes, and would
+        push out what the plug said there when a step stopped.
+        """
+        try:
+            self._get("/", {}, timeout)
+            return True
+        except urllib.error.HTTPError:
+            return True
+        except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError,
+                http.client.HTTPException):
+            return False
+
     def wait_reachable(self, timeout: float = 180.0, poll: float = 3.0) -> float:
         """Block until the plug answers.  Returns seconds waited."""
         started = time.monotonic()
@@ -320,13 +448,7 @@ class Device:
 
     def download_settings(self, timeout: float = 30.0) -> bytes:
         """Tasmota's configuration backup (the .dmp file the web UI offers)."""
-        query = urllib.parse.urlencode(self._auth_params())
-        request = urllib.request.Request(
-            f"{self.base_url}/dl" + (f"?{query}" if query else ""),
-            headers={"User-Agent": "S60Autoflash/1", "Referer": f"{self.base_url}/"},
-        )
-        with _OPENER.open(request, timeout=timeout) as response:
-            return response.read()
+        return self._request("GET", "/dl", {}, timeout)
 
     def restore_settings(self, backup: bytes, timeout: float = 60.0) -> str:
         """Restore a configuration backup; Tasmota checks it, saves it and restarts."""
@@ -350,16 +472,6 @@ class Device:
         except (DeviceError, urllib.error.URLError, OSError):
             if page != "/up":
                 raise  # a restore must arm the restore page, or the file is taken as firmware
-        query = urllib.parse.urlencode({**self._auth_params(), "fsz": str(len(payload))})
-        url = f"{self.base_url}/u2?{query}"
-        request = urllib.request.Request(
-            url,
-            data=body,
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                "User-Agent": "S60Autoflash/1",
-                "Referer": f"{self.base_url}/",
-            },
-        )
-        with _OPENER.open(request, timeout=timeout) as response:
-            return response.read().decode("utf-8", errors="replace")
+        reply = self._request("POST", "/u2", {"fsz": str(len(payload))}, timeout, body=body,
+                              headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        return reply.decode("utf-8", errors="replace")
