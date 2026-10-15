@@ -108,3 +108,18 @@ class ESPHomeImageCheckTests(unittest.TestCase):
             esphome.check_app(bytes(other), "firmware.ota.bin")
         with self.assertRaisesRegex(esphome.ImageError, "app slot"):
             esphome.check_app(bytes(image) + b"\0" * esphome.SLOT_SIZE, "big.bin")
+
+
+class PublishedFilesAreInGitTests(unittest.TestCase):
+    def test_every_pinned_file_is_tracked(self):
+        # .gitignore leaves out *.bin and *.ota but for each published one by
+        # name; one not named passes every test here and is missing from a clone.
+        import shutil
+        import subprocess
+        from tools.s60_autoflash import ROOT
+        if shutil.which("git") is None or not (ROOT / ".git").exists():
+            self.skipTest("not a Git checkout")
+        pinned = [line.split()[1] for line in (ROOT / "SHA256SUMS").read_text().splitlines() if line.strip()]
+        tracked = set(subprocess.run(["git", "ls-files", "--", *pinned], cwd=ROOT, check=True,
+                                     capture_output=True, text=True).stdout.split())
+        self.assertEqual([path for path in pinned if path not in tracked], [])
