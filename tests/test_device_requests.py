@@ -86,6 +86,33 @@ class HeldRequestTests(unittest.TestCase):
         self.assertEqual(self.server.closed_unanswered, [False] * device.MOST_HELD)
         self.assertEqual(plug._get("/slow", {}, timeout=5), "late")  # answered: sent again
 
+    def test_a_held_request_is_kept_alive_and_ends_when_the_plug_restarts(self):
+        # The commit restarts the plug, cutting off the reply to the request that
+        # started it: that hold must end, or it counts against the plug for ever.
+        from unittest import mock
+        import struct
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        self.addCleanup(listener.close)
+        accepted = []
+        threading.Thread(target=lambda: accepted.append(listener.accept()[0]), daemon=True).start()
+        plug = Device(f"127.0.0.1:{listener.getsockname()[1]}")
+        with mock.patch.object(device, "_keep_alive", wraps=device._keep_alive) as kept:
+            with self.assertRaises(TimeoutError):
+                plug._get("/cm", {"cmnd": "Br s60_busy(600000)"}, timeout=0.3)
+        kept.assert_called_once()
+        self.assertTrue(kept.call_args.args[0].getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE))
+        self.assertEqual(device.held_requests(plug.host), 1)
+        # A restarted plug refuses the old connection: here, reset at once.
+        connection = accepted[0]
+        connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        connection.close()
+        deadline = time.monotonic() + 5
+        while device.held_requests(plug.host) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(device.held_requests(plug.host), 0)
+
     def test_the_web_page_check_still_says_no_at_once(self):
         plug = self.start(delay=1.5)
         self.server.slow_page = True

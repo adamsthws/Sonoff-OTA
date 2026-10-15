@@ -40,6 +40,13 @@ class DeviceError(RuntimeError):
 # that reached the plug is never closed unanswered: it is held open here, and
 # the plug's late answer read and dropped.  Longer than any phase can run.
 HOLD_SECONDS = 20 * 60
+# A held request to a plug that has since restarted - the commit restarts it,
+# cutting off the reply to the request that started it - will never be
+# answered.  Keepalive tells the two apart: a busy plug's network answers it,
+# as it answers ping, and a restarted one refuses the old connection, which
+# ends the hold within seconds.  Checked every 10s, given up after 5 minutes
+# of no answer at all (the plug off the network for that long).
+KEEPALIVE_IDLE, KEEPALIVE_INTERVAL, KEEPALIVE_COUNT = 10, 10, 30
 # A plug that has not answered this many requests will not answer another one
 # sooner: it is not sent, only added to the plug's queue, and fails at once.
 MOST_HELD = 3
@@ -49,6 +56,24 @@ _held: list[tuple[str, threading.Thread]] = []
 def held_requests(host: str | None = None) -> int:
     """How many requests a plug has not answered yet, held open for it."""
     return sum(1 for to, worker in _held if worker.is_alive() and host in (None, to))
+
+
+def _keep_alive(sock: socket.socket) -> None:
+    """Turn on keepalive, at the pace above where the system allows it."""
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    for name, value in (("TCP_KEEPIDLE", KEEPALIVE_IDLE), ("TCP_KEEPALIVE", KEEPALIVE_IDLE),
+                        ("TCP_KEEPINTVL", KEEPALIVE_INTERVAL), ("TCP_KEEPCNT", KEEPALIVE_COUNT)):
+        option = getattr(socket, name, None)
+        if option is not None:
+            try:
+                sock.setsockopt(socket.IPPROTO_TCP, option, value)
+            except OSError:
+                pass  # not settable here: the system's own pace, then
+    if hasattr(socket, "SIO_KEEPALIVE_VALS") and not hasattr(socket, "TCP_KEEPIDLE"):
+        try:  # older Windows: on, idle and interval in milliseconds
+            sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, KEEPALIVE_IDLE * 1000, KEEPALIVE_INTERVAL * 1000))
+        except OSError:
+            pass
 
 
 def _exchange(host: str, method: str, target: str, headers: dict[str, str],
@@ -75,6 +100,7 @@ def _exchange(host: str, method: str, target: str, headers: dict[str, str],
     def converse() -> None:
         try:
             connection.sock.settimeout(HOLD_SECONDS)
+            _keep_alive(connection.sock)
             try:
                 connection.request(method, target, body=body, headers=headers)
             except OSError as exc:
