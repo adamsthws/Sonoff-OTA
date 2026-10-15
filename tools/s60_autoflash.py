@@ -2718,13 +2718,14 @@ def run_firmware(state: RunState) -> str:
 
 
 # This run's steps: Tasmota's until its firmware is known (apply_target).
-STEPS = steps_for("tasmota")
+TASMOTA_STEPS = steps_for("tasmota")
+STEPS = TASMOTA_STEPS
 STEP_INDEX = {step: (title, handler) for step, title, handler in STEPS}
 
 
 def apply_target(firmware: str) -> None:
     global STEPS, STEP_INDEX
-    STEPS = steps_for(firmware)
+    STEPS = TASMOTA_STEPS if firmware == "tasmota" else steps_for(firmware)
     STEP_INDEX = {step: (title, handler) for step, title, handler in STEPS}
 
 
@@ -2790,6 +2791,8 @@ DESTRUCTIVE_STEPS = {"C2", "E2", "E3", "F2", "G1", "I1"}
 
 
 def stage_name(step: str) -> str:
+    if STEPS is not TASMOTA_STEPS and step in ESPHOME_STAGE_NAMES:
+        return ESPHOME_STAGE_NAMES[step]
     return STAGE_NAMES.get(step, STEP_INDEX[step][0])
 
 
@@ -2968,6 +2971,9 @@ def wait_for_plug_back(ctx: Context) -> None:
 
 # Each step's name on its stage line, in words that need no knowledge of the
 # internals.
+# Where a shared step means something else on the way to ESPHome: D4 frees
+# the half of the memory ESPHome goes into, and the layout is not changed.
+ESPHOME_STAGE_NAMES = {"D4": "Making room for ESPHome"}
 STAGE_NAMES = {
     "A0": "Confirming prerequisites",
     "A5": "Validating local files",

@@ -71,6 +71,13 @@ class RouteTests(RouteTestCase):
         self.assertEqual(tasmota[-1], "H1")
         self.assertEqual(esphome[:len(af.COMMON_STEPS)], tasmota[:len(af.COMMON_STEPS)])
 
+    def test_d4_is_named_for_what_it_does_on_each_route(self):
+        self.addCleanup(af.apply_target, "tasmota")
+        af.apply_target("esphome")
+        self.assertEqual(af.stage_name("D4"), "Making room for ESPHome")
+        af.apply_target("tasmota")
+        self.assertEqual(af.stage_name("D4"), "Preparing memory layout")
+
     def test_a_run_is_complete_by_its_own_firmware(self):
         ctx = self.ctx(firmware="esphome")
         ctx.state.mark("I2", DONE)
