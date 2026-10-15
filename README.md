@@ -164,14 +164,17 @@ It is also done over the air, through Tasmota's Firmware Upgrade page.
 ## More detail
 
 - **[docs/technical-details.md](docs/technical-details.md)** - the firmware
-  bundle, how secrets are handled, the finished memory layout, and notes for
-  developers.
+  bundle, secrets handling, memory layout, notes for devs.
 - **[docs/what-happens.md](docs/what-happens.md)** - how it works and what
   happens to the plug, step by step.
 - **[docs/troubleshooting.md](docs/troubleshooting.md)** - problems met so far
   and their fixes.
+- **[docs/emulator.md](docs/emulator.md)** - the whole conversion run against
+  an emulated s60 plug.
 - **[docs/unattended.md](docs/unattended.md)** - running a conversion with
-  nobody at the keyboard, for testing, and keeping the screen it drew.
+  nobody at the keyboard - for testing.
+- **[docs/upstream-contributions.md](docs/upstream-contributions.md)** - bugs
+  found and fixed while building this project.
 - **[archive/docs/reference/](archive/docs/reference/)** - the original
   research, the manual procedure and how the firmware format was decoded.
 
