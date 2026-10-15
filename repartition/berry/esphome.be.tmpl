@@ -1,9 +1,11 @@
 # S60 ESPHome install: write ESPHome into Sonoff's ota_0, which the temporary
-# Tasmota does not run from, reading every block back to the computer; then
-# erase the boot selection, so the bootloader starts ota_0, and restart.
+# Tasmota does not run from, reading every block back to the computer; put
+# ESPHome's bootloader in place of Sonoff's; then erase the boot selection, so
+# the bootloader starts ota_0, and restart.
 # Until that erase the plug still starts Tasmota, so a power cut before it
-# changes nothing; after it, the ESPHome that starts has been checked.
-# The partition table is not changed.
+# changes nothing - except during the half second the bootloader is written,
+# the one write the plug cannot start without.  After it, the ESPHome that
+# starts has been checked.  The partition table is not changed.
 import flash
 import crypto
 import string
@@ -18,6 +20,8 @@ var image_length = @IMAGE_LENGTH@
 var image_pad_length = @IMAGE_PAD_LENGTH@
 var slot_address = 0x20000
 var otadata_address = 0x1D000
+var expected_bootloader = bytes("@BOOTLOADER_SHA256@")
+var bootloader_length = @BOOTLOADER_LENGTH@
 
 def guard(ok, message)
   if !ok
@@ -166,8 +170,8 @@ def post_text(path, body)
   guard(status == 200, format("POST %s returned HTTP %i after %i attempts", path, status, attempt))
 end
 
-def fetch_chunk(index, expected_length)
-  var path = format("/chunk/esphome/%i", index)
+def fetch_chunk(kind, index, expected_length)
+  var path = format("/chunk/%s/%i", kind, index)
   var reply = [-1, nil]
   var attempt = 0
   var window = retry_window()
@@ -185,10 +189,68 @@ def fetch_chunk(index, expected_length)
         "the plug's Wi-Fi went down and was not back within 20 seconds")
   guard(reply[0] == 200, format("GET %s returned HTTP %i after %i attempts", path, reply[0], attempt))
   var encoded = reply[1]
-  guard(size(encoded) == expected_length * 2, "ESPHome chunk body length differs")
+  guard(size(encoded) == expected_length * 2, kind + " chunk body length differs")
   var data = bytes(encoded)
-  guard(size(data) == expected_length, "ESPHome chunk hex is invalid")
+  guard(size(data) == expected_length, kind + " chunk hex is invalid")
   return data
+end
+
+# ESPHome's bootloader in place of Sonoff's, which cannot roll back an update
+# that fails to start.  There is only the one bootloader, at the very start of
+# the flash, so it cannot be written beside the old one and switched to: it is
+# fetched whole and checked first, so nothing waits on the network while it is
+# written, then written a sector at a time, each read back at once.  If one
+# differs, Sonoff's is put back while the plug still runs.  Returns the
+# SHA-256 of what is there now.
+def install_bootloader()
+  var room = ((bootloader_length + 4095) / 4096) * 4096
+  var wanted = bytes()
+  var index = 0
+  while size(wanted) < bootloader_length
+    var count = bootloader_length - size(wanted)
+    if count > 4096 count = 4096 end
+    wanted += fetch_chunk("bootloader", index, count)
+    index += 1
+  end
+  var hash = crypto.SHA256()
+  hash.update(wanted)
+  guard(hash.out() == expected_bootloader, "ESPHome's bootloader SHA-256 differs")
+  while size(wanted) < room wanted.add(0xFF, 1) end
+
+  var before = flash.read(0, room)
+  if before == wanted
+    print("S60 ESPHOME: its bootloader is already in place")
+  else
+    var good = true
+    var at = 0
+    while at < room
+      var sector = wanted[at .. at + 4095]
+      flash.write(at, sector)
+      if flash.read(at, 4096) != sector
+        good = false
+        break
+      end
+      at += 4096
+    end
+    if !good
+      flash.write(0, before)
+      guard(flash.read(0, room) == before,
+            "the bootloader did not write correctly and Sonoff's could not be put back")
+      guard(false, "ESPHome's bootloader did not write correctly; Sonoff's was put back")
+    end
+    print("S60 ESPHOME: bootloader written and read back")
+  end
+
+  var offset = 0
+  index = 0
+  while offset < bootloader_length
+    var count = bootloader_length - offset
+    if count > 4096 count = 4096 end
+    post_text(format("/capture/bootloader/%i", index), flash.read(offset, count).tohex())
+    offset += count
+    index += 1
+  end
+  return sha_region(0, bootloader_length)
 end
 
 def run_esphome()
@@ -203,7 +265,7 @@ def run_esphome()
   while offset < image_length
     var count = image_length - offset
     if count > 4096 count = 4096 end
-    var data = fetch_chunk(index, count)
+    var data = fetch_chunk("esphome", index, count)
     # flash.write preserves untouched bytes during a partial-sector write.
     # Erase the final sector first so the bytes after the image remain 0xFF.
     if count < 4096 flash.erase(slot_address + offset, 0x1000) end
@@ -225,14 +287,18 @@ def run_esphome()
   end
   guard(sha_region(0x8000, 0x1000) == expected_table, "the partition table changed")
 
+  var bootloader_hash = install_bootloader()
+  guard(bootloader_hash == expected_bootloader, "the written bootloader SHA-256 differs")
+
   # Every byte checked: now let the bootloader choose ota_0.
   flash.erase(otadata_address, 0x2000)
   guard(sha_region(otadata_address, 0x2000) == erased_otadata, "the boot selection did not erase")
 
   var report = format(
     "session=%s\nstatus=PASS\ncurrent_ota=%i\ntable_sha256=%s\n" +
-    "image_sha256=%s\nimage_size=%i\notadata=erased\n",
-    session, flash.current_ota(), expected_table.tohex(), written_hash.tohex(), image_length)
+    "image_sha256=%s\nimage_size=%i\notadata=erased\nbootloader_sha256=%s\n",
+    session, flash.current_ota(), expected_table.tohex(), written_hash.tohex(), image_length,
+    bootloader_hash.tohex())
   post_text("/report/esphome", report)
   print("S60 ESPHOME PASS; restarting into ESPHome")
   tasmota.cmd("Restart 99")

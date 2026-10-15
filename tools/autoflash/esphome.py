@@ -26,6 +26,14 @@ ROOT = Path(__file__).resolve().parents[2]
 IMAGE = ROOT / "artifacts" / "esphome-sonoff-s60-imprintable-1.0.0.bin"
 IMAGE_SHA256 = "04cbad327cc4fd3b3109e34ec4d3a5832cb9bc5bce33f96103acdbf59ab1a09b"
 IMAGE_SIZE = 950_016
+# ESPHome's bootloader, from the same build, put in place of Sonoff's: Sonoff's
+# (ESP-IDF 4.4) starts ESPHome but cannot roll back an update that fails to
+# start ("Bootloader too old for OTA rollback").  It is all that sits before
+# the partition table at 0x8000, and the one part the plug cannot start without.
+BOOTLOADER = ROOT / "artifacts" / "esphome-sonoff-s60-bootloader-1.0.0.bin"
+BOOTLOADER_SHA256 = "3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433"
+BOOTLOADER_SIZE = 21_088
+BOOTLOADER_ROOM = 0x8000
 # Sonoff's app slots, which the run leaves as they are: ESPHome goes into ota_0.
 SLOT_ADDRESS = 0x20000
 SLOT_SIZE = 0x1F0000
@@ -68,6 +76,22 @@ def published_image() -> bytes:
     if not imprint.has_placeholders(image):
         raise ImageError(f"{IMAGE.name} has no untouched Wi-Fi placeholders")
     return image
+
+
+def published_bootloader() -> bytes:
+    """The pinned bootloader, checked to be one for this plug."""
+    bootloader = BOOTLOADER.read_bytes()
+    if (len(bootloader) != BOOTLOADER_SIZE
+            or hashlib.sha256(bootloader).hexdigest() != BOOTLOADER_SHA256):
+        raise ImageError(f"{BOOTLOADER.name} differs from the pinned file")
+    if len(bootloader) > BOOTLOADER_ROOM or bootloader[0] != 0xE9:
+        raise ImageError(f"{BOOTLOADER.name} is not an ESP32 bootloader that fits before 0x8000")
+    if struct.unpack_from("<H", bootloader, 12)[0] != ESP32_C3_CHIP_ID:
+        raise ImageError(f"{BOOTLOADER.name} is not built for the ESP32-C3 in the S60")
+    report = imprint.parse_esp_image(bootloader)
+    if not report["checksum_valid"] or report["sha256_valid"] is not True:
+        raise ImageError(f"{BOOTLOADER.name} fails its own integrity check")
+    return bootloader
 
 
 def image_for(ssid: str, password: str, own: Path | None = None) -> bytes:

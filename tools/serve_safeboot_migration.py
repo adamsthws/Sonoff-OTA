@@ -53,6 +53,7 @@ try:
         sha256_bytes,
         verify_manifest_files,
     )
+    from tools.autoflash import esphome as esphome_files
 except ModuleNotFoundError:
     from safeboot_migration import (
         CANONICAL_NVS_SIZE,
@@ -80,6 +81,7 @@ except ModuleNotFoundError:
         sha256_bytes,
         verify_manifest_files,
     )
+    from autoflash import esphome as esphome_files
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -227,6 +229,7 @@ class MigrationState:
         evidence_dir: Path,
         max_evidence_age: int,
         image: bytes | None = None,
+        bootloader: bytes | None = None,
     ) -> None:
         self.manifest_path = manifest_path
         self.manifest = manifest
@@ -253,6 +256,10 @@ class MigrationState:
             if len(image) > ESPHOME_SLOT_SIZE:
                 raise ValueError("the ESPHome image does not fit the plug's app slot")
             self.image = image
+            # ESPHome's own, pinned: the same for every plug, and holds nothing private.
+            self.bootloader = bootloader if bootloader is not None else esphome_files.published_bootloader()
+            if not self.bootloader or self.bootloader[0] != 0xE9 or len(self.bootloader) > 0x8000:
+                raise ValueError("the bootloader is not one that fits before the partition table")
             return
         if image is not None:
             raise ValueError(f"{phase} takes no image")
@@ -333,6 +340,8 @@ class MigrationState:
                 "IMAGE_PAD_LENGTH": str(pad_length),
                 "IMAGE_PAD_SHA256": sha256_bytes(b"\xff" * pad_length),
                 "ERASED_OTADATA_SHA256": sha256_bytes(b"\xff" * OTADATA_SIZE),
+                "BOOTLOADER_SHA256": sha256_bytes(self.bootloader),
+                "BOOTLOADER_LENGTH": str(len(self.bootloader)),
             }
         safeboot_length = len(self.safeboot)
         copy_length = sector_aligned_size(safeboot_length)
@@ -412,9 +421,17 @@ class MigrationState:
             raise ValueError("ESPHome chunk index is outside the image")
         return self.image[index * SECTOR_SIZE : (index + 1) * SECTOR_SIZE]
 
+    def bootloader_chunk(self, index: int) -> bytes:
+        if self.phase != "esphome":
+            raise ValueError("bootloader chunks are unavailable in this phase")
+        count = (len(self.bootloader) + SECTOR_SIZE - 1) // SECTOR_SIZE
+        if index < 0 or index >= count:
+            raise ValueError("bootloader chunk index is outside the bootloader")
+        return self.bootloader[index * SECTOR_SIZE : (index + 1) * SECTOR_SIZE]
+
     def receive_capture(self, kind: str, index: int, body: bytes) -> None:
         if self.phase == "esphome":
-            allowed = {"written": len(self.image)}
+            allowed = {"written": len(self.image), "bootloader": len(self.bootloader)}
         else:
             allowed = {
                 "preflight": {"table": TABLE_SIZE, "nvs": CANONICAL_NVS_SIZE, "otadata": OTADATA_SIZE},
@@ -633,6 +650,8 @@ class MigrationState:
         written = self.assembled_capture("written", len(self.image))
         if written != self.image:
             raise ValueError("host read-back differs byte-for-byte from the ESPHome image")
+        if self.assembled_capture("bootloader", len(self.bootloader)) != self.bootloader:
+            raise ValueError("host read-back differs byte-for-byte from ESPHome's bootloader")
         expected = {
             "status": "PASS",
             "current_ota": "1",
@@ -640,6 +659,7 @@ class MigrationState:
             "image_sha256": sha256_bytes(self.image),
             "image_size": str(len(self.image)),
             "otadata": "erased",
+            "bootloader_sha256": sha256_bytes(self.bootloader),
         }
         require_report_fields(report, expected)
         # Hashes only: the image holds the Wi-Fi password, so its bytes are never kept.
@@ -698,6 +718,9 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
             match = re.fullmatch(r"/chunk/esphome/([0-9]+)", path)
             if match:
                 return 200, state.image_chunk(int(match.group(1))).hex().encode("ascii"), "text/plain"
+            match = re.fullmatch(r"/chunk/bootloader/([0-9]+)", path)
+            if match:
+                return 200, state.bootloader_chunk(int(match.group(1))).hex().encode("ascii"), "text/plain"
             if path == "/restore-from" and state.phase == "restore":
                 return 200, str(state.restore_from()).encode("ascii"), "text/plain"
             if path == "/target-table" and state.phase == "commit":

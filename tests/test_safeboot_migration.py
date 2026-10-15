@@ -26,6 +26,7 @@ from tools.safeboot_migration import (
     sector_aligned_size,
     sha256_bytes,
 )
+from tools.autoflash import esphome as esphome_files
 from tools.configure_recovery_safeboot import render_header
 from tools.validate_recovery_safeboot import header_value
 from tools.serve_safeboot_migration import (
@@ -815,9 +816,11 @@ if __name__ == "__main__":
 
 
 class ESPHomePhaseTests(unittest.TestCase):
-    """The esphome phase: ESPHome written to ota_0 and read back, then otadata erased."""
+    """The esphome phase: ESPHome written to ota_0 and read back, its bootloader
+    put in place of Sonoff's and read back, then otadata erased."""
 
     IMAGE = b"\xe9" + bytes((index * 13 + 5) & 0xFF for index in range(10_000))
+    BOOTLOADER = esphome_files.published_bootloader()
 
     def state(self, fixture, image=None):
         return MigrationState(fixture.manifest_path, fixture.manifest, "esphome",
@@ -830,6 +833,7 @@ class ESPHomePhaseTests(unittest.TestCase):
             "table_sha256": SOURCE_TABLE_SHA256,
             "image_sha256": sha256_bytes(self.IMAGE), "image_size": str(len(self.IMAGE)),
             "otadata": "erased",
+            "bootloader_sha256": sha256_bytes(self.BOOTLOADER),
         }
         fields.update(changes)
         return "".join(f"{key}={value}\n" for key, value in fields.items()).encode()
@@ -839,11 +843,21 @@ class ESPHomePhaseTests(unittest.TestCase):
             rendered = self.state(MigrationFixture(Path(directory))).render_berry().decode()
         self.assertNotRegex(rendered, r"@[A-Z][A-Z0-9_]+@")
         self.assertIn(sha256_bytes(self.IMAGE), rendered)
-        self.assertIn("/chunk/esphome/", rendered)
+        self.assertIn('fetch_chunk("esphome"', rendered)
+        self.assertIn('fetch_chunk("bootloader"', rendered)
+        self.assertIn(sha256_bytes(self.BOOTLOADER), rendered)
         self.assertIn("/fail/esphome", rendered)
-        # The boot selection is erased only after the written image is checked.
-        self.assertLess(rendered.index("the written ESPHome SHA-256 differs"),
-                        rendered.index("flash.erase(otadata_address"))
+        # The bootloader is written only after the image is checked, and the
+        # boot selection erased only after both.
+        run = rendered[rendered.index("def run_esphome"):]
+        self.assertLess(run.index("the written ESPHome SHA-256 differs"),
+                        run.index("install_bootloader()"))
+        self.assertLess(run.index("the written bootloader SHA-256 differs"),
+                        run.index("flash.erase(otadata_address"))
+        # All of it fetched and checked before the first byte of it is written.
+        install = rendered[rendered.index("def install_bootloader"):rendered.index("def run_esphome")]
+        self.assertLess(install.index("ESPHome's bootloader SHA-256 differs"),
+                        install.index("flash.write("))
 
     def test_it_serves_the_image_and_passes_on_an_exact_read_back(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -854,11 +868,17 @@ class ESPHomePhaseTests(unittest.TestCase):
             self.assertEqual(served, self.IMAGE)
             with self.assertRaises(ValueError):
                 state.image_chunk(3)
+            served = b"".join(state.bootloader_chunk(i) for i in range(6))
+            self.assertEqual(served, self.BOOTLOADER)
+            with self.assertRaises(ValueError):
+                state.bootloader_chunk(6)
             send_chunks(state, "written", self.IMAGE)
+            send_chunks(state, "bootloader", self.BOOTLOADER)
             state.receive_report("esphome", self.report(state))
             self.assertEqual((state.complete, state.result_status), (True, "PASS"))
             evidence = (fixture.evidence_dir / "esphome-report.json").read_text()
             self.assertEqual(json.loads(evidence)["otadata"], "erased")
+            self.assertEqual(json.loads(evidence)["bootloader_sha256"], sha256_bytes(self.BOOTLOADER))
             # The image holds the Wi-Fi password: none of its bytes are kept.
             self.assertNotIn(self.IMAGE[:64].hex(), evidence)
             self.assertEqual(sorted(p.name for p in fixture.evidence_dir.iterdir()),
@@ -871,7 +891,20 @@ class ESPHomePhaseTests(unittest.TestCase):
             wrong = bytearray(self.IMAGE)
             wrong[5000] ^= 1
             send_chunks(state, "written", bytes(wrong))
+            send_chunks(state, "bootloader", self.BOOTLOADER)
             with self.assertRaisesRegex(ValueError, "byte-for-byte"):
+                state.receive_report("esphome", self.report(state))
+            self.assertFalse(state.complete)
+
+    def test_a_bootloader_read_back_that_differs_by_one_byte_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            state = self.state(fixture)
+            wrong = bytearray(self.BOOTLOADER)
+            wrong[20_000] ^= 1
+            send_chunks(state, "written", self.IMAGE)
+            send_chunks(state, "bootloader", bytes(wrong))
+            with self.assertRaisesRegex(ValueError, "bootloader"):
                 state.receive_report("esphome", self.report(state))
             self.assertFalse(state.complete)
 
@@ -880,6 +913,9 @@ class ESPHomePhaseTests(unittest.TestCase):
             fixture = MigrationFixture(Path(directory))
             state = self.state(fixture)
             send_chunks(state, "written", self.IMAGE)
+            send_chunks(state, "bootloader", self.BOOTLOADER)
+            with self.assertRaises(ValueError):
+                state.receive_report("esphome", self.report(state, bootloader_sha256="0" * 64))
             with self.assertRaises(ValueError):
                 state.receive_report("esphome", self.report(state, otadata="kept"))
             with self.assertRaises(ValueError):

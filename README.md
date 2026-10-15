@@ -178,9 +178,10 @@ into it, in memory only.
 - **Updates** are ESPHome's own, from Home Assistant or ESPHome's tools.
 - **Its memory** stays laid out as Sonoff made it: ESPHome goes into the half
   Sonoff's firmware updates used, which is enough for it. Sonoff's bootloader
-  stays too, as on the way to Tasmota, so ESPHome notes at start-up that it
-  cannot roll a failed update back by itself; its safe mode, which keeps a
-  plug that keeps failing to start open to updates, still works.
+  is replaced by ESPHome's own, so an update that fails to start is rolled
+  back to the one before by itself. Writing it takes under a second, and is
+  the one moment of the run when a power cut would leave a plug that needs
+  opening to repair.
 
 The ESPHome option was contributed by [p1otr](https://github.com/p1otr).
 

@@ -20,7 +20,8 @@ end up running.
   to start with, as Tasmota has none, and Home Assistant finds it and can
   adopt it.
 - Every block of ESPHome is read back and checked before the plug switches to
-  it. The plug's memory layout stays as Sonoff made it.
+  it. The plug's memory layout stays as Sonoff made it; its bootloader becomes
+  ESPHome's own, so ESPHome can roll back an update that fails to start.
 - The answer is kept with the run, so carrying on an unfinished run carries
   on the same way. `--firmware tasmota` or `--firmware esphome` answers it in
   advance, as an unattended run must.

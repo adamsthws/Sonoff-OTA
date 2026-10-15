@@ -10,6 +10,7 @@ directory, never here.
 | `tasmota32c3-bluetooth.bin` | Berry-capable Tasmota used temporarily on the original partition layout | `a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708` |
 | `s60-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `aa32fafa4a9470152d5f8826fc6aedf94387575332353b50b8ce454ec1f9d364` |
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
+| `esphome-sonoff-s60-bootloader-1.0.0.bin` | ESPHome's bootloader, from the same build: it replaces Sonoff's when ESPHome is installed, so ESPHome can roll back an update that fails to start | `3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433` |
 | `esphome-sonoff-s60-imprintable-1.0.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `04cbad327cc4fd3b3109e34ec4d3a5832cb9bc5bce33f96103acdbf59ab1a09b` |
 
 The Bluetooth image is the exact file used by the successful migrations. It
@@ -68,10 +69,10 @@ finds the last commit that has it.
 The ESPHome image is built from [`../ESPHome/sonoff_s60.yaml`](../ESPHome/sonoff_s60.yaml)
 (its `project` version is the one in the file name) with ESPHome 2026.9.1 and
 ESP-IDF 5.5.5, as `esphome compile sonoff_s60.yaml`; `firmware.ota.bin` is the file
-published. Like the imprintable Safeboot it holds placeholders instead of a
+published, and `bootloader/bootloader.bin` from the same build is the bootloader. Like the imprintable Safeboot it holds placeholders instead of a
 network name and password, and the run writes the plug's Wi-Fi into them in
 memory (`tools/autoflash/imprint.py`). It has no OTA password, web login or API
 encryption key, as ESPHome's own ready-made images have none: the plug is open
 on the home network until its owner adds them, as official Tasmota is. To
 publish a new one, change the config and its `project` version, build it,
-and replace the file, its row above and its line in `SHA256SUMS`.
+and replace both files, their rows above and their lines in `SHA256SUMS`.

@@ -76,6 +76,15 @@ class PublishedESPHomeTests(unittest.TestCase):
         line = f"{sha256_bytes(image)}  {esphome.IMAGE.relative_to(ROOT).as_posix()}"
         self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
 
+    def test_its_bootloader_is_pinned_and_comes_from_the_same_build(self):
+        from tools.autoflash import esphome
+        from tools.s60_autoflash import ROOT
+        bootloader = esphome.published_bootloader()  # refuses a changed or broken file
+        line = f"{sha256_bytes(bootloader)}  {esphome.BOOTLOADER.relative_to(ROOT).as_posix()}"
+        self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
+        version = esphome.IMAGE.name.rsplit("-", 1)[1]
+        self.assertTrue(esphome.BOOTLOADER.name.endswith("-" + version), "built with the image")
+
     def test_the_esphome_image_can_have_the_wifi_written_in(self):
         from tools.autoflash import esphome, imprint
         image = esphome.published_image()

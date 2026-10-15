@@ -163,10 +163,15 @@ For **ESPHome**, steps 8 and 9 are instead:
 8. **Install ESPHome** into the half of the plug's memory Tasmota is not
    running from - the published ESPHome for the S60, with your Wi-Fi written
    in, in memory only. Every block is read back and compared with the image,
-   byte for byte. Only then does the plug switch to it, by clearing the note
-   that says which half to start, and restart. Until that moment it still
-   starts Tasmota, so a power cut before it changes nothing. The memory
-   layout itself is not changed.
+   byte for byte. Then ESPHome's own bootloader - the small program that
+   starts the plug - replaces Sonoff's, which cannot undo a failed update.
+   There is only one, so it is fetched and checked whole first, then written
+   in under a second and read back; if it does not read back right, Sonoff's
+   is put back. A power cut in that second would leave a plug that has to be
+   opened to repair: the one such moment in the run. Only then does the plug
+   switch to ESPHome, by clearing the note that says which half to start, and
+   restart. Until that moment it still starts Tasmota. The memory layout
+   itself is not changed.
 9. **Check ESPHome is running** and has joined your Wi-Fi. If it cannot, it
    puts up its own network, named like `sonoff-s60-xxxxxx`, where its page
    asks for your Wi-Fi.
