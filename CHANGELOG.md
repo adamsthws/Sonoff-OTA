@@ -9,6 +9,24 @@ The version is set in one place, `tools/autoflash/__init__.py`. Merging a new
 one to `main` tags it and publishes a release with its notes from here, so add
 the section below before changing the number.
 
+## 2.0.0
+
+ESPHome, as well as Tasmota: the run asks at the start which the plug should
+end up running.
+
+- Choosing ESPHome needs nothing built or installed: the run installs a
+  ready-made ESPHome for the S60 (`ESPHome/s60.yaml`), with the plug's Wi-Fi
+  written in, in memory only. It joins your Wi-Fi by itself, has no password
+  to start with, as Tasmota has none, and Home Assistant finds it and can
+  adopt it.
+- Every block of ESPHome is read back and checked before the plug switches to
+  it. The plug's memory layout stays as Sonoff made it.
+- The answer is kept with the run, so carrying on an unfinished run carries
+  on the same way. `--firmware tasmota` or `--firmware esphome` answers it in
+  advance, as an unattended run must.
+- The report says which firmware the plug ended up with, and the relay and
+  meter are checked through ESPHome on its route.
+
 ## 1.2.0
 
 The report at the end now comes from every run that converted or failed, and
