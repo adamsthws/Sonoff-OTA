@@ -345,9 +345,11 @@ class PhaseRunner:
         """
         if self._plug_answers():
             return
-        self.log("    The plug is not answering at all - most likely stuck waiting for this computer.")
-        self.log("    Give it two minutes; if its web page still does not answer, switch it off")
-        self.log("    and on (at this stage that is safe), then run this again - it carries on.")
+        # Said before this run decides whether to try the step again, so it
+        # must hold either way: nothing here about running the tool again.
+        self.log("    The plug is not answering at all - it may be off the Wi-Fi, or stuck waiting")
+        self.log("    for this computer. If its web page still does not answer in a few minutes,")
+        self.log("    switch it off and on: at this stage that is safe.")
 
     def _show_plug_console(self) -> str | None:
         """Show the plug's own last words on the phase, from its console, and
