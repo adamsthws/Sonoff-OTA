@@ -3,7 +3,7 @@
 Notes from reviewing and testing [PR #4, "add ESPHome support"](https://github.com/adamsthws/Sonoff-OTA/pull/4)
 (October 2026). PR #4 was merged into this branch, `esphome`, where the work
 continues. The prototype of a pre-built image described here became
-`ESPHome/s60.yaml`, which p1otr extended (overload
+`ESPHome/sonoff_s60.yaml`, which p1otr extended (overload
 protection, a countdown, more energy sensors); this folder keeps these notes
 and the scripts used to test it.
 
@@ -56,7 +56,7 @@ leave-no-trace, so the image should be built once and shipped.
 The tool already ships a pre-built firmware with no Wi-Fi in it: the bridge.
 `tools/autoflash/imprint.py` writes the plug's Wi-Fi into placeholders reserved
 at build time and recalculates the checksum and SHA-256. The prototype (now
-`ESPHome/s60.yaml`) does the same for ESPHome:
+`ESPHome/sonoff_s60.yaml`) does the same for ESPHome:
 
 - `s60_imprint.h` held the bridge's placeholders (in the published config they
   are in its boot lambda, so Home Assistant can adopt it from that one file):
@@ -125,8 +125,8 @@ plug to confirm.
 |---|---|
 | `imprint_image.py` | imprints a built image with the tool's `imprint.py` |
 | `emulator_flash.py` | erases the emulated plug's settings, or writes an image to a slot, for control tests |
-| `windows-uv-build.ps1` | builds `ESPHome/s60.yaml` on Windows with a portable uv, all under `C:\S60\b` (tested with the prototype config: 889,984 bytes, as on Linux; 6 minutes with ESP-IDF already downloaded) |
+| `windows-uv-build.ps1` | builds `ESPHome/sonoff_s60.yaml` on Windows with a portable uv, all under `C:\S60\b` (tested with the prototype config: 889,984 bytes, as on Linux; 6 minutes with ESP-IDF already downloaded) |
 | `firmware_choice_mockup.py` | the Tasmota or ESPHome question, as the tool would ask it |
 
-The config itself is `ESPHome/s60.yaml`, one self-contained file. Building on Linux, from `ESPHome/`: `esphome compile s60.yaml`, then
+The config itself is `ESPHome/sonoff_s60.yaml`, one self-contained file. Building on Linux, from `ESPHome/`: `esphome compile sonoff_s60.yaml`, then
 `python3 prototype/imprint_image.py .esphome/build/sonoff-s60/build/firmware.ota.bin imprinted.ota.bin "Your Wi-Fi" "password"`.

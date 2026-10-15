@@ -87,10 +87,10 @@ class PublishedESPHomeTests(unittest.TestCase):
 
     def test_the_esphome_config_has_no_passwords_and_can_be_adopted(self):
         from tools.s60_autoflash import ROOT
-        config = (ROOT / "ESPHome" / "s60.yaml").read_text()
+        config = (ROOT / "ESPHome" / "sonoff_s60.yaml").read_text()
         for key in ("password:", "encryption:", "auth:", "key:"):
             self.assertNotIn(key, config.replace("password: !lambda", ""), key)
-        self.assertIn("package_import_url: github://adamsthws/Sonoff-OTA/ESPHome/s60.yaml@main", config)
+        self.assertIn("package_import_url: github://adamsthws/Sonoff-OTA/ESPHome/sonoff_s60.yaml@main", config)
         self.assertNotIn("includes:", config)  # adoption takes this one file
 
 

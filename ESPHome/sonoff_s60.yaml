@@ -43,7 +43,7 @@ esphome:
 
 # Adopting the plug in Home Assistant's ESPHome builder takes this config.
 dashboard_import:
-  package_import_url: github://adamsthws/Sonoff-OTA/ESPHome/s60.yaml@main
+  package_import_url: github://adamsthws/Sonoff-OTA/ESPHome/sonoff_s60.yaml@main
   import_full_config: true
 
 globals:

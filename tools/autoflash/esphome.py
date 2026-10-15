@@ -1,7 +1,7 @@
 """ESPHome instead of the final Tasmota: the image, and the plug once it runs it.
 
-The run installs a pre-built ESPHome (artifacts/esphome-s60-imprintable-*.bin,
-from ESPHome/s60.yaml) rather than asking anyone to build one: building it
+The run installs a pre-built ESPHome (artifacts/esphome-sonoff-s60-imprintable-*.bin,
+from ESPHome/sonoff_s60.yaml) rather than asking anyone to build one: building it
 takes gigabytes of tools and minutes of compiling. Like the recovery Safeboot,
 it holds placeholders instead of a Wi-Fi name and password, and the plug's own
 Wi-Fi is written into them in memory (imprint.py) - so the image on disk never
@@ -22,8 +22,8 @@ from . import imprint
 
 ROOT = Path(__file__).resolve().parents[2]
 # The published image, pinned: a changed file is refused, never used unseen.
-IMAGE = ROOT / "artifacts" / "esphome-s60-imprintable-1.0.0.bin"
-IMAGE_SHA256 = "ea054c7da18321f10f717ae6e4734552e442bd394d4749194ddff7fa603a0e0a"
+IMAGE = ROOT / "artifacts" / "esphome-sonoff-s60-imprintable-1.0.0.bin"
+IMAGE_SHA256 = "549dd12171535bacb5cba5dbd5c4db36411fcf52af8fe68719956de0600e8aeb"
 IMAGE_SIZE = 923_504
 # Sonoff's app slots, which the run leaves as they are: ESPHome goes into ota_0.
 SLOT_ADDRESS = 0x20000
@@ -83,7 +83,7 @@ def image_for(ssid: str, password: str, own: Path | None = None) -> bytes:
 
 # ------------------------------------------------------------ the plug, running it
 # Its web page (web_server version 3) and REST paths, named after each entity's
-# name in ESPHome/s60.yaml: /switch/Relay, /sensor/Voltage, /sensor/Power.
+# name in ESPHome/sonoff_s60.yaml: /switch/Relay, /sensor/Voltage, /sensor/Power.
 
 # Straight to the plug: a proxy set for the internet has no route to it.
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))

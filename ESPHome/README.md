@@ -1,6 +1,6 @@
 # ESPHome for the S60
 
-[`s60.yaml`](s60.yaml) is the ESPHome the conversion installs when ESPHome is
+[`sonoff_s60.yaml`](sonoff_s60.yaml) is the ESPHome the conversion installs when ESPHome is
 chosen at the start. Nobody converting a plug needs to build it: the tool
 installs the pre-built image in [`../artifacts/`](../artifacts/README.md) and
 writes the plug's Wi-Fi into it, in memory only.
@@ -12,11 +12,11 @@ and the plug keeps Sonoff's.
 
 ## Changing it
 
-1. Edit `s60.yaml`, and raise its `project` `version`.
-2. Build it: `esphome compile s60.yaml` (ESPHome 2026.9.1 built the current
+1. Edit `sonoff_s60.yaml`, and raise its `project` `version`.
+2. Build it: `esphome compile sonoff_s60.yaml` (ESPHome 2026.9.1 built the current
    image).
 3. Publish `.esphome/build/sonoff-s60/build/firmware.ota.bin` as
-   `artifacts/esphome-s60-imprintable-<version>.bin`, and update its row in
+   `artifacts/esphome-sonoff-s60-imprintable-<version>.bin`, and update its row in
    `artifacts/README.md`, its line in `SHA256SUMS`, and the pin in
    `tools/autoflash/esphome.py`. `tests/test_published_artifacts.py` checks
    it can still be imprinted.

@@ -163,7 +163,7 @@ worked for others.
 Pick **ESPHome** when the tool asks, and the plug ends up running
 [ESPHome](https://esphome.io) instead of Tasmota - on your Wi-Fi, with nothing
 to build or install on your computer: the tool installs a ready-made ESPHome
-for the S60 ([`ESPHome/s60.yaml`](ESPHome/s60.yaml)) and writes your Wi-Fi
+for the S60 ([`ESPHome/sonoff_s60.yaml`](ESPHome/sonoff_s60.yaml)) and writes your Wi-Fi
 into it, in memory only.
 
 - **The plug:** relay and button, the status LED, the power meter (voltage,

@@ -1,4 +1,4 @@
-# Build ESPHome/s60.yaml on Windows with a portable uv, keeping everything
+# Build ESPHome/sonoff_s60.yaml on Windows with a portable uv, keeping everything
 # it downloads under one short folder. In the emulator's Windows:
 #     & C:\S60\repo\ESPHome\prototype\windows-uv-build.ps1
 $ErrorActionPreference = "Stop"
@@ -28,12 +28,12 @@ $env:UV_NO_CONFIG = "1"
 $env:ESPHOME_ESP_IDF_PREFIX = "$root\idf"
 
 $esphome = Split-Path $PSScriptRoot  # the config is in ESPHome\, beside this folder
-Copy-Item "$esphome\s60.yaml" "$root\cfg"
+Copy-Item "$esphome\sonoff_s60.yaml" "$root\cfg"
 Set-Location "$root\cfg"
 Write-Host "Building ESPHome (the first time downloads ESP-IDF, about 3 GB)..."
 # Windows PowerShell turns a native program's stderr into errors: let it run on.
 $ErrorActionPreference = "Continue"
-& "$root\uv\uv.exe" tool run --python 3.12 --from esphome==2026.9.1 esphome compile s60.yaml 2>&1 |
+& "$root\uv\uv.exe" tool run --python 3.12 --from esphome==2026.9.1 esphome compile sonoff_s60.yaml 2>&1 |
     ForEach-Object { "$_" } | Tee-Object "$root\build.log"
 $code = $LASTEXITCODE
 

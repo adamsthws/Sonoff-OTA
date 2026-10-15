@@ -15,7 +15,7 @@ ESPHome, as well as Tasmota: the run asks at the start which the plug should
 end up running.
 
 - Choosing ESPHome needs nothing built or installed: the run installs a
-  ready-made ESPHome for the S60 (`ESPHome/s60.yaml`), with the plug's Wi-Fi
+  ready-made ESPHome for the S60 (`ESPHome/sonoff_s60.yaml`), with the plug's Wi-Fi
   written in, in memory only. It joins your Wi-Fi by itself, has no password
   to start with, as Tasmota has none, and Home Assistant finds it and can
   adopt it.
