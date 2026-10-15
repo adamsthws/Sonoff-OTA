@@ -78,6 +78,12 @@ class RouteTests(RouteTestCase):
         af.apply_target("tasmota")
         self.assertEqual(af.stage_name("D4"), "Preparing memory layout")
 
+    def test_an_install_cut_short_by_the_network_is_tried_again(self):
+        self.assertIn("I1", af.RETRY_STEPS)
+        said = ("esphome did not pass: the plug says: migration_refused: "
+                "POST /capture/written/21 returned HTTP -11 after 6 attempts")
+        self.assertRegex(said, af.TRANSIENT_RE)
+
     def test_a_run_is_complete_by_its_own_firmware(self):
         ctx = self.ctx(firmware="esphome")
         ctx.state.mark("I2", DONE)

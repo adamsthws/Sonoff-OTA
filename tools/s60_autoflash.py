@@ -2881,7 +2881,9 @@ def cmd_step(ctx: Context, step: str) -> int:
 # what it checks first (D4 the slot it is in, E2 the spare slot, G1 only over
 # the recovery Safeboot), or sets what it sets again.  Not the steps that ask
 # for anything, nor C2 or E3, which must happen once.
-RETRY_STEPS = {"A2", "D4", "E1", "E2", "F4", "G1", "H1"}
+# I1 too: until the plug restarts it runs Tasmota from ota_1, and writes the
+# same checked image again; once it runs ESPHome, I1 finds it and stops.
+RETRY_STEPS = {"A2", "D4", "E1", "E2", "F4", "G1", "H1", "I1"}
 ATTEMPTS = 3
 RETRY_PAUSE = 10.0
 # A failure worth another go: the plug or the network not answering.  A refusal
@@ -2971,9 +2973,6 @@ def wait_for_plug_back(ctx: Context) -> None:
 
 # Each step's name on its stage line, in words that need no knowledge of the
 # internals.
-# Where a shared step means something else on the way to ESPHome: D4 frees
-# the half of the memory ESPHome goes into, and the layout is not changed.
-ESPHOME_STAGE_NAMES = {"D4": "Making room for ESPHome"}
 STAGE_NAMES = {
     "A0": "Confirming prerequisites",
     "A5": "Validating local files",
@@ -2993,6 +2992,9 @@ STAGE_NAMES = {
     "I1": "Installing ESPHome",
     "I2": "Checking ESPHome",
 }
+# Where a shared step means something else on the way to ESPHome: D4 frees
+# the half of the memory ESPHome goes into, and the layout is not changed.
+ESPHOME_STAGE_NAMES = {"D4": "Making room for ESPHome"}
 
 
 # What each step does, in words that assume no knowledge of the internals.
