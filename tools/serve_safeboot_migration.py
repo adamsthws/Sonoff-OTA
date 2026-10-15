@@ -19,6 +19,7 @@ import os
 import re
 import secrets
 import socketserver
+import threading
 import sys
 import time
 import urllib.parse
@@ -680,30 +681,30 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
         if not self._allowed():
             return
         path = urllib.parse.urlsplit(self.path).path
-        state: MigrationState = self.server.state
+        # Worked out under the lock, sent after it: a plug slow to take the
+        # reply holds up nobody else.
+        with self.server.lock:
+            status, body, content_type = self._answer_get(path, self.server.state)
+        self._response(status, body, content_type)
+
+    @staticmethod
+    def _answer_get(path: str, state: "MigrationState") -> tuple[int, bytes, str]:
         try:
             if path == f"/berry/{state.phase}.be":
-                self._response(200, state.render_berry(), "text/plain; charset=utf-8")
-                return
+                return 200, state.render_berry(), "text/plain; charset=utf-8"
             match = re.fullmatch(r"/chunk/safeboot/([0-9]+)", path)
             if match:
-                chunk = state.safeboot_chunk(int(match.group(1)))
-                self._response(200, chunk.hex().encode("ascii"))
-                return
+                return 200, state.safeboot_chunk(int(match.group(1))).hex().encode("ascii"), "text/plain"
             match = re.fullmatch(r"/chunk/esphome/([0-9]+)", path)
             if match:
-                chunk = state.image_chunk(int(match.group(1)))
-                self._response(200, chunk.hex().encode("ascii"))
-                return
+                return 200, state.image_chunk(int(match.group(1))).hex().encode("ascii"), "text/plain"
             if path == "/restore-from" and state.phase == "restore":
-                self._response(200, str(state.restore_from()).encode("ascii"))
-                return
+                return 200, str(state.restore_from()).encode("ascii"), "text/plain"
             if path == "/target-table" and state.phase == "commit":
-                self._response(200, state.target_table.hex().encode("ascii"))
-                return
-            self._response(404, b"not found\n")
+                return 200, state.target_table.hex().encode("ascii"), "text/plain"
+            return 404, b"not found\n", "text/plain"
         except ValueError as exc:
-            self._response(409, f"refused: {exc}\n".encode("utf-8"))
+            return 409, f"refused: {exc}\n".encode("utf-8"), "text/plain"
 
     def do_POST(self) -> None:
         if not self._allowed():
@@ -716,36 +717,45 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
         if content_length < 0 or content_length > MAX_POST_SIZE:
             self._response(413, b"body too large\n")
             return
+        # Read before taking the lock: a body the plug stopped sending part way
+        # waits out MigrationHandler.timeout here, holding up nobody else.
         body = self.rfile.read(content_length)
         path = urllib.parse.urlsplit(self.path).path
         state: MigrationState = self.server.state
         try:
-            capture = re.fullmatch(r"/capture/([a-z-]+)/([0-9]+)", path)
-            if capture:
-                state.receive_capture(capture.group(1), int(capture.group(2)), body)
+            with self.server.lock:
+                capture = re.fullmatch(r"/capture/([a-z-]+)/([0-9]+)", path)
+                report = re.fullmatch(r"/report/([a-z]+)", path)
+                failure = re.fullmatch(r"/fail/([a-z]+)", path)
+                if capture:
+                    state.receive_capture(capture.group(1), int(capture.group(2)), body)
+                elif report:
+                    state.receive_report(report.group(1), body)
+                elif failure:
+                    state.receive_failure(failure.group(1), body)
+            if capture or report or failure:
                 self._response(200)
-                return
-            report = re.fullmatch(r"/report/([a-z]+)", path)
-            if report:
-                state.receive_report(report.group(1), body)
-                self._response(200)
-                return
-            failure = re.fullmatch(r"/fail/([a-z]+)", path)
-            if failure:
-                state.receive_failure(failure.group(1), body)
-                self._response(200)
-                return
-            self._response(404, b"not found\n")
+            else:
+                self._response(404, b"not found\n")
         except ValueError as exc:
             print(f"  REFUSED {path}: {exc}")
             self._response(409, f"refused: {exc}\n".encode("utf-8"))
 
 
-class MigrationServer(http.server.HTTPServer):
+class MigrationServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    # Each request in a thread of its own. After a network outage the plug's
+    # abandoned requests are still open here, each waited on for up to
+    # MigrationHandler.timeout; served one at a time, they held up the plug's
+    # next request past the five seconds it waits for a reply, so the phase
+    # failed with the network back. State changes take `lock` in turn.
+    daemon_threads = True
+    block_on_close = False  # a phase with its result ends without waiting on them
+
     def __init__(self, address: tuple[str, int], device_ip: str, state: MigrationState):
         super().__init__(address, MigrationHandler)
         self.device_ip = device_ip
         self.state = state
+        self.lock = threading.Lock()
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         # One line, not socketserver's traceback: a request the plug abandoned

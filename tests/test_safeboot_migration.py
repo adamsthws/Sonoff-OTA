@@ -728,11 +728,46 @@ class MigrationValidationTests(unittest.TestCase):
                     started = clock.monotonic()
                     with mock.patch("builtins.print") as printed:
                         server.handle_request()
-                    self.assertLess(clock.monotonic() - started, 5)
+                        # Back at once: the half-read request waits in its own thread...
+                        self.assertLess(clock.monotonic() - started, 1)
+                        # ...and is still dropped once its timeout passes.
+                        while printed.call_args is None and clock.monotonic() - started < 5:
+                            clock.sleep(0.05)
+                    self.assertIsNotNone(printed.call_args, "the stalled request was never dropped")
                     self.assertRegex(printed.call_args.args[0], "timed out|request dropped")
                     stalled.close()
                 finally:
                     server.server_close()
+
+    def test_a_request_cut_off_by_an_outage_does_not_hold_up_the_next(self):
+        # After a network outage the plug's abandoned requests are still open
+        # here, each waited on for up to MigrationHandler.timeout. The plug's
+        # next request must be answered meanwhile, not after them: it gives up
+        # on a reply within 5 seconds (emulator, ESPHome run with an outage).
+        import http.client
+        import socket
+        import time as clock
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            state = fixture.state("preflight")
+            server = MigrationServer(("127.0.0.1", 0), "127.0.0.1", state)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            stalled = socket.create_connection(server.server_address, timeout=2)
+            try:
+                stalled.sendall(b"POST /capture/table/0 HTTP/1.1\r\nHost: x\r\n"
+                                b"Content-Length: 8192\r\n\r\n" + b"00" * 100)
+                clock.sleep(0.2)  # taken up by the server before the next arrives
+                started = clock.monotonic()
+                connection = http.client.HTTPConnection(*server.server_address, timeout=4)
+                connection.request("GET", "/berry/preflight.be")
+                self.assertEqual(connection.getresponse().status, 200)
+                self.assertLess(clock.monotonic() - started, 2)
+                connection.close()
+            finally:
+                stalled.close()
+                server.shutdown()
+                server.server_close()
 
     def test_http_server_exposes_only_the_selected_phase_to_the_selected_device(self):
         with tempfile.TemporaryDirectory() as directory:
