@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
-from tools.autoflash import __version__, plugs, tasmota_settings  # noqa: E402
+from tools.autoflash import __version__, esphome, imprint, plugs, tasmota_settings  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import (  # noqa: E402
@@ -230,7 +230,7 @@ def run_is_complete(directory: Path) -> bool:
         state = RunState.open(directory)
     except (OSError, ValueError):
         return False
-    return state.is_done(STEPS[-1][0])
+    return state.is_done(steps_for(run_firmware(state))[-1][0])
 
 
 CURRENT_POINTER = ROOT / "captures" / ".autoflash-current"
@@ -261,7 +261,8 @@ def describe_run(directory: Path) -> str:
     mac = plugs.mac_of_run(directory) or state.input("plug_mac")
     if mac and state.input("plug_ip"):
         where += f", MAC {mac}"
-    pending = next((step for step, _, _ in STEPS if not state.is_done(step)), None)
+    pending = next((step for step, _, _ in steps_for(run_firmware(state))
+                    if not state.is_done(step)), None)
     try:
         when = dt.datetime.fromisoformat(state.data.get("updated_utc", "")).astimezone()
         today = when.date() == dt.date.today()
@@ -421,6 +422,8 @@ class Context:
         # (no Safeboot / E3 repartition) and uploads this image via Tasmota OTA.
         esphome = getattr(args, "esphome", None)
         self.esphome_firmware = Path(esphome).expanduser().resolve() if esphome else None
+        # --firmware: which to install, instead of being asked (--unattended needs it).
+        self.firmware_given = "esphome" if esphome else getattr(args, "firmware", None)
         if args.plug_ip:
             self.state.set_input("plug_ip", args.plug_ip)
         if args.email:
@@ -2145,7 +2148,7 @@ def step_promote(ctx: Context) -> dict[str, Any]:
     image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
     device.wait_reachable(timeout=120)
     slot = device.current_ota()
-    say(f"The plug is running from slot {slot}. The migration needs slot 1.")
+    say(f"The plug is running from slot {slot}. The next steps need slot 1.")
     if slot == 1:
         device.command("SaveData 0")
         say("Already there. SaveData 0 - settings frozen so the migration's checks stay stable")
@@ -2564,6 +2567,8 @@ def verify_high_slot(ctx: "Context") -> tuple[bool, str]:
     """
     if ctx.state.is_done("E3") or commit_report(ctx) == "PASS":
         return True, ""  # superseded: the old two-slot layout no longer exists
+    if ctx.state.is_done("I1"):
+        return True, ""  # superseded: ESPHome runs now, not the Tasmota it asked
     slot = ctx.device.current_ota()
     if slot == 1:
         return True, ""
@@ -2602,104 +2607,74 @@ STEP_VERIFIERS: dict[str, Callable[["Context"], tuple[bool, str]]] = {
 }
 
 
-def step_esphome_upload(ctx: Context) -> dict[str, Any]:
-    """I1 - flash ESPHome over interim Tasmota while the stock partition table is intact."""
-    path = ctx.esphome_firmware
-    if path is None:
-        raise Abort(
-            "ESPHome mode is active but no firmware path is set; pass --esphome /path/to/firmware.ota.bin"
-        )
-    if not path.is_file():
-        raise Abort(f"ESPHome firmware not found: {path}")
-    size = path.stat().st_size
-    # Stock ota_0/ota_1 are 0x1f0000 (1,984 KiB) each; leave a small margin.
-    max_size = 0x1F0000 - 0x1000
-    if size < 100_000:
-        raise Abort(
-            f"{path} is only {size} bytes - that does not look like an ESPHome ESP32 image"
-        )
-    if size > max_size:
-        raise Abort(
-            f"{path} is {size:,} bytes; the stock Sonoff OTA slot is only "
-            f"{max_size:,} bytes usable. Build a leaner ESPHome image "
-            "(esp-idf, no unused components)"
-        )
-    if ctx.state.is_done("E3"):
-        raise Abort(
-            "this run already committed the Tasmota Safeboot partition table (E3). "
-            "Stock-layout ESPHome mode cannot be used on it; start --new on another "
-            "plug, or finish with the normal Tasmota path / safeboot ESPHome migration "
-            "(https://esphome.io/guides/migrate_sonoff_tasmota/#esp32-partition-table-migration)"
-        )
-    output.transient_begin()
-    section("Installing ESPHome (stock Sonoff partitions)", [
-        "Interim Tasmota is running on the original Sonoff dual-OTA layout",
-        "(two ~1984 KiB slots, no Safeboot). The partition table is not changed.",
-        "",
-        f"File: {path}",
-        f"Size: {size:,} bytes (stock slot limit ~{max_size:,})",
-        "",
-        "Build ESPHome against a partitions.csv that matches stock S60 offsets",
-        "(ota_0 at 0x20000, ota_1 at 0x210000, size 0x1f0000 each).",
-        "Using the default ESPHome table will boot poorly or break later OTAs.",
-        "",
-        "Use firmware.ota.bin (app/OTA image), not firmware.factory.bin.",
-        "Put Wi-Fi credentials in the YAML - they are not copied from Tasmota.",
+def step_esphome_install(ctx: Context) -> dict[str, Any]:
+    """I1 - ESPHome into ota_0 from the temporary Tasmota, every block read back.
+
+    Like staging Safeboot, it writes only the slot Tasmota does not run from,
+    and the partition table is left as Sonoff made it.  Only once the whole
+    image has been read back and matched does the plug erase its boot
+    selection and restart, which starts ESPHome (the esphome phase).
+    """
+    host = ctx.state.input("plug_ip")
+    if host and esphome.is_esphome(host):
+        say("The plug already runs ESPHome; there is nothing to install again.")
+        return {"already_installed": True}
+    ssid, password = ctx.wifi()
+    try:
+        image = esphome.image_for(ssid, password, own=ctx.esphome_firmware)
+    except (esphome.ImageError, imprint.ImprintError, OSError) as exc:
+        raise Abort(f"the ESPHome image cannot be used: {exc}") from exc
+    name = ctx.esphome_firmware.name if ctx.esphome_firmware else esphome.IMAGE.name
+    section("Installing ESPHome", quiet=True, body=[
+        f"{name}, with your Wi-Fi written in (in memory only), goes into the half",
+        "of the plug's memory Tasmota is not running from. Every block is read back",
+        "and checked against the image; only then does the plug switch to it and",
+        "restart. Its memory layout stays as Sonoff made it.",
     ])
-    device = ctx.device
-    device.wait_reachable(timeout=120)
     if ctx.dry_run:
-        say(f"[dry-run] would upload ESPHome from {path}")
-        return {"path": str(path), "size": size, "dry_run": True, "layout": "stock"}
-    how = upload_or_prompt(ctx, path, "ESPHome firmware (stock layout)")
-    output.transient_end()
-    return {"path": str(path), "size": size, "upload": how, "layout": "stock"}
+        say(f"[dry-run] would install {name}")
+        return {"dry_run": True, "image": name}
+    code, captured = ctx.phase_runner().run("esphome", image=image)
+    if code != 0:
+        raise phase_failed("esphome", code, captured)
+    return {"exit": code, "image": name, "size": len(image)}
 
 
-def step_esphome_wait(ctx: Context, wait: float = 180.0) -> dict[str, Any]:
-    """I2 - wait until the plug no longer answers as Tasmota."""
+def step_esphome_check(ctx: Context, wait: float = 180.0) -> dict[str, Any]:
+    """I2 - ESPHome started from what was written, and joined the home Wi-Fi."""
     host = ctx.state.input("plug_ip")
     if not host:
-        raise Abort("plug address is not known")
-    say("Waiting for the plug to leave Tasmota and boot ESPHome...")
-    say("(Usually 30-90 seconds; the Tasmota web UI will stop answering.)")
+        raise Abort("the plug's address is not known")
+    if ctx.dry_run:
+        say("[dry-run] would wait for ESPHome to answer")
+        return {"dry_run": True}
+    say("Waiting for the plug to start ESPHome and join your Wi-Fi...")
     started = time.monotonic()
-    saw_down = False
     while time.monotonic() - started < wait:
+        if esphome.is_esphome(host):
+            seconds = round(time.monotonic() - started, 1)
+            say(f"    ESPHome answered at {host} after {seconds}s.")
+            return {"seconds": seconds}
+        output.progress(f"waiting for ESPHome... {time.monotonic() - started:.0f}s")
         time.sleep(3)
-        try:
-            body = setup_network.page(host, timeout=3.0)
-            if body is None:
-                raise
-        except Exception:
-            saw_down = True
-            output.progress(
-                f"plug offline while rebooting... {time.monotonic() - started:.0f}s"
-            )
-            continue
-        lower = body.lower()
-        if "tasmota" in lower:
-            output.progress(
-                f"still answering as Tasmota... {time.monotonic() - started:.0f}s"
-            )
-            continue
-        say(f"    Plug at {host} is no longer serving Tasmota.")
-        if saw_down:
-            say("    It went offline and came back - typical after a successful OTA.")
-        tell("")
-        tell("ESPHome should be running on the stock Sonoff partition table.")
-        tell("No Safeboot migration is required for this path.")
-        tell("Later ESPHome OTAs stay within the two ~1984 KiB slots.")
-        return {
-            "host": host,
-            "seconds": round(time.monotonic() - started, 1),
-            "layout": "stock",
-        }
     raise Abort(
-        "after three minutes the plug still answers as Tasmota, or never came back. "
-        "Check the binary (stock partitions.csv, app image size), power-cycle once, "
-        "and re-run with the same --esphome path"
+        "ESPHome was written and checked, but has not answered on your Wi-Fi within "
+        "three minutes - most likely it cannot join it. When it cannot, it puts up its "
+        "own network, named like sonoff-s60-xxxxxx: join that, and its page asks for "
+        "your Wi-Fi. Or switch the plug off and on, and run the same command again"
     )
+
+
+def evidence_esphome_installed(ctx: Context) -> tuple[bool | None, str]:
+    host = ctx.state.input("plug_ip")
+    if host and esphome.is_esphome(host):
+        return True, "The plug is running ESPHome, so the install did finish."
+    if ctx.device.current_ota() == 1:
+        return False, (
+            "The plug is still running the temporary Tasmota, so it did not switch;\n"
+            "  it is safe to do this step again."
+        )
+    return None, "The plug neither runs ESPHome nor answers as the temporary Tasmota."
 
 
 # Shared prefix: stock Sonoff layout is still in place through D1 inclusive.
@@ -2725,21 +2700,70 @@ TASMOTA_FINAL_STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] 
 ]
 # ESPHome product: stay on stock dual-OTA table; flash ESPHome from interim Tasmota.
 ESPHOME_FINAL_STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = [
-    ("I1", "Upload ESPHome on stock layout", step_esphome_upload),
-    ("I2", "Wait for ESPHome boot", step_esphome_wait),
+    ("D4", "Promote to high slot and freeze NVS", step_promote),
+    ("I1", "ESPHome into the other slot, every block checked", step_esphome_install),
+    ("I2", "ESPHome started and on the Wi-Fi", step_esphome_check),
 ]
-# Default target is Tasmota; main() rebuilds this when --esphome is passed.
-STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = (
-    COMMON_STEPS + TASMOTA_FINAL_STEPS
-)
+# The firmware a run installs, as asked at its start and kept in its record.
+FIRMWARES = {"tasmota": "Tasmota", "esphome": "ESPHome"}
+
+
+def steps_for(firmware: str) -> list[tuple[str, str, Callable[[Context], dict[str, Any]]]]:
+    return COMMON_STEPS + (ESPHOME_FINAL_STEPS if firmware == "esphome" else TASMOTA_FINAL_STEPS)
+
+
+def run_firmware(state: RunState) -> str:
+    """A run's firmware; one from before there was a choice installs Tasmota."""
+    return state.input("firmware") or "tasmota"
+
+
+# This run's steps: Tasmota's until its firmware is known (apply_target).
+STEPS = steps_for("tasmota")
 STEP_INDEX = {step: (title, handler) for step, title, handler in STEPS}
 
 
-def apply_target(esphome: bool) -> None:
-    """Choose Tasmota (Safeboot layout) or ESPHome (stock layout) finish."""
+def apply_target(firmware: str) -> None:
     global STEPS, STEP_INDEX
-    STEPS = COMMON_STEPS + (ESPHOME_FINAL_STEPS if esphome else TASMOTA_FINAL_STEPS)
+    STEPS = steps_for(firmware)
     STEP_INDEX = {step: (title, handler) for step, title, handler in STEPS}
+
+
+def settle_firmware(ctx: Context) -> str:
+    """Which firmware this run installs: kept from its start, given on the
+    command line, or asked - once, before anything is done."""
+    kept = ctx.state.input("firmware")
+    given = ctx.firmware_given
+    if kept and given and given != kept:
+        raise Abort(
+            f"this plug is being converted to {FIRMWARES[kept]}, and a conversion cannot "
+            f"switch to {FIRMWARES[given]} part way. Carry on without "
+            f"{'--esphome' if ctx.esphome_firmware else '--firmware'}, or start again with --new"
+        )
+    if kept:
+        return kept
+    started = [step for step, _, _ in COMMON_STEPS if ctx.state.is_done(step) and step != "A0"]
+    if given:
+        firmware = given
+    elif started:
+        firmware = "tasmota"  # begun before there was a choice: it was Tasmota then
+    else:
+        output.transient_begin()
+        section("Choose the plug's new firmware", [
+            "Tasmota has its own web page for settings, and works with Home Assistant",
+            "and many other systems. ESPHome is made for Home Assistant, and is set",
+            "up and customised from there.",
+        ])
+        try:
+            choice = ask_choice("Which firmware would you like", list(FIRMWARES.values()))
+        except prompts.NoOneToAnswer:
+            output.transient_end()
+            raise Abort("an unattended run needs to be told which firmware: "
+                        "--firmware tasmota or --firmware esphome") from None
+        output.transient_end()
+        firmware = list(FIRMWARES)[choice]
+    ctx.state.set_input("firmware", firmware)
+    tell(f"Converting the plug to {FIRMWARES[firmware]}.")
+    return firmware
 
 
 # ---------------------------------------------------------------------- CLI
@@ -2884,8 +2908,9 @@ def wait_while_plug_busy(ctx: Context) -> None:
     run would go on as if it were.  It is told apart by answering ping.
     """
     host = ctx.state.input("plug_ip")
-    if not host or not ctx.state.is_done("D1") or ctx.state.is_done(STEPS[-1][0]):
-        return  # not running Tasmota yet, or finished
+    if (not host or not ctx.state.is_done("D1") or ctx.state.is_done(STEPS[-1][0])
+            or ctx.state.is_done("I1")):
+        return  # not running Tasmota yet, finished, or running ESPHome
     device = ctx.device
     if device.answers(timeout=3.0) or not hostsys.ping_ok(host):
         return  # answering, or not on the network at all: the steps say which
@@ -2959,8 +2984,8 @@ STAGE_NAMES = {
     "F4": "Configuring Tasmota",
     "G1": "Installing Safeboot",
     "H1": "Verifying conversion",
-    "I1": "Installing ESPHome (stock layout)",
-    "I2": "Waiting for ESPHome",
+    "I1": "Installing ESPHome",
+    "I2": "Checking ESPHome",
 }
 
 
@@ -2981,8 +3006,8 @@ PLAIN_DESCRIPTION = {
     "F4": "sets up Wi-Fi, saves settings and applies the S60 plug template",
     "G1": "replaces the temporary startup firmware with the official one",
     "H1": "checks the finished plug against the official files",
-    "I1": "uploads ESPHome through interim Tasmota without changing the partition table",
-    "I2": "waits until the plug stops answering as Tasmota",
+    "I1": "writes ESPHome into the plug, checks every block, and switches to it",
+    "I2": "checks the plug has started ESPHome and joined your Wi-Fi",
 }
 
 
@@ -3107,6 +3132,7 @@ ATTEMPTED_EVIDENCE: dict[str, Callable[["Context"], tuple[bool | None, str]]] = 
     "C2": evidence_bridge_installed,
     "E3": evidence_commit_finished,
     "F2": evidence_official_app_installed,
+    "I1": evidence_esphome_installed,
 }
 
 
@@ -3160,18 +3186,15 @@ def cmd_run(ctx: Context) -> int:
 
 def run_steps(ctx: Context) -> int:
     started = time.monotonic()
-    resumed = any(ctx.state.is_done(step) for step, _, _ in STEPS)
-    ctx.run_started, ctx.run_resumed = started, resumed
     tell("")
-    if ctx.esphome_firmware:
-        tell("Target: ESPHome on the stock Sonoff partition table.")
-        tell("Interim Tasmota is only a vehicle - Safeboot repartition is skipped.")
-        tell(f"ESPHome image: {ctx.esphome_firmware}")
-        tell("")
     tell("Converting a plug usually takes under 10 minutes. Some stages take a")
     tell("minute or two with little to see - that's normal. Keep the plug plugged")
     tell("in, and this computer awake, until the last stage says complete.")
     tell("")
+    firmware = settle_firmware(ctx)
+    apply_target(firmware)
+    resumed = any(ctx.state.is_done(step) for step, _, _ in STEPS)
+    ctx.run_started, ctx.run_resumed = started, resumed
     wait_while_plug_busy(ctx)
     for step, title, _ in STEPS:
         if ctx.state.is_done(step):
@@ -3242,7 +3265,8 @@ def run_steps(ctx: Context) -> int:
     close_firewall_rules(ctx)
     tell("")
     output.show("Conversion complete!", output.GREEN)
-    tell("The plug is running official Tasmota...")
+    tell("The plug is running ESPHome..." if firmware == "esphome"
+         else "The plug is running official Tasmota...")
     url = plug_page_url(ctx.state.input("plug_ip"))
     if url:
         output.show_link(url, "Your plug")
@@ -3361,6 +3385,7 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         name = "__"
     fields = [
         ("Result", result),
+        ("Firmware", FIRMWARES[run_firmware(ctx.state)]),
         ("Tool version", __version__),
         ("Plug model", model or "__"),
         ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),
@@ -3378,7 +3403,8 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Plug Wi-Fi signal", f"{signal} dBm" if isinstance(signal, int) else "not recorded"),
         ("Typed the Wi-Fi", "yes" if ctx.state.input("wifi_typed") else "no"),
         ("Joined setup network", "yes" if joined else "no"),
-        ("Name in Tasmota", name),
+        (("Name in ESPHome", "Sonoff S60") if run_firmware(ctx.state) == "esphome"
+         else ("Name in Tasmota", name)),
         ("Relay", hardware.get("Relay", "not checked")),
         ("Power meter", hardware.get("Power meter", "not checked")),
     ]
@@ -3481,9 +3507,31 @@ def check_hardware(ctx: Context) -> dict[str, str]:
     return result
 
 
+def check_esphome_hardware(ctx: Context) -> dict[str, str]:
+    """check_hardware's two switches and two readings, through ESPHome's web API."""
+    host = ctx.state.input("plug_ip")
+    say("Checking the relay and power meter...")
+    was_on = esphome.relay(host)
+    if was_on is None:
+        say("    The plug did not answer the check.")
+        return {key: "could not be checked" for key in ("Relay", "Power meter")}
+    switched = esphome.switch_relay(host, not was_on)
+    time.sleep(METER_SETTLE)
+    first = esphome.meter(host) or None
+    restored = esphome.switch_relay(host, was_on)
+    time.sleep(METER_SETTLE)
+    second = esphome.meter(host) or None
+    on, off = (second, first) if was_on else (first, second)
+    result = describe_hardware(switched, restored, on, off)
+    for label, value in result.items():
+        say(f"    {label}: {value}")
+    return result
+
+
 def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     """Ask for a report, with this run's details ready to paste."""
-    fields = report_fields(ctx, seconds, resumed, check_hardware(ctx))
+    check = check_esphome_hardware if run_firmware(ctx.state) == "esphome" else check_hardware
+    fields = report_fields(ctx, seconds, resumed, check(ctx))
     offer_report(ctx, fields, "Please share how it went!")
     tell("")
     output.show("You've reached the bit where I hold out my hat!", output.GREEN)
@@ -3654,13 +3702,10 @@ def _main() -> int:
                         help="type the Wi-Fi details instead of reading them from the plug")
     parser.add_argument("--no-backup", action="store_true",
                         help="keep no backup of the Sonoff firmware (it holds the Wi-Fi password)")
-    parser.add_argument(
-        "--esphome",
-        metavar="PATH",
-        help="after interim Tasmota on the stock partition table, upload this ESPHome "
-             "firmware.ota.bin and stop (no Safeboot repartition). Build the image against "
-             "stock S60 partitions (ota slots ~1984 KiB at 0x20000 / 0x210000)",
-    )
+    parser.add_argument("--firmware", choices=list(FIRMWARES),
+                        help="which firmware to install, instead of being asked at the start")
+    # An ESPHome built by hand (firmware.ota.bin), instead of the published one.
+    parser.add_argument("--esphome", metavar="PATH", help=argparse.SUPPRESS)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--unattended", action="store_true",
                         help="nobody at the keyboard: go ahead past the point of no return "
@@ -3675,7 +3720,6 @@ def _main() -> int:
                         help=argparse.SUPPRESS)  # testing: the backup's first two reads fail
     parser.add_argument("--bridge", help=argparse.SUPPRESS)  # research: archive/docs/reference/automatic-wifi.md
     args = parser.parse_args()
-    apply_target(bool(getattr(args, "esphome", None)))
     prompts.UNATTENDED = args.unattended
     global SIMULATED_BACKUP_FAILURES
     SIMULATED_BACKUP_FAILURES = 2 if args.simulate_backup_failure else 0
@@ -3697,6 +3741,7 @@ def _main() -> int:
             args.run = resolve_run_name(args.run, args.new, args.plug_ip,
                                         ask=args.command == "run" and not args.unattended)
         ctx = Context(args)
+        apply_target(run_firmware(ctx.state))  # a run settles it at its start
     except QuitRun:
         say("Stopped. Nothing was changed.")
         return 130
@@ -3711,9 +3756,10 @@ def _main() -> int:
             return 0
         for directory in directories:
             state = RunState.open(directory)
-            done = sum(1 for step, _, _ in STEPS if state.is_done(step))
+            steps = steps_for(run_firmware(state))
+            done = sum(1 for step, _, _ in steps if state.is_done(step))
             mark = "verified" if run_is_complete(directory) else "in progress"
-            say(f"  {run_name(directory):<55} {done}/{len(STEPS)} steps  {mark}"
+            say(f"  {run_name(directory):<55} {done}/{len(steps)} steps  {mark}"
                 f"  {state.input('plug_ip') or ''}")
         for backup in plugs.backups():
             say(f"  Sonoff backup: {backup.describe()} in {display_path(backup.directory)}")

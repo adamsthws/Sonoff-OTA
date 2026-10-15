@@ -11,7 +11,11 @@ holds it, and the plug joins the home network by itself when it starts.
 from __future__ import annotations
 
 import hashlib
+import http.client
+import json
 import struct
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from . import imprint
@@ -75,3 +79,57 @@ def image_for(ssid: str, password: str, own: Path | None = None) -> bytes:
     if imprint.has_placeholders(image):
         return imprint.imprint(image, ssid, password)
     return image  # built with its own Wi-Fi
+
+
+# ------------------------------------------------------------ the plug, running it
+# Its web page (web_server version 3) and REST paths, named after each entity's
+# name in ESPHome/s60.yaml: /switch/Relay, /sensor/Voltage, /sensor/Power.
+
+# Straight to the plug: a proxy set for the internet has no route to it.
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _request(host: str, path: str, *, post: bool = False, timeout: float = 4.0) -> str | None:
+    request = urllib.request.Request(f"http://{host}{path}", data=b"" if post else None,
+                                     method="POST" if post else "GET")
+    try:
+        with _OPENER.open(request, timeout=timeout) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, OSError, http.client.HTTPException):
+        return None
+
+
+def is_esphome(host: str, timeout: float = 4.0) -> bool:
+    """Whether ESPHome's own web page answers at `host` (not merely "not Tasmota")."""
+    page = _request(host, "/", timeout=timeout)
+    return page is not None and "<esp-app" in page
+
+
+def _state(host: str, path: str) -> object:
+    body = _request(host, path)
+    try:
+        return json.loads(body)["value"] if body else None
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def relay(host: str) -> bool | None:
+    value = _state(host, "/switch/Relay")
+    return value if isinstance(value, bool) else None
+
+
+def switch_relay(host: str, on: bool) -> bool:
+    """Switch the relay, and say whether it then reads as asked."""
+    _request(host, f"/switch/Relay/{'turn_on' if on else 'turn_off'}", post=True)
+    return relay(host) is on
+
+
+def meter(host: str) -> dict[str, float]:
+    """The meter's voltage and power, as check_hardware's readings: each only
+    if the plug has a reading (none, until its meter has reported)."""
+    readings = {}
+    for key in ("Voltage", "Power"):
+        value = _state(host, f"/sensor/{key}")
+        if isinstance(value, (int, float)):
+            readings[key] = float(value)
+    return readings
