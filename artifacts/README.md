@@ -10,7 +10,7 @@ directory, never here.
 | `tasmota32c3-bluetooth.bin` | Berry-capable Tasmota used temporarily on the original partition layout | `a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708` |
 | `s60-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `aa32fafa4a9470152d5f8826fc6aedf94387575332353b50b8ce454ec1f9d364` |
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
-| `esphome-sonoff-s60-imprintable-1.0.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `549dd12171535bacb5cba5dbd5c4db36411fcf52af8fe68719956de0600e8aeb` |
+| `esphome-sonoff-s60-imprintable-1.0.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `04cbad327cc4fd3b3109e34ec4d3a5832cb9bc5bce33f96103acdbf59ab1a09b` |
 
 The Bluetooth image is the exact file used by the successful migrations. It
 was retrieved from Tasmota's official moving `install/firmware` branch at

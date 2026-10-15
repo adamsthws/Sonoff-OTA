@@ -163,3 +163,39 @@ class CheckStepTests(RouteTestCase):
         ctx.dry_run = True
         with mock.patch.object(af.esphome, "is_esphome", side_effect=AssertionError("waited")):
             self.assertEqual(af.step_esphome_check(ctx), {"dry_run": True})
+
+
+class ESPHomePageTests(unittest.TestCase):
+    """ESPHome's page, as the plug serves it with web_server's local: true."""
+
+    def serve(self, body, headers):
+        import http.server
+        import threading
+
+        class Page(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                for key, value in headers.items():
+                    self.send_header(key, value)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Page)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"127.0.0.1:{server.server_address[1]}"
+
+    def test_a_gzipped_page_is_recognised(self):
+        import gzip
+        page = b"<!doctype html><html><body><esp-app></esp-app></body></html>"
+        host = self.serve(gzip.compress(page), {"Content-Type": "text/html", "Content-Encoding": "gzip"})
+        self.assertTrue(af.esphome.is_esphome(host))
+
+    def test_a_tasmota_page_is_not(self):
+        host = self.serve(b"<html><body>Tasmota</body></html>", {"Content-Type": "text/html"})
+        self.assertFalse(af.esphome.is_esphome(host))

@@ -10,6 +10,7 @@ holds it, and the plug joins the home network by itself when it starts.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import http.client
 import json
@@ -23,8 +24,8 @@ from . import imprint
 ROOT = Path(__file__).resolve().parents[2]
 # The published image, pinned: a changed file is refused, never used unseen.
 IMAGE = ROOT / "artifacts" / "esphome-sonoff-s60-imprintable-1.0.0.bin"
-IMAGE_SHA256 = "549dd12171535bacb5cba5dbd5c4db36411fcf52af8fe68719956de0600e8aeb"
-IMAGE_SIZE = 923_504
+IMAGE_SHA256 = "04cbad327cc4fd3b3109e34ec4d3a5832cb9bc5bce33f96103acdbf59ab1a09b"
+IMAGE_SIZE = 950_016
 # Sonoff's app slots, which the run leaves as they are: ESPHome goes into ota_0.
 SLOT_ADDRESS = 0x20000
 SLOT_SIZE = 0x1F0000
@@ -94,8 +95,12 @@ def _request(host: str, path: str, *, post: bool = False, timeout: float = 4.0) 
                                      method="POST" if post else "GET")
     try:
         with _OPENER.open(request, timeout=timeout) as response:
-            return response.read().decode("utf-8", errors="replace")
-    except (urllib.error.URLError, OSError, http.client.HTTPException):
+            body = response.read()
+            # The page itself (web_server's local: true) comes gzipped, asked or not.
+            if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                body = gzip.decompress(body)
+            return body.decode("utf-8", errors="replace")
+    except (urllib.error.URLError, OSError, http.client.HTTPException, EOFError, gzip.BadGzipFile):
         return None
 
 

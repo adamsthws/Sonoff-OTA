@@ -168,15 +168,19 @@ into it, in memory only.
 
 - **The plug:** relay and button, the status LED, the power meter (voltage,
   current, power, daily, monthly, yearly and total energy), overload
-  protection and a countdown timer.
-- **Its web page** is at the link the tool gives at the end. Like Tasmota, it
-  has no password to start with.
+  protection and a countdown timer. After a power cut the relay comes back as
+  it was.
+- **Its web page** is at the link the tool gives at the end, and works without
+  the internet. Like Tasmota, it has no password to start with.
 - **Home Assistant** finds it by itself. Adopting it in Home Assistant's ESPHome
   builder takes its config from this repository, so you can change it and
   add passwords and an API key there.
 - **Updates** are ESPHome's own, from Home Assistant or ESPHome's tools.
 - **Its memory** stays laid out as Sonoff made it: ESPHome goes into the half
-  Sonoff's firmware updates used, which is enough for it.
+  Sonoff's firmware updates used, which is enough for it. Sonoff's bootloader
+  stays too, as on the way to Tasmota, so ESPHome notes at start-up that it
+  cannot roll a failed update back by itself; its safe mode, which keeps a
+  plug that keeps failing to start open to updates, still works.
 
 The ESPHome option was contributed by [p1otr](https://github.com/p1otr).
 

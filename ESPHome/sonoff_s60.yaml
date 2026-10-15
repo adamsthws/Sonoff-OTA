@@ -14,32 +14,40 @@ esphome:
     name: adamsthws.sonoff-s60
     version: "1.0.0"
   on_boot:
+    # Tasmota holds the relay and LED pins through a software restart, and
+    # the install ends with one: release them before anything drives them,
+    # or the relay stays as Tasmota left it until the plug is unplugged.
+    - priority: 1000
+      then:
+        - lambda: |-
+            gpio_hold_dis(GPIO_NUM_4);
+            gpio_hold_dis(GPIO_NUM_5);
     # After Wi-Fi is set up (its priority is 250); on_boot's default, 600, is before.
-    priority: -100
-    then:
-      - lambda: |-
-          // Written by the conversion tool: each a marker, then filler, and
-          // each must appear exactly once in the image. Read through volatile
-          // pointers, so the compiler cannot fold in this build-time text.
-          static const char ssid[] = "S60-IMPRINT-SSID>.................................";
-          static const char password[] = "S60-IMPRINT-PASS>................................................................";
-          const char *volatile at_ssid = ssid;
-          const char *volatile at_password = password;
-          id(imprinted_ssid) = at_ssid;
-          id(imprinted_password) = at_password;
-      - if:
-          condition:
-            # Imprinted, and nothing saved yet: once saved, the Wi-Fi is used
-            # from there, and a later change in Home Assistant is not undone.
-            lambda: |-
-              return !id(imprinted_ssid).empty()
-                  && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0
-                  && !wifi::global_wifi_component->has_sta();
-          then:
-            - wifi.configure:
-                ssid: !lambda 'return id(imprinted_ssid);'
-                password: !lambda 'return id(imprinted_password);'
-                save: true
+    - priority: -100
+      then:
+        - lambda: |-
+            // Written by the conversion tool: each a marker, then filler, and
+            // each must appear exactly once in the image. Read through volatile
+            // pointers, so the compiler cannot fold in this build-time text.
+            static const char ssid[] = "S60-IMPRINT-SSID>.................................";
+            static const char password[] = "S60-IMPRINT-PASS>................................................................";
+            const char *volatile at_ssid = ssid;
+            const char *volatile at_password = password;
+            id(imprinted_ssid) = at_ssid;
+            id(imprinted_password) = at_password;
+        - if:
+            condition:
+              # Imprinted, and nothing saved yet: once saved, the Wi-Fi is used
+              # from there, and a later change in Home Assistant is not undone.
+              lambda: |-
+                return !id(imprinted_ssid).empty()
+                    && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0
+                    && !wifi::global_wifi_component->has_sta();
+            then:
+              - wifi.configure:
+                  ssid: !lambda 'return id(imprinted_ssid);'
+                  password: !lambda 'return id(imprinted_password);'
+                  save: true
 
 # Adopting the plug in Home Assistant's ESPHome builder takes this config.
 dashboard_import:
@@ -65,6 +73,9 @@ preferences:
 logger:
 
 api:
+  # Not restarting when Home Assistant is away: a plug without it would cut
+  # the power to what it runs every 15 minutes (the default).
+  reboot_timeout: 0s
 
 ota:
   - platform: esphome
@@ -72,8 +83,11 @@ ota:
 
 web_server:
   version: 3
+  # The page's code from the plug itself, so it works where the plug has no internet.
+  local: true
 
 wifi:
+  reboot_timeout: 0s
   ap: {}
 
 captive_portal:
@@ -110,14 +124,14 @@ uart:
 status_led:
   pin:
     number: GPIO5
-    inverted: true
+    inverted: false  # Tasmota's 544 on this pin: LedLink, not inverted
 
 switch:
   - id: relay
     platform: gpio
     name: "Relay"
     pin: GPIO4
-    restore_mode: ALWAYS_ON
+    restore_mode: RESTORE_DEFAULT_ON  # as it was before a power cut; on if never set
 
 number:
   - platform: template
@@ -174,6 +188,7 @@ binary_sensor:
     internal: true
     pin:
       number: GPIO9
+      mode: INPUT_PULLUP
       inverted: true
     on_press:
       - switch.toggle: relay
