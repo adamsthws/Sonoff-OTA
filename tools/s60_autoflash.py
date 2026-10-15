@@ -2940,7 +2940,10 @@ def execute_with_retries(ctx: Context, step: str) -> int:
         ctx.state.capture(f"{step}.attempts", attempt)
         if code != 1 or step not in RETRY_STEPS or attempt == ATTEMPTS:
             return code
-        error = str(ctx.state.data.get("steps", {}).get(step, {}).get("error", ""))
+        # A step the plug is asked about later (ATTEMPTED_EVIDENCE) keeps no
+        # error in its record, so what it failed with is taken from this run.
+        error = str(ctx.state.data.get("steps", {}).get(step, {}).get("error", "")
+                    or ctx.last_failure)
         if not TRANSIENT_RE.search(error):
             return code
         tell(f"    That may have been the network - trying again in {RETRY_PAUSE:.0f}s "
@@ -2956,13 +2959,20 @@ def wait_for_plug_back(ctx: Context) -> None:
     if not ctx.state.input("plug_ip") or not ctx.state.is_done("D1"):
         return
     device = ctx.device
-    if device.answers(timeout=3.0):
+    host = ctx.state.input("plug_ip")
+    esphome_route = run_firmware(ctx.state) == "esphome"
+
+    def back() -> bool:
+        # On the way to ESPHome the plug may already have switched to it.
+        return device.answers(timeout=3.0) or (esphome_route and esphome.is_esphome(host, 3.0))
+
+    if back():
         return
     tell("    The plug is not answering yet - waiting for it (a router restarting, say).")
     started = time.monotonic()
     while time.monotonic() - started < PLUG_BACK_WAIT:
         output.progress(f"waiting for the plug... {time.monotonic() - started:.0f}s")
-        if device.answers(timeout=3.0):
+        if back():
             output.progress_clear()
             tell("    It is answering again.")
             return

@@ -84,6 +84,23 @@ class RouteTests(RouteTestCase):
                 "POST /capture/written/21 returned HTTP -11 after 6 attempts")
         self.assertRegex(said, af.TRANSIENT_RE)
 
+    def test_a_phase_left_to_be_asked_about_is_still_tried_again(self):
+        # I1 stays "attempted", with no error kept, when its phase ends with no
+        # result; the reason it gave decides whether to try again in this run.
+        ctx = self.ctx(firmware="esphome")
+        ctx.last_failure = ("the plug stopped the esphome without reaching this computer; "
+                            "its console says: POST /capture/written/22 returned HTTP -1")
+        tries = []
+
+        def execute(ctx, step):
+            tries.append(step)
+            return 1 if len(tries) == 1 else 0
+
+        with mock.patch.object(af, "execute", side_effect=execute), \
+                mock.patch.object(af, "wait_for_plug_back"), mock.patch.object(af.time, "sleep"):
+            self.assertEqual(af.execute_with_retries(ctx, "I1"), 0)
+        self.assertEqual(tries, ["I1", "I1"])
+
     def test_a_run_is_complete_by_its_own_firmware(self):
         ctx = self.ctx(firmware="esphome")
         ctx.state.mark("I2", DONE)
