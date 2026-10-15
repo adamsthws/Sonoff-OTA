@@ -9,6 +9,24 @@ The version is set in one place, `tools/autoflash/__init__.py`. Merging a new
 one to `main` tags it and publishes a release with its notes from here, so add
 the section below before changing the number.
 
+## 1.2.0
+
+The report at the end now comes from every run that converted or failed, and
+says how long each stage took.
+
+- A run that failed - a stage that stopped, or something unexpected - offers
+  its report too, saying where it stopped and why, with nothing private in
+  it. A run you stopped yourself, at a question or with Ctrl-C, offers none.
+- The report gives each stage's time, how long each stage that runs on the
+  plug kept it busy, which stages needed retries, and the plug's Wi-Fi
+  signal.
+- Python has a line of its own in the report, saying where it came from:
+  the tool's portable one, one it installed, a virtual environment, or one
+  already on the computer.
+- Fixes a plug that had just restarted, after the memory-layout rewrite say,
+  being taken for one not answering: a request it could never answer was
+  waited on for up to 20 minutes.
+
 ## 1.1.1
 
 Fixes the ways a plug could be left answering nothing, not even its web
