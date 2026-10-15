@@ -96,12 +96,13 @@ class PhaseDisplay:
             path = request.group("path")
             if path.startswith("/berry/"):
                 self._line("    The plug fetched its instructions.")
-            elif path.startswith("/chunk/safeboot/"):
+            elif path.startswith(("/chunk/safeboot/", "/chunk/esphome/")):
                 chunk_id = path.rsplit("/", 1)[-1]
                 self.copied_chunks.add(chunk_id)
                 copied = len(self.copied_chunks)
                 total = f"/{self.blocks}" if self.blocks else ""
-                self._status(f"    Copying the startup firmware: block {copied}{total}")
+                what = "ESPHome" if path.startswith("/chunk/esphome/") else "the startup firmware"
+                self._status(f"    Copying {what}: block {copied}{total}")
             elif path.startswith("/capture/") and self.phase == "preflight":
                 self.read += 1
                 self._status(f"    Reading the plug's memory layout: {self.read} blocks")
@@ -191,8 +192,10 @@ class PhaseRunner:
         self.busy_seconds: float | None = None
         self._started_at: float | None = None
 
-    def _blocks(self, phase: str) -> int | None:
-        """How many 4 KiB blocks of startup firmware a phase copies, for progress."""
+    def _blocks(self, phase: str, image: bytes | None = None) -> int | None:
+        """How many 4 KiB blocks of firmware a phase copies, for progress."""
+        if image is not None:
+            return (len(image) + SECTOR - 1) // SECTOR
         try:
             artifacts = json.loads(self.manifest.read_text(encoding="utf-8"))["artifacts"]
             if phase == "stage":
@@ -205,7 +208,13 @@ class PhaseRunner:
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
-    def _command(self, phase: str, extra_flags: list[str]) -> list[str]:
+    def _command(self, phase: str, extra_flags: list[str], image: bytes | None = None) -> list[str]:
+        if image is not None:
+            piped = ["--image-from-stdin", "--no-sensitive-captures"]
+        elif self.recovery:
+            piped = ["--recovery-from-stdin", "--no-sensitive-captures"]
+        else:
+            piped = []
         return hostsys.python_script(
             self.repo_root / "tools" / "serve_safeboot_migration.py",
             phase,
@@ -219,7 +228,7 @@ class PhaseRunner:
             str(self.listen_port),
             "--device-ip",
             self.device.host,
-            *(["--recovery-from-stdin", "--no-sensitive-captures"] if self.recovery else []),
+            *piped,
             *extra_flags,
             unbuffered=True,
         )
@@ -230,25 +239,31 @@ class PhaseRunner:
         extra_flags: list[str] | None = None,
         confirm: Callable[[str], bool] | None = None,
         exec_timeout: float = EXEC_TIMEOUT,
+        image: bytes | None = None,
     ) -> tuple[int, str]:
-        """Run one phase end to end.  Returns (exit code, captured output)."""
+        """Run one phase end to end.  Returns (exit code, captured output).
+
+        `image`: what the esphome phase installs, the Wi-Fi written in - piped
+        to the server like the recovery image, never a file.
+        """
         if phase in ARMED_PHASES and confirm is None:
             raise PhaseError(f"{phase} requires an explicit confirmation callback")
         self.busy_seconds, self._started_at = None, None
 
+        piped = image if image is not None else self.recovery
         process = subprocess.Popen(
-            self._command(phase, extra_flags or []),
+            self._command(phase, extra_flags or [], image),
             cwd=str(self.repo_root),
-            stdin=subprocess.PIPE if self.recovery else None,
+            stdin=subprocess.PIPE if piped else None,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
         )
-        if self.recovery:
+        if piped:
             assert process.stdin is not None
             try:
-                process.stdin.buffer.write(self.recovery)
+                process.stdin.buffer.write(piped)
                 process.stdin.close()
             except BrokenPipeError:
                 pass  # the server stopped early; its output says why
@@ -261,7 +276,7 @@ class PhaseRunner:
         log_path = self.evidence_dir / f"{phase}-server.log"
         log_file = log_path.open("w", encoding="utf-8")
         display = PhaseDisplay(
-            phase, self._blocks(phase),
+            phase, self._blocks(phase, image),
             write=output.raw_progress,
             log=self.log,
         )

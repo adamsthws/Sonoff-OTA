@@ -777,3 +777,92 @@ class MigrationValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ESPHomePhaseTests(unittest.TestCase):
+    """The esphome phase: ESPHome written to ota_0 and read back, then otadata erased."""
+
+    IMAGE = b"\xe9" + bytes((index * 13 + 5) & 0xFF for index in range(10_000))
+
+    def state(self, fixture, image=None):
+        return MigrationState(fixture.manifest_path, fixture.manifest, "esphome",
+                              "http://192.168.1.10:8089", fixture.evidence_dir, 7200,
+                              image=self.IMAGE if image is None else image)
+
+    def report(self, state, **changes):
+        fields = {
+            "session": state.session, "status": "PASS", "current_ota": "1",
+            "table_sha256": SOURCE_TABLE_SHA256,
+            "image_sha256": sha256_bytes(self.IMAGE), "image_size": str(len(self.IMAGE)),
+            "otadata": "erased",
+        }
+        fields.update(changes)
+        return "".join(f"{key}={value}\n" for key, value in fields.items()).encode()
+
+    def test_its_berry_is_rendered_whole(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rendered = self.state(MigrationFixture(Path(directory))).render_berry().decode()
+        self.assertNotRegex(rendered, r"@[A-Z][A-Z0-9_]+@")
+        self.assertIn(sha256_bytes(self.IMAGE), rendered)
+        self.assertIn("/chunk/esphome/", rendered)
+        self.assertIn("/fail/esphome", rendered)
+        # The boot selection is erased only after the written image is checked.
+        self.assertLess(rendered.index("the written ESPHome SHA-256 differs"),
+                        rendered.index("flash.erase(otadata_address"))
+
+    def test_it_serves_the_image_and_passes_on_an_exact_read_back(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            fixture.evidence_dir.mkdir(parents=True)
+            state = self.state(fixture)
+            served = b"".join(state.image_chunk(i) for i in range(3))
+            self.assertEqual(served, self.IMAGE)
+            with self.assertRaises(ValueError):
+                state.image_chunk(3)
+            send_chunks(state, "written", self.IMAGE)
+            state.receive_report("esphome", self.report(state))
+            self.assertEqual((state.complete, state.result_status), (True, "PASS"))
+            evidence = (fixture.evidence_dir / "esphome-report.json").read_text()
+            self.assertEqual(json.loads(evidence)["otadata"], "erased")
+            # The image holds the Wi-Fi password: none of its bytes are kept.
+            self.assertNotIn(self.IMAGE[:64].hex(), evidence)
+            self.assertEqual(sorted(p.name for p in fixture.evidence_dir.iterdir()),
+                             ["esphome-report.json"])
+
+    def test_a_read_back_that_differs_by_one_byte_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            state = self.state(fixture)
+            wrong = bytearray(self.IMAGE)
+            wrong[5000] ^= 1
+            send_chunks(state, "written", bytes(wrong))
+            with self.assertRaisesRegex(ValueError, "byte-for-byte"):
+                state.receive_report("esphome", self.report(state))
+            self.assertFalse(state.complete)
+
+    def test_a_report_without_the_boot_selection_erased_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            state = self.state(fixture)
+            send_chunks(state, "written", self.IMAGE)
+            with self.assertRaises(ValueError):
+                state.receive_report("esphome", self.report(state, otadata="kept"))
+            with self.assertRaises(ValueError):
+                state.receive_report("esphome", self.report(state, current_ota="0"))
+            self.assertFalse(state.complete)
+
+    def test_it_needs_an_image_that_fits_and_other_phases_take_none(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            with self.assertRaisesRegex(ValueError, "image-from-stdin"):
+                self.state(fixture, image=b"")
+            with self.assertRaisesRegex(ValueError, "image-from-stdin"):
+                self.state(fixture, image=b"\x00" * 100)
+            with self.assertRaisesRegex(ValueError, "slot"):
+                self.state(fixture, image=b"\xe9" * 0x1F0001)
+            with self.assertRaisesRegex(ValueError, "takes no image"):
+                MigrationState(fixture.manifest_path, fixture.manifest, "preflight",
+                               "http://192.168.1.10:8089", fixture.evidence_dir, 7200,
+                               image=self.IMAGE)
+            with self.assertRaisesRegex(ValueError, "unavailable"):
+                fixture.state("preflight").image_chunk(0)

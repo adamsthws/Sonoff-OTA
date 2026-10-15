@@ -1,0 +1,249 @@
+# S60 ESPHome install: write ESPHome into Sonoff's ota_0, which the temporary
+# Tasmota does not run from, reading every block back to the computer; then
+# erase the boot selection, so the bootloader starts ota_0, and restart.
+# Until that erase the plug still starts Tasmota, so a power cut before it
+# changes nothing; after it, the ESPHome that starts has been checked.
+# The partition table is not changed.
+import flash
+import crypto
+import string
+
+var base_url = "@BASE_URL@"
+var session = "@SESSION@"
+var expected_table = bytes("@SOURCE_TABLE_SHA256@")
+var expected_image = bytes("@IMAGE_SHA256@")
+var image_pad_hash = bytes("@IMAGE_PAD_SHA256@")
+var erased_otadata = bytes("@ERASED_OTADATA_SHA256@")
+var image_length = @IMAGE_LENGTH@
+var image_pad_length = @IMAGE_PAD_LENGTH@
+var slot_address = 0x20000
+var otadata_address = 0x1D000
+
+def guard(ok, message)
+  if !ok
+    raise "migration_refused", message
+  end
+end
+
+# Tell the computer why this stopped, so it can say so at once instead of
+# waiting for a report that is never coming.  One quick try only: if the
+# computer cannot be reached, its own timeout says so instead.
+def report_failure(exception, message)
+  try
+    var text = bytes().fromstring(str(exception) + ": " + str(message))
+    var reason = bytes()
+    var i = 0
+    while i < size(text) && i < 200
+      var c = text[i]
+      if c < 0x20 || c > 0x7E c = 0x3F end
+      reason.add(c, 1)
+      i += 1
+    end
+    if tasmota.wifi("up")  # webclient can crash with the Wi-Fi down (Tasmota #18831)
+      var client = webclient()
+      client.begin(base_url + "/fail/esphome")
+      client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
+      client.close()
+    else
+      print("S60 report not sent: the plug's Wi-Fi is down")
+    end
+  except .. as report_exception, report_message
+    print("S60 failure report not sent:", report_exception, report_message)
+  end
+end
+
+def sha_region(address, length)
+  var hash = crypto.SHA256()
+  var offset = 0
+  while offset < length
+    var count = length - offset
+    if count > 4096 count = 4096 end
+    hash.update(flash.read(address + offset, count))
+    offset += count
+    tasmota.yield()
+  end
+  return hash.out()
+end
+
+# Wait without blocking Wi-Fi reconnects or tripping Berry's timeout.
+def pause(ms)
+  var wake = tasmota.millis(ms)
+  while !tasmota.time_reached(wake)
+    tasmota.delay(50)
+    tasmota.yield()
+  end
+end
+
+# How long failed requests are worth trying again: 20 seconds in all, for the
+# whole phase.  While a phase runs the plug does nothing else - not even read
+# its energy meter, whose readings then pile up until its web server stops
+# answering for good, after 70-90 seconds busy (a real S60TPG).  A phase takes
+# under a minute, so retrying stops well short of that.  A router restart takes
+# longer: this computer runs the step again once the plug is back.
+var retry_until = nil
+class retry_window
+  def over()
+    if retry_until == nil retry_until = tasmota.millis(20000) end
+    return tasmota.time_reached(retry_until)
+  end
+end
+
+# webclient's get_string() waits for ever on a reply that stops part way with
+# the connection still open - a router restarting mid-block, say - and the
+# plug then answers nothing until it is switched off and on (Tasmota reads a
+# body with no time limit: arendst/Tasmota#25139).  So replies are read here
+# by hand, and one silent for five seconds is given up, to be asked for again.
+# This computer's replies always say how long they are.
+var server = string.split(base_url, "/")[2]
+var server_ip = string.split(server, ":")[0]
+var server_port = int(string.split(server, ":")[1])
+
+# [HTTP status, body]; status -1 when the computer could not be reached, or
+# its reply stopped or was cut short.
+def get_body(path)
+  var client = tcpclient()
+  if !client.connect(server_ip, server_port)
+    client.close()
+    return [-1, nil]
+  end
+  client.write(format("GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path, server))
+  var reply = ""
+  var head = -1
+  var length = -1
+  var quiet = tasmota.millis(5000)
+  while true
+    var piece = client.read()
+    if size(piece) > 0
+      reply += piece
+      quiet = tasmota.millis(5000)
+      if head < 0
+        head = string.find(reply, "\r\n\r\n")
+        if head >= 0
+          var fields = string.tolower(reply[0 .. head + 1])
+          var at = string.find(fields, "\r\ncontent-length:")
+          if at < 0 break end
+          var i = at + 17
+          while fields[i] == " " i += 1 end
+          length = int(fields[i .. string.find(fields, "\r", i) - 1])
+        end
+      end
+      if head >= 0 && size(reply) - head - 4 >= length
+        client.close()
+        return [int(reply[9 .. 11]), reply[head + 4 ..]]
+      end
+    elif !client.connected() && client.available() == 0
+      break  # closed before the whole reply came
+    elif tasmota.time_reached(quiet)
+      break
+    else
+      tasmota.delay(5)
+      tasmota.yield()
+    end
+  end
+  client.close()
+  return [-1, nil]
+end
+
+def post_text(path, body)
+  var status = -1
+  var attempt = 0
+  var window = retry_window()
+  while true
+    if tasmota.wifi("up")  # webclient can crash with the Wi-Fi down (Tasmota #18831)
+      var client = webclient()
+      client.begin(base_url + path)
+      status = client.POST(body)
+      client.close()
+      attempt += 1
+      if status >= 0 break end
+    end
+    if window.over() break end
+    pause(1000)
+  end
+  # Given up with the Wi-Fi still down: that is the reason, whatever was tried first.
+  guard(attempt > 0 && (status >= 0 || tasmota.wifi("up")),
+        "the plug's Wi-Fi went down and was not back within 20 seconds")
+  guard(status == 200, format("POST %s returned HTTP %i after %i attempts", path, status, attempt))
+end
+
+def fetch_chunk(index, expected_length)
+  var path = format("/chunk/esphome/%i", index)
+  var reply = [-1, nil]
+  var attempt = 0
+  var window = retry_window()
+  while true
+    if tasmota.wifi("up")  # no request with the Wi-Fi down: it can crash Tasmota (#18831)
+      reply = get_body(path)
+      attempt += 1
+      if reply[0] >= 0 break end
+    end
+    if window.over() break end
+    pause(1000)
+  end
+  # Given up with the Wi-Fi still down: that is the reason, whatever was tried first.
+  guard(attempt > 0 && (reply[0] >= 0 || tasmota.wifi("up")),
+        "the plug's Wi-Fi went down and was not back within 20 seconds")
+  guard(reply[0] == 200, format("GET %s returned HTTP %i after %i attempts", path, reply[0], attempt))
+  var encoded = reply[1]
+  guard(size(encoded) == expected_length * 2, "ESPHome chunk body length differs")
+  var data = bytes(encoded)
+  guard(size(data) == expected_length, "ESPHome chunk hex is invalid")
+  return data
+end
+
+def run_esphome()
+  guard(tasmota.arch() == "esp32c3", "device is not ESP32-C3")
+  guard(flash.size() == 0x400000, "flash is not exactly 4 MiB")
+  guard(flash.current_ota() == 1, "refusing to overwrite the running ota_0")
+  guard(sha_region(0x8000, 0x1000) == expected_table, "the partition table is not Sonoff's")
+  guard(slot_address + image_length <= 0x210000, "ESPHome exceeds the slot")
+
+  var offset = 0
+  var index = 0
+  while offset < image_length
+    var count = image_length - offset
+    if count > 4096 count = 4096 end
+    var data = fetch_chunk(index, count)
+    # flash.write preserves untouched bytes during a partial-sector write.
+    # Erase the final sector first so the bytes after the image remain 0xFF.
+    if count < 4096 flash.erase(slot_address + offset, 0x1000) end
+    flash.write(slot_address + offset, data)
+    var readback = flash.read(slot_address + offset, count)
+    guard(readback == data, format("read-back differs at 0x%X", slot_address + offset))
+    post_text(format("/capture/written/%i", index), readback.tohex())
+    offset += count
+    index += 1
+    if index % 16 == 0 print(format("S60 ESPHOME: %i/%i bytes", offset, image_length)) end
+    tasmota.yield()
+  end
+
+  var written_hash = sha_region(slot_address, image_length)
+  guard(written_hash == expected_image, "the written ESPHome SHA-256 differs")
+  if image_pad_length > 0
+    guard(sha_region(slot_address + image_length, image_pad_length) == image_pad_hash,
+          "the sector padding after ESPHome is not erased")
+  end
+  guard(sha_region(0x8000, 0x1000) == expected_table, "the partition table changed")
+
+  # Every byte checked: now let the bootloader choose ota_0.
+  flash.erase(otadata_address, 0x2000)
+  guard(sha_region(otadata_address, 0x2000) == erased_otadata, "the boot selection did not erase")
+
+  var report = format(
+    "session=%s\nstatus=PASS\ncurrent_ota=%i\ntable_sha256=%s\n" +
+    "image_sha256=%s\nimage_size=%i\notadata=erased\n",
+    session, flash.current_ota(), expected_table.tohex(), written_hash.tohex(), image_length)
+  post_text("/report/esphome", report)
+  print("S60 ESPHOME PASS; restarting into ESPHome")
+  tasmota.cmd("Restart 99")
+  return true
+end
+
+var result
+try
+  result = run_esphome()
+except .. as esphome_exception, esphome_message
+  report_failure(esphome_exception, esphome_message)
+  raise esphome_exception, esphome_message
+end
+return result

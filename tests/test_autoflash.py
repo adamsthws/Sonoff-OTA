@@ -1162,6 +1162,15 @@ class PhaseDisplayTests(unittest.TestCase):
         self.assertIn("block 198/198", written)
         self.assertNotIn("\n", written.rstrip("\n"), "progress stays on one line")
 
+    def test_installing_esphome_counts_its_blocks(self):
+        lines = ['  [10.0.0.5] "GET /berry/esphome.be HTTP/1.1" 200 -']
+        for n in range(226):
+            lines += [f'  [10.0.0.5] "GET /chunk/esphome/{n} HTTP/1.1" 200 -',
+                      f'  [10.0.0.5] "POST /capture/written/{n} HTTP/1.1" 200 -']
+        written, _ = self.run_lines("esphome", 226, lines)
+        self.assertIn("Copying ESPHome: block 226/226", written)
+        self.assertNotIn("startup firmware", written)
+
     def test_refusals_are_always_shown(self):
         _, logged = self.run_lines("commit", None, ["  REFUSED /chunk/safeboot/9: outside the artifact",
                                                     "REFUSING: could not bind server"])

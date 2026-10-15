@@ -85,7 +85,11 @@ ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_DIR = ROOT / "repartition" / "berry"
 LOCK_PATH = ROOT / "REPARTITION_LOCK"
 COMMIT_FLAG = "--i-accept-power-loss-may-require-opening-the-plug"
-PHASES = ("preflight", "stage", "commit", "restore")
+PHASES = ("preflight", "stage", "commit", "restore", "esphome")
+# esphome: Sonoff's second app slot, ota_0, which the temporary Tasmota does not
+# run from, and its boot selection, which ESPHome is chosen by being erased.
+ESPHOME_SLOT_ADDRESS = 0x20000
+ESPHOME_SLOT_SIZE = 0x1F0000
 MAX_POST_SIZE = 9000
 # Longer than a phase keeps the plug busy, retrying included (about a minute),
 # so a plug that could report has reported.  A router restart is waited out
@@ -221,6 +225,7 @@ class MigrationState:
         base_url: str,
         evidence_dir: Path,
         max_evidence_age: int,
+        image: bytes | None = None,
     ) -> None:
         self.manifest_path = manifest_path
         self.manifest = manifest
@@ -238,6 +243,18 @@ class MigrationState:
         self.last_heard = time.monotonic()
         self.captures: dict[str, dict[int, bytes]] = {}
         self.manifest_sha256 = sha256_bytes(manifest_path.read_bytes())
+
+        if phase == "esphome":
+            # Its own image, with the Wi-Fi written in: given on standard
+            # input, never a file.  Nothing of the Safeboot migration's is used.
+            if not image or image[0] != 0xE9:
+                raise ValueError("esphome needs the ESPHome image (--image-from-stdin)")
+            if len(image) > ESPHOME_SLOT_SIZE:
+                raise ValueError("the ESPHome image does not fit the plug's app slot")
+            self.image = image
+            return
+        if image is not None:
+            raise ValueError(f"{phase} takes no image")
 
         self.recovery_mode = is_recovery_manifest(manifest)
         if phase == "restore" and not self.recovery_mode:
@@ -304,6 +321,18 @@ class MigrationState:
                     raise ValueError("commit evidence does not match recovery Safeboot")
 
     def replacements(self) -> dict[str, str]:
+        if self.phase == "esphome":
+            pad_length = sector_aligned_size(len(self.image)) - len(self.image)
+            return {
+                "BASE_URL": self.base_url,
+                "SESSION": self.session,
+                "SOURCE_TABLE_SHA256": SOURCE_TABLE_SHA256,
+                "IMAGE_SHA256": sha256_bytes(self.image),
+                "IMAGE_LENGTH": str(len(self.image)),
+                "IMAGE_PAD_LENGTH": str(pad_length),
+                "IMAGE_PAD_SHA256": sha256_bytes(b"\xff" * pad_length),
+                "ERASED_OTADATA_SHA256": sha256_bytes(b"\xff" * OTADATA_SIZE),
+            }
         safeboot_length = len(self.safeboot)
         copy_length = sector_aligned_size(safeboot_length)
         staging_pad_length = copy_length - safeboot_length
@@ -374,14 +403,25 @@ class MigrationState:
             raise ValueError("Safeboot chunk index is outside the artifact")
         return payload[index * SECTOR_SIZE : (index + 1) * SECTOR_SIZE]
 
+    def image_chunk(self, index: int) -> bytes:
+        if self.phase != "esphome":
+            raise ValueError("ESPHome chunks are unavailable in this phase")
+        count = (len(self.image) + SECTOR_SIZE - 1) // SECTOR_SIZE
+        if index < 0 or index >= count:
+            raise ValueError("ESPHome chunk index is outside the image")
+        return self.image[index * SECTOR_SIZE : (index + 1) * SECTOR_SIZE]
+
     def receive_capture(self, kind: str, index: int, body: bytes) -> None:
-        allowed = {
-            "preflight": {"table": TABLE_SIZE, "nvs": CANONICAL_NVS_SIZE, "otadata": OTADATA_SIZE},
-            "stage": {"staged": len(self.safeboot)},
-            "commit": {},
-            "restore": {"restored": len(self.official_safeboot),
-                        "factory-sha": FACTORY_SECTORS * 32},
-        }[self.phase]
+        if self.phase == "esphome":
+            allowed = {"written": len(self.image)}
+        else:
+            allowed = {
+                "preflight": {"table": TABLE_SIZE, "nvs": CANONICAL_NVS_SIZE, "otadata": OTADATA_SIZE},
+                "stage": {"staged": len(self.safeboot)},
+                "commit": {},
+                "restore": {"restored": len(self.official_safeboot),
+                            "factory-sha": FACTORY_SECTORS * 32},
+            }[self.phase]
         if kind not in allowed:
             raise ValueError(f"capture {kind!r} is unavailable in {self.phase}")
         total = allowed[kind]
@@ -433,6 +473,8 @@ class MigrationState:
             self._finish_stage(report)
         elif self.phase == "commit":
             self._finish_commit(report)
+        elif self.phase == "esphome":
+            self._finish_esphome(report)
         else:
             self._finish_restore(report)
 
@@ -586,6 +628,27 @@ class MigrationState:
         self.result_status = status
 
 
+    def _finish_esphome(self, report: dict[str, str]) -> None:
+        written = self.assembled_capture("written", len(self.image))
+        if written != self.image:
+            raise ValueError("host read-back differs byte-for-byte from the ESPHome image")
+        expected = {
+            "status": "PASS",
+            "current_ota": "1",
+            "table_sha256": SOURCE_TABLE_SHA256,
+            "image_sha256": sha256_bytes(self.image),
+            "image_size": str(len(self.image)),
+            "otadata": "erased",
+        }
+        require_report_fields(report, expected)
+        # Hashes only: the image holds the Wi-Fi password, so its bytes are never kept.
+        evidence = self._base_evidence("esphome", "PASS")
+        evidence.update(expected)
+        atomic_json(self.evidence_dir / "esphome-report.json", evidence)
+        self.complete = True
+        self.result_status = "PASS"
+
+
 class MigrationHandler(http.server.BaseHTTPRequestHandler):
     server_version = "S60SafebootMigration/1.0"
     protocol_version = "HTTP/1.1"
@@ -625,6 +688,11 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
             match = re.fullmatch(r"/chunk/safeboot/([0-9]+)", path)
             if match:
                 chunk = state.safeboot_chunk(int(match.group(1)))
+                self._response(200, chunk.hex().encode("ascii"))
+                return
+            match = re.fullmatch(r"/chunk/esphome/([0-9]+)", path)
+            if match:
+                chunk = state.image_chunk(int(match.group(1)))
                 self._response(200, chunk.hex().encode("ascii"))
                 return
             if path == "/restore-from" and state.phase == "restore":
@@ -753,13 +821,21 @@ def main() -> int:
         "so it never exists as a file",
     )
     parser.add_argument(
+        "--image-from-stdin", action="store_true",
+        help="esphome: read the image to install, with the Wi-Fi written in, from "
+        "standard input, so it never exists as a file",
+    )
+    parser.add_argument(
         "--no-sensitive-captures", action="store_true",
         help="keep only hashes of the plug's NVS and of the staged recovery image, "
         "not the bytes - they can hold credentials",
     )
     args = parser.parse_args()
+    if args.recovery_from_stdin and args.image_from_stdin:
+        parser.error("standard input carries one image: the recovery Safeboot or ESPHome")
     if args.recovery_from_stdin:
         provide_in_memory(RECOVERY_ARTIFACT, sys.stdin.buffer.read())
+    image = sys.stdin.buffer.read() if args.image_from_stdin else None
 
     try:
         listen_ip = validate_lan_ipv4(args.listen_ip, "--listen-ip")
@@ -794,7 +870,8 @@ def main() -> int:
     base_url = f"http://{listen_ip}:{args.listen_port}"
     try:
         state = MigrationState(
-            manifest_path, manifest, args.phase, base_url, evidence_dir, args.max_evidence_age
+            manifest_path, manifest, args.phase, base_url, evidence_dir, args.max_evidence_age,
+            image=image,
         )
         state.sensitive_captures = not args.no_sensitive_captures
         rendered = state.render_berry()
