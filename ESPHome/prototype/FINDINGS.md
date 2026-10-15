@@ -3,7 +3,7 @@
 Notes from reviewing and testing [PR #4, "add ESPHome support"](https://github.com/adamsthws/Sonoff-OTA/pull/4)
 (October 2026). PR #4 was merged into this branch, `esphome`, where the work
 continues. The prototype of a pre-built image described here became
-`ESPHome/s60.yaml` and `ESPHome/s60_imprint.h`, which p1otr extended (overload
+`ESPHome/s60.yaml`, which p1otr extended (overload
 protection, a countdown, more energy sensors); this folder keeps these notes
 and the scripts used to test it.
 
@@ -58,7 +58,9 @@ The tool already ships a pre-built firmware with no Wi-Fi in it: the bridge.
 at build time and recalculates the checksum and SHA-256. The prototype (now
 `ESPHome/s60.yaml`) does the same for ESPHome:
 
-- `s60_imprint.h` holds the bridge's placeholders: `S60-IMPRINT-SSID>` plus 33
+- `s60_imprint.h` held the bridge's placeholders (in the published config they
+  are in its boot lambda, so Home Assistant can adopt it from that one file):
+  `S60-IMPRINT-SSID>` plus 33
   filler bytes, `S60-IMPRINT-PASS>` plus 64.
 - The config has no network; `on_boot` hands the imprinted values to ESPHome's
   `wifi.configure` action, whose name and password are lambdas, so the config
@@ -126,6 +128,5 @@ plug to confirm.
 | `windows-uv-build.ps1` | builds `ESPHome/s60.yaml` on Windows with a portable uv, all under `C:\S60\b` (tested with the prototype config: 889,984 bytes, as on Linux; 6 minutes with ESP-IDF already downloaded) |
 | `firmware_choice_mockup.py` | the Tasmota or ESPHome question, as the tool would ask it |
 
-The config itself is `ESPHome/s60.yaml`, with `s60_imprint.h` and the partition
-table beside it. Building on Linux, from `ESPHome/`: `esphome compile s60.yaml`, then
+The config itself is `ESPHome/s60.yaml`, one self-contained file. Building on Linux, from `ESPHome/`: `esphome compile s60.yaml`, then
 `python3 prototype/imprint_image.py .esphome/build/sonoff-s60/build/firmware.ota.bin imprinted.ota.bin "Your Wi-Fi" "password"`.

@@ -1,17 +1,28 @@
-# flashing ESPHome
+# ESPHome for the S60
 
-`--esphome firmware.ota.bin` enables optional path to flash an ESPHome
-application. The run stops after interim Tasmota on the *stock* partition table
-(no Safeboot / E3 repartition) and uploads this image via Tasmota OTA. 
+[`s60.yaml`](s60.yaml) is the ESPHome the conversion installs when ESPHome is
+chosen at the start. Nobody converting a plug needs to build it: the tool
+installs the pre-built image in [`../artifacts/`](../artifacts/README.md) and
+writes the plug's Wi-Fi into it, in memory only.
 
-Build ESPHome against a partitions_sonoff_stock.csv that matches stock S60
-offsets (ota_0 at 0x20000, ota_1 at 0x210000, size 0x1f0000 each).
-Using the default ESPHome table will boot poorly or break later OTAs.
+It is also the config Home Assistant takes when it adopts a converted plug
+(`dashboard_import`), so it is kept as one self-contained file: no includes,
+and no partition file - an app image does not contain the partition table,
+and the plug keeps Sonoff's.
 
-Use firmware.ota.bin (app/OTA image), not firmware.factory.bin.
+## Changing it
 
-Example s60.yaml and partitions file are provided in this directory.
+1. Edit `s60.yaml`, and raise its `project` `version`.
+2. Build it: `esphome compile s60.yaml` (ESPHome 2026.9.1 built the current
+   image).
+3. Publish `.esphome/build/sonoff-s60/build/firmware.ota.bin` as
+   `artifacts/esphome-s60-imprintable-<version>.bin`, and update its row in
+   `artifacts/README.md`, its line in `SHA256SUMS`, and the pin in
+   `tools/autoflash/esphome.py`. `tests/test_published_artifacts.py` checks
+   it can still be imprinted.
 
-`esphome compile s60.yaml
-../start.sh run --esphome .esphome/build/sonoff-s60/build/firmware.ota.bin
-`
+Keep the two `S60-IMPRINT-` placeholders as they are: the tool finds and fills
+them, and refuses an image in which either appears more than once.
+
+[`prototype/FINDINGS.md`](prototype/FINDINGS.md) records how this route was
+worked out and tested.

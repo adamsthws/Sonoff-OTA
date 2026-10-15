@@ -109,7 +109,9 @@ join the plug's own setup network.
 
 ## The run, step by step
 
-This is what `python3 tools/s60_autoflash.py run` does, in order:
+This is what `python3 tools/s60_autoflash.py run` does, in order. First it
+asks which firmware you would like, Tasmota or ESPHome (`--firmware` answers
+in advance); steps 1-7 are the same for both.
 
 1. **List what has to be in place first** - the eWeLink app and account, the
    plug added with LAN Control on - and wait for a key press.
@@ -155,6 +157,22 @@ At the end it checks the finished plug against the official Tasmota release,
 tells you whether every byte matches, and removes the temporary firewall rule
 - which needs administrator rights again, so it says why before the system
 asks.
+
+For **ESPHome**, steps 8 and 9 are instead:
+
+8. **Install ESPHome** into the half of the plug's memory Tasmota is not
+   running from - the published ESPHome for the S60, with your Wi-Fi written
+   in, in memory only. Every block is read back and compared with the image,
+   byte for byte. Only then does the plug switch to it, by clearing the note
+   that says which half to start, and restart. Until that moment it still
+   starts Tasmota, so a power cut before it changes nothing. The memory
+   layout itself is not changed.
+9. **Check ESPHome is running** and has joined your Wi-Fi. If it cannot, it
+   puts up its own network, named like `sonoff-s60-xxxxxx`, where its page
+   asks for your Wi-Fi.
+
+It then switches the relay off and on again through ESPHome to check it, and
+gives you the plug's ESPHome page.
 
 ## At the end
 

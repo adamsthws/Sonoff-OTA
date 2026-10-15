@@ -1,10 +1,10 @@
-# Sonoff S60 → Tasmota, OTA
+# Sonoff S60 → Tasmota or ESPHome, OTA
 ## Fully automated 'Over The Air' conversion
 
 ![A successful conversion run](docs/SuccessRunScreenshot.png)
 
-Turns a stock Sonoff S60 smart plug into one running **Tasmota** using
-OTA method - no soldering, no taking the plug apart.
+Turns a stock Sonoff S60 smart plug into one running **Tasmota** or
+**ESPHome** using OTA method - no soldering, no taking the plug apart.
 
 Until now, the established way to put Tasmota on an S60 was to open it and
 flash it over USB-serial - hard work, because the case is plastic-welded shut.
@@ -17,7 +17,8 @@ Conversion with this tool is fully automated end to end, with checks at every st
 It is resumable and can be restarted at any point.
 
 Converted plugs end up byte-for-byte identical to a plug flashed over USB with
-the official Tasmota release, the final automated checks verify this by reading their flash back at the end of the cenversion.
+the official Tasmota release, the final automated checks verify this by reading their flash back at the end of the conversion.
+ESPHome is checked the same way: every block of it is read back before the plug switches to it.
 
 ---
 
@@ -104,6 +105,9 @@ cd Sonoff-OTA
 - Run the same command for every plug: it carries on an unfinished run, or
 starts a new one. 
 
+- First you're asked which firmware you'd like: Tasmota or ESPHome
+([Choosing ESPHome](#choosing-esphome)).
+
 - The you're walked through every step of the conversion.
 
 - Finding the plug, backing up its Sonoff firmware,
@@ -119,8 +123,11 @@ was interrupted, it checks the plug to work out where to resume from.
 
 ## What you end up with
 
-Official Tasmota, laid out in memory exactly as if the plug had been flashed
+**Tasmota:** official Tasmota, laid out in memory exactly as if the plug had been flashed
 over USB. That means normal Tasmota upgrades from then on.
+
+**ESPHome:** ESPHome for the S60, on your Wi-Fi, ready for Home Assistant to find
+([Choosing ESPHome](#choosing-esphome)).
 
  [layout itself](docs/technical-details.md#the-finished-memory-layout) is
 in the technical details.
@@ -151,15 +158,27 @@ report back on how it went here:
 worked for others.
 
 
-## Going on to ESPHome
+## Choosing ESPHome
 
-> Coming soon: Sonoff to ESPhome direct conversion
+Pick **ESPHome** when the tool asks, and the plug ends up running
+[ESPHome](https://esphome.io) instead of Tasmota - on your Wi-Fi, with nothing
+to build or install on your computer: the tool installs a ready-made ESPHome
+for the S60 ([`ESPHome/s60.yaml`](ESPHome/s60.yaml)) and writes your Wi-Fi
+into it, in memory only.
 
-Once the plug is running Tasmota, it is an ordinary Tasmota device, so if
-you would rather run **ESPHome** you can follow ESPHome's own standard
-route from there:
-[Migrating from Tasmota](https://esphome.io/guides/migrate_sonoff_tasmota/).
-It is also done over the air, through Tasmota's Firmware Upgrade page.
+- **The plug:** relay and button, the status LED, the power meter (voltage,
+  current, power, daily, monthly, yearly and total energy), overload
+  protection and a countdown timer.
+- **Its web page** is at the link the tool gives at the end. Like Tasmota, it
+  has no password to start with.
+- **Home Assistant** finds it by itself. Adopting it in Home Assistant's ESPHome
+  builder takes its config from this repository, so you can change it and
+  add passwords and an API key there.
+- **Updates** are ESPHome's own, from Home Assistant or ESPHome's tools.
+- **Its memory** stays laid out as Sonoff made it: ESPHome goes into the half
+  Sonoff's firmware updates used, which is enough for it.
+
+The ESPHome option was contributed by [p1otr](https://github.com/p1otr).
 
 ## More detail
 
@@ -186,6 +205,9 @@ which did the groundwork of working out the OTA route.
 A big thank you to [HG0161](https://github.com/HG0161) and the original
 [SonoffS60OTA](https://github.com/HG0161/SonoffS60OTA) repository for working out the update mechanism, decoding the firmware format
 and proving the OTA route on real plugs. This repository carries that work on.
+
+Thanks to [p1otr](https://github.com/p1otr) for the ESPHome option and its
+S60 config.
 
 Thanks too to everyone in the Tasmota threads for the
 [UK](https://github.com/arendst/Tasmota/discussions/22554) and

@@ -43,6 +43,8 @@ that is still going after that long, as Ctrl-C would.
 With `--unattended`:
 
 - the "Before you start" list and the window-size note are not waited on;
+- which firmware to install is not asked: say it with `--firmware tasmota` or
+  `--firmware esphome`, or the run stops there;
 - PROCEED, before the point of no return, is taken as typed;
 - an unfinished run is carried on, as the menu's first option would (`--new`
   starts afresh instead), and an interrupted step is done again;

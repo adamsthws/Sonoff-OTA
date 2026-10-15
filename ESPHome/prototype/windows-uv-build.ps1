@@ -28,7 +28,7 @@ $env:UV_NO_CONFIG = "1"
 $env:ESPHOME_ESP_IDF_PREFIX = "$root\idf"
 
 $esphome = Split-Path $PSScriptRoot  # the config is in ESPHome\, beside this folder
-Copy-Item "$esphome\s60.yaml", "$esphome\s60_imprint.h", "$esphome\partitions_sonoff_stock.csv" "$root\cfg"
+Copy-Item "$esphome\s60.yaml" "$root\cfg"
 Set-Location "$root\cfg"
 Write-Host "Building ESPHome (the first time downloads ESP-IDF, about 3 GB)..."
 # Windows PowerShell turns a native program's stderr into errors: let it run on.
