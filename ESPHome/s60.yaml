@@ -1,31 +1,61 @@
-# Prototype: a pre-built S60 ESPHome image with no Wi-Fi and no passwords.
-# The conversion tool imprints the plug's Wi-Fi into the placeholders in
-# s60_imprint.h; at boot, the imprinted values are handed to wifi.configure.
+# ESPHome for the Sonoff S60 (UK S60TPG and EU S60TPF: the same pins).
+#
+# The conversion tool installs this pre-built (artifacts/README.md says how it
+# is built), with no Wi-Fi and no passwords in it: it writes the plug's own
+# Wi-Fi into the two placeholders below (tools/autoflash/imprint.py), and at
+# boot they are handed to wifi.configure. Kept in this one file, so that Home
+# Assistant can adopt the plug from it (dashboard_import) and build it there.
 
 esphome:
   name: sonoff-s60
   friendly_name: Sonoff S60
   name_add_mac_suffix: true
-  includes:
-    - s60_imprint.h
+  project:
+    name: adamsthws.sonoff-s60
+    version: "1.0.0"
   on_boot:
     # After Wi-Fi is set up (its priority is 250); on_boot's default, 600, is before.
     priority: -100
     then:
+      - lambda: |-
+          // Written by the conversion tool: each a marker, then filler, and
+          // each must appear exactly once in the image. Read through volatile
+          // pointers, so the compiler cannot fold in this build-time text.
+          static const char ssid[] = "S60-IMPRINT-SSID>.................................";
+          static const char password[] = "S60-IMPRINT-PASS>................................................................";
+          const char *volatile at_ssid = ssid;
+          const char *volatile at_password = password;
+          id(imprinted_ssid) = at_ssid;
+          id(imprinted_password) = at_password;
       - if:
           condition:
-            lambda: 'return s60_is_imprinted();'
+            # Imprinted, and nothing saved yet: once saved, the Wi-Fi is used
+            # from there, and a later change in Home Assistant is not undone.
+            lambda: |-
+              return !id(imprinted_ssid).empty()
+                  && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0
+                  && !wifi::global_wifi_component->has_sta();
           then:
             - wifi.configure:
-                ssid: !lambda 'return s60_imprinted(S60_IMPRINT_SSID);'
-                password: !lambda 'return s60_imprinted(S60_IMPRINT_PASS);'
+                ssid: !lambda 'return id(imprinted_ssid);'
+                password: !lambda 'return id(imprinted_password);'
                 save: true
+
+# Adopting the plug in Home Assistant's ESPHome builder takes this config.
+dashboard_import:
+  package_import_url: github://adamsthws/Sonoff-OTA/ESPHome/s60.yaml@main
+  import_full_config: true
+
+globals:
+  - id: imprinted_ssid
+    type: std::string
+  - id: imprinted_password
+    type: std::string
 
 esp32:
   variant: esp32c3
   framework:
     type: esp-idf
-  partitions: partitions_sonoff_stock.csv
   flash_size: 4MB
 
 # avoid frequent NVS write to save flash

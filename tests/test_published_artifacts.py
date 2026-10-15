@@ -66,3 +66,45 @@ class PublishedArtifactTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PublishedESPHomeTests(unittest.TestCase):
+    def test_the_esphome_image_is_pinned(self):
+        from tools.autoflash import esphome
+        from tools.s60_autoflash import ROOT
+        image = esphome.published_image()  # refuses a changed file
+        line = f"{sha256_bytes(image)}  {esphome.IMAGE.relative_to(ROOT).as_posix()}"
+        self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
+
+    def test_the_esphome_image_can_have_the_wifi_written_in(self):
+        from tools.autoflash import esphome, imprint
+        image = esphome.published_image()
+        validate_native_image(image, esphome.SLOT_SIZE, "published ESPHome")
+        self.assertEqual(imprint.find_build_paths(image), [])
+        written = esphome.image_for("Home", "a password")
+        imprint.require_imprinted(written)
+        self.assertEqual(len(written), len(image))
+
+    def test_the_esphome_config_has_no_passwords_and_can_be_adopted(self):
+        from tools.s60_autoflash import ROOT
+        config = (ROOT / "ESPHome" / "s60.yaml").read_text()
+        for key in ("password:", "encryption:", "auth:", "key:"):
+            self.assertNotIn(key, config.replace("password: !lambda", ""), key)
+        self.assertIn("package_import_url: github://adamsthws/Sonoff-OTA/ESPHome/s60.yaml@main", config)
+        self.assertNotIn("includes:", config)  # adoption takes this one file
+
+
+class ESPHomeImageCheckTests(unittest.TestCase):
+    def test_a_factory_image_or_another_chip_is_refused(self):
+        from tools.autoflash import esphome
+        image = bytearray(esphome.published_image())
+        factory = bytearray(image)
+        factory[32:36] = b"\x50\x00\x00\x00"  # a bootloader's description, not an app's
+        with self.assertRaisesRegex(esphome.ImageError, "factory"):
+            esphome.check_app(bytes(factory), "firmware.factory.bin")
+        other = bytearray(image)
+        other[12] = 0  # ESP32
+        with self.assertRaisesRegex(esphome.ImageError, "ESP32-C3"):
+            esphome.check_app(bytes(other), "firmware.ota.bin")
+        with self.assertRaisesRegex(esphome.ImageError, "app slot"):
+            esphome.check_app(bytes(image) + b"\0" * esphome.SLOT_SIZE, "big.bin")
