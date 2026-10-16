@@ -52,6 +52,10 @@ own firmware.
   for the plug, puts them back and tries again - up to three times in all,
   for a power cut, a read-back that differed, or the plug changing since its
   checks. A plug that did lose them is found on its setup network.
+- A plug switched off and on before the installer has done its work goes
+  back to Sonoff's firmware - by design, so nothing is lost - but the run then
+  waited a quarter of an hour for an installer that was gone. It now sees
+  Sonoff's firmware and sends the installer again, up to three times.
 - A plug that cannot be found can be set up through its own network by
   choice, for a computer that cannot see Wi-Fi networks. While waiting for a
   plug whose Wi-Fi went, the run says it will rejoin by itself, and that it has

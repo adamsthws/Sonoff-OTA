@@ -1919,6 +1919,17 @@ def bridge_on_home_network(ctx: Context, *, timeout: float = 60.0) -> str | None
     return None
 
 
+# Sent again at most this many times in a run, as the commit is tried: a plug
+# whose power keeps going is told about, not sent the installer for ever.
+BRIDGE_SENDS = 3
+
+
+def back_on_sonoff(ctx: Context) -> bool:
+    """Whether the plug answers as Sonoff's own firmware."""
+    host = ctx.state.input("plug_ip") or ctx.finder.poll()
+    return bool(host) and detect.identify(host) == "sonoff"
+
+
 def bridge_answers(host: str) -> bool:
     body = setup_network.page(host, timeout=2.0)
     return body is not None and setup_network.BRIDGE_PAGE_MARKER.lower() in body.lower()
@@ -1934,7 +1945,58 @@ def reach_bridge(ctx: Context) -> str:
     if address:
         say(f"    The installer joined your network at {address}.")
         return address
-    bridge = find_ssid(BRIDGE_AP_PREFIX) or "S60-OTA-Bridge-XXXX   (the XXXX varies)"
+    # The installer hands the plug back to Sonoff's firmware when it is switched
+    # off and on before its work is done - by design, so a power cut never
+    # strands it.  Waiting for the installer then waits for ever: looked for
+    # before the wait, and during it.
+    asked = False
+    while True:
+        address = resend_if_back_on_sonoff(ctx)
+        if address:
+            return address
+        bridge = find_ssid(BRIDGE_AP_PREFIX) or "S60-OTA-Bridge-XXXX   (the XXXX varies)"
+        if not asked:
+            ask_to_join_bridge(bridge)
+            asked = True
+
+        def gone_back() -> bool:
+            return getattr(ctx, "bridge_sends", 0) < BRIDGE_SENDS and back_on_sonoff(ctx)
+
+        found = wait_for_bridge(ctx, bridge.split()[0], gone_back=gone_back)
+        if found != BACK_ON_SONOFF:
+            return found or setup_network.SETUP_HOST
+        tell("    While waiting, the plug went back to Sonoff's own firmware (switched off")
+        tell("    and on, say).")
+
+
+def resend_if_back_on_sonoff(ctx: Context) -> str | None:
+    """The installer sent again while the plug is back on Sonoff's firmware, up
+    to BRIDGE_SENDS in a run; its address once it joined the home network."""
+    sends = getattr(ctx, "bridge_sends", 0)
+    while sends < BRIDGE_SENDS and back_on_sonoff(ctx):
+        sends += 1
+        ctx.bridge_sends = sends
+        tell("    The plug is running Sonoff's own firmware again: it goes back to it when")
+        tell("    switched off and on before the installer has done its work, so nothing")
+        tell(f"    is lost. Sending the installer again (attempt {sends} of {BRIDGE_SENDS}).")
+        ctx.state.mark("C2", FAILED, error="redo: the plug went back to Sonoff's firmware")
+        try:
+            ctx.state.mark("C2", DONE, result=step_bridge(ctx))
+        except Abort as exc:
+            # Cut off part way, the plug keeps Sonoff's firmware: another go,
+            # while there are goes left.
+            if sends == BRIDGE_SENDS:
+                raise
+            tell(f"    {exc}.")
+            continue
+        address = bridge_on_home_network(ctx, timeout=120.0)
+        if address:
+            say(f"    The installer joined your network at {address}.")
+            return address
+    return None
+
+
+def ask_to_join_bridge(bridge: str) -> None:
     copied = hostsys.copy_to_clipboard(BRIDGE_PASSWORD)
     section("Join the bridge's Wi-Fi network", [
         "The plug is running our small installer, which has made its own Wi-Fi",
@@ -1949,7 +2011,6 @@ def reach_bridge(ctx: Context) -> str:
         "If that network is not there, wait: the installer may still be joining",
         "your own Wi-Fi, and this carries on by itself when it does.",
     ])
-    return wait_for_bridge(ctx, bridge.split()[0]) or setup_network.SETUP_HOST
 
 
 # The steps after the backup: once any has started, the installer it reads
@@ -2120,7 +2181,13 @@ def back_up_stock(ctx: Context, host: str) -> str:
     return "saved"
 
 
-def wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None) -> str | None:
+# What wait_for_bridge says when the plug went back to Sonoff's firmware meanwhile.
+BACK_ON_SONOFF = "back on Sonoff's firmware"
+GONE_BACK_EVERY = 30.0
+
+
+def wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None,
+                    gone_back: Callable[[], bool] | None = None) -> str | None:
     """Wait for this computer to join the bridge's network, or for the bridge to
     turn up on the home network instead.  The bridge's address on the home
     network, or None once this computer has joined the bridge's own.
@@ -2133,7 +2200,13 @@ def wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None)
         timeout = user_action_limit()
     marker = setup_network.BRIDGE_PAGE_MARKER.lower()
     started = time.monotonic()
+    looked = started
     while time.monotonic() - started < timeout:
+        if gone_back is not None and time.monotonic() - looked >= GONE_BACK_EVERY:
+            looked = time.monotonic()
+            if gone_back():
+                output.progress_clear()
+                return BACK_ON_SONOFF
         body = setup_network.page(setup_network.SETUP_HOST, timeout=2.0)
         if body is not None and marker in body.lower():
             output.progress_clear()

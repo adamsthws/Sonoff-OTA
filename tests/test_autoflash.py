@@ -1637,11 +1637,88 @@ class BridgeOnHomeNetworkTests(unittest.TestCase):
         self.assertIsNone(self.find([None] * 20, {}))
 
 
+class BackOnSonoffTests(unittest.TestCase):
+    """A power cut before the installer has done its work puts the plug back on
+    Sonoff's firmware, by design: the installer is sent again, not waited for."""
+
+    def reach(self, running, sends=(None,), found=(None, "192.168.1.51"), waits=(None,)):
+        from types import SimpleNamespace
+        from unittest import mock
+        from tools import s60_autoflash
+        from tools.autoflash import setup_network
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        state.set_input("plug_ip", "192.168.1.51")
+        ctx = SimpleNamespace(state=state, finder=SimpleNamespace(poll=lambda: "192.168.1.51"))
+        found = iter(found)
+        outcomes = iter(sends)
+
+        def send(_):
+            outcome = next(outcomes)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return {"seconds": 20}
+
+        with mock.patch.object(setup_network, "page", return_value=None), \
+             mock.patch.object(s60_autoflash, "bridge_on_home_network", side_effect=lambda *a, **k: next(found, None)), \
+             mock.patch.object(s60_autoflash.detect, "identify",
+                               **({"side_effect": running} if isinstance(running, list) else {"return_value": running})), \
+             mock.patch.object(s60_autoflash, "step_bridge", side_effect=send) as bridge, \
+             mock.patch.object(s60_autoflash, "wait_for_bridge", side_effect=list(waits)) as wait, \
+             mock.patch.object(s60_autoflash, "find_ssid", return_value=None), \
+             mock.patch.object(s60_autoflash.hostsys, "copy_to_clipboard", return_value=False), \
+             mock.patch.object(s60_autoflash, "section"), mock.patch.object(s60_autoflash, "tell"), \
+             mock.patch.object(s60_autoflash, "say"):
+            try:
+                address = s60_autoflash.reach_bridge(ctx)
+            except s60_autoflash.Abort as exc:
+                address = exc
+        return address, bridge.call_count, wait.call_count, state
+
+    def test_the_installer_is_sent_again_and_found(self):
+        address, sent, waited, state = self.reach("sonoff")
+        self.assertEqual((address, sent, waited), ("192.168.1.51", 1, 0))
+        self.assertEqual(state.status("C2"), "done")
+
+    def test_a_send_cut_off_is_tried_again_three_times_in_all(self):
+        from tools import s60_autoflash
+        failed = s60_autoflash.Abort("bridge delivery stopped part way")
+        # Two cut off, the third gets there.
+        address, sent, _, _ = self.reach("sonoff", sends=(failed, failed, None),
+                                         found=(None, "192.168.1.51"))
+        self.assertEqual((address, sent), ("192.168.1.51", 3))
+        # Three cut off: it stops, with the reason, rather than go on for ever.
+        address, sent, _, _ = self.reach("sonoff", sends=(failed,) * 5)
+        self.assertIs(address, failed)
+        self.assertEqual(sent, s60_autoflash.BRIDGE_SENDS)
+
+    def test_back_on_sonoff_after_every_send_stops_asking_after_three(self):
+        # Sent, but the plug went back each time (its power keeps going): after
+        # three it falls through to the usual wait, which says what is wrong.
+        address, sent, waited, _ = self.reach("sonoff", sends=(None,) * 5, found=(None,) * 10)
+        self.assertEqual((sent, waited), (3, 1))
+
+    def test_back_on_sonoff_while_waiting_sends_it_again(self):
+        # A power cut during the backup, once the run was waiting for the
+        # installer's own network: the installer is gone, so it is sent again.
+        from tools import s60_autoflash
+        address, sent, waited, state = self.reach([None, "sonoff"], waits=(s60_autoflash.BACK_ON_SONOFF,),
+                                                  found=(None, "192.168.1.51"))
+        self.assertEqual((address, sent, waited), ("192.168.1.51", 1, 1))
+        self.assertEqual(state.status("C2"), "done")
+
+    def test_anything_else_is_waited_for_as_before(self):
+        address, sent, waited, _ = self.reach(None)
+        self.assertEqual((sent, waited), (0, 1))
+
+
 class WaitForBridgeTests(unittest.TestCase):
     """While waiting for the bridge's own network, a late join of the home one
     must still be noticed: the bridge then never raises its own."""
 
-    def wait(self, addresses, pages, timeout=60.0):
+    def wait(self, addresses, pages, timeout=60.0, gone_back=None):
         from types import SimpleNamespace
         from unittest import mock
         from tools import s60_autoflash
@@ -1654,7 +1731,8 @@ class WaitForBridgeTests(unittest.TestCase):
              mock.patch.object(s60_autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
              mock.patch.object(s60_autoflash.time, "sleep"), \
              mock.patch.object(s60_autoflash, "say"):
-            return s60_autoflash.wait_for_bridge(ctx, "S60-OTA-Bridge-A04D", timeout=timeout)
+            return s60_autoflash.wait_for_bridge(ctx, "S60-OTA-Bridge-A04D", timeout=timeout,
+                                                 gone_back=gone_back)
 
     def test_a_late_join_of_the_home_network_is_taken(self):
         bridge = "<title>S60 OTA Bridge</title>"
@@ -1666,6 +1744,11 @@ class WaitForBridgeTests(unittest.TestCase):
         from tools.autoflash import setup_network
         bridge = "<title>S60 OTA Bridge</title>"
         self.assertIsNone(self.wait([None] * 50, {setup_network.SETUP_HOST: bridge}))
+
+    def test_a_plug_gone_back_to_sonoffs_firmware_ends_the_wait(self):
+        from tools import s60_autoflash
+        self.assertEqual(self.wait([None] * 100, {}, timeout=600.0, gone_back=lambda: True),
+                         s60_autoflash.BACK_ON_SONOFF)
 
     def test_neither_in_time_stops_with_a_reason(self):
         from tools import s60_autoflash

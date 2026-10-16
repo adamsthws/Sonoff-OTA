@@ -113,6 +113,9 @@ Each fixed, with a test, and the scenario run again:
   gone while it first started: the run now says to switch the plug off and on.
 - A plug restarting, or left on the startup firmware, was missed by a run
   started from the beginning, and taken for one still on Sonoff's firmware.
+- A plug switched off and on after the installer was sent goes back to
+  Sonoff's firmware, as the installer means it to; the run then waited for
+  the installer for a quarter of an hour, and stopped. It now sends it again.
 - A power cut while the memory layout was rebuilt for Tasmota cost Tasmota
   its settings - the rebuild wrote over where it kept them - so the plug came
   back waiting on its setup network, and the next run stopped for good. The
