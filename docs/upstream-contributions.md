@@ -136,3 +136,8 @@ showed too, and every fix behaved the same on both.
 - **Our own mistakes.** When a test turned out to be wrong - an image that was
   never flashed, a fix that had leaked into a "before" build - it was
   re-run, and the PRs only report the re-runs.
+
+## Related
+
+[How the tool is tested](testing.md): the unit tests, the emulator and the
+fault matrix that found these bugs, and what has been run on real plugs.
