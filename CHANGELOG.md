@@ -12,7 +12,20 @@ the section below before changing the number.
 ## 2.0.0
 
 ESPHome, as well as Tasmota: the run asks at the start which the plug should
-end up running.
+end up running. And a plug can move between them later, or back to Sonoff's
+own firmware.
+
+- A run looks for the plug first. One already on Tasmota or ESPHome is offered
+  the other two: Tasmota, ESPHome, or Sonoff's own firmware and settings put
+  back from the backup taken when it was first converted (only where that
+  backup is on this computer). One left part way through a conversion is
+  recognised, and can go on to any of the three.
+- Every way round is over the air and checked as the first conversion is:
+  every block read back and compared byte for byte, and the plug switched
+  only once all of it is.
+- The bootloader becomes ESPHome's on every route, once: it starts all three
+  firmwares, and rolls back an update that fails to start. The final check of
+  a Tasmota plug now covers it too.
 
 - Choosing ESPHome needs nothing built or installed: the run installs a
   ready-made ESPHome for the S60 (`ESPHome/sonoff_s60.yaml`), with the plug's Wi-Fi

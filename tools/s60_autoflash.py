@@ -2786,11 +2786,28 @@ def step_leave_tasmota(ctx: Context) -> dict[str, Any]:
                                    esphome.published_bootloader())
     except (esphome.ImageError, imprint.ImprintError, plans.PlanError, OSError) as exc:
         raise Abort(f"the mover cannot be used: {exc}") from exc
-    result = run_plan(ctx, plan)
+    try:
+        result = run_plan(ctx, plan)
+    except Abort:
+        # Sonoff's table is the plan's last write, there only if every write
+        # before it read back right: with it in place, all that is missing is
+        # the restart into the mover.  Not left waiting for one.
+        if not table_written(ctx):
+            raise
+        say("    Everything was written before the plan stopped; restarting the plug into the mover.")
+        ctx.device.command("Restart 99")
+        result = {"plan": plan.name, "restarted_after": "a stopped report"}
     if not ctx.dry_run:
         wait_for(ctx, lambda address: esphome_ota.probe(address), "the plug to start the mover")
         say("    The plug is running the mover, on Sonoff's memory layout.")
     return result
+
+
+def table_written(ctx: Context) -> bool:
+    try:
+        return ctx.device.sha_region(plans.TABLE_ADDRESS, plans.SECTOR, timeout=30) == plans.SONOFF_TABLE_SHA256
+    except (DeviceError, OSError):
+        return False
 
 
 def send_as_esphome_update(ctx: Context, image: bytes, what: str) -> float:
@@ -3165,10 +3182,23 @@ def find_current_firmware(ctx: Context) -> str:
             return running
         return "sonoff"
     say("Looking for S60s already running Tasmota or ESPHome on your network...")
-    try:
-        found = detect.converted_s60s(hostsys.local_ip_towards("192.0.2.1"))
-    except OSError:
-        found = []
+
+    def search() -> list[detect.Found]:
+        try:
+            return detect.converted_s60s(hostsys.local_ip_towards("192.0.2.1"))
+        except OSError:
+            return []
+
+    found = search()
+    if not found and converted_here(ctx):
+        # A plug this computer converted, or left part way, may be restarting -
+        # a run stopped and started again at once finds it mid-restart.
+        say("    None answered. One this computer converted may be restarting: looking "
+            f"again for up to {RESTART_GRACE:.0f} seconds...")
+        started = time.monotonic()
+        while not found and time.monotonic() - started < RESTART_GRACE:
+            time.sleep(5)
+            found = search()
     if not found:
         return "sonoff"
     stock = "A plug still on Sonoff's firmware (it is set up in the eWeLink app)"
@@ -3186,6 +3216,22 @@ def find_current_firmware(ctx: Context) -> str:
         chosen = found[choice]
     adopt_plug(ctx, chosen)
     return chosen.firmware
+
+
+RESTART_GRACE = 45.0
+
+
+def converted_here(ctx: Context) -> bool:
+    """Whether this computer has a record of converting a plug, other than this run."""
+    for directory in run_directories():
+        if directory.resolve() == ctx.dir.resolve():
+            continue
+        try:
+            if RunState.open(directory).input("firmware"):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
 
 
 def adopt_plug(ctx: Context, found: "detect.Found") -> None:

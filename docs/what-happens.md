@@ -109,9 +109,11 @@ join the plug's own setup network.
 
 ## The run, step by step
 
-This is what `python3 tools/s60_autoflash.py run` does, in order. First it
-asks which firmware you would like, Tasmota or ESPHome (`--firmware` answers
-in advance); steps 1-7 are the same for both.
+This is what `python3 tools/s60_autoflash.py run` does, in order, for a plug
+still on Sonoff's firmware (one already converted is in
+[Changing firmware later](#changing-firmware-later)). First it asks which
+firmware you would like, Tasmota or ESPHome (`--firmware` answers in
+advance); steps 1-7 are the same for both.
 
 1. **List what has to be in place first** - the eWeLink app and account, the
    plug added with LAN Control on - and wait for a key press.
@@ -146,7 +148,13 @@ in advance); steps 1-7 are the same for both.
    details so it joins too. If the installer could not join, or Tasmota does
    not appear, it asks you to join the plug's own network instead, names it,
    does the rest itself, and tells you when to switch back.
-8. **Rebuild the plug's memory layout** to match the official Tasmota one. It
+8. **Update the bootloader**, the small program that starts the plug's
+   firmware, to ESPHome's, which starts Tasmota, ESPHome and Sonoff's firmware
+   alike and rolls back an update that fails to start. There is only one, so
+   it is fetched and checked whole first, then written in under a second and
+   read back; if it does not read back right, the old one is put back. A
+   power cut in that second would leave a plug that has to be opened to
+   repair. Then **rebuild the plug's memory layout** to match the official Tasmota one. It
    counts down ten seconds first - Ctrl-C stops it - before the minute in
    which the power must stay on.
 9. **Install official Tasmota**, which joins your Wi-Fi by itself, apply the
@@ -158,20 +166,14 @@ tells you whether every byte matches, and removes the temporary firewall rule
 - which needs administrator rights again, so it says why before the system
 asks.
 
-For **ESPHome**, steps 8 and 9 are instead:
+For **ESPHome**, after the bootloader, steps 8 and 9 are instead:
 
 8. **Install ESPHome** into the half of the plug's memory Tasmota is not
    running from - the published ESPHome for the S60, with your Wi-Fi written
    in, in memory only. Every block is read back and compared with the image,
-   byte for byte. Then ESPHome's own bootloader - the small program that
-   starts the plug - replaces Sonoff's, which cannot undo a failed update.
-   There is only one, so it is fetched and checked whole first, then written
-   in under a second and read back; if it does not read back right, Sonoff's
-   is put back. A power cut in that second would leave a plug that has to be
-   opened to repair: the one such moment in the run. Only then does the plug
-   switch to ESPHome, by clearing the note that says which half to start, and
-   restart. Until that moment it still starts Tasmota. The memory layout
-   itself is not changed.
+   byte for byte. Only then does the plug switch to ESPHome, by clearing the
+   note that says which half to start, and restart. Until that moment it
+   still starts Tasmota. The memory layout itself is not changed.
 9. **Check ESPHome is running** and has joined your Wi-Fi. If it cannot, it
    puts up its own network, named like `sonoff-s60-xxxxxx`, where its page
    asks for your Wi-Fi.
@@ -181,19 +183,49 @@ gives you the plug's ESPHome page.
 
 ## At the end
 
-The tool reads back three parts of the plug's memory, calculates a fingerprint
-of each, and compares them against the official Tasmota release files:
+The tool reads back four parts of the plug's memory, calculates a fingerprint
+of each, and compares them against the files they came from:
 
+- the bootloader
 - the memory layout table
 - the recovery firmware
 - Tasmota itself
 
-If all three match, the plug is byte-for-byte identical to a plug flashed over
-USB with the official release. Not equivalent, identical.
+If all four match, the plug's Tasmota is byte-for-byte identical to a plug
+flashed over USB with the official release - not equivalent, identical - with
+ESPHome's bootloader starting it.
 
 From then on it is an ordinary Tasmota device: normal updates through its own
 web page, normal integrations, and none of it touching Sonoff's servers.
 
+
+## Changing firmware later
+
+A plug this tool converted can move to either of the other two, or back to
+Sonoff's firmware. The run finds it on the network by what it answers as,
+says what it runs, and offers the other two (Sonoff's only where the plug's
+backup is on the computer). Every route has the same checks as above.
+
+Most routes pass through the same place the first conversion does: Sonoff's
+memory layout, with a full Tasmota running from its second half. From there
+the steps above finish the job for Tasmota or ESPHome, and going back to
+Sonoff writes the plug's own firmware and settings from its backup into the
+first half, checks them, and switches to them.
+
+- **From ESPHome**, the startup firmware is sent to ESPHome as an ordinary
+  ESPHome update, with your Wi-Fi written in (asked for: ESPHome does not
+  say what its password is). It joins your Wi-Fi, saves it for Tasmota, and
+  is sent the full Tasmota.
+- **From Tasmota**, the plug is on Tasmota's own layout, where Tasmota sits
+  across both halves of Sonoff's. A small ESPHome, the *mover*, fits in front
+  of it: it is written there, the area Sonoff's layout keeps settings in is
+  cleared, and Sonoff's layout table is written last - the one moment a power
+  cut would leave a plug needing to be opened. The plug restarts into the
+  mover, which takes ESPHome itself as an update, or the startup firmware
+  as on the way from ESPHome.
+- **A plug left part way** - running the mover, the startup firmware or the
+  full Tasmota on Sonoff's layout - is recognised by a new run, and can go on
+  to any of the three from where it is.
 
 ## Safety, and why you can believe the checks
 

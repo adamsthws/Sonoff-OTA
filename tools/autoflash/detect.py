@@ -64,16 +64,23 @@ def _tasmota(host: str, timeout: float) -> tuple[str, str | None] | None:
             name = str(status.get("StatusNET", {}).get("Hostname", "")) if isinstance(status, dict) else ""
             return ("startup", name) if name.startswith(STARTUP_HOSTNAME) else None
         status = device.command("Status 0")
+        if isinstance(status, dict) and "StatusFWR" not in status:
+            status["StatusFWR"] = device.command("Status 2").get("StatusFWR", {})
     except Exception:  # noqa: BLE001 - anything but Tasmota answering
         return None
     if not isinstance(status, dict) or "Status" not in status:
         return None
     name = status.get("StatusNET", {}).get("Hostname")
+    version = str(status.get("StatusFWR", {}).get("Version", ""))
     try:
-        if device.sha_region(0x8000, 0x1000, timeout=20) == SONOFF_TABLE_SHA256:
-            return "hub", name
+        sonoff_layout = device.sha_region(0x8000, 0x1000, timeout=20) == SONOFF_TABLE_SHA256
     except Exception:  # noqa: BLE001 - no Berry: not one of this tool's
-        pass
+        sonoff_layout = False
+    # The routes' own Tasmota is the bluetooth build.  Official Tasmota with
+    # Sonoff's table is one leaving Tasmota that has not restarted yet: still
+    # Tasmota, so leaving it carries on (the plan finds its writes done).
+    if sonoff_layout and "bluetooth" in version:
+        return "hub", name
     try:
         template = device.command("Template")
     except Exception:  # noqa: BLE001

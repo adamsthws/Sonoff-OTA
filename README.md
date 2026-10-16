@@ -4,7 +4,9 @@
 ![A successful conversion run](docs/SuccessRunScreenshot.png)
 
 Turns a stock Sonoff S60 smart plug into one running **Tasmota** or
-**ESPHome** using OTA method - no soldering, no taking the plug apart.
+**ESPHome** using OTA method - no soldering, no taking the plug apart. Later
+it moves the plug between the two, or back to Sonoff's own firmware, the same
+way ([Changing firmware later](#changing-firmware-later)).
 
 Until now, the established way to put Tasmota on an S60 was to open it and
 flash it over USB-serial - hard work, because the case is plastic-welded shut.
@@ -105,10 +107,11 @@ cd Sonoff-OTA
 - Run the same command for every plug: it carries on an unfinished run, or
 starts a new one. 
 
-- First you're asked which firmware you'd like: Tasmota or ESPHome
-([Choosing ESPHome](#choosing-esphome)).
+- First it looks for the plug. One still on Sonoff's firmware is offered
+Tasmota or ESPHome ([Choosing ESPHome](#choosing-esphome)); one already on
+Tasmota or ESPHome is offered the other two.
 
-- The you're walked through every step of the conversion.
+- Then you're walked through every step of the conversion.
 
 - Finding the plug, backing up its Sonoff firmware,
 installing Tasmota, rebuilding its memory and checking the result - happens automatically.
@@ -136,6 +139,43 @@ You also keep a full backup of the plug's Sonoff firmware.
 
 If you later change your Wi-Fi, the plug can be told the new one through its
 own network: see [a converted plug that has lost your Wi-Fi](docs/troubleshooting.md#a-converted-plug-that-has-lost-your-wi-fi).
+
+## Changing firmware later
+
+```mermaid
+block-beta
+  columns 3
+  space S["Sonoff's own firmware<br/>(eWeLink)"] space
+  space:3
+  space:3
+  space:3
+  space:3
+  space:3
+  T["Tasmota"] space E["ESPHome"]
+  S --> T
+  T --> S
+  S --> E
+  E --> S
+  T --> E
+  E --> T
+```
+
+Run the same command with a converted plug on your network: it finds the plug,
+says what it runs, and offers the other two. Every way round is over the air,
+with the same checks as the first conversion: every block written is read
+back, and the plug only switches once it has all been checked.
+
+- **Back to Sonoff's firmware** puts back the plug's own firmware and settings
+  from the backup taken when it was first converted, so it is in the eWeLink app
+  again as it was. It is only offered where that backup is on the computer
+  doing it.
+- **From ESPHome**, you are asked for your Wi-Fi password: ESPHome does not
+  say what it is, and the firmware going on needs it written in.
+- **The bootloader**, the small program that starts the plug's firmware, is
+  replaced once, with ESPHome's, which starts all three and rolls back an
+  update that fails to start. Writing it takes under a second; it and the
+  memory map are the only moments a power cut would leave a plug that needs
+  opening to repair.
 
 ## When something goes wrong
 
