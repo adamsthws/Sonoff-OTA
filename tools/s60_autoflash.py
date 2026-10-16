@@ -273,7 +273,10 @@ def run_is_complete(directory: Path) -> bool:
         state = RunState.open(directory)
     except (OSError, ValueError):
         return False
-    return state.is_done(steps_of(state)[-1][0])
+    steps = steps_of(state)
+    if not steps:
+        return state.input("firmware") is not None  # it already ran what was asked
+    return state.is_done(steps[-1][0])
 
 
 CURRENT_POINTER = ROOT / "captures" / ".autoflash-current"
@@ -3044,7 +3047,9 @@ SOURCES = ("sonoff", "tasmota", "esphome", "midway")
 
 
 def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Callable[[Context], dict[str, Any]]]]:
-    """The steps from `source` firmware to `firmware`."""
+    """The steps from `source` firmware to `firmware` (none, if it is the same)."""
+    if firmware == source:
+        return []
     final = {"tasmota": TASMOTA_FINAL_STEPS, "esphome": ESPHOME_FINAL_STEPS,
              "sonoff": SONOFF_FINAL_STEPS}[firmware]
     if source == "sonoff":
@@ -3088,6 +3093,10 @@ def apply_target(firmware: str, source: str = "sonoff") -> None:
     STEP_INDEX = {step: (title, handler) for step, title, handler in STEPS}
 
 
+class NothingToDo(Exception):
+    """The plug already runs the firmware asked for."""
+
+
 def settle_firmware(ctx: Context) -> str:
     """Which firmware this run installs (settle_route)."""
     return settle_route(ctx)[0]
@@ -3117,9 +3126,13 @@ def settle_route(ctx: Context) -> tuple[str, str]:
     if source != "sonoff" and not sonoff_backup_exists(ctx):
         choices.remove("sonoff")  # going back needs this plug's backup
     if given:
+        if given == source:
+            # Asked for what it runs: nothing to do, and nothing left unfinished.
+            ctx.state.set_input("source", source)
+            ctx.state.set_input("firmware", source)
+            raise NothingToDo(f"The plug already runs {detect.NAMES[source]}: there is nothing to convert.")
         if given not in choices:
-            raise Abort(f"the plug already runs {detect.NAMES[source]}" if given == source else
-                        f"this plug cannot go to {FIRMWARES[given]}: there is no backup of its "
+            raise Abort(f"this plug cannot go to {FIRMWARES[given]}: there is no backup of its "
                         "Sonoff firmware on this computer")
         firmware = given
     elif started:
@@ -3762,7 +3775,14 @@ def run_steps(ctx: Context) -> int:
     tell("minute or two with little to see - that's normal. Keep the plug plugged")
     tell("in, and this computer awake, until the last stage says complete.")
     tell("")
-    firmware, source = settle_route(ctx)
+    try:
+        firmware, source = settle_route(ctx)
+    except NothingToDo as nothing:
+        tell(str(nothing))
+        return 0
+    except Abort as refused:
+        tell(f"Stopped before anything was done: {refused}.")
+        return 2
     apply_target(firmware, source)
     resumed = any(ctx.state.is_done(step) for step, _, _ in STEPS)
     ctx.run_started, ctx.run_resumed = started, resumed

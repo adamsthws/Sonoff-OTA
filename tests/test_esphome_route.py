@@ -215,7 +215,7 @@ class FromAConvertedPlugTests(RouteTestCase):
     """A plug this tool converted, found on the network, offered the other two."""
 
     def settle(self, running, *, backup=True, given=None, answer=0):
-        ctx = self.ctx(given=given)
+        ctx = self.ctx(given=given, run=f"{running}-{given}-{backup}")
         with mock.patch.object(af, "find_current_firmware", return_value=running), \
                 mock.patch.object(af, "sonoff_backup_exists", return_value=backup), \
                 mock.patch.object(af, "ask_choice", return_value=answer) as asked:
@@ -233,7 +233,7 @@ class FromAConvertedPlugTests(RouteTestCase):
         self.assertEqual(firmware, "tasmota")
 
     def test_the_firmware_it_already_runs_cannot_be_asked_for(self):
-        with self.assertRaisesRegex(af.Abort, "already runs ESPHome"):
+        with self.assertRaisesRegex(af.NothingToDo, "already runs ESPHome"):
             self.settle("esphome", given="esphome")
         with self.assertRaisesRegex(af.Abort, "no backup"):
             self.settle("tasmota", backup=False, given="sonoff")
@@ -253,3 +253,13 @@ class FromAConvertedPlugTests(RouteTestCase):
                 self.assertEqual(len(steps), len(set(steps)), (source, firmware))
                 # The bootloader is written on every route, before any firmware goes in.
                 self.assertTrue("D5" in steps or "L1" in steps, (source, firmware))
+
+
+class AlreadyThereTests(RouteTestCase):
+    def test_asking_for_what_it_runs_ends_the_run_done(self):
+        ctx = self.ctx(given="esphome")
+        with mock.patch.object(af, "find_current_firmware", return_value="esphome"):
+            with self.assertRaisesRegex(af.NothingToDo, "already runs ESPHome"):
+                af.settle_route(ctx)
+        # Never offered back as an unfinished run.
+        self.assertTrue(af.run_is_complete(Path(self.tmp.name) / "run"))

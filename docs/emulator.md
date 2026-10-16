@@ -122,7 +122,7 @@ through eWeLink. The first start builds the image, which takes a few minutes.
 
 ### Several at once
 
-`--instance N` (1-9, on `emu.sh` and `unattended-test.sh`) runs another
+`--instance N` (1-30, on `emu.sh` and `unattended-test.sh`) runs another
 emulator beside the first: its own container (`s60-emu-N`), state
 (`captures/emulation/state-N/`) and browser port (8080+N), so tests can run side
 by side. Each is its own small network, so the identical plugs do not meet.

@@ -28,7 +28,7 @@ emu_args=(--cloud --yes --detach) keep=0 run_args=() from="" save=""
 while [ $# -gt 0 ]; do
     case "$1" in
     --fresh|--pcap|--rebuild|--no-firewall|--plug=*) emu_args+=("$1") ;;
-    --instance=[1-9])  # another emulator beside the first: see emu.sh
+    --instance=[1-9]|--instance=[12][0-9]|--instance=30)  # another emulator beside the first: see emu.sh
         n=${1#--instance=}; emu_args+=("$1")
         NAME=s60-emu-$n PORT=$((8080 + n)) STATE=$STATE-$n ;;
     --keep) keep=1 ;;
@@ -52,7 +52,12 @@ if [ -n "$from" ]; then
     rm -rf "$STATE/work/captures" && cp -a "$SAVED/$from/captures" "$STATE/work/captures"
 fi
 
-"$ROOT/tools/emulator/emu.sh" "${emu_args[@]}" >/dev/null
+# One left running (--keep) is carried on with as it is - the plug, its network
+# and the computer's firewall - as a person running the tool again would find them.
+if [ -n "$from" ] || [[ " ${emu_args[*]} " == *" --fresh "* ]] || \
+        [ -z "$(docker ps -q -f "name=^$NAME\$")" ]; then
+    "$ROOT/tools/emulator/emu.sh" "${emu_args[@]}" >/dev/null
+fi
 keep_plug() {
     [ -n "$save" ] || return 0
     docker exec "$NAME" /opt/s60emu/bin/plug off >/dev/null 2>&1 || true

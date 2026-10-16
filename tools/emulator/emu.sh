@@ -12,7 +12,7 @@
 #   tools/emulator/emu.sh --no-firewall  without the "computer's" firewall (ufw), on by default
 #   tools/emulator/emu.sh --windows  Windows is the computer, wired in by windows_link.py
 #                                    (from Windows, start it all with tools/emulator/emu.ps1)
-#   tools/emulator/emu.sh --instance N  another emulator beside the first (N = 1-9): its own
+#   tools/emulator/emu.sh --instance N  another emulator beside the first (N = 1-30): its own
 #                                    container (s60-emu-N), state (state-N) and browser
 #                                    port (8080+N), so tests can run side by side
 #
@@ -43,7 +43,7 @@ while [ $# -gt 0 ]; do
     case "$arg" in
     --plug) [ $# -ge 2 ] || { echo "--plug needs a MAC address" >&2; exit 2; }; plug=$2; shift ;;
     --plug=*) plug=${arg#--plug=} ;;
-    --instance) [ $# -ge 2 ] || { echo "--instance needs a number, 1-9" >&2; exit 2; }; instance=$2; shift ;;
+    --instance) [ $# -ge 2 ] || { echo "--instance needs a number, 1-30" >&2; exit 2; }; instance=$2; shift ;;
     --instance=*) instance=${arg#--instance=} ;;
     --cloud) cloud=1 ;;
     --yes) yes=1 ;;
@@ -58,7 +58,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 if [ -n "$instance" ]; then
-    case "$instance" in [1-9]) ;; *) echo "--instance needs a number, 1-9" >&2; exit 2 ;; esac
+    case "$instance" in [1-9]|[12][0-9]|30) ;; *) echo "--instance needs a number, 1-30" >&2; exit 2 ;; esac
     STATE=$STATE-$instance NAME=s60-emu-$instance
     PORT=$((8080 + instance)) LINK_PORT=$((7860 + instance))
 fi
