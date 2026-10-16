@@ -26,12 +26,56 @@ The older custom `s60-tasmota-15.6.0-*.bin` builds and their corresponding
 configuration, patch, documentation and helper are retained together under
 `archive/`.
 
+## ESPHome firmware
+
+ESPHome's firmware code is distributed under the GNU General Public License
+v3.0.
+
+`artifacts/esphome-sonoff-s60-imprintable-1.0.0.bin` and
+`artifacts/esphome-sonoff-s60-mover-1.0.0.bin` are built with ESPHome 2026.9.1
+and ESP-IDF 5.5.5 from this project's configs,
+[`ESPHome/sonoff_s60.yaml`](ESPHome/sonoff_s60.yaml) and
+[`ESPHome/sonoff_s60_mover.yaml`](ESPHome/sonoff_s60_mover.yaml), with
+`esphome compile`. The corresponding source is the
+[ESPHome 2026.9.1 release](https://github.com/esphome/esphome/tree/2026.9.1)
+and these configs. `artifacts/esphome-sonoff-s60-bootloader-1.0.0.bin` is the
+ESP-IDF bootloader from the same build. How they are built and published is in
+[`artifacts/README.md`](artifacts/README.md).
+
 ## OTA bridge
 
-The OTA bridge is built using Espressif ESP-IDF through PlatformIO. Its source
-is provided in `archive/bridge/`. ESP-IDF and its bundled components retain
-their own copyright notices and licenses; see the corresponding upstream
-distributions resolved by `archive/bridge/platformio.ini`.
+`artifacts/s60-ota-bridge-4.4.2.ota` is this project's own firmware, under
+this repository's licence ([`LICENSE`](LICENSE)). Its source is in
+`archive/bridge/`, and `tools/build_vendor_ota.py` wraps it for the stock
+updater. It is built with ESP-IDF through PlatformIO, as pinned by
+`archive/bridge/platformio.ini`.
+
+## ESP-IDF
+
+The bridge and the ESPHome images include Espressif's ESP-IDF, which is
+distributed under the
+[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). ESP-IDF's
+bundled components keep their own copyright notices and licences, listed in
+the ESP-IDF source for the version each build names.
+
+## Data files
+
+`artifacts/tasmota-settings-template-15.6.0.0.bin` is Tasmota 15.6.0's default
+settings, with no network details in them, captured from a converted plug.
+
+`artifacts/sonoff-s60-partition-table.bin` is the standard ESP-IDF partition
+table every S60 ships with, read from a stock plug: a list of partition names,
+offsets and sizes, with no code or settings in it. Why the project keeps it is
+in [`docs/legal.md`](docs/legal.md).
+
+## Availability of source
+
+The Tasmota and ESPHome sources above are named by upstream commit or release.
+If any of them stops being available upstream, ask in an issue and the project
+will provide the corresponding source for any binary it has published.
+
+## Trademarks
 
 Sonoff and eWeLink are trademarks of their respective owners. This project is
-independent and is not an official Sonoff, eWeLink, or Tasmota installer.
+independent and is not an official Sonoff, eWeLink, Tasmota or ESPHome
+installer.
