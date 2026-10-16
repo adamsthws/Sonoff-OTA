@@ -1239,6 +1239,7 @@ def step_check(ctx: Context) -> dict[str, Any]:
         raise Abort("artifact checksums failed: " + "; ".join(problems))
     say("published artifact checksums: OK")
 
+    restore_left_locks()
     for lock in ("RECOVERY_LOCK", "REPARTITION_LOCK"):
         if not (ROOT / lock).exists():
             raise Abort(f"{lock} is not in place; refusing to start from an unsafe state")
@@ -3805,8 +3806,24 @@ def cmd_run(ctx: Context) -> int:
         forget_run_secrets(ctx.dir)
 
 
+def restore_left_locks() -> None:
+    """Put back a safety lock a run left moved aside.
+
+    A step that needs one moves it aside while it runs and puts it back after,
+    however it ends - unless this computer itself stopped (a crash, a power cut)
+    while it ran.  Moved aside, the lock then fails every run: put back, the
+    step simply asks for it again.
+    """
+    for name in ("RECOVERY_LOCK", "REPARTITION_LOCK"):
+        lock, moved = ROOT / name, ROOT / f"{name}.owner-authorized"
+        if moved.exists() and not lock.exists():
+            hostsys.replace_file(moved, lock)
+            say(f"{name} put back: a run stopped while it was moved aside")
+
+
 def run_steps(ctx: Context) -> int:
     started = time.monotonic()
+    restore_left_locks()  # a resumed run skips A5, which looks too
     tell("")
     tell("Converting a plug usually takes under 10 minutes. Some stages take a")
     tell("minute or two with little to see - that's normal. Keep the plug plugged")

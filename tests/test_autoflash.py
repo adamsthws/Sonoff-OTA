@@ -2241,3 +2241,18 @@ class BridgeEvidenceTests(unittest.TestCase):
              mock.patch.object(s60_autoflash, "find_ssid", return_value=None):
             installed, _ = s60_autoflash.evidence_bridge_installed(mock.Mock())
         self.assertIsNone(installed)
+
+
+class LeftLockTests(unittest.TestCase):
+    def test_a_lock_left_moved_aside_by_a_stopped_run_is_put_back(self):
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "RECOVERY_LOCK.owner-authorized").write_text("locked\n")
+            (root / "REPARTITION_LOCK").write_text("locked\n")
+            with mock.patch.object(autoflash, "ROOT", root), mock.patch.object(autoflash, "say"):
+                autoflash.restore_left_locks()
+            self.assertTrue((root / "RECOVERY_LOCK").exists())
+            self.assertFalse((root / "RECOVERY_LOCK.owner-authorized").exists())
+            self.assertTrue((root / "REPARTITION_LOCK").exists())
