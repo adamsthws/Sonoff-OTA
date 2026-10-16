@@ -1,6 +1,22 @@
 # Sonoff S60 → Tasmota or ESPHome, OTA
 ## Fully automated 'Over The Air' conversion
 
+```mermaid
+%%{init: {"themeCSS": ".outer-circle { display: none; }", "block": {"padding": 20}}}%%
+block-beta
+  columns 3
+  space S((("Sonoff<br/>(eWeLink)"))) H["&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"]
+  space:3
+  T((("Tasmota"))) space E((("ESPHome")))
+  S --> T
+  T --> S
+  S --> E
+  E --> S
+  T --> E
+  E --> T
+  style H fill:none,stroke:none
+```
+
 ![A successful conversion run](docs/SuccessRunScreenshot.png)
 
 Turns a stock Sonoff S60 smart plug into one running **Tasmota** or
@@ -141,24 +157,6 @@ If you later change your Wi-Fi, the plug can be told the new one through its
 own network: see [a converted plug that has lost your Wi-Fi](docs/troubleshooting.md#a-converted-plug-that-has-lost-your-wi-fi).
 
 ## Changing firmware later
-
-```mermaid
-block-beta
-  columns 3
-  space S["Sonoff's own firmware<br/>(eWeLink)"] space
-  space:3
-  space:3
-  space:3
-  space:3
-  space:3
-  T["Tasmota"] space E["ESPHome"]
-  S --> T
-  T --> S
-  S --> E
-  E --> S
-  T --> E
-  E --> T
-```
 
 Run the same command with a converted plug on your network: it finds the plug,
 says what it runs, and offers the other two. Every way round is over the air,

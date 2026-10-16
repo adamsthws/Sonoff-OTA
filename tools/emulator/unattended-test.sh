@@ -82,7 +82,9 @@ echo "The emulated plug is up; converting it unattended..."
 # repository has no .env, so a run you sit through asks for it. Kept in the
 # container's /tmp, gone when it stops, and removed after the run anyway.
 answers=/tmp/s60-unattended.env
-"${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers" < "$ROOT/.env"
+# Not the Wi-Fi in it, if any: that is your real network's, and the emulated
+# plug's is its own (given below).
+grep -v '^ *\(export \)\?S60_WIFI_' "$ROOT/.env" | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
 [ "$keep" = 1 ] && trap 'docker exec "$NAME" rm -f "$answers" 2>/dev/null || true' EXIT
 
 # On a terminal the run is shown live; otherwise its final screen is printed.
