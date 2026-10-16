@@ -495,6 +495,7 @@ class Context:
         self.run_resumed = False
         self.reported = False
         self.last_failure = ""  # what the last stage to fail said, for the report
+        self.last_failed_step = ""  # and which it was: a failure may send earlier steps back
         try:
             output.private(bundle_ssid(self.manifest_path), "wifi-name")
         except (BundleError, OSError, ValueError):
@@ -3391,6 +3392,7 @@ def _execute(ctx: Context, step: str) -> int:
         output.stage_end("stopped")
         section(f"{step} could not start", firewall_hint(ctx))
         ctx.last_failure = str(exc)
+        ctx.last_failed_step = step
         tell(f"FAILED: {exc}")
         return 1
     except (Abort, DeviceError, ValueError, PhaseError) as exc:
@@ -3401,6 +3403,7 @@ def _execute(ctx: Context, step: str) -> int:
             ctx.state.mark(step, FAILED, error=str(exc))
         output.stage_end("stopped")
         ctx.last_failure = str(exc)
+        ctx.last_failed_step = step
         tell(f"FAILED: {exc}")
         return 1
     except Exception as exc:  # noqa: BLE001 - recorded and explained, not a bare traceback
@@ -3410,6 +3413,7 @@ def _execute(ctx: Context, step: str) -> int:
             ctx.state.mark(step, FAILED, error=message)
         output.stage_end("stopped")
         ctx.last_failure = message
+        ctx.last_failed_step = step
         tell(f"FAILED: {message}")
         return 1
     # A step may end its stage otherwise: "skipped" or "already done".
@@ -4003,8 +4007,11 @@ def run_result(ctx: Context, ending: str) -> str:
     """
     if ending == "converted":
         return "converted"
+    # The stage that failed, not the first left to do: a failure may have sent
+    # earlier steps back to be done again (E3 refused as changed sends E1, E2).
+    failed = getattr(ctx, "last_failed_step", "")
     stopped = next(((number, step) for number, (step, _, _) in enumerate(STEPS, 1)
-                    if not ctx.state.is_done(step)), None)
+                    if (step == failed if failed else not ctx.state.is_done(step))), None)
     where = (f"stage {stopped[0]} of {len(STEPS)} ({stage_name(stopped[1])})"
              if stopped else "the end")
     reason = ctx.last_failure or (

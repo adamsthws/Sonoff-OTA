@@ -623,6 +623,25 @@ class ReportTests(OutputTestCase):
                          f"crashed at {where}: something unexpected went wrong: KeyError: 'x'")
         self.assertEqual(af.run_result(ctx, "converted"), "converted")
 
+    def test_the_result_names_the_stage_that_failed_not_one_it_sent_back(self):
+        # A refused commit sends E1 and E2 back to be done again: the run still
+        # stopped at the commit.
+        import tools.s60_autoflash as af
+        from tools.autoflash.state import DONE
+        self.enterContext(mock.patch.dict(af.output._private, {}, clear=True))
+        ctx = self.ctx()
+        for step, _, _ in af.STEPS:
+            if step == "E3":
+                break
+            ctx.state.mark(step, DONE)
+        for step in ("E1", "E2", "E3"):
+            ctx.state.mark(step, "failed")
+        ctx.last_failure, ctx.last_failed_step = "commit refused", "E3"
+        number = [step for step, _, _ in af.STEPS].index("E3") + 1
+        self.assertEqual(af.run_result(ctx, "failed"),
+                         f"stopped at stage {number} of {len(af.STEPS)} "
+                         f"({af.stage_name('E3')}): commit refused")
+
     def test_only_a_run_that_failed_offers_its_report_not_one_the_operator_stopped(self):
         import tools.s60_autoflash as af
         self.assertEqual(af.report_ending(1, None), "failed")       # a stage failed
