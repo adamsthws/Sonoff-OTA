@@ -9,7 +9,9 @@
 #   it fetched and checked before its first byte is written, so nothing waits
 #   on the network while the plug cannot start, then written a sector at a
 #   time, each read back at once, and the old bytes put back if one differs;
-# - erase: a region cleared, unless it already is, and checked.
+# - erase: a region cleared, unless it already is, and checked;
+# - copy: bytes already on the plug moved elsewhere on it, each sector read
+#   back, then the whole compared with where it came from.
 # Then the report, and a restart if the plan has one.
 import flash
 import crypto
@@ -281,6 +283,31 @@ def write_whole(step)
   end
 end
 
+# A copy from one place on the plug to another: what this computer does not
+# have, such as the plug's settings.
+def copy_region(step)
+  var source = step["src"]
+  var address = step["addr"]
+  var total = step["len"]
+  var wanted = sha_region(source, total)
+  if sha_region(address, total) != wanted
+    var offset = 0
+    while offset < total
+      var data = flash.read(source + offset, 0x1000)
+      if flash.read(address + offset, 0x1000) != data
+        flash.write(address + offset, data)
+      end
+      guard(flash.read(address + offset, 0x1000) == data,
+            format("copy read-back differs at 0x%X", address + offset))
+      offset += 0x1000
+      tasmota.yield()
+    end
+  end
+  guard(sha_region(address, total) == wanted, format("the copy to 0x%X differs from its source", address))
+  guard(sha_region(source, total) == wanted, format("0x%X changed while being copied", source))
+  print(format("S60 PLAN: 0x%X copied to 0x%X", source, address))
+end
+
 def run_plan()
   guard(tasmota.arch() == "esp32c3", "device is not ESP32-C3")
   guard(flash.size() == 0x400000, "flash is not exactly 4 MiB")
@@ -293,6 +320,10 @@ def run_plan()
           format("the plug runs from slot %i, not %i", flash.current_ota(), expected_running))
   end
 
+  # Run again after its table was written, the plan's copies are done - and
+  # the plug may have saved over them since, which copying again would undo.
+  var table_written = table == final_table && final_table != expected_table
+
   var report = format("session=%s\nstatus=PASS\nplan=%s\n", session, plan_name)
   var i = 0
   while i < size(steps)
@@ -304,6 +335,9 @@ def run_plan()
       guard(sha_region(step["addr"], step["len"]) == bytes(step["sha"]),
             format("0x%X did not erase", step["addr"]))
       report += format("step%i=erased\n", i)
+    elif step["op"] == "copy"
+      if !table_written copy_region(step) end
+      report += format("step%i=copied\n", i)
     else
       if step["whole"] write_whole(step) else write_streamed(step) end
       var written = sha_region(step["addr"], step["len"])

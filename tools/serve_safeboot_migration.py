@@ -38,7 +38,12 @@ try:
         TABLE_SIZE,
         TARGET_PARTITIONS,
         TARGET_TABLE_SHA256,
+        INTERIM_TABLE_SHA256,
+        LOW_REGIONS_OFFSET,
+        LOW_REGIONS_SIZE,
+        MOVED_LOW_OFFSET,
         analyze_canonical_nvs,
+        interim_table,
         artifact_bytes,
         load_evidence,
         load_manifest,
@@ -66,7 +71,12 @@ except ModuleNotFoundError:
         TABLE_SIZE,
         TARGET_PARTITIONS,
         TARGET_TABLE_SHA256,
+        INTERIM_TABLE_SHA256,
+        LOW_REGIONS_OFFSET,
+        LOW_REGIONS_SIZE,
+        MOVED_LOW_OFFSET,
         analyze_canonical_nvs,
+        interim_table,
         artifact_bytes,
         load_evidence,
         load_manifest,
@@ -268,6 +278,7 @@ class MigrationState:
         if target_report["sha256"] != TARGET_TABLE_SHA256:
             raise ValueError("target table differs from the reviewed official sector")
         self.target_table_sha256 = target_report["sha256"]
+        self.interim_table = interim_table() if phase == "commit" else b""
 
         self.live_preflight: dict[str, Any] | None = None
         self.stage_evidence: dict[str, Any] | None = None
@@ -346,6 +357,10 @@ class MigrationState:
             "ARM_TOKEN": self.arm_token,
             "SOURCE_TABLE_SHA256": SOURCE_TABLE_SHA256,
             "TARGET_TABLE_SHA256": self.target_table_sha256,
+            "INTERIM_TABLE_SHA256": INTERIM_TABLE_SHA256,
+            "LOW_REGIONS_OFFSET": str(LOW_REGIONS_OFFSET),
+            "LOW_REGIONS_SIZE": str(LOW_REGIONS_SIZE),
+            "MOVED_LOW_OFFSET": str(MOVED_LOW_OFFSET),
             "LIVE_NVS_SHA256": live_nvs,
             "SAFEBOOT_SHA256": sha256_bytes(self.safeboot),
             "SAFEBOOT_LENGTH": str(safeboot_length),
@@ -717,6 +732,8 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
                 return 200, str(state.restore_from()).encode("ascii"), "text/plain"
             if path == "/target-table" and state.phase == "commit":
                 return 200, state.target_table.hex().encode("ascii"), "text/plain"
+            if path == "/interim-table" and state.phase == "commit":
+                return 200, state.interim_table.hex().encode("ascii"), "text/plain"
             return 404, b"not found\n", "text/plain"
         except ValueError as exc:
             return 409, f"refused: {exc}\n".encode("utf-8"), "text/plain"

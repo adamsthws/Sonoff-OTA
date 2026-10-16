@@ -66,6 +66,28 @@ SPIFFS_OFFSET = 0x3B0000
 SPIFFS_SIZE = 0x50000
 SAFEBOOT_STAGE_OFFSET = OLD_OTA0_OFFSET
 
+# The commit copies Safeboot into place over where Sonoff's layout keeps the
+# settings and the boot selection - and Tasmota keeps its settings past the
+# five pages Tasmota's layout keeps, so a power cut part way used to leave a
+# Tasmota with none, waiting on its setup network.  So first those regions are
+# copied whole to the end of ota_0, which the commit never touches, and this
+# interim table - Sonoff's, with them moved - written: a power cut anywhere in
+# the copy then starts the same Tasmota, with its settings and boot selection.
+# The interim layout lives only inside a commit: a later run finding it puts
+# Sonoff's back, from the moved copy, before anything else.
+LOW_REGIONS_OFFSET = 0x9000
+LOW_REGIONS_SIZE = OLD_OTA0_OFFSET - LOW_REGIONS_OFFSET  # nvs, reserve, otadata, phy_init
+MOVED_LOW_OFFSET = OLD_OTA1_OFFSET - LOW_REGIONS_SIZE
+INTERIM_PARTITIONS = (
+    ("nvs", 0x01, 0x02, MOVED_LOW_OFFSET, 0x010000, 0x0),
+    ("reserve", 0x01, 0x02, MOVED_LOW_OFFSET + 0x10000, 0x004000, 0x0),
+    ("otadata", 0x01, 0x00, MOVED_LOW_OFFSET + 0x14000, 0x002000, 0x0),
+    ("phy_init", 0x01, 0x01, MOVED_LOW_OFFSET + 0x16000, 0x001000, 0x0),
+    ("ota_0", 0x00, 0x10, OLD_OTA0_OFFSET, MOVED_LOW_OFFSET - OLD_OTA0_OFFSET - 0x9000, 0x0),
+    ("ota_1", 0x00, 0x11, OLD_OTA1_OFFSET, OLD_OTA_SLOT_SIZE, 0x0),
+)
+INTERIM_TABLE_SHA256 = "cfb1e1c46fa209a6c1eada92123a02847ab8e72f67c0044afbcb1c29ead4c936"
+
 OFFICIAL_INSTALL_COMMIT = "dcfc2bd2d958add881e4ecb2ccc182a15602be1d"
 # Changing this release, or the Bluetooth build pinned below?  The Tasmota
 # settings template (artifacts/tasmota-settings-template-*.bin), which lets
@@ -229,6 +251,29 @@ def require_exact_partitions(
     wanted = tuple(expected)
     if actual != wanted:
         raise ValueError(f"partition entries differ\nactual={actual!r}\nexpected={wanted!r}")
+
+
+SOURCE_TABLE_FILE = Path(__file__).resolve().parents[1] / "artifacts" / "sonoff-s60-partition-table.bin"
+
+
+def interim_table(source: bytes | None = None) -> bytes:
+    """Sonoff's partition table with its low regions moved (see INTERIM_PARTITIONS)."""
+    source = SOURCE_TABLE_FILE.read_bytes() if source is None else source
+    if sha256_bytes(source) != SOURCE_TABLE_SHA256:
+        raise ValueError("that is not Sonoff's partition table")
+    report = parse_partition_sector(source)
+    require_exact_partitions(report, SOURCE_PARTITIONS)
+    table = bytearray(source)
+    for index, (label, _, _, offset, size, _) in enumerate(INTERIM_PARTITIONS):
+        if report["entries"][index]["label"] != label:
+            raise ValueError("Sonoff's partitions are not in the expected order")
+        struct.pack_into("<II", table, index * PARTITION_ENTRY_SIZE + 4, offset, size)
+    md5 = report["md5_offset"]
+    table[md5 + 16:md5 + 32] = hashlib.md5(table[:md5]).digest()
+    require_exact_partitions(parse_partition_sector(bytes(table)), INTERIM_PARTITIONS)
+    if sha256_bytes(bytes(table)) != INTERIM_TABLE_SHA256:
+        raise ValueError("the interim table differs from the reviewed one")
+    return bytes(table)
 
 
 def require_pinned_artifacts(manifest: dict[str, Any]) -> None:

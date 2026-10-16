@@ -113,6 +113,12 @@ Each fixed, with a test, and the scenario run again:
   gone while it first started: the run now says to switch the plug off and on.
 - A plug restarting, or left on the startup firmware, was missed by a run
   started from the beginning, and taken for one still on Sonoff's firmware.
+- A power cut while the memory layout was rebuilt for Tasmota cost Tasmota
+  its settings - the rebuild wrote over where it kept them - so the plug came
+  back waiting on its setup network, and the next run stopped for good. The
+  settings are now moved aside first; cuts timed off the plug's own output at
+  each point of the rebuild, then each way on from there (Tasmota, ESPHome,
+  Sonoff's firmware), all came back with the settings and were converted.
 
 ## Real plugs
 

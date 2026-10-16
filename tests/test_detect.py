@@ -41,6 +41,12 @@ class TasmotaTests(unittest.TestCase):
                            module="Generic")
         self.assertEqual(self.kind(fake), "hub")
 
+    def test_the_routes_own_tasmota_on_the_interim_layout_is_part_way_too(self):
+        # A commit stopped part way: the next step puts Sonoff's layout back.
+        fake = FakeTasmota(version="15.6.0.1(f5b34a2-bluetooth)", table=detect.INTERIM_TABLE_SHA256,
+                           module="Generic")
+        self.assertEqual(self.kind(fake), "hub")
+
     def test_official_tasmota_with_sonoffs_table_is_still_leaving_tasmota(self):
         # The table written, the restart into the mover not yet: leaving Tasmota
         # is done again, and finds its writes done - never taken as the hub.

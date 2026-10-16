@@ -15,6 +15,7 @@ import socket
 from dataclasses import dataclass
 
 from . import esphome, esphome_ota, hostsys
+from .plans import INTERIM_TABLE_SHA256
 from .device import Device
 
 NAMES = {
@@ -70,7 +71,10 @@ def _tasmota(host: str, timeout: float) -> tuple[str, str | None] | None:
     name = status.get("StatusNET", {}).get("Hostname")
     version = str(status.get("StatusFWR", {}).get("Version", ""))
     try:
-        sonoff_layout = device.sha_region(0x8000, 0x1000, timeout=20) == SONOFF_TABLE_SHA256
+        # Or the interim layout a commit stopped part way leaves: the same
+        # Tasmota, its settings moved aside, which the next step puts back.
+        sonoff_layout = device.sha_region(0x8000, 0x1000, timeout=20) in (SONOFF_TABLE_SHA256,
+                                                                           INTERIM_TABLE_SHA256)
     except Exception:  # noqa: BLE001 - no Berry: not one of this tool's
         sonoff_layout = False
     # The routes' own Tasmota is the bluetooth build.  Official Tasmota with

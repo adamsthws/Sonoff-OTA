@@ -51,6 +51,32 @@ class PlanTests(unittest.TestCase):
         with self.assertRaisesRegex(plans.PlanError, "Sonoff's partition table"):
             plans.leave_tasmota(b"\xe9" * 1000, b"\0" * SECTOR, esphome.published_bootloader())
 
+    def test_putting_sonoffs_layout_back_copies_the_settings_home_then_the_table(self):
+        plan = plans.sonoff_layout_back(esphome.sonoff_table())
+        self.assertEqual((plan.table_sha256, plan.running, plan.restart),
+                         (plans.INTERIM_TABLE_SHA256, 1, True))
+        self.assertEqual(plan.steps, [plans.Copy(plans.MOVED_LOW_OFFSET, plans.LOW_REGIONS_OFFSET,
+                                                 plans.LOW_REGIONS_SIZE),
+                                      plans.Write("table", plans.TABLE_ADDRESS, whole=True)])
+        self.assertEqual(plan.final_table_sha256(), plans.SONOFF_TABLE_SHA256)
+        # The settings are the plug's own: what was copied cannot be known here.
+        self.assertEqual(plan.expected()["step0"], "copied")
+        self.assertLessEqual(plan.busy_estimate(), plans.BUSY_LIMIT)
+        again = plans.Plan.from_bundle(plan.bundle())
+        self.assertEqual((again.steps, again.expected()), (plan.steps, plan.expected()))
+        self.assertIn('"op":"copy"', plan.berry())
+        with self.assertRaisesRegex(plans.PlanError, "Sonoff's partition table"):
+            plans.sonoff_layout_back(b"\0" * SECTOR)
+
+    def test_a_copy_from_where_the_plan_writes_is_refused(self):
+        plan = plans.Plan("x", "x", plans.SONOFF_TABLE_SHA256, 1,
+                          steps=[plans.Copy(0x20000, 0x9000, SECTOR), plans.Erase(0x20000, SECTOR)])
+        with self.assertRaisesRegex(plans.PlanError, "copy is from a region the plan writes"):
+            plan.check()
+        plan = plans.Plan("x", "x", plans.SONOFF_TABLE_SHA256, 1, steps=[plans.Copy(0x20000, 0x9000, 100)])
+        with self.assertRaisesRegex(plans.PlanError, "sector-aligned"):
+            plan.check()
+
     def test_overlapping_writes_and_too_much_at_once_are_refused(self):
         plan = plans.Plan("x", "x", plans.SONOFF_TABLE_SHA256, 1,
                           steps=[plans.Write("a", 0x20000), plans.Erase(0x20000, SECTOR)],

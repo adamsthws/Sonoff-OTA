@@ -33,6 +33,7 @@ from tools.validate_recovery_safeboot import header_value
 from tools.serve_safeboot_migration import (
     COMMIT_FLAG,
     RESTORE_FLAG,
+    MigrationHandler,
     MigrationServer,
     MigrationState,
     parse_report,
@@ -437,6 +438,53 @@ class MigrationValidationTests(unittest.TestCase):
             self.assertNotRegex(rendered, r"(?m)^\s*flash\.factory\(")
             self.assertIn(state.arm_token, rendered)
             self.assertIn(sha256_bytes(fixture.target_table), rendered)
+
+    def test_the_interim_layout_moves_only_the_low_regions_clear_of_the_commit(self):
+        import tools.safeboot_migration as migration
+        table = migration.interim_table()
+        self.assertEqual(sha256_bytes(table), migration.INTERIM_TABLE_SHA256)
+        source = {e["label"]: e for e in migration.parse_partition_sector(
+            migration.SOURCE_TABLE_FILE.read_bytes())["entries"]}
+        interim = {e["label"]: e for e in migration.parse_partition_sector(table)["entries"]}
+        low = ("nvs", "reserve", "otadata", "phy_init")
+        # Moved whole, each the same size and the same distance apart.
+        for label in low:
+            self.assertEqual(interim[label]["size"], source[label]["size"], label)
+            self.assertEqual(interim[label]["offset"] - source[label]["offset"],
+                             migration.MOVED_LOW_OFFSET - migration.LOW_REGIONS_OFFSET, label)
+        self.assertEqual(interim["ota_1"], source["ota_1"])  # the Tasmota that starts
+        moved = (migration.MOVED_LOW_OFFSET, migration.MOVED_LOW_OFFSET + migration.LOW_REGIONS_SIZE)
+        # In what was ota_0, clear of everything the commit writes or reads its
+        # copy from, and of the shrunk ota_0.
+        self.assertGreaterEqual(moved[0], interim["ota_0"]["end"])
+        self.assertEqual(moved[1], migration.OLD_OTA1_OFFSET)
+        self.assertGreaterEqual(moved[0], migration.SAFEBOOT_STAGE_OFFSET + migration.SAFEBOOT_SIZE)
+        self.assertGreaterEqual(moved[0], migration.SAFEBOOT_OFFSET + migration.SAFEBOOT_SIZE)
+        with self.assertRaises(ValueError):
+            migration.interim_table(b"\xff" * 4096)
+
+    def test_the_commit_moves_the_settings_aside_before_writing_over_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            nvs_hash = sha256_bytes(canonical_nvs())
+            fixture.write_preflight_evidence(nvs_hash)
+            fixture.write_stage_evidence(nvs_hash)
+            state = fixture.state("commit")
+            rendered = state.render_berry().decode()
+            self.assertEqual(MigrationHandler._answer_get("/interim-table", state)[1],
+                             state.interim_table.hex().encode())
+        import tools.safeboot_migration as migration
+        self.assertIn(migration.INTERIM_TABLE_SHA256, rendered)
+        commit = rendered[rendered.index("def run_commit"):]
+        order = [commit.index(text) for text in (
+            "move_low_regions()",                      # the settings copied aside
+            "flash.write(0x8000, interim)",            # the interim table pointing at them
+            "flash.write(0x10000 + offset, data)",     # only then the copy over them
+            "flash.write(0x8000, target_table)")]      # and the final table last
+        self.assertEqual(order, sorted(order))
+        # Failing once the interim table is in place keeps it: it starts the
+        # same Tasmota, with its settings, where Sonoff's would start one without.
+        self.assertIn("keep_interim_layout(interim)", commit)
 
     def test_restore_is_armed_and_requires_official_app_before_factory_write(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -847,6 +895,22 @@ class PlanPhaseTests(unittest.TestCase):
         # A whole write is checked in full before its first byte is written.
         whole = rendered[rendered.index("def write_whole"):rendered.index("def run_plan")]
         self.assertLess(whole.index("SHA-256 differs"), whole.index("flash.write("))
+
+    def test_a_copy_is_reported_as_copied_and_its_bytes_never_reach_this_computer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            fixture.evidence_dir.mkdir(parents=True)
+            state = self.state(fixture, plans.sonoff_layout_back(esphome_files.sonoff_table()))
+            rendered = state.render_berry().decode()
+            self.assertIn("def copy_region", rendered)
+            # Run again once its table is written, it must not copy the old
+            # settings back over what the plug has saved since.
+            self.assertIn("if !table_written copy_region(step) end", rendered)
+            send_chunks(state, "table", esphome_files.sonoff_table())
+            state.receive_report("plan", self.report(state))
+            self.assertEqual((state.complete, state.result_status), (True, "PASS"))
+            evidence = json.loads((fixture.evidence_dir / "plan-sonoff_layout-report.json").read_text())
+            self.assertEqual(evidence["steps"][0], {"copy": "0x1F9000", "to": "0x009000", "bytes": 0x17000})
 
     def test_it_serves_each_piece_and_passes_on_an_exact_read_back(self):
         with tempfile.TemporaryDirectory() as directory:

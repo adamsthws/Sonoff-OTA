@@ -10,6 +10,7 @@ var arm_token = "@ARM_TOKEN@"
 var armed = true
 var source_table_hash = bytes("@SOURCE_TABLE_SHA256@")
 var target_table_hash = bytes("@TARGET_TABLE_SHA256@")
+var interim_table_hash = bytes("@INTERIM_TABLE_SHA256@")
 var live_nvs_hash = bytes("@LIVE_NVS_SHA256@")
 var safeboot_hash = bytes("@SAFEBOOT_SHA256@")
 var staging_pad_hash = bytes("@STAGING_PAD_SHA256@")
@@ -19,6 +20,11 @@ var safeboot_length = @SAFEBOOT_LENGTH@
 var copy_length = @SAFEBOOT_COPY_LENGTH@
 var staging_pad_length = @STAGING_PAD_LENGTH@
 var erased_tail_length = @ERASED_TAIL_LENGTH@
+# Sonoff's settings, reserve, boot selection and PHY data: copied to the end
+# of ota_0, where the interim table points, before the copy writes over them.
+var low_offset = @LOW_REGIONS_OFFSET@
+var low_size = @LOW_REGIONS_SIZE@
+var moved_low = @MOVED_LOW_OFFSET@
 
 def guard(ok, message)
   if !ok
@@ -145,13 +151,13 @@ def get_body(path)
   return [-1, nil]
 end
 
-def fetch_target_table()
+def fetch_table(path, expected_hash, what)
   var reply = [-1, nil]
   var attempt = 0
   var window = retry_window()
   while true
     if tasmota.wifi("up")  # no request with the Wi-Fi down: it can crash Tasmota (#18831)
-      reply = get_body("/target-table")
+      reply = get_body(path)
       attempt += 1
       if reply[0] >= 0 break end
     end
@@ -161,14 +167,50 @@ def fetch_target_table()
   # Given up with the Wi-Fi still down: that is the reason, whatever was tried first.
   guard(attempt > 0 && (reply[0] >= 0 || tasmota.wifi("up")),
         "the plug's Wi-Fi went down and was not back within 20 seconds")
-  guard(reply[0] == 200, format("target table GET returned HTTP %i after %i attempts", reply[0], attempt))
+  guard(reply[0] == 200, format("%s GET returned HTTP %i after %i attempts", what, reply[0], attempt))
   var encoded = reply[1]
-  guard(size(encoded) == 8192, "target table body length differs")
+  guard(size(encoded) == 8192, what + " body length differs")
   var table = bytes(encoded)
-  guard(size(table) == 4096, "target table hex is invalid")
-  guard(crypto.SHA256().update(table).out() == target_table_hash,
-        "downloaded target table SHA-256 differs")
+  guard(size(table) == 4096, what + " hex is invalid")
+  guard(crypto.SHA256().update(table).out() == expected_hash,
+        "downloaded " + what + " SHA-256 differs")
   return table
+end
+
+# Sonoff's low regions to the end of ota_0, each sector read back, then the
+# whole compared with what is still in place.
+def move_low_regions()
+  var wanted = sha_region(low_offset, low_size)
+  var offset = 0
+  while offset < low_size
+    var data = flash.read(low_offset + offset, 0x1000)
+    if flash.read(moved_low + offset, 0x1000) != data
+      flash.write(moved_low + offset, data)
+    end
+    guard(flash.read(moved_low + offset, 0x1000) == data,
+          format("moved settings read-back differs at 0x%X", moved_low + offset))
+    offset += 0x1000
+    tasmota.yield()
+  end
+  guard(sha_region(moved_low, low_size) == wanted, "moved settings differ from the originals")
+  guard(sha_region(low_offset, low_size) == wanted, "the settings changed while being moved")
+end
+
+# Once the interim table is in place, it is what a restart must find: a
+# failure after then leaves it, or puts it back.
+def keep_interim_layout(interim)
+  try
+    if flash.read(0x8000, 0x1000) != interim
+      flash.write(0x8000, interim)
+    end
+    guard(flash.read(0x8000, 0x1000) == interim, "interim table restore differs")
+    print("S60 ROLLBACK PASS: interim layout kept, with the settings moved aside; safe to restart")
+    return true
+  except .. as rollback_exception, rollback_message
+    print("S60 ROLLBACK FAILED; DO NOT REBOOT OR REMOVE POWER:",
+          rollback_exception, rollback_message)
+    return false
+  end
 end
 
 def best_effort_report(status, rollback)
@@ -220,12 +262,24 @@ def run_commit(provided_token)
   guard(sha_region(0x20000 + safeboot_length, staging_pad_length) == staging_pad_hash,
         "staged Safeboot sector padding is not erased")
 
-  var target_table = fetch_target_table()
+  var target_table = fetch_table("/target-table", target_table_hash, "target table")
+  var interim = fetch_table("/interim-table", interim_table_hash, "interim table")
   var old_table = flash.read(0x8000, 0x1000)
   var old_otadata = flash.read(0x1D000, 0x2000)
   armed = false
+  var interim_in_place = false
 
   try
+    # The copy below writes over Sonoff's settings and boot selection, which
+    # a power cut part way would leave the old Tasmota without: moved aside
+    # first, with the interim table pointing at them.
+    print("S60 COMMIT: moving the settings aside")
+    move_low_regions()
+    flash.write(0x8000, interim)
+    guard(flash.read(0x8000, 0x1000) == interim, "interim partition-table read-back differs")
+    interim_in_place = true
+    print("S60 COMMIT: settings moved aside; interim table in place")
+
     var offset = 0
     var sector = 0
     while offset < copy_length
@@ -262,7 +316,12 @@ def run_commit(provided_token)
     guard(sha_region(0x8000, 0x1000) == target_table_hash,
           "official partition-table SHA-256 read-back differs")
   except .. as commit_exception, commit_message
-    var rollback_ok = restore_source_layout(old_table, old_otadata)
+    var rollback_ok
+    if interim_in_place
+      rollback_ok = keep_interim_layout(interim)
+    else
+      rollback_ok = restore_source_layout(old_table, old_otadata)
+    end
     best_effort_report("FAIL", rollback_ok)
     raise commit_exception, commit_message
   end

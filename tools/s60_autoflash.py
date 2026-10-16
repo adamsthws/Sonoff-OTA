@@ -2282,9 +2282,31 @@ def plug_back_on_wifi(ctx: Context) -> None:
         locate_plug(ctx, setup=True)
 
 
+def sonoff_layout_back(ctx: Context) -> None:
+    """A commit stopped part way - by a power cut, say - leaves the plug on the
+    interim layout, its settings moved aside (safeboot_migration says why).
+    Every check and plan expects Sonoff's: put back first, then a restart."""
+    if ctx.dry_run:
+        return
+    device = ctx.device
+    try:
+        table = device.sha_region(plans.TABLE_ADDRESS, plans.SECTOR, timeout=30)
+    except (DeviceError, OSError):
+        return  # no Berry to ask: the step's own checks say what is wrong
+    if table != plans.INTERIM_TABLE_SHA256:
+        return
+    tell("    The last commit stopped part way, with the plug's settings moved aside;")
+    tell("    putting them back first.")
+    booted, uptime = device.started_at(), device.uptime_seconds()
+    run_plan(ctx, plans.sonoff_layout_back(esphome.sonoff_table()))
+    device.wait_for_reboot(timeout=300, started_at=booted, before=uptime)
+    say("    The plug is back on Sonoff's layout, with its settings.")
+
+
 def step_preflight(ctx: Context) -> dict[str, Any]:
     """E1 - read-only inspection.  Re-runnable at any time."""
     plug_back_on_wifi(ctx)
+    sonoff_layout_back(ctx)
     ctx.wifi()  # read them off the plug first, so the check below compares the right network
     network = check_plug_network(ctx)
     code, captured = ctx.phase_runner().run("preflight")
@@ -2322,6 +2344,7 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         return {"exit": 0, "already_written": True}
 
     plug_back_on_wifi(ctx)
+    sonoff_layout_back(ctx)
     try:
         check_plug_network(ctx)  # may rebuild the bundle
         if not staged_bundle_is_current():
@@ -2946,6 +2969,7 @@ def step_bootloader(ctx: Context) -> dict[str, Any]:
     """D5 - ESPHome's bootloader, written once for every firmware: it starts
     Tasmota, ESPHome and Sonoff's firmware alike, and rolls back an update
     that fails to start.  Skipped when it is already in place."""
+    sonoff_layout_back(ctx)
     return run_plan(ctx, plans.bootloader(esphome.published_bootloader()))
 
 

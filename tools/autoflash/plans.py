@@ -14,7 +14,10 @@ each is a plan, run by one Berry program (repartition/berry/plan.be.tmpl):
   fetched and checked in full before its first byte is written, so nothing
   waits on the network while the plug cannot start, and the old bytes are
   put back if a sector does not read back right;
-- an erase clears a region and checks it is clear.
+- an erase clears a region and checks it is clear;
+- a copy moves bytes already on the plug from one place to another, each
+  sector read back, then the whole compared with where it came from - for
+  what this computer does not have (the plug's settings, say).
 
 Each plan's data travels to the phase server on standard input, never as a
 file: some holds the Wi-Fi password (an imprinted image) or the plug's own
@@ -51,8 +54,12 @@ BUSY_LIMIT = 55.0
 
 try:
     from tools.safeboot_migration import TARGET_TABLE_SHA256 as TASMOTA_TABLE_SHA256
+    from tools.safeboot_migration import (INTERIM_TABLE_SHA256, LOW_REGIONS_OFFSET,
+                                          LOW_REGIONS_SIZE, MOVED_LOW_OFFSET)
 except ModuleNotFoundError:  # run as a script from tools/
     from safeboot_migration import TARGET_TABLE_SHA256 as TASMOTA_TABLE_SHA256
+    from safeboot_migration import (INTERIM_TABLE_SHA256, LOW_REGIONS_OFFSET,
+                                    LOW_REGIONS_SIZE, MOVED_LOW_OFFSET)
 
 
 class PlanError(ValueError):
@@ -71,6 +78,14 @@ class Write:
 
 @dataclass(frozen=True)
 class Erase:
+    address: int
+    length: int
+
+
+@dataclass(frozen=True)
+class Copy:
+    """`length` bytes already on the plug, from `source` to `address`."""
+    source: int
     address: int
     length: int
 
@@ -130,6 +145,9 @@ class Plan:
             elif isinstance(step, Erase):
                 if step.address % SECTOR or step.length % SECTOR or step.length <= 0:
                     raise PlanError(f"{self.name}: an erase is not sector-aligned")
+            elif isinstance(step, Copy):
+                if step.source % SECTOR or step.address % SECTOR or step.length % SECTOR or step.length <= 0:
+                    raise PlanError(f"{self.name}: a copy is not sector-aligned")
             else:
                 raise PlanError(f"{self.name}: unknown step {step!r}")
         spans = sorted(self.regions(), key=lambda region: region[0])
@@ -138,6 +156,13 @@ class Plan:
                 raise PlanError(f"{self.name}: {a} and {b} overlap")
         if spans and (spans[0][0] < 0 or spans[-1][1] > 0x400000):
             raise PlanError(f"{self.name}: a step is outside the 4 MiB flash")
+        for step in self.steps:
+            if isinstance(step, Copy):
+                if step.source + step.length > 0x400000:
+                    raise PlanError(f"{self.name}: a copy is from outside the 4 MiB flash")
+                if any(start < step.source + step.length and step.source < end
+                       for start, end, _ in spans):
+                    raise PlanError(f"{self.name}: a copy is from a region the plan writes")
         if self.busy_estimate() > BUSY_LIMIT:
             raise PlanError(f"{self.name}: about {self.busy_estimate():.0f} s of writing keeps the "
                             f"plug busy past {BUSY_LIMIT:.0f} s; split it")
@@ -153,7 +178,8 @@ class Plan:
 
     def busy_estimate(self) -> float:
         written = sum(self.span(step)[1] for step in self.steps if isinstance(step, Write))
-        return written * SECONDS_PER_BYTE
+        copied = sum(step.length for step in self.steps if isinstance(step, Copy))
+        return (written + copied) * SECONDS_PER_BYTE
 
     def blocks(self) -> int:
         """4 KiB blocks fetched from this computer, for the progress line."""
@@ -168,6 +194,8 @@ class Plan:
             if isinstance(step, Write):
                 start, length = self.span(step)
                 found[f"step{index}"] = sha256(self.blobs[step.blob][start:start + length])
+            elif isinstance(step, Copy):
+                found[f"step{index}"] = "copied"  # bytes this computer does not have
             else:
                 found[f"step{index}"] = "erased"
         return found
@@ -181,6 +209,9 @@ class Plan:
                 rows.append({"write": step.blob, "address": f"0x{step.address:06X}",
                              "bytes": length, "whole": step.whole,
                              "sha256": sha256(self.blobs[step.blob][start:start + length])})
+            elif isinstance(step, Copy):
+                rows.append({"copy": f"0x{step.source:06X}", "to": f"0x{step.address:06X}",
+                             "bytes": step.length})
             else:
                 rows.append({"erase": f"0x{step.address:06X}", "bytes": step.length})
         return rows
@@ -192,7 +223,9 @@ class Plan:
             "name": self.name, "title": self.title, "table_sha256": self.table_sha256,
             "running": self.running, "restart": self.restart,
             "steps": [(["write", s.blob, s.address, s.start, s.length, s.whole]
-                       if isinstance(s, Write) else ["erase", s.address, s.length])
+                       if isinstance(s, Write) else
+                       ["copy", s.source, s.address, s.length] if isinstance(s, Copy) else
+                       ["erase", s.address, s.length])
                       for s in self.steps],
             "blobs": [[name, len(data)] for name, data in self.blobs.items()],
         }
@@ -209,8 +242,8 @@ class Plan:
                 offset += size
             if offset != len(rest):
                 raise PlanError("the plan's data is not the length it says")
-            steps = [Write(*row[1:]) if row[0] == "write" else Erase(*row[1:])
-                     for row in header["steps"]]
+            kinds = {"write": Write, "copy": Copy, "erase": Erase}
+            steps = [kinds[row[0]](*row[1:]) for row in header["steps"]]
             plan = cls(name=header["name"], title=header["title"],
                        table_sha256=header["table_sha256"], running=header["running"],
                        steps=steps, blobs=blobs, restart=header["restart"])
@@ -230,6 +263,9 @@ class Plan:
                     f'{{"op":"write","blob":"{step.blob}","addr":{step.address},'
                     f'"first":{start // SECTOR},"len":{length},"whole":{str(step.whole).lower()},'
                     f'"sha":"{sha256(data)}","pad":{pad},"padsha":"{erased_sha256(pad)}"}}')
+            elif isinstance(step, Copy):
+                rows.append(f'{{"op":"copy","src":{step.source},"addr":{step.address},'
+                            f'"len":{step.length}}}')
             else:
                 rows.append(f'{{"op":"erase","addr":{step.address},"len":{step.length},'
                             f'"sha":"{erased_sha256(step.length)}"}}')
@@ -283,6 +319,27 @@ def leave_tasmota(mover: bytes, sonoff_table: bytes, bootloader_image: bytes) ->
             Write("table", TABLE_ADDRESS, whole=True),
         ],
         blobs={"bootloader": bootloader_image, "mover": mover, "table": sonoff_table},
+    ).check()
+
+
+def sonoff_layout_back(sonoff_table: bytes) -> Plan:
+    """From the interim layout a commit stopped part way leaves, back to Sonoff's.
+
+    The commit moved Sonoff's settings, reserve, boot selection and PHY data to
+    the end of ota_0 and pointed an interim table at them (safeboot_migration
+    says why); Tasmota has run on them there since.  Copied back, and Sonoff's
+    table written last, the plug is as it was before the commit - with
+    whatever Tasmota saved meanwhile - and the restart starts the same Tasmota
+    from it.  A power cut before the table leaves the interim layout, as good
+    as before; the table is the one sector a cut leaves unable to start.
+    """
+    if sha256(sonoff_table) != SONOFF_TABLE_SHA256:
+        raise PlanError("that is not Sonoff's partition table")
+    return Plan(
+        name="sonoff_layout", title="Sonoff's layout", table_sha256=INTERIM_TABLE_SHA256, running=1,
+        steps=[Copy(MOVED_LOW_OFFSET, LOW_REGIONS_OFFSET, LOW_REGIONS_SIZE),
+               Write("table", TABLE_ADDRESS, whole=True)],
+        blobs={"table": sonoff_table},
     ).check()
 
 
