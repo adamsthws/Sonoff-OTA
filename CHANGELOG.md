@@ -48,9 +48,10 @@ own firmware.
   Tasmota its settings. The rebuild wrote over where they were kept, so the
   plug came back waiting on its setup network, and the next run then stopped
   for good on the plug having changed. Now the settings are moved aside
-  first, with an interim layout pointing at them, and put back by the next
-  run; a plug that did lose them is found on its setup network, and a commit
-  the plug refuses as changed sends the run back through its checks.
+  first, with an interim layout pointing at them, and the run itself waits
+  for the plug, puts them back and tries again - up to three times in all,
+  for a power cut, a read-back that differed, or the plug changing since its
+  checks. A plug that did lose them is found on its setup network.
 - A plug that cannot be found can be set up through its own network by
   choice, for a computer that cannot see Wi-Fi networks. While waiting for a
   plug whose Wi-Fi went, the run says it will rejoin by itself, and that it has

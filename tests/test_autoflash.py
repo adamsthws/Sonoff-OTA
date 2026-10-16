@@ -1116,9 +1116,85 @@ class CommitEvidenceTests(unittest.TestCase):
              mock.patch.object(autoflash.hostsys, "replace_file"), \
              mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
             with self.assertRaises(autoflash.Abort) as caught:
-                autoflash.step_commit(ctx)
+                autoflash.commit_once(ctx)
         self.assertIn("run the same command", str(caught.exception))
         self.assertEqual([ctx.state.status(s) for s in ("E1", "E2")], [FAILED, FAILED])
+
+    def commit_tries(self, outcomes, recovered=False):
+        """step_commit with each try's outcome given: an exception, or a result."""
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        ctx = SimpleNamespace(evidence=Path(directory.name), state=RunState.open(Path(directory.name)))
+        tries = iter(outcomes)
+
+        def once(_):
+            outcome = next(tries)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        with mock.patch.object(autoflash, "commit_once", side_effect=once) as commit, \
+             mock.patch.object(autoflash, "commit_recovered", return_value=recovered) as recover, \
+             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
+            try:
+                result = autoflash.step_commit(ctx)
+            except Exception as exc:  # noqa: BLE001 - what the test looks at
+                result = exc
+        return result, commit.call_count, recover.call_count, ctx.state
+
+    def test_a_power_cut_in_the_commit_is_recovered_from_and_tried_again(self):
+        import tools.s60_autoflash as autoflash
+        from tools.autoflash.phases import PhaseError
+        result, tries, recoveries, state = self.commit_tries(
+            [PhaseError("the plug stopped the commit without reaching this computer"), {"exit": 0}])
+        self.assertEqual((result, tries, recoveries), ({"exit": 0}, 2, 1))
+        self.assertEqual(state.data["captures"]["E3.attempts"], 2)
+        self.assertEqual(autoflash.COMMIT_ATTEMPTS, 3)
+
+    def test_a_read_back_that_differed_is_tried_again_and_so_is_a_refusal_as_changed(self):
+        import tools.s60_autoflash as autoflash
+        result, tries, _, _ = self.commit_tries([
+            autoflash.CommitFailed("commit did not pass: the plug says: migration_refused: "
+                                   "canonical Safeboot read-back differs at 0x31000",
+                                   "S60 ROLLBACK PASS: interim layout kept"),
+            autoflash.CommitFailed("commit refused before writing anything - the plug says: "
+                                   "migration_refused: staged Safeboot SHA-256 differs", ""),
+            {"exit": 0}])
+        self.assertEqual((result, tries), ({"exit": 0}, 3))
+
+    def test_the_plug_refusing_connections_while_it_comes_back_is_another_try(self):
+        import urllib.error
+        result, tries, _, _ = self.commit_tries(
+            [urllib.error.URLError(ConnectionRefusedError(111, "Connection refused")), {"exit": 0}])
+        self.assertEqual((result, tries), ({"exit": 0}, 2))
+
+    def test_three_tries_at_most_then_it_stops(self):
+        from tools.autoflash.phases import PhaseError
+        result, tries, recoveries, state = self.commit_tries([PhaseError("timed out")] * 5)
+        self.assertIsInstance(result, PhaseError)
+        self.assertEqual((tries, recoveries, state.data["captures"]["E3.attempts"]), (3, 2, 3))
+
+    def test_a_rollback_that_failed_or_another_refusal_is_never_tried_again(self):
+        import tools.s60_autoflash as autoflash
+        for failure in (
+                autoflash.CommitFailed("commit did not pass: the plug says: migration_refused: "
+                                       "canonical Safeboot read-back differs at 0x31000",
+                                       "S60 ROLLBACK FAILED; DO NOT REBOOT OR REMOVE POWER"),
+                autoflash.CommitFailed("commit did not pass: the plug says: migration_refused: "
+                                       "commit requires old ota_1 to be running", "")):
+            result, tries, recoveries, _ = self.commit_tries([failure, {"exit": 0}])
+            self.assertIs(result, failure)
+            self.assertEqual((tries, recoveries), (1, 0))
+
+    def test_a_commit_that_finished_unseen_is_not_done_again(self):
+        # The cut came after the final table: the plug runs the startup firmware.
+        from tools.autoflash.phases import PhaseError
+        result, tries, recoveries, _ = self.commit_tries([PhaseError("timed out")], recovered=True)
+        self.assertEqual((result, tries, recoveries), ({"exit": 0, "finished_unseen": True}, 1, 1))
 
     def test_the_interim_layout_is_put_back_before_anything_else(self):
         # A commit stopped part way leaves the settings moved aside, which
@@ -1151,7 +1227,8 @@ class CommitEvidenceTests(unittest.TestCase):
 
         for on_wifi, setup, expected in ((True, None, None), (False, "tasmota-ABCDEF-1234", "configure"),
                                          (False, None, "locate")):
-            ctx = SimpleNamespace(finder=mock.Mock(poll=mock.Mock(return_value="192.0.2.5" if on_wifi else None)))
+            ctx = SimpleNamespace(finder=mock.Mock(poll=mock.Mock(return_value="192.0.2.5" if on_wifi else None)),
+                                  device=mock.Mock())
             with mock.patch.object(autoflash, "find_ssid", return_value=setup), \
                  mock.patch.object(autoflash, "setup_networks", return_value=("tasmota-ABCDEF-",)), \
                  mock.patch.object(autoflash, "configure_plug_wifi") as configure, \
@@ -1162,6 +1239,9 @@ class CommitEvidenceTests(unittest.TestCase):
             self.assertEqual(locate.called, expected == "locate", (on_wifi, setup))
             if expected == "configure":
                 configure.assert_called_once_with(ctx, setup)
+            # On the network is not answering yet: switched back on, the plug
+            # answers ping before its web server is up.
+            ctx.device.wait_reachable.assert_called_once()
 
 
 class RebootDetectionTests(unittest.TestCase):

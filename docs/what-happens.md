@@ -159,9 +159,12 @@ advance); steps 1-7 are the same for both.
    anything, it copies the plug's settings, and the note that says which half
    to start, to where the rebuild does not reach, and points the plug at the
    copy: a power cut during the rebuild leaves it starting the same Tasmota,
-   settings and all, and the next run carries on. Only the moments the layout
-   table itself is written - a few milliseconds, twice - would leave a plug
-   that has to be opened.
+   settings and all. The run waits for it to come back, puts its settings
+   back where they were and tries again by itself - up to three times in
+   all, for a power cut, a read-back that differed, or the plug changing
+   since its checks. Only the moments the layout table itself is written - a
+   few milliseconds, twice each time - would leave a plug that has to be
+   opened.
 9. **Install official Tasmota**, which joins your Wi-Fi by itself, apply the
    S60 settings, and check the result. Only if it does not appear on your
    network are you asked to join its setup network.

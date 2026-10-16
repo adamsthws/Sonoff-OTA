@@ -801,6 +801,19 @@ def s60_template(product_model: str | None) -> str:
 # The commit's own checks, made before its first write, that the plug is still
 # as E1 and E2 left it (repartition/berry/commit.be.tmpl).
 COMMIT_REFUSED_AS_CHANGED_RE = re.compile(r"NVS changed since preflight|staged Safeboot")
+# The commit's checks of what it wrote: after any of these it put back what was
+# there before (a bit read wrong once, say), so it can be tried again.
+COMMIT_READBACK_RE = re.compile(r"read-back differs|SHA-256 differs|did not erase|"
+                                r"differ from the originals|changed while being moved|"
+                                r"padding differs|erased tail differs")
+# A commit that did not finish is tried again, up to this many times in all, from
+# the plug as it was before: after a power cut part way (it starts the same
+# Tasmota, its settings moved aside - safeboot_migration says how), a read-back
+# that differed, or the plug changing since its checks.  Each try has the two
+# moments a power cut leaves a plug that cannot start - the interim table and
+# the final one, a few milliseconds each - so power that keeps going is not
+# tried for ever.
+COMMIT_ATTEMPTS = 3
 PHASE_PROBLEM_RE = re.compile(
     r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in|PLUG SAYS|plug's console|"
     r"not answering at all|switch it off|and on \(at this stage",
@@ -2269,17 +2282,19 @@ def plug_back_on_wifi(ctx: Context) -> None:
     """Before E1 or E3 asks the plug anything: find it, or bring it back.
 
     A power cut while the commit writes can cost Tasmota its settings: it comes
-    back on its old layout, asking to be set up on its own network.
+    back on its old layout, asking to be set up on its own network.  Found on
+    the network is not yet answering: a plug just switched back on answers
+    ping a few seconds before its web server, so that is waited for too.
     """
-    if ctx.finder.poll():
-        return
-    setup = find_ssid(setup_networks(ctx), timeout=15)
-    if setup:
-        tell(f"    The plug is not on your Wi-Fi: it is asking to be set up on {setup},")
-        tell("    as Tasmota does when it has lost its settings - after a power cut, say.")
-        configure_plug_wifi(ctx, setup)
-    else:
-        locate_plug(ctx, setup=True)
+    if not ctx.finder.poll():
+        setup = find_ssid(setup_networks(ctx), timeout=15)
+        if setup:
+            tell(f"    The plug is not on your Wi-Fi: it is asking to be set up on {setup},")
+            tell("    as Tasmota does when it has lost its settings - after a power cut, say.")
+            configure_plug_wifi(ctx, setup)
+        else:
+            locate_plug(ctx, setup=True)
+    ctx.device.wait_reachable(timeout=120)
 
 
 def sonoff_layout_back(ctx: Context) -> None:
@@ -2324,7 +2339,80 @@ def step_stage(ctx: Context) -> dict[str, Any]:
 
 
 def step_commit(ctx: Context) -> dict[str, Any]:
-    """E3 - the single destructive operation.  Never automatically re-run."""
+    """E3 - the single destructive operation, tried again only from the plug as
+    it was before it (COMMIT_ATTEMPTS)."""
+    # Already written: the plug now runs the startup firmware, which cannot
+    # answer the checks below, so failing them would send the run back to E1
+    # with no way forward.
+    if commit_report(ctx) == "PASS":
+        say("The plug already reported the new layout written and checked;")
+        say("there is nothing to do again here.")
+        return {"exit": 0, "already_written": True}
+
+    for attempt in range(1, COMMIT_ATTEMPTS + 1):
+        ctx.state.capture("E3.attempts", attempt)
+        try:
+            if attempt > 1 and commit_recovered(ctx):
+                say("The new layout is written: the plug finished the commit before it was lost.")
+                return {"exit": 0, "finished_unseen": True}
+            return commit_once(ctx)
+        except (Abort, PhaseError, DeviceError, OSError) as exc:
+            # OSError: the plug not answering while it is brought back, which
+            # is the network, as TRANSIENT_RE says - not a reason to stop.
+            why = commit_retry_reason(ctx, exc)
+            if why is None or attempt == COMMIT_ATTEMPTS:
+                raise
+            tell(f"    {why} Putting the plug back as it was and trying again "
+                 f"(attempt {attempt + 1} of {COMMIT_ATTEMPTS}).")
+            for step in ("E1", "E2"):
+                ctx.state.mark(step, FAILED, error="redo: before the commit is tried again")
+    raise AssertionError("unreachable")
+
+
+class CommitFailed(Abort):
+    """The commit phase did not pass; `captured` is what the plug said."""
+
+    def __init__(self, message: str, captured: str) -> None:
+        super().__init__(message)
+        self.captured = captured
+
+
+def commit_retry_reason(ctx: Context, exc: Exception) -> str | None:
+    """Why a failed commit is worth trying again - or None if it is not."""
+    captured = getattr(exc, "captured", "")
+    if "ROLLBACK FAILED" in captured:
+        return None  # the plug could not put the old bytes back: never restarted from here
+    text = str(exc)
+    if COMMIT_REFUSED_AS_CHANGED_RE.search(text):
+        return "The plug changed after its checks (after a power cut, say), so it refused."
+    if COMMIT_READBACK_RE.search(text):
+        return "A read-back differed, and the plug put back what was there before."
+    if isinstance(exc, PhaseError) or TRANSIENT_RE.search(text):
+        return "The plug stopped part way - a power cut, or its Wi-Fi going."
+    return None
+
+
+def commit_recovered(ctx: Context) -> bool:
+    """Before another try: the plug back, and as it was before the commit.
+
+    True when it turns out the commit did finish - its report lost as the
+    plug restarted, or never sent with the Wi-Fi gone - the plug then runs the
+    startup firmware.  Otherwise Sonoff's layout put back if a power cut left
+    the interim one, and the checks and staging done again: a cut part way
+    through the copy overwrites the staged image.
+    """
+    wait_while_plug_busy(ctx)  # still finishing the commit this computer lost
+    plug_back_on_wifi(ctx)
+    if commit_report(ctx) == "PASS" or ctx.device.is_safeboot():
+        return True
+    for step, handler in (("E1", step_preflight), ("E2", step_stage)):
+        say(f"{step} again, before the commit is tried again")
+        ctx.state.mark(step, DONE, result=handler(ctx))
+    return False
+
+
+def commit_once(ctx: Context) -> dict[str, Any]:
+    """One try of the commit, from a plug its checks and staging just saw."""
     # E1 and E2 pinned the bundle as it was then.  If it has been rebuilt since,
     # or the plug has moved networks, send the run back to E1 rather than fail
     # inside the commit server with nothing the operator can act on.
@@ -2334,14 +2422,6 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         except (OSError, ValueError):
             return False
         return report.get("manifest_sha256") == sha256_bytes(ctx.manifest_path.read_bytes())
-
-    # Already written: the plug now runs the startup firmware, which cannot
-    # answer the checks below, so failing them would send the run back to E1
-    # with no way forward.
-    if commit_report(ctx) == "PASS":
-        say("The plug already reported the new layout written and checked;")
-        say("there is nothing to do again here.")
-        return {"exit": 0, "already_written": True}
 
     plug_back_on_wifi(ctx)
     sonoff_layout_back(ctx)
@@ -2387,19 +2467,18 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         if COMMIT_REFUSED_AS_CHANGED_RE.search(reason):
             # Refused before the first write. The commit checks the plug against
             # what E1 and E2 saw, and only those can see it afresh - running
-            # the commit again would be refused the same way, for good.
+            # the commit again as it was would be refused the same way, for good.
             for step in ("E1", "E2"):
                 ctx.state.mark(step, FAILED, error="redo: the plug changed after its checks")
-            raise Abort(
+            raise CommitFailed(
                 f"commit refused before writing anything - {reason}. The plug has "
                 "changed since it was checked, as it does after a power cut "
                 "during a commit or after being set up again. Its checks and "
-                "staging run again: run the same command"
+                "staging run again: run the same command", captured
             )
-        raise phase_failed("commit", code, captured)
+        raise CommitFailed(str(phase_failed("commit", code, captured)), captured)
     say("The new layout is written. The plug restarts by itself, and the run carries on.")
     return {"exit": code}
-
 
 
 def recovery_firmware_up(ctx: Context, started: float, *, within: float) -> bool:
@@ -3541,7 +3620,8 @@ def wait_while_plug_busy(ctx: Context) -> None:
 def execute_with_retries(ctx: Context, step: str) -> int:
     for attempt in range(1, ATTEMPTS + 1):
         code = execute(ctx, step)
-        ctx.state.capture(f"{step}.attempts", attempt)
+        if step != "E3":  # it counts its own tries (COMMIT_ATTEMPTS)
+            ctx.state.capture(f"{step}.attempts", attempt)
         if code != 1 or step not in RETRY_STEPS or attempt == ATTEMPTS:
             return code
         # A step the plug is asked about later (ATTEMPTED_EVIDENCE) keeps no
