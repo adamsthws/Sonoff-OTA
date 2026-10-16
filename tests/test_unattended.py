@@ -42,6 +42,11 @@ class CredentialsFileTests(unittest.TestCase):
         self.assertEqual(credentials.get("EWELINK_PASSWORD"), "pass word#1")
         self.assertIsNone(credentials.get("S60_SUDO_PASSWORD"))  # empty is not given
 
+    def test_the_wifi_for_a_plug_on_esphome_can_be_given(self):
+        given = self.load("S60_WIFI_SSID=Home-2G\nS60_WIFI_PASSWORD=a pass\n")
+        self.assertEqual(given, ["S60_WIFI_PASSWORD", "S60_WIFI_SSID"])
+        self.assertEqual(credentials.get("S60_WIFI_PASSWORD"), "a pass")
+
     def test_the_environment_wins_over_the_file(self):
         self.load("EWELINK_EMAIL=file@example.com\n")
         os.environ["EWELINK_EMAIL"] = "shell@example.com"

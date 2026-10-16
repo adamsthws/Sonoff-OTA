@@ -24,6 +24,10 @@ KEYS = {
     "EWELINK_EMAIL": None,  # an email is scrubbed from the log anyway
     "EWELINK_PASSWORD": "ewelink-password",
     "S60_SUDO_PASSWORD": "sudo-password",
+    # Only for a plug on ESPHome, which cannot say its Wi-Fi password: no
+    # password given means an open network.
+    "S60_WIFI_SSID": "wifi-name",
+    "S60_WIFI_PASSWORD": "wifi-password",
 }
 
 _values: dict[str, str] = {}
