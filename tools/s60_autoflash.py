@@ -2951,8 +2951,10 @@ def step_sonoff_check(ctx: Context, wait: float = 240.0) -> dict[str, Any]:
     except Abort as exc:
         raise Abort(
             "Sonoff's firmware was written and checked, but has not answered on your Wi-Fi. "
-            "It rejoins the network it was on when the backup was taken; if that has "
-            "changed, add it again in the eWeLink app"
+            "If the network dropped while it first started, it does not try again: switch "
+            "the plug off and on, then run the same command again to check it. It rejoins the "
+            "network it was on when the backup was taken; if that has changed, add it again "
+            "in the eWeLink app"
         ) from exc
     seconds = round(time.monotonic() - started, 1)
     say(f"    Sonoff's firmware answered after {seconds}s.")
