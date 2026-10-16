@@ -116,6 +116,9 @@ Each fixed, with a test, and the scenario run again:
 - A plug switched off and on after the installer was sent goes back to
   Sonoff's firmware, as the installer means it to; the run then waited for
   the installer for a quarter of an hour, and stopped. It now sends it again.
+- Started again from the beginning after the layout was rebuilt for Tasmota,
+  a run took the startup firmware for the ESPHome route's, on Sonoff's
+  layout, and sent the plug round steps it could never finish.
 - A power cut while the memory layout was rebuilt for Tasmota cost Tasmota
   its settings - the rebuild wrote over where it kept them - so the plug came
   back waiting on its setup network, and the next run stopped for good. The

@@ -56,6 +56,11 @@ own firmware.
   back to Sonoff's firmware - by design, so nothing is lost - but the run then
   waited a quarter of an hour for an installer that was gone. It now sees
   Sonoff's firmware and sends the installer again, up to three times.
+- A run started again (`--new`) after the memory layout was rebuilt for
+  Tasmota, before official Tasmota was set up, took the plug for one on its
+  way from ESPHome and sent it round steps that need Sonoff's layout, which
+  never finished. This computer's record of the plug now tells the two
+  apart, and the run goes on from official Tasmota.
 - A plug that cannot be found can be set up through its own network by
   choice, for a computer that cannot see Wi-Fi networks. While waiting for a
   plug whose Wi-Fi went, the run says it will rejoin by itself, and that it has

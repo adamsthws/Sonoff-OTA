@@ -1714,6 +1714,54 @@ class BackOnSonoffTests(unittest.TestCase):
         self.assertEqual((sent, waited), (0, 1))
 
 
+class PastTheCommitTests(unittest.TestCase):
+    """A plug left on the startup firmware is on Tasmota's layout if this
+    computer's run of it got past the commit - Sonoff's otherwise."""
+
+    def source(self, earlier):
+        import json
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        runs = []
+        for index, (done, report) in enumerate(earlier):
+            run = root / f"run{index}"
+            (run / "live").mkdir(parents=True)
+            state = RunState.open(run)
+            for step in done:
+                state.mark(step, "done")
+            if report:
+                (run / "live" / "commit-report.json").write_text(json.dumps({"phase": "commit", "status": report}))
+            runs.append(run)
+        now = root / "now"
+        now.mkdir()
+        ctx = SimpleNamespace(dir=now, state=RunState.open(now), evidence=now / "live")
+        self.evidence = ctx.evidence
+        ctx.state.set_input("plug_mac", "12:34:56:ab:cd:ef")
+        with mock.patch.object(autoflash, "run_directories", return_value=runs), \
+             mock.patch.object(autoflash.plugs, "mac_of_run", return_value="12:34:56:ab:cd:ef"), \
+             mock.patch.object(autoflash, "say"):
+            return autoflash.past_the_commit(ctx, "midway")
+
+    def test_a_run_that_committed_and_did_not_finish(self):
+        self.assertEqual(self.source([(["E1", "E2", "E3"], None)]), "committed")
+        # Stopped as the plug restarted: the report says so, the record not yet.
+        self.assertEqual(self.source([(["E1", "E2"], "PASS")]), "committed")
+        # And G1 has that run's record of the startup firmware it put on.
+        self.assertTrue((self.evidence / "commit-report.json").is_file())
+
+    def test_otherwise_part_way_as_before(self):
+        self.assertEqual(self.source([(["X1", "X2"], None)]), "midway")       # the ESPHome route
+        self.assertEqual(self.source([(["E3", "F2", "F4", "G1", "H1"], None)]), "midway")  # finished
+        self.assertEqual(self.source([]), "midway")                           # no record of it
+        # The latest run decides: one past the commit, then one that started over.
+        self.assertEqual(self.source([(["E3"], None), (["X1"], None)]), "midway")
+
+
 class WaitForBridgeTests(unittest.TestCase):
     """While waiting for the bridge's own network, a late join of the home one
     must still be noticed: the bridge then never raises its own."""

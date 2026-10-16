@@ -73,6 +73,19 @@ class TasmotaTests(unittest.TestCase):
             found = detect.converted_s60s("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
         self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.37", "midway")])
 
+    def test_a_tasmota_not_yet_set_up_is_taken_only_with_a_mac_this_computer_knows(self):
+        # Official Tasmota, put on by a run stopped before it gave it the S60's
+        # template: any Tasmota could look like it.
+        fake = FakeTasmota(version="15.6.0(release-tasmota32)", table=TASMOTA_TABLE, module="Generic")
+        neighbours = {"192.168.0.37": "12:34:56:ab:cd:ef", "192.168.0.99": "aa:bb:cc:dd:ee:ff"}
+        with mock.patch.object(detect, "Device", fake), \
+                mock.patch.object(detect.hostsys, "sweep"), \
+                mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
+                mock.patch.object(detect, "_port_open", return_value=True), \
+                mock.patch.object(detect.esphome, "is_esphome", return_value=False):
+            found = detect.converted_s60s("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
+        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.37", "midway")])
+
 
 if __name__ == "__main__":
     unittest.main()

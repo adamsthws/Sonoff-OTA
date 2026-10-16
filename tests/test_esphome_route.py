@@ -251,8 +251,21 @@ class FromAConvertedPlugTests(RouteTestCase):
                 steps = [step for step, _, _ in af.steps_for(firmware, source)]
                 self.assertEqual(steps[-1], last[firmware], (source, firmware))
                 self.assertEqual(len(steps), len(set(steps)), (source, firmware))
-                # The bootloader is written on every route, before any firmware goes in.
-                self.assertTrue("D5" in steps or "L1" in steps, (source, firmware))
+                # The bootloader is written on every route, before any firmware goes
+                # in - past the commit, by the run that got there (D5 comes before E3).
+                self.assertTrue("D5" in steps or "L1" in steps or source == "committed",
+                                (source, firmware))
+
+    def test_past_the_commit_official_tasmota_goes_on_first(self):
+        # Never the hub's steps: they need Sonoff's two slots, and Tasmota's
+        # layout has one - the slot swap waits for a restart that never comes.
+        for firmware in af.FIRMWARES:
+            steps = [step for step, _, _ in af.steps_for(firmware, "committed")]
+            self.assertEqual(steps[:4], ["A0", "A5", "F2", "F4"], firmware)
+            if firmware != "tasmota":
+                self.assertIn("H1", steps)
+                self.assertEqual(steps[steps.index("H1") + 1], "L1", firmware)  # then on from Tasmota
+            self.assertFalse({"X2", "D4", "E3"} & set(steps[:steps.index("H1")]), firmware)
 
 
 class AlreadyThereTests(RouteTestCase):

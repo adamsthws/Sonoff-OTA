@@ -92,6 +92,14 @@ def _tasmota(host: str, timeout: float) -> tuple[str, str | None] | None:
     return "tasmota", name
 
 
+def _answers_as_tasmota(host: str, timeout: float) -> bool:
+    try:
+        status = Device(host, timeout=timeout).command("Status 0")
+    except Exception:  # noqa: BLE001 - anything but Tasmota answering
+        return False
+    return isinstance(status, dict) and "Status" in status
+
+
 def identify(host: str, *, timeout: float = 3.0) -> str | None:
     """sonoff, tasmota, esphome; mover, startup or hub midway - or None if
     nothing known answers."""
@@ -129,7 +137,12 @@ def converted_s60s(near: str, *, known_macs: set[str] = frozenset(), timeout: fl
                 return Found(host, "esphome", mac)
             return None
         found = _tasmota(host, timeout)
+        known = hostsys.normalise_mac(mac) in known_macs
         if not found:
+            # Official Tasmota put on by a run stopped before it gave it the
+            # S60's settings: any Tasmota, so only a plug this computer knows.
+            if known and _answers_as_tasmota(host, timeout):
+                return Found(host, "midway", mac, "Tasmota, not yet set up as an S60")
             return None
         if found[0] == "startup":
             if hostsys.normalise_mac(mac) not in known_macs:

@@ -2576,6 +2576,14 @@ def recovery_firmware_up(ctx: Context, started: float, *, within: float) -> bool
 def step_canonical(ctx: Context) -> dict[str, Any]:
     """F - first canonical boot, then the official application."""
     app = ROOT / "captures/safeboot-recovery-migration/tasmota32c3.bin"
+    if run_source(ctx.state) == "committed" and ctx.finder.poll() and not ctx.device.is_safeboot():
+        # A run stopped after official Tasmota went on, before it was set up.
+        # Only on this route: after E3 the interim Tasmota still answers for a
+        # moment, which this would take for the official one.
+        version = ctx.device.firmware_version() or ""
+        if version and "bluetooth" not in version:
+            say(f"Official Tasmota is installed already ({version}).")
+            return {"already": version}
     section("The plug has restarted with its new layout", quiet=True, body=[
         "It is now running a small recovery firmware whose only job is to accept",
         "the real Tasmota. It joins your Wi-Fi by itself.",
@@ -3295,7 +3303,11 @@ START_STEPS = [step for step in COMMON_STEPS if step[0] in ("A0", "A5")]
 FIRMWARES = {"tasmota": "Tasmota", "esphome": "ESPHome", "sonoff": "Sonoff"}
 # "midway": a plug a run left part way, found by a new one: on Sonoff's layout,
 # running the mover, the startup firmware or the interim Tasmota.
-SOURCES = ("sonoff", "tasmota", "esphome", "midway")
+# "committed": one a run left past the commit (E3), on Tasmota's layout with the
+# startup firmware or an official Tasmota not yet set up - which only this
+# computer's record of that run can tell from the ESPHome route's startup
+# firmware, on Sonoff's layout.
+SOURCES = ("sonoff", "tasmota", "esphome", "midway", "committed")
 
 
 def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Callable[[Context], dict[str, Any]]]]:
@@ -3311,6 +3323,12 @@ def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Cal
         return START_STEPS + [LEAVE_TASMOTA_STEP,
                               ("M1", "ESPHome, sent to the mover as an update", step_esphome_from_mover),
                               ESPHOME_FINAL_STEPS[-1]]
+    if source == "committed":
+        # Official Tasmota first, from where the run left it; then on from Tasmota.
+        rest = [step for step in TASMOTA_FINAL_STEPS if step[0] in ("F2", "F4", "G1", "H1")]
+        if firmware != "tasmota":
+            rest += steps_for(firmware, "tasmota")[len(START_STEPS):]
+        return START_STEPS + rest
     leave = [LEAVE_TASMOTA_STEP] if source == "tasmota" else []
     return START_STEPS + leave + TO_HUB_STEPS + HUB_STEPS + final  # esphome and midway alike
 
@@ -3412,7 +3430,7 @@ FIRMWARE_BLURBS = {
 def ask_firmware(source: str, choices: list[str]) -> str:
     output.transient_begin()
     body = (["This plug was left part way through a conversion; it can go on to any",
-             "of these from where it is.", ""] if source == "midway" else [])
+             "of these from where it is.", ""] if source in ("midway", "committed") else [])
     for name in choices:
         body += FIRMWARE_BLURBS[name]
     if source != "sonoff" and "sonoff" not in choices:
@@ -3447,7 +3465,7 @@ def find_current_firmware(ctx: Context) -> str:
             running = "midway"
         if running in ("tasmota", "esphome", "midway"):
             adopt_plug(ctx, detect.Found(given, running, hostsys.mac_of(given)))
-            return running
+            return past_the_commit(ctx, running)
         return "sonoff"
     say("Looking for S60s already running Tasmota or ESPHome on your network...")
 
@@ -3487,7 +3505,42 @@ def find_current_firmware(ctx: Context) -> str:
             return "sonoff"
         chosen = found[choice]
     adopt_plug(ctx, chosen)
-    return chosen.firmware
+    return past_the_commit(ctx, chosen.firmware)
+
+
+def past_the_commit(ctx: Context, running: str) -> str:
+    """"committed" for a plug part way that a run of this computer's left past
+    its commit: on Tasmota's layout, not Sonoff's, so the way on is official
+    Tasmota first - never the hub's steps, which need Sonoff's two slots."""
+    if running != "midway":
+        return running
+    mac = ctx.state.input("plug_mac")
+    for directory in reversed(run_directories()):
+        if directory.resolve() == ctx.dir.resolve() or plugs.mac_of_run(directory) != mac:
+            continue
+        try:
+            state = RunState.open(directory)
+            report = json.loads((directory / "live" / "commit-report.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            report = {}
+            try:
+                state = RunState.open(directory)
+            except (OSError, ValueError):
+                continue
+        committed = state.is_done("E3") or report.get("status") == "PASS"
+        if committed and not state.is_done("H1"):
+            say("    This computer's record of it says its last run got past the commit:")
+            say("    it is on Tasmota's layout, so official Tasmota goes on first.")
+            # G1 puts the official startup firmware back over the one that run
+            # put on, and checks it is that one by the run's own record of it.
+            ctx.evidence.mkdir(parents=True, exist_ok=True)
+            for name in ("commit-report.json", "stage-report.json"):
+                kept = directory / "live" / name
+                if kept.is_file() and not (ctx.evidence / name).exists():
+                    shutil.copy2(kept, ctx.evidence / name)
+            return "committed"
+        return running  # its latest run says otherwise
+    return running
 
 
 RESTART_GRACE = 45.0
@@ -4257,7 +4310,8 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Result", result),
         ("Firmware", FIRMWARES[run_firmware(ctx.state)]),
         ("Converted from", {"sonoff": "Sonoff", "tasmota": "Tasmota", "esphome": "ESPHome",
-                            "midway": "part way through a conversion"}[run_source(ctx.state)]),
+                            "midway": "part way through a conversion",
+                            "committed": "part way through a conversion"}[run_source(ctx.state)]),
         ("Tool version", __version__),
         ("Plug model", model or "__"),
         ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),
