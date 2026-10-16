@@ -1111,12 +1111,34 @@ class CommitEvidenceTests(unittest.TestCase):
         refused = 'THE PLUG SAYS: migration_refused: NVS changed since preflight'
         ctx.phase_runner = lambda: mock.Mock(run=mock.Mock(return_value=(1, refused)))
         with mock.patch.object(autoflash, "check_plug_network"), \
+             mock.patch.object(autoflash, "plug_back_on_wifi"), \
              mock.patch.object(autoflash.hostsys, "replace_file"), \
              mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
             with self.assertRaises(autoflash.Abort) as caught:
                 autoflash.step_commit(ctx)
         self.assertIn("run the same command", str(caught.exception))
         self.assertEqual([ctx.state.status(s) for s in ("E1", "E2")], [FAILED, FAILED])
+
+    def test_a_plug_asking_to_be_set_up_is_set_up_before_the_commit(self):
+        # After a power cut mid-commit, Tasmota may have lost its settings and be
+        # waiting on its own network: the run used to stop on "No route to host".
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        for on_wifi, setup, expected in ((True, None, None), (False, "tasmota-ABCDEF-1234", "configure"),
+                                         (False, None, "locate")):
+            ctx = SimpleNamespace(finder=mock.Mock(poll=mock.Mock(return_value="192.0.2.5" if on_wifi else None)))
+            with mock.patch.object(autoflash, "find_ssid", return_value=setup), \
+                 mock.patch.object(autoflash, "setup_networks", return_value=("tasmota-ABCDEF-",)), \
+                 mock.patch.object(autoflash, "configure_plug_wifi") as configure, \
+                 mock.patch.object(autoflash, "locate_plug") as locate, \
+                 mock.patch.object(autoflash, "tell"):
+                autoflash.plug_back_on_wifi(ctx)
+            self.assertEqual(configure.called, expected == "configure", (on_wifi, setup))
+            self.assertEqual(locate.called, expected == "locate", (on_wifi, setup))
+            if expected == "configure":
+                configure.assert_called_once_with(ctx, setup)
 
 
 class RebootDetectionTests(unittest.TestCase):

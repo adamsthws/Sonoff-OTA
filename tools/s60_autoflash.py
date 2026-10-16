@@ -2265,8 +2265,26 @@ def step_promote(ctx: Context) -> dict[str, Any]:
     return {"current_ota": after, "uploads": uploads}
 
 
+def plug_back_on_wifi(ctx: Context) -> None:
+    """Before E1 or E3 asks the plug anything: find it, or bring it back.
+
+    A power cut while the commit writes can cost Tasmota its settings: it comes
+    back on its old layout, asking to be set up on its own network.
+    """
+    if ctx.finder.poll():
+        return
+    setup = find_ssid(setup_networks(ctx), timeout=15)
+    if setup:
+        tell(f"    The plug is not on your Wi-Fi: it is asking to be set up on {setup},")
+        tell("    as Tasmota does when it has lost its settings - after a power cut, say.")
+        configure_plug_wifi(ctx, setup)
+    else:
+        locate_plug(ctx, setup=True)
+
+
 def step_preflight(ctx: Context) -> dict[str, Any]:
     """E1 - read-only inspection.  Re-runnable at any time."""
+    plug_back_on_wifi(ctx)
     ctx.wifi()  # read them off the plug first, so the check below compares the right network
     network = check_plug_network(ctx)
     code, captured = ctx.phase_runner().run("preflight")
@@ -2303,6 +2321,7 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         say("there is nothing to do again here.")
         return {"exit": 0, "already_written": True}
 
+    plug_back_on_wifi(ctx)
     try:
         check_plug_network(ctx)  # may rebuild the bundle
         if not staged_bundle_is_current():
