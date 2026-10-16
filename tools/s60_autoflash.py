@@ -797,6 +797,9 @@ def s60_template(product_model: str | None) -> str:
 
 
 # A phase server's line that says why it stopped, rather than how it is getting on.
+# The commit's own checks, made before its first write, that the plug is still
+# as E1 and E2 left it (repartition/berry/commit.be.tmpl).
+COMMIT_REFUSED_AS_CHANGED_RE = re.compile(r"NVS changed since preflight|staged Safeboot")
 PHASE_PROBLEM_RE = re.compile(
     r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in|PLUG SAYS|plug's console|"
     r"not answering at all|switch it off|and on \(at this stage",
@@ -2337,6 +2340,19 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         hostsys.replace_file(moved, lock)
         say("REPARTITION_LOCK restored")
     if code != 0:
+        reason = failure_reason(captured) or ""
+        if COMMIT_REFUSED_AS_CHANGED_RE.search(reason):
+            # Refused before the first write. The commit checks the plug against
+            # what E1 and E2 saw, and only those can see it afresh - running
+            # the commit again would be refused the same way, for good.
+            for step in ("E1", "E2"):
+                ctx.state.mark(step, FAILED, error="redo: the plug changed after its checks")
+            raise Abort(
+                f"commit refused before writing anything - {reason}. The plug has "
+                "changed since it was checked, as it does after a power cut "
+                "during a commit or after being set up again. Its checks and "
+                "staging run again: run the same command"
+            )
         raise phase_failed("commit", code, captured)
     say("The new layout is written. The plug restarts by itself, and the run carries on.")
     return {"exit": code}

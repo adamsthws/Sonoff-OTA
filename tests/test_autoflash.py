@@ -1092,6 +1092,32 @@ class CommitEvidenceTests(unittest.TestCase):
         network.assert_not_called()
         self.assertTrue(result["already_written"])
 
+    def test_a_commit_refused_as_changed_sends_the_run_back_to_its_checks(self):
+        # After a power cut mid-commit the plug's settings and staged copy have
+        # changed: the commit, run again as it was, is refused every time.
+        import json
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        ctx = self.ctx(None)
+        manifest = ctx.evidence / "manifest.json"
+        manifest.write_text("{}")
+        (ctx.evidence / "stage-report.json").write_text(json.dumps(
+            {"manifest_sha256": autoflash.sha256_bytes(manifest.read_bytes())}))
+        ctx.manifest_path = manifest
+        ctx.state = RunState.open(ctx.evidence)
+        for step in ("E1", "E2"):
+            ctx.state.mark(step, "done")
+        refused = 'THE PLUG SAYS: migration_refused: NVS changed since preflight'
+        ctx.phase_runner = lambda: mock.Mock(run=mock.Mock(return_value=(1, refused)))
+        with mock.patch.object(autoflash, "check_plug_network"), \
+             mock.patch.object(autoflash.hostsys, "replace_file"), \
+             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
+            with self.assertRaises(autoflash.Abort) as caught:
+                autoflash.step_commit(ctx)
+        self.assertIn("run the same command", str(caught.exception))
+        self.assertEqual([ctx.state.status(s) for s in ("E1", "E2")], [FAILED, FAILED])
+
 
 class RebootDetectionTests(unittest.TestCase):
     """A restart soon after another must still be seen - the D4 hang."""
