@@ -24,8 +24,6 @@ NAMES = {
     "midway": "a firmware part way through a conversion",
 }
 SONOFF_TABLE_SHA256 = "f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf"
-# The startup firmware names itself so (tools/configure_imprintable_safeboot.py).
-STARTUP_HOSTNAME = "s60-recovery-"
 SONOFF_LAN_PORT = 8081
 
 
@@ -52,17 +50,16 @@ def _port_open(host: str, port: int, timeout: float) -> bool:
 def _tasmota(host: str, timeout: float) -> tuple[str, str | None] | None:
     """("tasmota", "startup" or "hub", its name) if an S60's Tasmota answers.
 
-    The startup firmware names itself s60-recovery-; a Tasmota on Sonoff's
-    partition table is one part way through a conversion (the Berry Tasmota
-    the routes pass through), whatever its template; official Tasmota on
-    its own layout counts only with the S60's template.
+    A safeboot is the startup firmware: it answers no commands, so says
+    nothing more (converted_s60s takes only one with a MAC this computer
+    knows).  A Tasmota on Sonoff's partition table is one part way through a
+    conversion (the Berry Tasmota the routes pass through), whatever its
+    template; official Tasmota on its own layout counts only with the S60's.
     """
     device = Device(host, timeout=timeout)
     try:
         if device.is_safeboot():
-            status = device.command("Status 5")
-            name = str(status.get("StatusNET", {}).get("Hostname", "")) if isinstance(status, dict) else ""
-            return ("startup", name) if name.startswith(STARTUP_HOSTNAME) else None
+            return "startup", None
         status = device.command("Status 0")
         if isinstance(status, dict) and "StatusFWR" not in status:
             status["StatusFWR"] = device.command("Status 2").get("StatusFWR", {})
@@ -107,9 +104,12 @@ def identify(host: str, *, timeout: float = 3.0) -> str | None:
     return None
 
 
-def converted_s60s(near: str, *, timeout: float = 2.0) -> list[Found]:
+def converted_s60s(near: str, *, known_macs: set[str] = frozenset(), timeout: float = 2.0) -> list[Found]:
     """The S60s on the network running Tasmota or ESPHome, found by asking every
-    device on the subnet of `near` (an address on it) what it is."""
+    device on the subnet of `near` (an address on it) what it is.  A Tasmota
+    safeboot counts only with one of `known_macs`: a plug this computer was
+    converting, left on the startup firmware - any Tasmota mid-update looks
+    the same."""
     hostsys.sweep(near)
     neighbours = hostsys.neighbour_table()
 
@@ -125,9 +125,13 @@ def converted_s60s(near: str, *, timeout: float = 2.0) -> list[Found]:
                 return Found(host, "esphome", mac)
             return None
         found = _tasmota(host, timeout)
-        if found:
-            return Found(host, "tasmota" if found[0] == "tasmota" else "midway", mac, found[1])
-        return None
+        if not found:
+            return None
+        if found[0] == "startup":
+            if hostsys.normalise_mac(mac) not in known_macs:
+                return None
+            return Found(host, "midway", mac, "the startup firmware")
+        return Found(host, "tasmota" if found[0] == "tasmota" else "midway", mac, found[1])
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
         results = list(pool.map(ask, neighbours.items()))

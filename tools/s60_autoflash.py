@@ -3133,23 +3133,26 @@ def settle_route(ctx: Context) -> tuple[str, str]:
     return firmware, source
 
 
+# What each firmware is, in the words the choice is made in.
+FIRMWARE_BLURBS = {
+    "tasmota": ["Tasmota has its own web page for settings, and works with Home Assistant",
+                "and many other systems."],
+    "esphome": ["ESPHome is made for Home Assistant, and is set up and customised from",
+                "there."],
+    "sonoff": ["Sonoff's own firmware puts the plug back in the eWeLink app, with the",
+               "settings it had."],
+}
+
+
 def ask_firmware(source: str, choices: list[str]) -> str:
     output.transient_begin()
-    body = {
-        "sonoff": ["Tasmota has its own web page for settings, and works with Home Assistant",
-                   "and many other systems. ESPHome is made for Home Assistant, and is set",
-                   "up and customised from there."],
-        "tasmota": ["ESPHome is made for Home Assistant, and is set up and customised from",
-                    "there. Sonoff's own firmware puts the plug back in the eWeLink app."],
-        "esphome": ["Tasmota has its own web page for settings, and works with Home Assistant",
-                    "and many other systems. Sonoff's own firmware puts the plug back in the",
-                    "eWeLink app."],
-        "midway": ["This plug was left part way through a conversion. It can go on to",
-                   "any of these, from where it is now."],
-    }[source]
+    body = (["This plug was left part way through a conversion; it can go on to any",
+             "of these from where it is.", ""] if source == "midway" else [])
+    for name in choices:
+        body += FIRMWARE_BLURBS[name]
     if source != "sonoff" and "sonoff" not in choices:
-        body = body + ["", "Going back to Sonoff's firmware needs the backup this tool takes when",
-                       "it first converts a plug, and there is none for this one here."]
+        body += ["", "Going back to Sonoff's own firmware needs the backup this tool takes",
+                 "when it first converts a plug, and there is none for this one here."]
     section("Choose the plug's new firmware", body)
     labels = {"tasmota": "Tasmota", "esphome": "ESPHome",
               "sonoff": "Sonoff's own firmware (back to eWeLink, from its backup)"}
@@ -3183,9 +3186,13 @@ def find_current_firmware(ctx: Context) -> str:
         return "sonoff"
     say("Looking for S60s already running Tasmota or ESPHome on your network...")
 
+    # Plugs this computer has records of: their backups and their runs.
+    known = {name.replace("-", ":") for name in
+             (path.name for path in plugs.PLUGS.glob("*")) if plugs.MAC_RE.match(name)}
+
     def search() -> list[detect.Found]:
         try:
-            return detect.converted_s60s(hostsys.local_ip_towards("192.0.2.1"))
+            return detect.converted_s60s(hostsys.local_ip_towards("192.0.2.1"), known_macs=known)
         except OSError:
             return []
 

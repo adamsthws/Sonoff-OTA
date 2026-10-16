@@ -53,10 +53,19 @@ class TasmotaTests(unittest.TestCase):
         self.assertIsNone(self.kind(FakeTasmota(version="15.6.0(release-tasmota)", table=TASMOTA_TABLE,
                                                 module="Jomarto SH0617")))
 
-    def test_only_this_tools_startup_firmware_counts(self):
-        self.assertEqual(self.kind(FakeTasmota(version="", table="", safeboot=True,
-                                               hostname="s60-recovery-0076")), "startup")
-        self.assertIsNone(self.kind(FakeTasmota(version="", table="", safeboot=True)))
+    def test_a_safeboot_is_taken_only_with_a_mac_this_computer_knows(self):
+        # It answers no commands: nothing else tells this tool's startup
+        # firmware from any Tasmota part way through an update.
+        self.assertEqual(self.kind(FakeTasmota(version="", table="", safeboot=True)), "startup")
+        fake = FakeTasmota(version="", table="", safeboot=True)
+        neighbours = {"192.168.0.37": "12:34:56:ab:cd:ef", "192.168.0.99": "aa:bb:cc:dd:ee:ff"}
+        with mock.patch.object(detect, "Device", fake), \
+                mock.patch.object(detect.hostsys, "sweep"), \
+                mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
+                mock.patch.object(detect, "_port_open", return_value=True), \
+                mock.patch.object(detect.esphome, "is_esphome", return_value=False):
+            found = detect.converted_s60s("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
+        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.37", "midway")])
 
 
 if __name__ == "__main__":
