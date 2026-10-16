@@ -2698,23 +2698,51 @@ def step_configure(ctx: Context) -> dict[str, Any]:
             locate_plug(ctx, setup=True)
     device = ctx.device
     device.wait_reachable(timeout=300)
+    template = s60_template(ctx.state.input("product_model"))
+    if s60_settings_in_place(device, template):
+        # Tried again after the plug took the template but its answer was slow
+        # (a busy plug): resetting again would only restart it again.
+        say("The S60 settings are in place already.")
+        return {"template": "applied", "wifi_route": route}
     # Tasmota may be running on the record the startup firmware saved, which
     # holds the Wi-Fi but only what a Safeboot sets (it skips most defaults,
     # never expecting to save them).  Reset 4 rebuilds every setting from this
     # firmware's own defaults and keeps the Wi-Fi.  Harmless when Tasmota
     # started from defaults anyway.
     booted, uptime = device.started_at(), device.uptime_seconds()
-    device.command("Reset 4")
+    device.command("Reset 4", timeout=SLOW_COMMAND)
     say("Settings reset to Tasmota's defaults, keeping the Wi-Fi; the plug restarts")
     device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
+    device.wait_reachable(timeout=120)
     booted, uptime = device.started_at(), device.uptime_seconds()
-    device.command("SaveData 1")
-    template = s60_template(ctx.state.input("product_model"))
-    device.command(f"Template {template}")
-    device.command("Module 0")
+    device.command("SaveData 1", timeout=SLOW_COMMAND)
+    device.command(f"Template {template}", timeout=SLOW_COMMAND)
+    device.command("Module 0", timeout=SLOW_COMMAND)
     say(f"Template applied as {json.loads(template)['NAME']}; the plug restarts")
     device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
+    # Restarted is not yet answering: the next step asks the plug at once.
+    device.wait_reachable(timeout=120)
     return {"template": "applied", "wifi_route": route}
+
+
+# Commands that rewrite Tasmota's settings answer slowly on a busy plug: given
+# longer than the usual few seconds before taken as not answering.
+SLOW_COMMAND = 30.0
+
+
+def s60_settings_in_place(device: Device, template: str) -> bool:
+    """Whether F4 has done its work already: the S60's template in use, and
+    settings saved."""
+    try:
+        current = device.command("Template", timeout=SLOW_COMMAND)
+        module = device.command("Module", timeout=SLOW_COMMAND)
+        saving = device.command("SaveData", timeout=SLOW_COMMAND)
+    except (DeviceError, OSError):
+        return False
+    name = json.loads(template)["NAME"]
+    return (isinstance(current, dict) and current.get("NAME") == name
+            and isinstance(module, dict) and "0" in (module.get("Module") or {})
+            and isinstance(saving, dict) and saving.get("SaveData") in ("ON", "1", 1))
 
 
 

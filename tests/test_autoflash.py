@@ -2331,16 +2331,42 @@ class ConfigureStepTests(unittest.TestCase):
         sent = []
         device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
                                  uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
-                                 command=lambda c: sent.append(c))
+                                 command=lambda c, timeout=None: sent.append(c))
         state = SimpleNamespace(input=lambda key: {"product_model": "S60TPF"}.get(key))
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device, state=state)
         with mock.patch.object(autoflash, "say") as said:
             result = autoflash.step_configure(ctx)
-        self.assertEqual(sent[0], "Reset 4")
-        self.assertEqual(sent[1:3], ["SaveData 1", f"Template {autoflash.s60_template('S60TPF')}"])
+        writes = [command for command in sent if " " in command]  # not the questions first
+        self.assertEqual(writes[0], "Reset 4")
+        self.assertEqual(writes[1:3], ["SaveData 1", f"Template {autoflash.s60_template('S60TPF')}"])
         self.assertIn("Sonoff S60TPF", " ".join(str(c.args[0]) for c in said.call_args_list))
         self.assertEqual(result["wifi_route"], "joined by itself")
         self.assertIn("joined your Wi-Fi by itself", " ".join(str(c.args[0]) for c in said.call_args_list))
+
+
+    def test_tried_again_once_the_settings_are_in_place_it_resets_nothing(self):
+        # A busy plug took the template but answered too slowly: resetting
+        # again would restart it again, every try.
+        import json
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        template = autoflash.s60_template("S60TPF")
+        answers = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
+                   "SaveData": {"SaveData": "ON"}}
+        sent = []
+
+        def command(c, timeout=None):
+            sent.append(c)
+            return answers.get(c)
+
+        device = SimpleNamespace(wait_reachable=lambda **_: None, command=command)
+        state = SimpleNamespace(input=lambda key: {"product_model": "S60TPF"}.get(key))
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device, state=state)
+        with mock.patch.object(autoflash, "say"):
+            result = autoflash.step_configure(ctx)
+        self.assertNotIn("Reset 4", sent)
+        self.assertEqual(result["template"], "applied")
 
 
 class StartupSettingsReportTests(unittest.TestCase):
