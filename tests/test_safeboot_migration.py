@@ -27,6 +27,7 @@ from tools.safeboot_migration import (
     sha256_bytes,
 )
 from tools.autoflash import esphome as esphome_files
+from tools.autoflash import plans
 from tools.configure_recovery_safeboot import render_header
 from tools.validate_recovery_safeboot import header_value
 from tools.serve_safeboot_migration import (
@@ -815,125 +816,98 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class ESPHomePhaseTests(unittest.TestCase):
-    """The esphome phase: ESPHome written to ota_0 and read back, its bootloader
-    put in place of Sonoff's and read back, then otadata erased."""
+class PlanPhaseTests(unittest.TestCase):
+    """The plan phase: whatever tools/autoflash/plans.py planned, carried out by
+    one Berry program, every write read back and compared byte for byte."""
 
     IMAGE = b"\xe9" + bytes((index * 13 + 5) & 0xFF for index in range(10_000))
     BOOTLOADER = esphome_files.published_bootloader()
 
-    def state(self, fixture, image=None):
-        return MigrationState(fixture.manifest_path, fixture.manifest, "esphome",
+    def state(self, fixture, plan=None):
+        return MigrationState(fixture.manifest_path, fixture.manifest, "plan",
                               "http://192.168.1.10:8089", fixture.evidence_dir, 7200,
-                              image=self.IMAGE if image is None else image)
+                              plan=plan or plans.esphome(self.IMAGE))
 
     def report(self, state, **changes):
-        fields = {
-            "session": state.session, "status": "PASS", "current_ota": "1",
-            "table_sha256": SOURCE_TABLE_SHA256,
-            "image_sha256": sha256_bytes(self.IMAGE), "image_size": str(len(self.IMAGE)),
-            "otadata": "erased",
-            "bootloader_sha256": sha256_bytes(self.BOOTLOADER),
-        }
+        fields = {"session": state.session, "status": "PASS", "plan": state.plan.name,
+                  **state.plan.expected()}
         fields.update(changes)
         return "".join(f"{key}={value}\n" for key, value in fields.items()).encode()
 
     def test_its_berry_is_rendered_whole(self):
         with tempfile.TemporaryDirectory() as directory:
-            rendered = self.state(MigrationFixture(Path(directory))).render_berry().decode()
+            plan = plans.leave_tasmota(self.IMAGE, esphome_files.sonoff_table(), self.BOOTLOADER)
+            rendered = self.state(MigrationFixture(Path(directory)), plan).render_berry().decode()
         self.assertNotRegex(rendered, r"@[A-Z][A-Z0-9_]+@")
-        self.assertIn(sha256_bytes(self.IMAGE), rendered)
-        self.assertIn('fetch_chunk("esphome"', rendered)
-        self.assertIn('fetch_chunk("bootloader"', rendered)
-        self.assertIn(sha256_bytes(self.BOOTLOADER), rendered)
-        self.assertIn("/fail/esphome", rendered)
-        # The bootloader is written only after the image is checked, and the
-        # boot selection erased only after both.
-        run = rendered[rendered.index("def run_esphome"):]
-        self.assertLess(run.index("the written ESPHome SHA-256 differs"),
-                        run.index("install_bootloader()"))
-        self.assertLess(run.index("the written bootloader SHA-256 differs"),
-                        run.index("flash.erase(otadata_address"))
-        # All of it fetched and checked before the first byte of it is written.
-        install = rendered[rendered.index("def install_bootloader"):rendered.index("def run_esphome")]
-        self.assertLess(install.index("ESPHome's bootloader SHA-256 differs"),
-                        install.index("flash.write("))
+        for blob in ("bootloader", "mover", "table"):
+            self.assertIn(f'"blob":"{blob}"', rendered)
+        self.assertIn(plans.TASMOTA_TABLE_SHA256, rendered)   # the layout it starts from
+        self.assertIn(plans.SONOFF_TABLE_SHA256, rendered)    # and the one it ends with
+        self.assertIn("/fail/plan", rendered)
+        # A whole write is checked in full before its first byte is written.
+        whole = rendered[rendered.index("def write_whole"):rendered.index("def run_plan")]
+        self.assertLess(whole.index("SHA-256 differs"), whole.index("flash.write("))
 
-    def test_it_serves_the_image_and_passes_on_an_exact_read_back(self):
+    def test_it_serves_each_piece_and_passes_on_an_exact_read_back(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = MigrationFixture(Path(directory))
             fixture.evidence_dir.mkdir(parents=True)
             state = self.state(fixture)
-            served = b"".join(state.image_chunk(i) for i in range(3))
+            served = b"".join(state.plan_chunk("esphome", i) for i in range(3))
             self.assertEqual(served, self.IMAGE)
             with self.assertRaises(ValueError):
-                state.image_chunk(3)
-            served = b"".join(state.bootloader_chunk(i) for i in range(6))
-            self.assertEqual(served, self.BOOTLOADER)
+                state.plan_chunk("esphome", 3)
             with self.assertRaises(ValueError):
-                state.bootloader_chunk(6)
-            send_chunks(state, "written", self.IMAGE)
-            send_chunks(state, "bootloader", self.BOOTLOADER)
-            state.receive_report("esphome", self.report(state))
+                state.plan_chunk("nothing", 0)
+            send_chunks(state, "esphome", self.IMAGE)
+            # As Berry writes them: hashes in capitals.
+            state.receive_report("plan", self.report(state, step0=state.plan.expected()["step0"].upper()))
             self.assertEqual((state.complete, state.result_status), (True, "PASS"))
-            evidence = (fixture.evidence_dir / "esphome-report.json").read_text()
-            self.assertEqual(json.loads(evidence)["otadata"], "erased")
-            self.assertEqual(json.loads(evidence)["bootloader_sha256"], sha256_bytes(self.BOOTLOADER))
+            evidence = (fixture.evidence_dir / "plan-esphome-report.json").read_text()
+            self.assertEqual(json.loads(evidence)["steps"][1], {"erase": "0x01D000", "bytes": 0x2000})
             # The image holds the Wi-Fi password: none of its bytes are kept.
             self.assertNotIn(self.IMAGE[:64].hex(), evidence)
             self.assertEqual(sorted(p.name for p in fixture.evidence_dir.iterdir()),
-                             ["esphome-report.json"])
+                             ["plan-esphome-report.json"])
 
     def test_a_read_back_that_differs_by_one_byte_is_refused(self):
         with tempfile.TemporaryDirectory() as directory:
-            fixture = MigrationFixture(Path(directory))
-            state = self.state(fixture)
+            state = self.state(MigrationFixture(Path(directory)))
             wrong = bytearray(self.IMAGE)
             wrong[5000] ^= 1
-            send_chunks(state, "written", bytes(wrong))
-            send_chunks(state, "bootloader", self.BOOTLOADER)
+            send_chunks(state, "esphome", bytes(wrong))
             with self.assertRaisesRegex(ValueError, "byte-for-byte"):
-                state.receive_report("esphome", self.report(state))
+                state.receive_report("plan", self.report(state))
             self.assertFalse(state.complete)
 
-    def test_a_bootloader_read_back_that_differs_by_one_byte_is_refused(self):
+    def test_a_report_that_differs_from_the_plan_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = self.state(MigrationFixture(Path(directory)))
+            send_chunks(state, "esphome", self.IMAGE)
+            with self.assertRaises(ValueError):
+                state.receive_report("plan", self.report(state, step1="kept"))
+            with self.assertRaises(ValueError):
+                state.receive_report("plan", self.report(state, step0="0" * 64))
+            with self.assertRaises(ValueError):
+                state.receive_report("plan", self.report(state, plan="leave_tasmota"))
+            self.assertFalse(state.complete)
+
+    def test_a_failure_is_kept_under_the_plans_name(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = MigrationFixture(Path(directory))
+            fixture.evidence_dir.mkdir(parents=True)
             state = self.state(fixture)
-            wrong = bytearray(self.BOOTLOADER)
-            wrong[20_000] ^= 1
-            send_chunks(state, "written", self.IMAGE)
-            send_chunks(state, "bootloader", bytes(wrong))
-            with self.assertRaisesRegex(ValueError, "bootloader"):
-                state.receive_report("esphome", self.report(state))
-            self.assertFalse(state.complete)
+            state.receive_failure("plan", f"session={state.session}\nreason=the table differs\n".encode())
+            report = json.loads((fixture.evidence_dir / "plan-esphome-report.json").read_text())
+            self.assertEqual((report["status"], report["reason"]), ("FAIL", "the table differs"))
 
-    def test_a_report_without_the_boot_selection_erased_is_refused(self):
+    def test_it_needs_a_plan_and_other_phases_take_none(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = MigrationFixture(Path(directory))
-            state = self.state(fixture)
-            send_chunks(state, "written", self.IMAGE)
-            send_chunks(state, "bootloader", self.BOOTLOADER)
-            with self.assertRaises(ValueError):
-                state.receive_report("esphome", self.report(state, bootloader_sha256="0" * 64))
-            with self.assertRaises(ValueError):
-                state.receive_report("esphome", self.report(state, otadata="kept"))
-            with self.assertRaises(ValueError):
-                state.receive_report("esphome", self.report(state, current_ota="0"))
-            self.assertFalse(state.complete)
-
-    def test_it_needs_an_image_that_fits_and_other_phases_take_none(self):
-        with tempfile.TemporaryDirectory() as directory:
-            fixture = MigrationFixture(Path(directory))
-            with self.assertRaisesRegex(ValueError, "image-from-stdin"):
-                self.state(fixture, image=b"")
-            with self.assertRaisesRegex(ValueError, "image-from-stdin"):
-                self.state(fixture, image=b"\x00" * 100)
-            with self.assertRaisesRegex(ValueError, "slot"):
-                self.state(fixture, image=b"\xe9" * 0x1F0001)
-            with self.assertRaisesRegex(ValueError, "takes no image"):
+            with self.assertRaisesRegex(ValueError, "plan-from-stdin"):
+                MigrationState(fixture.manifest_path, fixture.manifest, "plan",
+                               "http://192.168.1.10:8089", fixture.evidence_dir, 7200)
+            with self.assertRaisesRegex(ValueError, "takes no plan"):
                 MigrationState(fixture.manifest_path, fixture.manifest, "preflight",
                                "http://192.168.1.10:8089", fixture.evidence_dir, 7200,
-                               image=self.IMAGE)
-            with self.assertRaisesRegex(ValueError, "unavailable"):
-                fixture.state("preflight").image_chunk(0)
+                               plan=plans.esphome(self.IMAGE))

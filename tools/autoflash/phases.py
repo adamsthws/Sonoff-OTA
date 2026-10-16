@@ -71,8 +71,9 @@ class PhaseDisplay:
     """Turns the phase server's request log into a few readable lines."""
 
     def __init__(self, phase: str, blocks: int | None, write: Callable[[str], None],
-                 log: Callable[[str], None]) -> None:
+                 log: Callable[[str], None], title: str | None = None) -> None:
         self.phase = phase
+        self.title = title
         self.blocks = blocks
         self.write = write
         self.log = log
@@ -96,12 +97,11 @@ class PhaseDisplay:
             path = request.group("path")
             if path.startswith("/berry/"):
                 self._line("    The plug fetched its instructions.")
-            elif path.startswith(("/chunk/safeboot/", "/chunk/esphome/")):
-                chunk_id = path.rsplit("/", 1)[-1]
-                self.copied_chunks.add(chunk_id)
+            elif path.startswith("/chunk/"):
+                self.copied_chunks.add(path)
                 copied = len(self.copied_chunks)
                 total = f"/{self.blocks}" if self.blocks else ""
-                what = "ESPHome" if path.startswith("/chunk/esphome/") else "the startup firmware"
+                what = self.title or "the startup firmware"
                 self._status(f"    Copying {what}: block {copied}{total}")
             elif path.startswith("/capture/") and self.phase == "preflight":
                 self.read += 1
@@ -192,10 +192,10 @@ class PhaseRunner:
         self.busy_seconds: float | None = None
         self._started_at: float | None = None
 
-    def _blocks(self, phase: str, image: bytes | None = None) -> int | None:
+    def _blocks(self, phase: str, plan: "Plan | None" = None) -> int | None:
         """How many 4 KiB blocks of firmware a phase copies, for progress."""
-        if image is not None:
-            return (len(image) + SECTOR - 1) // SECTOR
+        if plan is not None:
+            return plan.blocks()
         try:
             artifacts = json.loads(self.manifest.read_text(encoding="utf-8"))["artifacts"]
             if phase == "stage":
@@ -208,9 +208,9 @@ class PhaseRunner:
         except (OSError, ValueError, KeyError, TypeError):
             return None
 
-    def _command(self, phase: str, extra_flags: list[str], image: bytes | None = None) -> list[str]:
-        if image is not None:
-            piped = ["--image-from-stdin", "--no-sensitive-captures"]
+    def _command(self, phase: str, extra_flags: list[str], plan: "Plan | None" = None) -> list[str]:
+        if plan is not None:
+            piped = ["--plan-from-stdin", "--no-sensitive-captures"]
         elif self.recovery:
             piped = ["--recovery-from-stdin", "--no-sensitive-captures"]
         else:
@@ -239,20 +239,20 @@ class PhaseRunner:
         extra_flags: list[str] | None = None,
         confirm: Callable[[str], bool] | None = None,
         exec_timeout: float = EXEC_TIMEOUT,
-        image: bytes | None = None,
+        plan: "Plan | None" = None,
     ) -> tuple[int, str]:
         """Run one phase end to end.  Returns (exit code, captured output).
 
-        `image`: what the esphome phase installs, the Wi-Fi written in - piped
-        to the server like the recovery image, never a file.
+        `plan`: what the plan phase writes (tools/autoflash/plans.py), with all
+        its data - piped to the server like the recovery image, never a file.
         """
         if phase in ARMED_PHASES and confirm is None:
             raise PhaseError(f"{phase} requires an explicit confirmation callback")
         self.busy_seconds, self._started_at = None, None
 
-        piped = image if image is not None else self.recovery
+        piped = plan.bundle() if plan is not None else self.recovery
         process = subprocess.Popen(
-            self._command(phase, extra_flags or [], image),
+            self._command(phase, extra_flags or [], plan),
             cwd=str(self.repo_root),
             stdin=subprocess.PIPE if piped else None,
             stdout=subprocess.PIPE,
@@ -273,10 +273,10 @@ class PhaseRunner:
         heard = [time.monotonic()]  # the server's last line: the plug's last request
         requested: list[float | None] = [None]  # the plug's last request, exactly
         self.evidence_dir.mkdir(parents=True, exist_ok=True)
-        log_path = self.evidence_dir / f"{phase}-server.log"
+        log_path = self.evidence_dir / (f"plan-{plan.name}-server.log" if plan else f"{phase}-server.log")
         log_file = log_path.open("w", encoding="utf-8")
         display = PhaseDisplay(
-            phase, self._blocks(phase, image),
+            phase, self._blocks(phase, plan), title=plan.title if plan else None,
             write=output.raw_progress,
             log=self.log,
         )

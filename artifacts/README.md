@@ -12,6 +12,8 @@ directory, never here.
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
 | `esphome-sonoff-s60-bootloader-1.0.0.bin` | ESPHome's bootloader, from the same build: it replaces Sonoff's when ESPHome is installed, so ESPHome can roll back an update that fails to start | `3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433` |
 | `esphome-sonoff-s60-imprintable-1.0.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `04cbad327cc4fd3b3109e34ec4d3a5832cb9bc5bce33f96103acdbf59ab1a09b` |
+| `esphome-sonoff-s60-mover-1.0.0.bin` | A small ESPHome the run uses for a minute or two when leaving Tasmota: it fits in front of Tasmota in Sonoff's layout, and takes the next firmware as an ordinary ESPHome update. Wi-Fi placeholders, like the image above | `d6e07f7f04e4eee0c61601ca4a101b8ba8a941c7ba816ee9bb675be9e2ff5f28` |
+| `sonoff-s60-partition-table.bin` | Sonoff's partition table, read from a stock plug: the one every conversion starts from, which the Tasmota route's preflight requires byte for byte. Written back when a plug leaves Tasmota's layout. Holds no secrets | `f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf` |
 
 The Bluetooth image is the exact file used by the successful migrations. It
 was retrieved from Tasmota's official moving `install/firmware` branch at
@@ -69,7 +71,8 @@ finds the last commit that has it.
 The ESPHome image is built from [`../ESPHome/sonoff_s60.yaml`](../ESPHome/sonoff_s60.yaml)
 (its `project` version is the one in the file name) with ESPHome 2026.9.1 and
 ESP-IDF 5.5.5, as `esphome compile sonoff_s60.yaml`; `firmware.ota.bin` is the file
-published, and `bootloader/bootloader.bin` from the same build is the bootloader. Like the imprintable Safeboot it holds placeholders instead of a
+published, and `bootloader/bootloader.bin` from the same build is the bootloader. The mover is
+[`../ESPHome/sonoff_s60_mover.yaml`](../ESPHome/sonoff_s60_mover.yaml), built the same way. Like the imprintable Safeboot it holds placeholders instead of a
 network name and password, and the run writes the plug's Wi-Fi into them in
 memory (`tools/autoflash/imprint.py`). It has no OTA password, web login or API
 encryption key, as ESPHome's own ready-made images have none: the plug is open

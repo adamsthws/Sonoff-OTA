@@ -1,0 +1,63 @@
+# The mover: a small ESPHome the conversion tool runs for a minute or two,
+# only to change which memory layout a plug has. Not something to keep on a
+# plug, and not for Home Assistant.
+#
+# Leaving Tasmota, the plug is on Tasmota's layout, and its running Tasmota
+# sits across both of the app slots Sonoff's layout has, so nothing it runs
+# can write into either. This is small enough for Tasmota's safeboot slot,
+# which it can: started from there, ESPHome's own partition-table update
+# (allow_partition_access) moves it into a slot of the new layout, writes
+# that layout, and starts it there. The tool then sends what comes next as an
+# ordinary update.
+#
+# Like sonoff_s60.yaml it is published pre-built with Wi-Fi placeholders the
+# tool writes the plug's Wi-Fi into; it saves nothing, as it never stays.
+
+esphome:
+  name: sonoff-s60-mover
+  name_add_mac_suffix: true
+  project:
+    name: adamsthws.sonoff-s60-mover
+    version: "1.0.0"
+  on_boot:
+    - priority: -100
+      then:
+        - lambda: |-
+            static const char ssid[] = "S60-IMPRINT-SSID>.................................";
+            static const char password[] = "S60-IMPRINT-PASS>................................................................";
+            const char *volatile at_ssid = ssid;
+            const char *volatile at_password = password;
+            id(imprinted_ssid) = at_ssid;
+            id(imprinted_password) = at_password;
+        - if:
+            condition:
+              lambda: |-
+                return !id(imprinted_ssid).empty()
+                    && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0;
+            then:
+              - wifi.configure:
+                  ssid: !lambda 'return id(imprinted_ssid);'
+                  password: !lambda 'return id(imprinted_password);'
+                  save: false
+
+globals:
+  - id: imprinted_ssid
+    type: std::string
+  - id: imprinted_password
+    type: std::string
+
+esp32:
+  variant: esp32c3
+  framework:
+    type: esp-idf
+  flash_size: 4MB
+
+wifi:
+  reboot_timeout: 0s
+  # Never a hotspot (a timeout of 0 never starts it; ESPHome wants one named):
+  # the mover only works on the home network, and the tool waits for it there.
+  ap:
+    ap_timeout: 0s
+
+ota:
+  - platform: esphome

@@ -365,5 +365,6 @@ After a new router or a changed Wi-Fi password, the plug cannot join any more.
 python3 tools/s60_autoflash.py step H1 --plug-ip 192.168.1.50
 ```
 
-Reads three areas of the plug's memory and compares them against the official
-Tasmota files. Read-only - safe to run whenever you want reassurance.
+Reads four areas of the plug's memory - the bootloader, the memory map, Safeboot
+and Tasmota - and compares them against the pinned files. Read-only - safe to
+run whenever you want reassurance.

@@ -94,6 +94,32 @@ def published_bootloader() -> bytes:
     return bootloader
 
 
+# The mover (ESPHome/sonoff_s60_mover.yaml): a small ESPHome, run only while a
+# plug leaves Tasmota, that takes the next firmware as an ESPHome update.
+MOVER = ROOT / "artifacts" / "esphome-sonoff-s60-mover-1.0.0.bin"
+MOVER_SHA256 = "d6e07f7f04e4eee0c61601ca4a101b8ba8a941c7ba816ee9bb675be9e2ff5f28"
+MOVER_SIZE = 742_144
+# Sonoff's partition table, written back when a plug leaves Tasmota's layout.
+SONOFF_TABLE = ROOT / "artifacts" / "sonoff-s60-partition-table.bin"
+
+
+def mover_for(ssid: str, password: str) -> bytes:
+    """The pinned mover with this Wi-Fi written in."""
+    image = MOVER.read_bytes()
+    if len(image) != MOVER_SIZE or hashlib.sha256(image).hexdigest() != MOVER_SHA256:
+        raise ImageError(f"{MOVER.name} differs from the pinned file")
+    check_app(image, MOVER.name)
+    return imprint.imprint(image, ssid, password)
+
+
+def sonoff_table() -> bytes:
+    from .plans import SONOFF_TABLE_SHA256
+    table = SONOFF_TABLE.read_bytes()
+    if hashlib.sha256(table).hexdigest() != SONOFF_TABLE_SHA256:
+        raise ImageError(f"{SONOFF_TABLE.name} is not Sonoff's partition table")
+    return table
+
+
 def image_for(ssid: str, password: str, own: Path | None = None) -> bytes:
     """The image to install: the published one with this Wi-Fi written in, or
     one built by hand (--esphome PATH), imprinted too if it has placeholders."""

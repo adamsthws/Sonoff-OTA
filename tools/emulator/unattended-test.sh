@@ -7,6 +7,10 @@
 #   tools/emulator/unattended-test.sh --keep     leave the emulator running afterwards
 #   tools/emulator/unattended-test.sh --plug=MAC which backed-up plug (else the one run last)
 #   tools/emulator/unattended-test.sh --instance=N  on emulator N, beside others (emu.sh --instance)
+#   tools/emulator/unattended-test.sh --save=NAME   keep the plug as the run left it, and its
+#                                                   captures (its backup, its runs), as NAME
+#   tools/emulator/unattended-test.sh --from=NAME   start from a plug kept with --save: one
+#                                                   converted earlier, on this computer
 #   tools/emulator/unattended-test.sh -- --new   anything after -- goes to the run itself
 #
 # Needs .env with the eWeLink account the dump's plug is in. It starts the
@@ -20,7 +24,7 @@ case "$ROOT" in /mnt/[a-z]/*) STATE=$HOME/.local/share/s60-emu/state ;; esac
 NAME=s60-emu PORT=8080
 PLUG=192.168.60.50
 
-emu_args=(--cloud --yes --detach) keep=0 run_args=()
+emu_args=(--cloud --yes --detach) keep=0 run_args=() from="" save=""
 while [ $# -gt 0 ]; do
     case "$1" in
     --fresh|--pcap|--rebuild|--no-firewall|--plug=*) emu_args+=("$1") ;;
@@ -28,6 +32,8 @@ while [ $# -gt 0 ]; do
         n=${1#--instance=}; emu_args+=("$1")
         NAME=s60-emu-$n PORT=$((8080 + n)) STATE=$STATE-$n ;;
     --keep) keep=1 ;;
+    --from=*) from=${1#--from=} ;;
+    --save=*) save=${1#--save=} ;;
     --) shift; run_args=("$@"); break ;;
     *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
@@ -36,8 +42,27 @@ done
 
 [ -s "$ROOT/.env" ] || { echo "No .env with the eWeLink account - see docs/unattended.md" >&2; exit 1; }
 
+# Plugs kept with --save: the flash, and the captures of the runs that made it.
+SAVED=$ROOT/captures/emulation/saved
+if [ -n "$from" ]; then
+    [ -f "$SAVED/$from/flash.bin" ] || { echo "No plug kept as '$from' (--save=$from)" >&2; exit 1; }
+    docker stop "$NAME" >/dev/null 2>&1 || true
+    mkdir -p "$STATE/work"
+    cp "$SAVED/$from/flash.bin" "$STATE/flash.bin"
+    rm -rf "$STATE/work/captures" && cp -a "$SAVED/$from/captures" "$STATE/work/captures"
+fi
+
 "$ROOT/tools/emulator/emu.sh" "${emu_args[@]}" >/dev/null
-[ "$keep" = 1 ] || trap 'docker stop "$NAME" >/dev/null 2>&1 || true' EXIT
+keep_plug() {
+    [ -n "$save" ] || return 0
+    docker exec "$NAME" /opt/s60emu/bin/plug off >/dev/null 2>&1 || true
+    rm -rf "${SAVED:?}/$save" && mkdir -p "$SAVED/$save"
+    cp "$STATE/flash.bin" "$SAVED/$save/flash.bin"
+    cp -a "$STATE/work/captures" "$SAVED/$save/captures"
+    rm -rf "$SAVED/$save/captures/unattended"
+    echo "Kept as '$save' (--from=$save)."
+}
+[ "$keep" = 1 ] || trap 'keep_plug; docker stop "$NAME" >/dev/null 2>&1 || true' EXIT
 
 as_you=(docker exec -u "$(id -u):$(id -g)" -w /work)
 waited=0
@@ -59,7 +84,9 @@ answers=/tmp/s60-unattended.env
 [ -t 1 ] && as_you+=(-t)
 stamp=$(date +%Y%m%d-%H%M%S)
 status=0
+# The emulator's Wi-Fi, for a run from ESPHome, which cannot say what it is.
 "${as_you[@]}" -e S60_EMULATOR_URL="http://localhost:$PORT" -e S60_EMULATOR_SUDO_PASSWORD=s60 \
+    -e S60_WIFI_SSID=PICSimLabWifi \
     -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/unattended_run.py --size 100x40 \
     --save "captures/unattended/$stamp" -- --env-file "$answers" "${run_args[@]}" || status=$?
 

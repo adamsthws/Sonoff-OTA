@@ -4,8 +4,10 @@ a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708  artifacts/tasm
 d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5  artifacts/tasmota-settings-template-15.6.0.0.bin
 3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433  artifacts/esphome-sonoff-s60-bootloader-1.0.0.bin
 04cbad327cc4fd3b3109e34ec4d3a5832cb9bc5bce33f96103acdbf59ab1a09b  artifacts/esphome-sonoff-s60-imprintable-1.0.0.bin
+d6e07f7f04e4eee0c61601ca4a101b8ba8a941c7ba816ee9bb675be9e2ff5f28  artifacts/esphome-sonoff-s60-mover-1.0.0.bin
 7d41da7e04dbd6f81b6edcff8a47d565d6df077bdaf8d8d68873a5b2f424bf40  archive/artifacts/s60-ota-bridge-v3-idf5.3.1.bin
 2b0ec6c49549d09bdb4c15cf975d24bdaee9ae309ca4786cbbc2522c6f152c1e  archive/artifacts/s60-tasmota-15.6.0-trial-cse7766.bin
 8a11558c94c57d34e6bc5c1f963814990958642dab4b5a796958917fb8c37c5d  archive/artifacts/s60-tasmota-15.6.0-final-cse7766.bin
 2d52d133f790c414cfc6209722b8ba87348e54670ef74d77c8a0e06605bc7e46  archive/artifacts/s60-ota-bridge-v2-1.2.1.ota
 4d37522a2e8fc481f23de821cbee10f800ecca2f476c86e2a116138b875d8c6b  archive/artifacts/s60-ota-bridge-v2-idf5.3.1.bin
+f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf  artifacts/sonoff-s60-partition-table.bin

@@ -145,9 +145,10 @@ class ResumeTests(unittest.TestCase):
     def test_every_destructive_step_records_an_attempt_first(self):
         import tools.s60_autoflash as autoflash
 
-        # Either firmware's steps: STEPS holds only the route chosen for the run.
-        every = autoflash.COMMON_STEPS + autoflash.TASMOTA_FINAL_STEPS + autoflash.ESPHOME_FINAL_STEPS
-        known = {step for step, _, _ in every}
+        # Every route's steps: STEPS holds only the route chosen for the run.
+        known = {step for firmware in autoflash.FIRMWARES for source in autoflash.SOURCES
+                 if firmware != source
+                 for step, _, _ in autoflash.steps_for(firmware, source)}
         self.assertTrue(autoflash.DESTRUCTIVE_STEPS <= known)
         self.assertIn("E3", autoflash.DESTRUCTIVE_STEPS)
         self.assertIn("C2", autoflash.DESTRUCTIVE_STEPS)
@@ -1151,10 +1152,10 @@ class RebootDetectionTests(unittest.TestCase):
 class PhaseDisplayTests(unittest.TestCase):
     """Hundreds of server request lines become a few readable ones."""
 
-    def run_lines(self, phase, blocks, lines):
+    def run_lines(self, phase, blocks, lines, title=None):
         from tools.autoflash.phases import PhaseDisplay
         written, logged = [], []
-        display = PhaseDisplay(phase, blocks, write=written.append, log=logged.append)
+        display = PhaseDisplay(phase, blocks, write=written.append, log=logged.append, title=title)
         for line in lines:
             display.feed(line)
         display.close()
@@ -1173,11 +1174,11 @@ class PhaseDisplayTests(unittest.TestCase):
         self.assertNotIn("\n", written.rstrip("\n"), "progress stays on one line")
 
     def test_installing_esphome_counts_its_blocks(self):
-        lines = ['  [10.0.0.5] "GET /berry/esphome.be HTTP/1.1" 200 -']
+        lines = ['  [10.0.0.5] "GET /berry/plan.be HTTP/1.1" 200 -']
         for n in range(226):
             lines += [f'  [10.0.0.5] "GET /chunk/esphome/{n} HTTP/1.1" 200 -',
-                      f'  [10.0.0.5] "POST /capture/written/{n} HTTP/1.1" 200 -']
-        written, _ = self.run_lines("esphome", 226, lines)
+                      f'  [10.0.0.5] "POST /capture/esphome/{n} HTTP/1.1" 200 -']
+        written, _ = self.run_lines("plan", 226, lines, title="ESPHome")
         self.assertIn("Copying ESPHome: block 226/226", written)
         self.assertNotIn("startup firmware", written)
 
@@ -1923,7 +1924,7 @@ class WifiFallbackTests(unittest.TestCase):
         from unittest import mock
         import tools.s60_autoflash as autoflash
         ctx = SimpleNamespace(args=SimpleNamespace(wifi=False), manifest_path=Path("unused"),
-                              state=SimpleNamespace(set_input=lambda *_: None),
+                              state=SimpleNamespace(set_input=lambda *_: None, input=lambda *_: None),
                               _wifi=None, _recovery=None)
         ctx.remember_wifi = lambda ssid, password, image: autoflash.Context.remember_wifi(
             ctx, ssid, password, image)

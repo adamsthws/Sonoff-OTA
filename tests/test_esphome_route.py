@@ -27,8 +27,18 @@ class RouteTestCase(unittest.TestCase):
         return SimpleNamespace(state=state, firmware_given=given, esphome_firmware=None,
                                dry_run=False)
 
+    def setUp_found(self, running="sonoff"):
+        # What the plug runs now, as the network would show it.
+        patch = mock.patch.object(af, "find_current_firmware", return_value=running)
+        patch.start()
+        self.addCleanup(patch.stop)
+
 
 class FirmwareChoiceTests(RouteTestCase):
+    def setUp(self):
+        super().setUp()
+        self.setUp_found()
+
     def test_it_is_asked_once_then_kept(self):
         ctx = self.ctx()
         with mock.patch.object(af, "ask_choice", return_value=1) as asked:
@@ -66,7 +76,7 @@ class RouteTests(RouteTestCase):
     def test_each_firmware_has_its_own_steps(self):
         esphome = [step for step, _, _ in af.steps_for("esphome")]
         tasmota = [step for step, _, _ in af.steps_for("tasmota")]
-        self.assertEqual(esphome[-3:], ["D4", "I1", "I2"])
+        self.assertEqual(esphome[-4:], ["D4", "D5", "I1", "I2"])
         self.assertNotIn("E3", esphome)  # the partition table is left as Sonoff made it
         self.assertEqual(tasmota[-1], "H1")
         self.assertEqual(esphome[:len(af.COMMON_STEPS)], tasmota[:len(af.COMMON_STEPS)])
@@ -199,3 +209,47 @@ class ESPHomePageTests(unittest.TestCase):
     def test_a_tasmota_page_is_not(self):
         host = self.serve(b"<html><body>Tasmota</body></html>", {"Content-Type": "text/html"})
         self.assertFalse(af.esphome.is_esphome(host))
+
+
+class FromAConvertedPlugTests(RouteTestCase):
+    """A plug this tool converted, found on the network, offered the other two."""
+
+    def settle(self, running, *, backup=True, given=None, answer=0):
+        ctx = self.ctx(given=given)
+        with mock.patch.object(af, "find_current_firmware", return_value=running), \
+                mock.patch.object(af, "sonoff_backup_exists", return_value=backup), \
+                mock.patch.object(af, "ask_choice", return_value=answer) as asked:
+            route = af.settle_route(ctx)
+        return route, (asked.call_args.args[1] if asked.called else None)
+
+    def test_from_tasmota_the_other_two_are_offered(self):
+        (firmware, source), offered = self.settle("tasmota", answer=1)
+        self.assertEqual(offered, ["ESPHome", "Sonoff's own firmware (back to eWeLink, from its backup)"])
+        self.assertEqual((firmware, source), ("sonoff", "tasmota"))
+
+    def test_without_its_backup_sonoff_is_not_offered(self):
+        (firmware, _), offered = self.settle("esphome", backup=False)
+        self.assertEqual(offered, ["Tasmota"])
+        self.assertEqual(firmware, "tasmota")
+
+    def test_the_firmware_it_already_runs_cannot_be_asked_for(self):
+        with self.assertRaisesRegex(af.Abort, "already runs ESPHome"):
+            self.settle("esphome", given="esphome")
+        with self.assertRaisesRegex(af.Abort, "no backup"):
+            self.settle("tasmota", backup=False, given="sonoff")
+
+    def test_a_plug_left_part_way_can_go_on_to_any_of_the_three(self):
+        _, offered = self.settle("midway")
+        self.assertEqual(len(offered), 3)
+
+    def test_every_route_ends_by_checking_its_firmware(self):
+        last = {"tasmota": "H1", "esphome": "I2", "sonoff": "R2"}
+        for source in af.SOURCES:
+            for firmware in af.FIRMWARES:
+                if firmware == source or (source == "sonoff" and firmware == "sonoff"):
+                    continue
+                steps = [step for step, _, _ in af.steps_for(firmware, source)]
+                self.assertEqual(steps[-1], last[firmware], (source, firmware))
+                self.assertEqual(len(steps), len(set(steps)), (source, firmware))
+                # The bootloader is written on every route, before any firmware goes in.
+                self.assertTrue("D5" in steps or "L1" in steps, (source, firmware))
