@@ -1,27 +1,20 @@
 # Sonoff S60 → Tasmota or ESPHome, OTA
-## Fully automated 'Over The Air' conversion
+## Fully automated 'Over The Air' firmware conversion
 
-```mermaid
-%%{init: {"themeCSS": ".outer-circle { display: none; }", "block": {"padding": 20}}}%%
-block-beta
-  columns 3
-  space S((("Sonoff<br/>(eWeLink)"))) H["&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"]
-  space:3
-  T((("Tasmota"))) space E((("ESPHome")))
-  S --> T
-  T --> S
-  S --> E
-  E --> S
-  T --> E
-  E --> T
-  style H fill:none,stroke:none
-```
+***Flash it, don't smash it.***
 
-![A successful conversion run](docs/SuccessRunScreenshot.png)
+<br>
+<br>
+
+![Sonoff (eWeLink), Tasmota and ESPHome: any one converts to any other](docs/FirmwareRoutes.svg)
+
+<br>
+<br>
+
+![A successful conversion run](docs/SuccessRun.svg)
 
 Turns a stock Sonoff S60 smart plug into one running **Tasmota** or
-**ESPHome** using OTA method - no soldering, no taking the plug apart. Later
-it moves the plug between the two, or back to Sonoff's own firmware, the same
+**ESPHome** using OTA method - no soldering, no taking the plug apart. Move the plug between the two, or back to Sonoff's own firmware, the same
 way ([Changing firmware later](#changing-firmware-later)).
 
 Until now, the established way to put Tasmota on an S60 was to open it and
@@ -123,14 +116,10 @@ cd Sonoff-OTA
 - Run the same command for every plug: it carries on an unfinished run, or
 starts a new one. 
 
-- First it looks for the plug. One still on Sonoff's firmware is offered
-Tasmota or ESPHome ([Choosing ESPHome](#choosing-esphome)); one already on
-Tasmota or ESPHome is offered the other two.
-
-- Then you're walked through every step of the conversion.
+- You're walked through every step of the conversion.
 
 - Finding the plug, backing up its Sonoff firmware,
-installing Tasmota, rebuilding its memory and checking the result - happens automatically.
+installing Tasmota, rebuilding its memory and checking the result all happens automatically.
 
 ### If you have to stop
 
@@ -145,16 +134,9 @@ was interrupted, it checks the plug to work out where to resume from.
 **Tasmota:** official Tasmota, laid out in memory exactly as if the plug had been flashed
 over USB. That means normal Tasmota upgrades from then on.
 
-**ESPHome:** ESPHome for the S60, on your Wi-Fi, ready for Home Assistant to find
-([Choosing ESPHome](#choosing-esphome)).
-
-The Tasmota [layout itself](docs/technical-details.md#the-finished-memory-layout) is
-in the technical details.
+**ESPHome:** ESPHome for the S60, on your Wi-Fi, ready for Home Assistant to find.
 
 You also keep a full backup of the plug's Sonoff firmware.
-
-If you later change your Wi-Fi, the plug can be told the new one through its
-own network: see [a converted plug that has lost your Wi-Fi](docs/troubleshooting.md#a-converted-plug-that-has-lost-your-wi-fi).
 
 ## Changing firmware later
 
@@ -165,15 +147,10 @@ back, and the plug only switches once it has all been checked.
 
 - **Back to Sonoff's firmware** puts back the plug's own firmware and settings
   from the backup taken when it was first converted, so it is in the eWeLink app
-  again as it was. It is only offered where that backup is on the computer
-  doing it.
+  again as it was. (It is only offered where that backup is on the computer
+  doing it).
 - **From ESPHome**, you are asked for your Wi-Fi password: ESPHome does not
   say what it is, and the firmware going on needs it written in.
-- **The bootloader**, the small program that starts the plug's firmware, is
-  replaced once, with ESPHome's, which starts all three and rolls back an
-  update that fails to start. Writing it takes under a second; it and the
-  memory map are the only moments a power cut would leave a plug that needs
-  opening to repair.
 
 ## When something goes wrong
 
@@ -191,40 +168,11 @@ Sonoff uses, but pointing at your computer, which hands it Tasmota.
 
 Whether it worked first time or stopped partway, please
 report back on how it went here:  
-- **[Test reports](https://github.com/adamsthws/Sonoff-OTA/discussions/1)**
+- **[Conversions In The Wild (Conversion Reports)](https://github.com/adamsthws/Sonoff-OTA/discussions/1)**
 
 > A clean conversion, a run that stopped partway, or only the read-only checks - all of it is useful. 
 
-> Reading the thread is the quickest way to see what has
-worked for others.
-
-
-## Choosing ESPHome
-
-Pick **ESPHome** when the tool asks, and the plug ends up running
-[ESPHome](https://esphome.io) instead of Tasmota - on your Wi-Fi, with nothing
-to build or install on your computer: the tool installs a ready-made ESPHome
-for the S60 ([`ESPHome/sonoff_s60.yaml`](ESPHome/sonoff_s60.yaml)) and writes your Wi-Fi
-into it, in memory only.
-
-- **The plug:** relay and button, the status LED, the power meter (voltage,
-  current, power, daily, monthly, yearly and total energy), overload
-  protection and a countdown timer. After a power cut the relay comes back as
-  it was.
-- **Its web page** is at the link the tool gives at the end, and works without
-  the internet. Like Tasmota, it has no password to start with.
-- **Home Assistant** finds it by itself. Adopting it in Home Assistant's ESPHome
-  builder takes its config from this repository, so you can change it and
-  add passwords and an API key there.
-- **Updates** are ESPHome's own, from Home Assistant or ESPHome's tools.
-- **Its memory** stays laid out as Sonoff made it: ESPHome goes into the half
-  Sonoff's firmware updates used, which is enough for it. Sonoff's bootloader
-  is replaced by ESPHome's own, so an update that fails to start is rolled
-  back to the one before by itself. Writing it takes under a second, and is
-  the one moment of the run when a power cut would leave a plug that needs
-  opening to repair.
-
-The ESPHome option was contributed by [p1otr](https://github.com/p1otr).
+> Reading the thread is the quickest way to see how it went for others.
 
 ## More detail
 
