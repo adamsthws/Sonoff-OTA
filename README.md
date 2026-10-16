@@ -186,6 +186,8 @@ report back on how it went here:
   an emulated s60 plug.
 - **[docs/unattended.md](docs/unattended.md)** - running a conversion with
   nobody at the keyboard - for testing.
+- **[docs/testing.md](docs/testing.md)** - how the tool is tested: unit tests,
+  the emulator, every fault in the way of every step, and real plugs.
 - **[docs/upstream-contributions.md](docs/upstream-contributions.md)** - bugs
   found and fixed while building this project.
 - **[archive/docs/reference/](archive/docs/reference/)** - the original

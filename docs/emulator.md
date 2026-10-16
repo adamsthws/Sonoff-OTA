@@ -163,7 +163,9 @@ Where it warns that sudo may ask for a password, it gives the emulator's
 ### Unattended, for testing
 
 One command starts the emulator, converts the plug with nobody at the
-keyboard, prints the screen the run left, and stops the emulator again:
+keyboard, prints the screen the run left, and stops the emulator again
+([testing.md](testing.md) says how that is used to test every route, and
+every fault in its way):
 
 ```sh
 tools/emulator/unattended-test.sh --fresh    # from stock, as a new user would
