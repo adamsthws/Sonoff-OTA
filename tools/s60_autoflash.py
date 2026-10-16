@@ -2958,23 +2958,60 @@ def step_sonoff_check(ctx: Context, wait: float = 240.0) -> dict[str, Any]:
     return {"seconds": seconds}
 
 
+# ESPHome installed as an update (to the mover) confirms itself only after a
+# minute running (safe_mode's boot_is_good_after); restarted before then, the
+# bootloader takes the plug back to what it ran before.
+ESPHOME_CONFIRMS_AFTER = 70.0
+
+
 def step_esphome_check(ctx: Context, wait: float = 180.0) -> dict[str, Any]:
-    """I2 - ESPHome started from what was written, and joined the home Wi-Fi."""
+    """I2 - ESPHome started from what was written, and joined the home Wi-Fi.
+
+    ESPHome sent to the mover as an update (from Tasmota) is not confirmed
+    until it has run a minute: a power cut before then takes the plug back to
+    the mover, which is then sent ESPHome again.  So it is waited out, and the
+    plug is only done once ESPHome is there for good.
+    """
     host = ctx.state.input("plug_ip")
     if not host:
         raise Abort("the plug's address is not known")
     if ctx.dry_run:
         say("[dry-run] would wait for ESPHome to answer")
         return {"dry_run": True}
+    as_update = run_source(ctx.state) == "tasmota"
     say("Waiting for the plug to start ESPHome and join your Wi-Fi...")
     started = time.monotonic()
-    while time.monotonic() - started < wait:
+    first_seen = None
+    resent = 0
+    while time.monotonic() - started < wait + ESPHOME_CONFIRMS_AFTER * as_update:
+        host = ctx.state.input("plug_ip")
         if esphome.is_esphome(host):
-            seconds = round(time.monotonic() - started, 1)
-            say(f"    ESPHome answered at {host} after {seconds}s.")
-            return {"seconds": seconds}
+            if first_seen is None:
+                first_seen = time.monotonic()
+                say(f"    ESPHome answered at {host} after {first_seen - started:.0f}s.")
+                if as_update:
+                    say("    Waiting a minute while it confirms itself, so a power cut now")
+                    say("    cannot take it back...")
+            if not as_update or time.monotonic() - first_seen >= ESPHOME_CONFIRMS_AFTER:
+                return {"seconds": round(first_seen - started, 1), "resent": resent}
+        elif as_update and esphome_ota.probe(host) is not None:
+            # Back on the mover: ESPHome restarted before it had confirmed itself.
+            first_seen = None
+            resent += 1
+            if resent > 2:
+                raise Abort("the plug keeps going back to the mover instead of starting ESPHome")
+            say("    The plug went back to the mover: ESPHome restarted before it had")
+            say("    confirmed itself. Sending ESPHome again...")
+            step_esphome_from_mover(ctx)
+            started = time.monotonic()
+            continue
+        else:
+            moved = ctx.finder.poll()
+            if moved and moved != host:
+                continue
         output.progress(f"waiting for ESPHome... {time.monotonic() - started:.0f}s")
         time.sleep(3)
+    output.progress_clear()
     raise Abort(
         "ESPHome was written and checked, but has not answered on your Wi-Fi within "
         "three minutes - most likely it cannot join it. When it cannot, it puts up its "

@@ -25,7 +25,7 @@ class RouteTestCase(unittest.TestCase):
                            "plug_ip": "192.168.0.50", **inputs}.items():
             state.set_input(key, value)
         return SimpleNamespace(state=state, firmware_given=given, esphome_firmware=None,
-                               dry_run=False)
+                               dry_run=False, finder=SimpleNamespace(poll=lambda: None))
 
     def setUp_found(self, running="sonoff"):
         # What the plug runs now, as the network would show it.
@@ -263,3 +263,34 @@ class AlreadyThereTests(RouteTestCase):
                 af.settle_route(ctx)
         # Never offered back as an unfinished run.
         self.assertTrue(af.run_is_complete(Path(self.tmp.name) / "run"))
+
+
+class ConfirmedOnlyAfterAMinuteTests(RouteTestCase):
+    """ESPHome sent to the mover is confirmed only after a minute running."""
+
+    def check(self, source, answers, probes=()):
+        ctx = self.ctx(source=source, firmware="esphome")
+        clock = iter(range(0, 100_000, 3))
+        with mock.patch.object(af.time, "monotonic", side_effect=lambda: next(clock)), \
+                mock.patch.object(af.time, "sleep"), \
+                mock.patch.object(af.esphome, "is_esphome", side_effect=list(answers)), \
+                mock.patch.object(af.esphome_ota, "probe", side_effect=list(probes) or None), \
+                mock.patch.object(af, "step_esphome_from_mover") as resent:
+            return af.step_esphome_check(ctx), resent
+
+    def test_from_tasmota_it_is_only_done_once_esphome_has_confirmed_itself(self):
+        result, _ = self.check("tasmota", [True] * 40)
+        self.assertEqual(result["resent"], 0)
+        # Asked again until 70 s after it first answered: 3 s a step.
+        self.assertGreaterEqual(result["seconds"], 0)
+
+    def test_back_on_the_mover_it_is_sent_esphome_again(self):
+        result, resent = self.check("tasmota", [False] + [True] * 40, probes=[object()])
+        resent.assert_called_once()
+        self.assertEqual(result["resent"], 1)
+
+    def test_from_stock_nothing_is_waited_for(self):
+        with mock.patch.object(af.esphome, "is_esphome", return_value=True) as asked:
+            ctx = self.ctx(firmware="esphome")
+            af.step_esphome_check(ctx)
+        self.assertEqual(asked.call_count, 1)
