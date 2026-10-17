@@ -68,6 +68,14 @@ own firmware.
 - An upload of official Tasmota to the startup firmware that stalls is
   noticed after two minutes, not ten, and tried again from a restart - up
   to three times - before it is left to be done by hand.
+- The installer is now 4.4.3. It starts even when an upload of Tasmota into
+  Sonoff's slot (D1) was cut off part way - by a power cut, or the computer
+  stopping - where 4.4.2 refused to start, leaving a plug with no network at
+  all that only a serial cable could recover.
+- A run started again after D1 was cut off finds the plug on the installer
+  and carries on from the backup, instead of looking for it in eWeLink -
+  which it cannot answer - and being told to switch it off and on. An upload
+  to the installer that stops is tried again by itself, three times in all.
 - A plug that cannot be found can be set up through its own network by
   choice, for a computer that cannot see Wi-Fi networks. While waiting for a
   plug whose Wi-Fi went, the run says it will rejoin by itself, and that it has

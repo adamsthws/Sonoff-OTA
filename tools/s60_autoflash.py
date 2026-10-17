@@ -1996,6 +1996,10 @@ def resend_if_back_on_sonoff(ctx: Context) -> str | None:
     to BRIDGE_SENDS in a run; its address once it joined the home network."""
     sends = getattr(ctx, "bridge_sends", 0)
     while sends < BRIDGE_SENDS and back_on_sonoff(ctx):
+        if not ctx.state.input("stock_version"):
+            # A run started on the installer has none of eWeLink's details.
+            raise Abort("the plug is back on Sonoff's own firmware, so the installer has to "
+                        "be sent again through eWeLink: run this again with --new")
         sends += 1
         ctx.bridge_sends = sends
         tell("    The plug is running Sonoff's own firmware again: it goes back to it when")
@@ -3414,7 +3418,9 @@ FIRMWARES = {"tasmota": "Tasmota", "esphome": "ESPHome", "sonoff": "Sonoff"}
 # startup firmware or an official Tasmota not yet set up - which only this
 # computer's record of that run can tell from the ESPHome route's startup
 # firmware, on Sonoff's layout.
-SOURCES = ("sonoff", "tasmota", "esphome", "midway", "committed")
+# "installer": one a run left on this tool's installer (the bridge), part way
+# from Sonoff's firmware: the backup and D1 need only the installer, not eWeLink.
+SOURCES = ("sonoff", "tasmota", "esphome", "midway", "committed", "installer")
 
 
 def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Callable[[Context], dict[str, Any]]]]:
@@ -3430,6 +3436,9 @@ def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Cal
         return START_STEPS + [LEAVE_TASMOTA_STEP,
                               ("M1", "ESPHome, sent to the mover as an update", step_esphome_from_mover),
                               ESPHOME_FINAL_STEPS[-1]]
+    if source == "installer":
+        on_installer = [step for step in COMMON_STEPS if step[0] in ("C3", "D1")]
+        return START_STEPS + on_installer + HUB_STEPS + final
     if source == "committed":
         # Official Tasmota first, from where the run left it; then on from Tasmota.
         rest = [step for step in TASMOTA_FINAL_STEPS if step[0] in ("F2", "F4", "G1", "H1")]
@@ -3537,7 +3546,7 @@ FIRMWARE_BLURBS = {
 def ask_firmware(source: str, choices: list[str]) -> str:
     output.transient_begin()
     body = (["This plug was left part way through a conversion; it can go on to any",
-             "of these from where it is.", ""] if source in ("midway", "committed") else [])
+             "of these from where it is.", ""] if source in ("midway", "committed", "installer") else [])
     for name in choices:
         body += FIRMWARE_BLURBS[name]
     if source != "sonoff" and "sonoff" not in choices:
@@ -3570,7 +3579,7 @@ def find_current_firmware(ctx: Context) -> str:
         running = detect.identify(given)
         if running in ("mover", "startup", "hub"):
             running = "midway"
-        if running in ("tasmota", "esphome", "midway"):
+        if running in ("tasmota", "esphome", "midway", "installer"):
             adopt_plug(ctx, detect.Found(given, running, hostsys.mac_of(given)))
             return past_the_commit(ctx, running)
         return "sonoff"
@@ -3792,12 +3801,13 @@ def cmd_step(ctx: Context, step: str) -> int:
 
 # Steps run again by themselves when they fail for a reason that may pass -
 # the network, mostly.  Each is safe to repeat: it only reads, or writes only
-# what it checks first (D4 the slot it is in, E2 the spare slot, G1 only over
-# the recovery Safeboot), or sets what it sets again.  Not the steps that ask
+# what it checks first (D1 the bridge's peer slot, which the bridge selects
+# itself away from before writing, D4 the slot it is in, E2 the spare slot, G1
+# only over the recovery Safeboot), or sets what it sets again.  Not the steps that ask
 # for anything, nor C2 or E3, which must happen once.
 # I1 too: until the plug restarts it runs Tasmota from ota_1, and writes the
 # same checked image again; once it runs ESPHome, I1 finds it and stops.
-RETRY_STEPS = {"A2", "D4", "E1", "E2", "F4", "G1", "H1", "I1",
+RETRY_STEPS = {"A2", "D1", "D4", "E1", "E2", "F4", "G1", "H1", "I1",
                "L1", "M1", "X1", "X2", "D5", "R1"}
 ATTEMPTS = 3
 RETRY_PAUSE = 10.0
@@ -4418,7 +4428,8 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Firmware", FIRMWARES[run_firmware(ctx.state)]),
         ("Converted from", {"sonoff": "Sonoff", "tasmota": "Tasmota", "esphome": "ESPHome",
                             "midway": "part way through a conversion",
-                            "committed": "part way through a conversion"}[run_source(ctx.state)]),
+                            "committed": "part way through a conversion",
+                            "installer": "part way through a conversion"}[run_source(ctx.state)]),
         ("Tool version", __version__),
         ("Plug model", model or "__"),
         ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),

@@ -87,5 +87,26 @@ class TasmotaTests(unittest.TestCase):
         self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.37", "midway")])
 
 
+class InstallerTests(unittest.TestCase):
+    """This tool's installer, left by a run part way from Sonoff's firmware,
+    answers with its own page: a run carries on from it, not from eWeLink."""
+
+    def test_its_page_names_it(self):
+        with mock.patch.object(detect.esphome, "is_esphome", return_value=False), \
+             mock.patch.object(detect, "_port_open", return_value=True), \
+             mock.patch.object(detect, "_is_installer", return_value=True):
+            self.assertEqual(detect.identify("192.168.0.37"), "installer")
+
+    def test_found_on_the_network_it_is_offered(self):
+        neighbours = {"192.168.0.37": "12:34:56:ab:cd:ef"}
+        with mock.patch.object(detect.hostsys, "sweep"), \
+             mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
+             mock.patch.object(detect, "_port_open", return_value=True), \
+             mock.patch.object(detect.esphome, "is_esphome", return_value=False), \
+             mock.patch.object(detect, "_is_installer", return_value=True):
+            found = detect.converted_s60s("192.168.0.1")
+        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.37", "installer")])
+
+
 if __name__ == "__main__":
     unittest.main()

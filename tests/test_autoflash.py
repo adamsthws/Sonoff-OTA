@@ -1651,6 +1651,7 @@ class BackOnSonoffTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         state = RunState.open(Path(directory.name))
         state.set_input("plug_ip", "192.168.1.51")
+        state.set_input("stock_version", "1.2.0")  # as eWeLink gave it at A2
         ctx = SimpleNamespace(state=state, finder=SimpleNamespace(poll=lambda: "192.168.1.51"))
         found = iter(found)
         outcomes = iter(sends)
@@ -1708,6 +1709,18 @@ class BackOnSonoffTests(unittest.TestCase):
                                                   found=(None, "192.168.1.51"))
         self.assertEqual((address, sent, waited), ("192.168.1.51", 1, 1))
         self.assertEqual(state.status("C2"), "done")
+
+    def test_a_run_started_on_the_installer_says_to_start_again(self):
+        # It has none of eWeLink's details, so cannot send the installer again.
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        with mock.patch.object(autoflash.RunState, "input",
+                               side_effect=lambda self, key: {"plug_ip": "192.168.1.51"}.get(key),
+                               autospec=True):
+            address, sent, _, _ = self.reach("sonoff")
+        self.assertIsInstance(address, autoflash.Abort)
+        self.assertIn("--new", str(address))
+        self.assertEqual(sent, 0)
 
     def test_anything_else_is_waited_for_as_before(self):
         address, sent, waited, _ = self.reach(None)

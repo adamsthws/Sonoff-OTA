@@ -268,6 +268,20 @@ class FromAConvertedPlugTests(RouteTestCase):
             self.assertFalse({"X2", "D4", "E3"} & set(steps[:steps.index("H1")]), firmware)
 
 
+class FromTheInstallerTests(RouteTestCase):
+    def test_on_from_the_installer_it_needs_no_ewelink(self):
+        # Left part way from Sonoff's firmware: the backup and D1 need only the
+        # installer; the eWeLink steps, which a plug on it cannot answer, are not run.
+        for firmware in af.FIRMWARES:
+            steps = [step for step, _, _ in af.steps_for(firmware, "installer")]
+            self.assertEqual(steps[:4], ["A0", "A5", "C3", "D1"], firmware)
+            self.assertFalse({"A1", "A2", "C2"} & set(steps), firmware)
+
+    def test_an_upload_to_the_installer_is_tried_again(self):
+        # The installer selects itself before an upload writes its peer slot.
+        self.assertIn("D1", af.RETRY_STEPS)
+
+
 class AlreadyThereTests(RouteTestCase):
     def test_asking_for_what_it_runs_ends_the_run_done(self):
         ctx = self.ctx(given="esphome")

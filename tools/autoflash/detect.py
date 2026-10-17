@@ -23,7 +23,19 @@ NAMES = {
     "tasmota": "Tasmota",
     "esphome": "ESPHome",
     "midway": "a firmware part way through a conversion",
+    "installer": "this tool's installer, part way from Sonoff's firmware",
 }
+BRIDGE_PAGE_MARKER = "S60 OTA Bridge"  # as setup_network has it
+
+
+def _is_installer(host: str, timeout: float) -> bool:
+    """This tool's installer (the bridge) answers with its own page."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://{host}/", timeout=timeout) as reply:
+            return BRIDGE_PAGE_MARKER.lower() in reply.read(4096).decode("utf-8", "replace").lower()
+    except Exception:  # noqa: BLE001 - anything but the installer answering
+        return False
 SONOFF_TABLE_SHA256 = "f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf"
 SONOFF_LAN_PORT = 8081
 
@@ -106,6 +118,8 @@ def identify(host: str, *, timeout: float = 3.0) -> str | None:
     if esphome.is_esphome(host, timeout=timeout):
         return "esphome" if esphome.relay(host) is not None else None
     if _port_open(host, 80, timeout):
+        if _is_installer(host, timeout):
+            return "installer"
         found = _tasmota(host, timeout)
         if found:
             return found[0]
@@ -136,6 +150,8 @@ def converted_s60s(near: str, *, known_macs: set[str] = frozenset(), timeout: fl
             if esphome.relay(host) is not None:
                 return Found(host, "esphome", mac)
             return None
+        if _is_installer(host, timeout):
+            return Found(host, "installer", mac, "the installer")
         found = _tasmota(host, timeout)
         known = hostsys.normalise_mac(mac) in known_macs
         if not found:
