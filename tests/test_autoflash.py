@@ -1779,18 +1779,21 @@ class WaitForBridgeTests(unittest.TestCase):
     """While waiting for the bridge's own network, a late join of the home one
     must still be noticed: the bridge then never raises its own."""
 
-    def wait(self, addresses, pages, timeout=60.0, gone_back=None):
+    def wait(self, addresses, pages, timeout=60.0, gone_back=None, answering=True, told=None):
         from types import SimpleNamespace
         from unittest import mock
         from tools import s60_autoflash
         from tools.autoflash import setup_network
 
         polls = iter(addresses)
-        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: next(polls, None)))
-        clock = iter(range(0, 10_000, 2))
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: next(polls, None)),
+                              state=SimpleNamespace(input=lambda key: "192.168.1.51"))
+        clock = iter(range(0, 100_000, 2))
         with mock.patch.object(setup_network, "page", side_effect=lambda host, **_: pages.get(host)), \
              mock.patch.object(s60_autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
              mock.patch.object(s60_autoflash.time, "sleep"), \
+             mock.patch.object(s60_autoflash.hostsys, "ping_ok", return_value=answering), \
+             mock.patch.object(s60_autoflash, "tell", side_effect=lambda line: (told if told is not None else []).append(line)), \
              mock.patch.object(s60_autoflash, "say"):
             return s60_autoflash.wait_for_bridge(ctx, "S60-OTA-Bridge-A04D", timeout=timeout,
                                                  gone_back=gone_back)
@@ -1810,6 +1813,18 @@ class WaitForBridgeTests(unittest.TestCase):
         from tools import s60_autoflash
         self.assertEqual(self.wait([None] * 100, {}, timeout=600.0, gone_back=lambda: True),
                          s60_autoflash.BACK_ON_SONOFF)
+
+    def test_nothing_at_the_plugs_address_is_told_to_switch_it_off_and_on(self):
+        # Sonoff's firmware, its Wi-Fi gone while it started, stays off it.
+        from tools import s60_autoflash
+        told = []
+        with self.assertRaises(s60_autoflash.Abort):
+            self.wait([None] * 500, {}, timeout=400.0, answering=False, told=told)
+        self.assertIn("switch it off and on", " ".join(told))
+        told = []
+        with self.assertRaises(s60_autoflash.Abort):
+            self.wait([None] * 500, {}, timeout=400.0, answering=True, told=told)
+        self.assertNotIn("switch it off and on", " ".join(told))  # something is there
 
     def test_neither_in_time_stops_with_a_reason(self):
         from tools import s60_autoflash

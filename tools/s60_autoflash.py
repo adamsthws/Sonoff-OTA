@@ -2212,6 +2212,11 @@ def back_up_stock(ctx: Context, host: str) -> str:
 # What wait_for_bridge says when the plug went back to Sonoff's firmware meanwhile.
 BACK_ON_SONOFF = "back on Sonoff's firmware"
 GONE_BACK_EVERY = 30.0
+# Nothing at all at the plug's address this long, and the person is told to
+# switch it off and on: Sonoff's firmware, its Wi-Fi gone while it started, does
+# not try it again (seen after an outage), and a restart is safe here - the
+# installer carries on (4.4.3), or the plug starts Sonoff's firmware again.
+NOTHING_THERE_HINT_AFTER = 120.0
 
 
 def wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None,
@@ -2229,7 +2234,18 @@ def wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None,
     marker = setup_network.BRIDGE_PAGE_MARKER.lower()
     started = time.monotonic()
     looked = started
+    heard = started  # the last time anything answered at the plug's address
+    hinted = False
     while time.monotonic() - started < timeout:
+        host = ctx.state.input("plug_ip")
+        if host and hostsys.ping_ok(host):
+            heard = time.monotonic()
+        elif not hinted and time.monotonic() - heard >= NOTHING_THERE_HINT_AFTER:
+            hinted = True
+            output.progress_clear()
+            tell("    Nothing is answering at the plug's address. If it is not on your Wi-Fi at all -")
+            tell("    after a Wi-Fi outage, Sonoff's firmware can stay off it - switch it off and on:")
+            tell("    at this stage that is safe. This carries on by itself.")
         if gone_back is not None and time.monotonic() - looked >= GONE_BACK_EVERY:
             looked = time.monotonic()
             if gone_back():
