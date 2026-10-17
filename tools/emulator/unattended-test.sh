@@ -93,7 +93,7 @@ stamp=$(date +%Y%m%d-%H%M%S)
 status=0
 # The emulator's Wi-Fi, for a run from ESPHome, which cannot say what it is.
 "${as_you[@]}" -e S60_EMULATOR_URL="http://localhost:$PORT" -e S60_EMULATOR_SUDO_PASSWORD=s60 \
-    -e S60_WIFI_SSID=PICSimLabWifi \
+    -e S60_WIFI_SSID=PICSimLabWifi -e S60_EMULATOR_COUNTDOWN="${S60_EMULATOR_COUNTDOWN:-}" \
     -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/unattended_run.py --size 100x40 \
     --save "captures/unattended/$stamp" -- --env-file "$answers" "${run_args[@]}" || status=$?
 

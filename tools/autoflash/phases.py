@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from . import hostsys, output
+from . import hostsys, interrupt, output
 from .device import Device
 
 ARMED_PHASES = {"commit", "restore"}
@@ -259,6 +259,7 @@ class PhaseRunner:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            **interrupt.child_group(),  # a first Ctrl-C asks, and must not stop it meanwhile
         )
         if piped:
             assert process.stdin is not None

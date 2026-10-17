@@ -624,6 +624,15 @@ def stream(process: subprocess.Popen) -> int:
         while process.poll() is None:
             tick()
             time.sleep(1.0)
+    except BaseException:
+        # The run stopping (Ctrl-C twice, the window closed): the child, in a
+        # process group of its own, is not told by the terminal, so is told here.
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        raise
     finally:
         reader.join(5.0)
     return process.wait()

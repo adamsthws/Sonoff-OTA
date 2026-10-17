@@ -21,7 +21,7 @@ import sys
 import time
 from typing import Callable, Iterable, Sequence
 
-from . import hostsys, output
+from . import hostsys, interrupt, output
 
 
 class QuitRun(SystemExit):
@@ -106,7 +106,8 @@ def _raw(question: str, default: str | None, private: str | None = None) -> str:
     if UNATTENDED:
         raise _no_one_to_answer(question)
     suffix = f" [{default}]" if default else ""
-    answer = input(output.question(f"{question}{suffix}", ": ")).strip()
+    with interrupt.asking():  # nothing in flight at a question: Ctrl-C stops at once
+        answer = input(output.question(f"{question}{suffix}", ": ")).strip()
     if private:
         output.private(answer, private)
     output.answered(answer)
@@ -156,6 +157,11 @@ class SecretLine:
 
 
 def ask_secret(prompt: str, reveal_seconds: float = 1.0) -> str:
+    with interrupt.asking():
+        return _ask_secret(prompt, reveal_seconds)
+
+
+def _ask_secret(prompt: str, reveal_seconds: float = 1.0) -> str:
     """Read a password, showing only the character just typed.
 
     Nothing is echoed by the terminal itself, nothing is written anywhere, and
@@ -331,6 +337,12 @@ def _ask_secret_windows(prompt: str, reveal_seconds: float) -> str:
 
 def wait_for_key(prompt: str = "Press any key to continue, or q to quit...", *,
                  until: Callable[[], bool] | None = None) -> None:
+    with interrupt.asking():
+        _wait_for_key(prompt, until=until)
+
+
+def _wait_for_key(prompt: str = "Press any key to continue, or q to quit...", *,
+                  until: Callable[[], bool] | None = None) -> None:
     """Pause until one key is pressed; q quits, anything else carries on.
     `until`: stop waiting without a key, too, once it is true - looked at a
     few times a second.
@@ -474,6 +486,76 @@ def ask_choice(question: str, options: Sequence[str], *, help_lines: Sequence[st
         if 1 <= chosen <= len(options):
             return chosen - 1
         _retry(mark, [f"Choose a number between 1 and {len(shown)}."])
+
+
+def countdown_choice(question: str, options: Sequence[str], *,
+                     seconds: float = interrupt.CARRY_ON_AFTER, default: int = 0) -> int:
+    """A numbered choice that takes `default` by itself after `seconds`, the
+    time left shown as it runs down: for a question the run must not stand
+    still on, such as one asked after a Ctrl-C that may have been a mistake.
+    Enter takes the default at once; Ctrl-C stops."""
+    if UNATTENDED or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        # The emulator's tests: the countdown's time, with nobody to answer,
+        # so a Ctrl-C can be pressed during it (it stops at once there).
+        wait = float(os.environ.get("S60_EMULATOR_COUNTDOWN") or 0)
+        if wait > 0:
+            with interrupt.asking():
+                time.sleep(wait)
+        answered_unattended(question, options[default])
+        return default
+    for index, option in enumerate(options, 1):
+        _emit([f"{index}. {option}" + ("   <- in a moment, by itself" if index - 1 == default else "")])
+    keys = {str(index): index - 1 for index in range(1, len(options) + 1)}
+    out = sys.stdout
+
+    def draw(left: float) -> None:
+        out.write("\r" + output.question(
+            f"{question} - {options[default].split(' - ')[0].lower()} in {max(0, int(left + 0.99))} s, "
+            f"or press 1-{len(options)}", ": ") + " ")
+        out.flush()
+
+    chosen = default
+    deadline = time.monotonic() + seconds
+    with interrupt.asking():
+        try:
+            if hostsys.IS_WINDOWS:
+                import msvcrt
+                while time.monotonic() < deadline:
+                    draw(deadline - time.monotonic())
+                    if msvcrt.kbhit():
+                        char = msvcrt.getwch()
+                        if char == "\x03":
+                            raise KeyboardInterrupt
+                        if char in ("\r", "\n"):
+                            break
+                        if char in keys:
+                            chosen = keys[char]
+                            break
+                    time.sleep(0.2)
+            else:
+                import termios
+                import tty
+                fd = sys.stdin.fileno()
+                saved = termios.tcgetattr(fd)
+                try:
+                    tty.setcbreak(fd)  # keys one at a time; Ctrl-C still a signal
+                    while time.monotonic() < deadline:
+                        draw(deadline - time.monotonic())
+                        if select.select([fd], [], [], 0.2)[0]:
+                            key = os.read(fd, 1).decode("utf-8", "replace")
+                            if key in ("\r", "\n"):
+                                break
+                            if key in keys:
+                                chosen = keys[key]
+                                break
+                finally:
+                    termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        finally:
+            out.write("\n")
+            out.flush()
+            output.after_input()
+    output.answered(options[chosen])
+    return chosen
 
 
 def ping_ok(address: str, timeout: int = 2) -> bool:

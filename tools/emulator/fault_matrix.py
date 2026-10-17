@@ -60,7 +60,7 @@ C2_ROUTES = {"sonoff>tasmota": "tasmota", "sonoff>esphome": "esphome"}
 FAULTS = ([("outage", s) for s in (1, 5, 15, 30, 60, 120, 180)]
           + [("plugoff", s) for s in (1, 5, 30, 180)]
           + [("crash", s) for s in (1, 60, 180)]
-          + [("cancel", "continue"), ("cancel", "new")])
+          + [("cancel", "continue"), ("cancel", "new"), ("ctrlc", "once")])
 
 # The bridge, off its home network for longer than this, raises its own and keeps
 # to it - and the emulator cannot be both, nor join its WPA2 one.
@@ -314,6 +314,12 @@ class Scenario:
             sh("docker", "exec", e, "pkill", "-KILL", "-f", "serve_tasmota_ota.py")
             sh("docker", "exec", e, "pkill", "-KILL", "-f", "tools/s60_autoflash.py")
         elif fault == "cancel":
+            # Stopping on purpose: Ctrl-C twice, as the first only asks.
+            sh("docker", "exec", e, "pkill", "-INT", "-f", "tools/s60_autoflash.py")
+            time.sleep(1)
+            sh("docker", "exec", e, "pkill", "-INT", "-f", "tools/s60_autoflash.py")
+        elif fault == "ctrlc":
+            # Once, by mistake: the run asks at the end of the stage, and carries on.
             sh("docker", "exec", e, "pkill", "-INT", "-f", "tools/s60_autoflash.py")
         self.say(f"FAULT done")
 

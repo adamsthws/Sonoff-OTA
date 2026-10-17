@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
 from tools.autoflash import __version__, esphome, imprint, plugs, tasmota_settings  # noqa: E402
-from tools.autoflash import detect, esphome_ota, plans  # noqa: E402
+from tools.autoflash import detect, esphome_ota, interrupt, plans  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import (  # noqa: E402
@@ -224,8 +224,10 @@ def run_tool(
     through the environment), so `interactive` no longer changes anything.
     """
     say(f"$ {' '.join(str(a) for a in args)}")
+    # Its own process group: a first Ctrl-C asks, and must not stop it meanwhile.
     process = subprocess.Popen(args, cwd=str(cwd), env=env,
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               **interrupt.child_group())
     return output.stream(process)
 
 
@@ -318,6 +320,8 @@ def describe_run(directory: Path) -> str:
     except ValueError:
         stamp = "an unknown time"
     details = [f"stopped at step {pending}" if pending else "finished", stamp]
+    if pending and state.input("stopped_by") == "window":
+        details.append("when its window was closed")
     if state.is_done(POINT_OF_NO_RETURN):
         details.append("past the point of no return")
     if not state.input("plug_ip"):
@@ -1113,8 +1117,9 @@ def wait_until_joined(network: str, marker: str | None = None) -> None:
         output.progress(f"waiting for this computer to join {network}... {elapsed:.0f}s")
 
     limit = user_action_limit()
-    joined = (setup_network.wait_for_page(marker, timeout=limit, tick=tick) if marker
-              else setup_network.wait_for_port(timeout=limit, tick=tick))
+    with interrupt.asking():  # waiting on the person: Ctrl-C stops at once
+        joined = (setup_network.wait_for_page(marker, timeout=limit, tick=tick) if marker
+                  else setup_network.wait_for_port(timeout=limit, tick=tick))
     if not joined:
         output.progress_clear()
         raise Abort(f"this computer did not join {network} within {limit / 60:.0f} minutes")
@@ -2225,6 +2230,12 @@ NOTHING_THERE_HINT_AFTER = 120.0
 
 def wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None,
                     gone_back: Callable[[], bool] | None = None) -> str | None:
+    with interrupt.asking():  # waiting on the person: Ctrl-C stops at once
+        return _wait_for_bridge(ctx, network, timeout=timeout, gone_back=gone_back)
+
+
+def _wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None,
+                     gone_back: Callable[[], bool] | None = None) -> str | None:
     """Wait for this computer to join the bridge's network, or for the bridge to
     turn up on the home network instead.  The bridge's address on the home
     network, or None once this computer has joined the bridge's own.
@@ -4229,6 +4240,29 @@ def restore_left_locks() -> None:
             say(f"{name} put back: a run stopped while it was moved aside")
 
 
+def stop_here_after_ctrl_c(step: str) -> bool:
+    """At the end of a stage, a Ctrl-C pressed during it is asked about: the
+    run stops here only if the person says so - by itself it carries on."""
+    if not interrupt.pending():
+        return False
+    interrupt.clear()
+    output.transient_begin()
+    section("You pressed Ctrl-C", [
+        f"The stage that was under way is done, and everything is recorded, so",
+        "stopping here is safe: running this again picks up where it left off.",
+    ])
+    choice = prompts.countdown_choice("Stop the run here", [
+        "Carry on - the run goes on to the next stage",
+        "Stop here",
+    ])
+    output.transient_end()
+    if choice == 1:
+        say(f"Stopped after {step}, as asked after Ctrl-C.")
+        return True
+    say(f"Carrying on after {step}: Ctrl-C was not confirmed.")
+    return False
+
+
 def run_steps(ctx: Context) -> int:
     started = time.monotonic()
     restore_left_locks()  # a resumed run skips A5, which looks too
@@ -4246,6 +4280,8 @@ def run_steps(ctx: Context) -> int:
         tell(f"Stopped before anything was done: {refused}.")
         return 2
     apply_target(firmware, source)
+    interrupt.clear()
+    ctx.state.set_input("stopped_by", None)
     resumed = any(ctx.state.is_done(step) for step, _, _ in STEPS)
     ctx.run_started, ctx.run_resumed = started, resumed
     wait_while_plug_busy(ctx)
@@ -4298,6 +4334,9 @@ def run_steps(ctx: Context) -> int:
                 output.stage_end("already done")
                 continue
         code = execute_with_retries(ctx, step)
+        if code == 0 and stop_here_after_ctrl_c(step):
+            close_firewall_rules(ctx)
+            return 130
         if code == 0 and step == POINT_OF_NO_RETURN and ctx.research_bridge:
             section("Research bridge installed - stopping here", [
                 f"{ctx.bridge.name} is on the plug. Join the bridge's network",
@@ -4740,8 +4779,9 @@ def _main() -> int:
     # Being stopped, or the terminal being closed, must still run the cleanup
     # in the finally blocks: the stored secrets and the firewall rule.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
-    if hasattr(signal, "SIGHUP"):
-        signal.signal(signal.SIGHUP, lambda *_: sys.exit(129))
+    # Ctrl-C asks before it stops a run part way; the window closing stops it,
+    # and is remembered (tools/autoflash/interrupt.py).
+    interrupt.install()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", action="version", version=f"S60 conversion tool {__version__}")
     parser.add_argument("command", choices=["run", "status", "step", "list", "cleanup"])
@@ -4875,6 +4915,13 @@ def _main() -> int:
         code, ending = 1, "crashed"
         return code
     except KeyboardInterrupt:
+        closed = interrupt.window_closed()
+        try:
+            ctx.state.set_input("stopped_by", "window" if closed else "ctrl-c")
+        except Exception:  # noqa: BLE001 - nothing must stop the run stopping
+            pass
+        if closed:
+            output.log_only("The run's window was closed: stopped at once.")
         output.stage_end("stopped")
         tell("")
         tell("Stopped with Ctrl-C. Run again to pick up where you left off or to start again")
