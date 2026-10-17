@@ -107,11 +107,13 @@ WEAK_SIGNAL_DBM = -75
 BRIDGE_AP_PREFIX = "S60-OTA-Bridge"
 # Fixed in the published bridge firmware; not a secret.
 BRIDGE_PASSWORD = "s60-ota-bridge"
-# 4.4.2: joins the home network the stock firmware was on, raising its own
+# 4.4.3: joins the home network the stock firmware was on, raising its own
 # only if that fails, gives Tasmota its Wi-Fi at D1, and lets the plug's whole
-# flash be read first, for the backup.  Named, like every bridge from 4.4.1
-# on, by the version the stock updater is given.
-BRIDGE_OTA = Path("artifacts/s60-ota-bridge-4.4.2.ota")
+# flash be read first, for the backup - and starts even once an upload into
+# Sonoff's slot was cut off, where 4.4.2 would not, leaving a plug only a
+# serial cable could recover.  Named, like every bridge from 4.4.1 on, by the
+# version the stock updater is given.
+BRIDGE_OTA = Path("artifacts/s60-ota-bridge-4.4.3.ota")
 # Ports the migration phase servers (serve_safeboot_migration.py) may listen
 # on, in order of preference.  Nothing on the plug keeps the port: each phase
 # starts its own server and sends the plug a loader URL that names it.
@@ -2029,7 +2031,9 @@ def ask_to_join_bridge(bridge: str) -> None:
         "if this computer has one, can stay connected. This carries on by itself.",
         "",
         "If that network is not there, wait: the installer may still be joining",
-        "your own Wi-Fi, and this carries on by itself when it does.",
+        "your own Wi-Fi, and this carries on by itself when it does. Until",
+        "someone joins it, it goes for up to 20 seconds every three minutes, to",
+        "try your Wi-Fi again.",
     ])
 
 

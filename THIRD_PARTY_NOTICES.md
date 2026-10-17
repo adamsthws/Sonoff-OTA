@@ -44,7 +44,7 @@ ESP-IDF bootloader from the same build. How they are built and published is in
 
 ## OTA bridge
 
-`artifacts/s60-ota-bridge-4.4.2.ota` is this project's own firmware, under
+`artifacts/s60-ota-bridge-4.4.3.ota` is this project's own firmware, under
 this repository's licence ([`LICENSE`](LICENSE)). Its source is in
 `archive/bridge/`, and `tools/build_vendor_ota.py` wraps it for the stock
 updater. It is built with ESP-IDF through PlatformIO, as pinned by

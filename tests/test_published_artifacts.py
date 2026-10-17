@@ -26,7 +26,7 @@ class PublishedArtifactTests(unittest.TestCase):
 
     def test_the_run_installs_the_pinned_bridge(self):
         from tools.s60_autoflash import BRIDGE_OTA, ROOT
-        self.assertEqual(BRIDGE_OTA.name, "s60-ota-bridge-4.4.2.ota")
+        self.assertEqual(BRIDGE_OTA.name, "s60-ota-bridge-4.4.3.ota")
         line = f"{sha256_bytes((ROOT / BRIDGE_OTA).read_bytes())}  {BRIDGE_OTA.as_posix()}"
         self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
 

@@ -6,7 +6,7 @@ directory, never here.
 
 | File | Purpose | SHA-256 |
 |---|---|---|
-| `s60-ota-bridge-4.4.2.ota` | Wrapped one-shot bridge the run installs; joins the home Wi-Fi stock was on, raising its own network only if that fails, lets the run back up the whole flash, and gives Tasmota its settings | `98dd677e405286a75a4b3ed0f1ce71407ed5cf2654a25b065f77be4dd62f5685` |
+| `s60-ota-bridge-4.4.3.ota` | Wrapped one-shot bridge the run installs; joins the home Wi-Fi stock was on, raising its own network only if that fails, lets the run back up the whole flash, gives Tasmota its settings, and starts even after an upload cut off part way | `00bd6cca52d62cd7e2dc07e8af534bcf76d48935dbadc0834ffeea83767ffa01` |
 | `tasmota32c3-bluetooth.bin` | Berry-capable Tasmota used temporarily on the original partition layout | `a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708` |
 | `s60-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `aa32fafa4a9470152d5f8826fc6aedf94387575332353b50b8ce454ec1f9d364` |
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
@@ -48,15 +48,19 @@ bundle-preparation path must imprint and validate a per-device copy first.
 
 From 4.4.1 on, a bridge is named by one version: the one the stock updater is
 given, the one in its app description, and the one its status page reports
-(`bridge 4.4.2`). `tools/build_vendor_ota.py` takes it from the image and
-refuses any other. The next bridge is 4.4.3. 4.4.1 has the Wi-Fi behaviour tried on a
+(`bridge 4.4.3`). `tools/build_vendor_ota.py` takes it from the image and
+refuses any other. The next bridge is 4.4.4. 4.4.1 has the Wi-Fi behaviour tried on a
 stock plug as "v6" on 8 October 2026; beyond that only its version, its name
 and a larger buffer for the status reply differ. 4.4.2 is 4.4.1 with the
 read-only `GET /flash` and `GET /efuse` of the research readout build, and
 `GET /flash-sha256`, the SHA-256 of the whole flash worked out on the plug, which
 read a stock plug's flash on hardware on 8 October 2026, added so the run can
-keep a backup of the Sonoff firmware. 4.4.2 itself is first tried on hardware
-by the next run.
+keep a backup of the Sonoff firmware. 4.4.3 is 4.4.2 that starts even when
+Sonoff's slot is no longer bootable - an upload of Tasmota into it cut off part
+way - where 4.4.2 refused to start, leaving a plug with no network at all; it
+reports `fallback: none` on its status page then. On its own network it also
+tries the home network again every three minutes while nobody is joined to it. Tried on the emulator; on
+hardware by the next run.
 
 The version is well above any Sonoff release so far (1.2.0). The stock 1.2.0
 updater does not compare versions - the upgrade command decides what is

@@ -30,7 +30,18 @@ Where stock saved no Wi-Fi it raises its own network at once, as v3 did.
 From 4.4.1 on, a bridge is named by one version: `BRIDGE_VERSION` in
 `main/main.c` and `PROJECT_VER` in `CMakeLists.txt` (a test keeps them equal)
 are the version the stock updater is given and the one `/status` reports.
-Change both for the next bridge, 4.4.3.
+Change both for the next bridge, 4.4.4.
+
+Bridge 4.4.3 starts even when Sonoff's slot is no longer bootable - an upload
+of Tasmota into it (D1) cut off part way, by a power cut or the computer
+stopping. 4.4.2 refused to start then, so the plug came up with no network
+at all, every time, and only a serial cable could recover it. With no
+fallback left there is nothing to keep: 4.4.3 says so in its log and on
+`/status` (`fallback: none`), stays the one that starts, and takes the
+upload again. And once on its own network, 4.4.3 tries the home network again
+every three minutes, for 20 seconds, while nobody is joined to its own: a
+router back after a restart is found again, where 4.4.2 kept to its own
+network for good. Never both at once, as 4.4.1 found on one radio.
 
 From 4.4.2 every build has the read-only `GET /flash` (the whole chip, with
 its size in `X-Flash-Size`), `GET /flash-sha256` (the SHA-256 of the whole
@@ -71,8 +82,8 @@ image - and validate it:
 ```sh
 python3 tools/build_vendor_ota.py \
   /tmp/s60-bridge-build/.pio/build/s60-ota-bridge/firmware.bin \
-  artifacts/s60-ota-bridge-4.4.2.ota
-python3 tools/analyze_vendor_ota.py artifacts/s60-ota-bridge-4.4.2.ota
+  artifacts/s60-ota-bridge-4.4.3.ota
+python3 tools/analyze_vendor_ota.py artifacts/s60-ota-bridge-4.4.3.ota
 ```
 
 When it cannot join the stock network, or stock saved none, it creates

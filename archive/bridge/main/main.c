@@ -74,11 +74,15 @@
 #define BRIDGE_MAX_IMAGE_SIZE 0x1f0000
 #define UPLOAD_BUFFER_SIZE 4096
 #define BRIDGE_HOSTNAME "s60-ota-bridge"
+/* On its own network, how often to try the home network again - only while
+ * nobody is joined to it - and for how long each time. */
+#define HOME_RETRY_EVERY_MS 180000
+#define HOME_RETRY_FOR_MS 20000
 /* How long to try the home network before keeping to the bridge's own. */
 #define STA_WINDOW_MS 45000
 /* The one version: the wrapper the updater is given and the app description
  * (PROJECT_VER in ../CMakeLists.txt) carry the same; a test keeps them equal. */
-#define BRIDGE_VERSION "4.4.2"
+#define BRIDGE_VERSION "4.4.3"
 #ifdef BRIDGE_FLASH_READOUT
 #define BRIDGE_NAME "bridge " BRIDGE_VERSION " flash readout"
 #else
@@ -88,11 +92,15 @@
 static const char *TAG = "s60_bridge";
 static const esp_partition_t *s_running;
 static const esp_partition_t *s_peer;
+/* The peer was not bootable at start-up: an upload into it was cut off. */
+static bool s_no_fallback;
 static volatile bool s_sta_trying;
 static volatile uint32_t s_sta_ip; /* network byte order; 0 until joined */
 static volatile bool s_tasmota_settings_saved;
 /* The bridge's own network, raised only when the home network fails. */
 static wifi_config_t s_ap_config;
+/* The home network, as the stock firmware saved it, for trying it again. */
+static wifi_config_t s_sta_config;
 #define TASMOTA_SETTINGS_SIZE 4096
 static uint8_t s_settings[TASMOTA_SETTINGS_SIZE];
 /* Keep the flash buffer out of the HTTP server task's relatively small stack.
@@ -245,15 +253,16 @@ static esp_err_t efuse_handler(httpd_req_t *req)
 /* Plain-text state for the host: which networks the bridge is on. */
 static esp_err_t status_handler(httpd_req_t *req)
 {
-    char body[128];
+    char body[192];
     uint32_t ip = s_sta_ip;
+    const char *fallback = s_no_fallback ? "fallback: none - an upload was cut off\n" : "";
     if (ip != 0) {
-        snprintf(body, sizeof(body), BRIDGE_NAME "\nhome network: joined " IPSTR "\n%s",
+        snprintf(body, sizeof(body), BRIDGE_NAME "\nhome network: joined " IPSTR "\n%s%s",
                  IP2STR((esp_ip4_addr_t *)&ip),
-                 s_tasmota_settings_saved ? "tasmota settings: saved\n" : "");
+                 s_tasmota_settings_saved ? "tasmota settings: saved\n" : "", fallback);
     } else {
-        snprintf(body, sizeof(body), BRIDGE_NAME "\nhome network: %s\n",
-                 s_sta_trying ? "joining" : "not joined");
+        snprintf(body, sizeof(body), BRIDGE_NAME "\nhome network: %s\n%s",
+                 s_sta_trying ? "joining" : "not joined", fallback);
     }
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -481,22 +490,65 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
 
 /* Raise the bridge's own network once the home network has given the bridge
  * no address for STA_WINDOW_MS - at start-up, or after losing it - so there
- * is always a way in.  It then keeps to its own network, as v5 did. */
+ * is always a way in.  On its own network, it tries the home network again
+ * every HOME_RETRY_EVERY_MS while nobody is joined to it - a router back
+ * after a restart is found again, and the run goes on there - and goes back
+ * to its own if that fails.  Never both at once: on one radio, the joined
+ * network dropped out while the bridge's own was up (v5). */
+/* Each change of network is a restart of Wi-Fi, as at start-up: stopped, set,
+ * started again, rather than the mode changed while it runs. */
+static void own_network(void)
+{
+    s_sta_trying = false;
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    esp_wifi_set_mode(WIFI_MODE_AP);
+    esp_wifi_set_config(WIFI_IF_AP, &s_ap_config);
+    esp_wifi_start();
+    ESP_LOGI(TAG, "AP ready: %s", s_ap_config.ap.ssid);
+}
+
+static void home_network(void)
+{
+    esp_wifi_stop();
+    s_sta_trying = true;  /* STA_START, as Wi-Fi starts, connects (on_wifi_event) */
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_set_config(WIFI_IF_STA, &s_sta_config);
+    esp_wifi_start();
+}
+
 static void station_watch(void *unused)
 {
     (void)unused;
-    TickType_t without = 0;
-    while (without < pdMS_TO_TICKS(STA_WINDOW_MS)) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        without = s_sta_ip != 0 ? 0 : without + pdMS_TO_TICKS(1000);
+    for (;;) {
+        TickType_t without = 0;
+        while (without < pdMS_TO_TICKS(STA_WINDOW_MS)) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            without = s_sta_ip != 0 ? 0 : without + pdMS_TO_TICKS(1000);
+        }
+        ESP_LOGW(TAG, "no address on the home network; raising the bridge's own");
+        own_network();
+        for (;;) {
+            vTaskDelay(pdMS_TO_TICKS(HOME_RETRY_EVERY_MS));
+            wifi_sta_list_t joined = {0};
+            if (esp_wifi_ap_get_sta_list(&joined) == ESP_OK && joined.num > 0) {
+                continue;  /* someone is using the bridge's own network */
+            }
+            ESP_LOGI(TAG, "nobody on the bridge's own network; trying the home network again");
+            home_network();
+            TickType_t waited = 0;
+            while (s_sta_ip == 0 && waited < pdMS_TO_TICKS(HOME_RETRY_FOR_MS)) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                waited += pdMS_TO_TICKS(500);
+            }
+            if (s_sta_ip != 0) {
+                ESP_LOGI(TAG, "back on the home network; the bridge's own is down");
+                break;  /* watch it again, as at start-up */
+            }
+            ESP_LOGW(TAG, "still no home network; the bridge's own again");
+            own_network();
+        }
     }
-    ESP_LOGW(TAG, "no address on the home network; raising the bridge's own");
-    s_sta_trying = false;
-    esp_wifi_disconnect();
-    esp_wifi_set_mode(WIFI_MODE_AP);
-    esp_wifi_set_config(WIFI_IF_AP, &s_ap_config);
-    ESP_LOGI(TAG, "AP ready: %s", s_ap_config.ap.ssid);
-    vTaskDelete(NULL);
 }
 
 static esp_err_t start_access_point(void)
@@ -538,6 +590,7 @@ static esp_err_t start_access_point(void)
         station.sta.pmf_cfg.capable = true;
         station.sta.pmf_cfg.required = false;
         s_sta_trying = true;
+        s_sta_config = station;
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &station));
     } else {
@@ -630,15 +683,22 @@ void app_main(void)
         return;
     }
 
-    /* Make the peer the automatic fallback for the next power cycle. */
+    /* Make the peer the automatic fallback for the next power cycle.  When it
+     * is no longer bootable - an upload into it was cut off part way, by a
+     * power cut or the computer stopping - there is no fallback left to keep:
+     * this bridge stays the one that starts, and carries on, so the upload
+     * can be done again.  Refusing to start then would leave a plug only a
+     * serial cable could recover. */
     err = esp_ota_set_boot_partition(s_peer);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Peer stock image is not bootable (%s); refusing to start",
-                 esp_err_to_name(err));
-        return;
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "power-cycle fallback selected: %s at 0x%08lx",
+                 s_peer->label, (unsigned long)s_peer->address);
+    } else {
+        s_no_fallback = true;
+        ESP_LOGW(TAG, "peer %s is not bootable (%s) - an upload into it was cut off; "
+                 "no fallback, carrying on so it can be uploaded again",
+                 s_peer->label, esp_err_to_name(err));
     }
-    ESP_LOGI(TAG, "power-cycle fallback selected: %s at 0x%08lx",
-             s_peer->label, (unsigned long)s_peer->address);
 
     ESP_ERROR_CHECK(start_access_point());
     ESP_ERROR_CHECK(start_web_server());
