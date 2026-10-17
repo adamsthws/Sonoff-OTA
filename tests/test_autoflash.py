@@ -2369,6 +2369,40 @@ class ConfigureStepTests(unittest.TestCase):
         self.assertEqual(result["template"], "applied")
 
 
+class PromoteTests(unittest.TestCase):
+    """D4 - tried again after an upload cut off, Tasmota is restarted first:
+    it still holds that upload, and the next hangs."""
+
+    def promote(self, failed_before):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        if failed_before:
+            state.mark("D4", FAILED, error="Berry Tasmota was not uploaded")
+        events = []
+        slots = iter([0, 1])
+        device = SimpleNamespace(
+            wait_reachable=lambda **_: None, started_at=lambda: "t", uptime_seconds=lambda: 10,
+            current_ota=lambda: next(slots), wait_for_reboot=lambda **_: events.append("rebooted"),
+            command=lambda c, timeout=None: events.append(c))
+        ctx = SimpleNamespace(device=device, state=state, dry_run=False)
+        with mock.patch.object(autoflash, "upload_or_prompt", side_effect=lambda *a: events.append("upload")), \
+             mock.patch.object(autoflash, "say"):
+            autoflash.step_promote(ctx)
+        return events
+
+    def test_a_first_try_uploads_at_once(self):
+        self.assertEqual(self.promote(False)[0], "upload")
+
+    def test_tried_again_it_restarts_first(self):
+        events = self.promote(True)
+        self.assertEqual(events[:3], ["Restart 1", "rebooted", "upload"])
+
+
 class StartupSettingsReportTests(unittest.TestCase):
     """F2 keeps what the startup firmware said about saving the Wi-Fi."""
 

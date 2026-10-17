@@ -119,6 +119,9 @@ Each fixed, with a test, and the scenario run again:
 - Started again from the beginning after the layout was rebuilt for Tasmota,
   a run took the startup firmware for the ESPHome route's, on Sonoff's
   layout, and sent the plug round steps it could never finish.
+- Tried again after an upload of the interim Tasmota cut off by the network
+  (D4), the next upload hung without a word: Tasmota still held the cut one.
+  The plug is now restarted first.
 - A power cut while the memory layout was rebuilt for Tasmota cost Tasmota
   its settings - the rebuild wrote over where it kept them - so the plug came
   back waiting on its setup network, and the next run stopped for good. The

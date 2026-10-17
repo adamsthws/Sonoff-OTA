@@ -2322,6 +2322,17 @@ def step_promote(ctx: Context) -> dict[str, Any]:
         say("[dry-run] would upload the same image through Firmware Upgrade")
         return {"current_ota": slot, "uploads": 0}
 
+    # Tried again after an upload that was cut off (the Wi-Fi going part way),
+    # Tasmota still holds that upload, and the next one hangs without a word
+    # until it gives up minutes later: a restart clears it.  It starts the same
+    # slot - an upload switches only once it is whole.
+    if ctx.state.status("D4") == FAILED:
+        say("Restarting the plug first, to clear the upload that was cut off...")
+        booted, uptime = device.started_at(), device.uptime_seconds()
+        device.command("Restart 1")
+        device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
+        device.wait_reachable(timeout=120)
+
     # Every upload writes the other slot and boots it, so this alternates.
     # One swap is expected; a second is allowed in case the run started from an
     # odd position.  Anything beyond that is a real fault, not bad luck.
