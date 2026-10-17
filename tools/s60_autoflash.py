@@ -1142,6 +1142,10 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
         "If a setup page opens by itself, close it: while that page is open the",
         "plug keeps scanning for networks, which can drop this computer off its",
         "network.",
+        "",
+        "The network can vanish for a few seconds every three minutes, as the",
+        "plug restarts to try your Wi-Fi again: if this computer is dropped off",
+        "it, join it again.",
     ])
     wait_until_joined(network)
     outcome = "manual"
