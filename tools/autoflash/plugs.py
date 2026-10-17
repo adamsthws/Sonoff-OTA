@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import oslock
+
 ROOT = Path(__file__).resolve().parents[2]
 CAPTURES = ROOT / "captures"
 PLUGS = CAPTURES / "plugs"
@@ -42,6 +44,59 @@ def folder_name(mac: str) -> str:
     if not MAC_RE.match(mac.strip()):
         raise ValueError(f"not a MAC address: {mac!r}")
     return mac.strip().lower().replace(":", "-")
+
+
+class PlugBusy(Exception):
+    """Another run is converting this plug right now."""
+
+
+_HELD: dict[str, Any] = {}  # the open lock files, kept for the run's life
+
+
+def hold(mac: str, run: str = "") -> None:
+    """This run's hold on the plug, refused while another run has it.
+
+    The operating system's own file lock, held as long as this process lives:
+    let go however the run ends, a crash included, so it can never be left
+    behind to refuse the next one."""
+    if mac in _HELD:
+        return
+    path = plug_dir(mac) / "run.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+", encoding="utf-8")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.seek(0)
+        held_by = handle.read().strip()
+        handle.close()
+        raise PlugBusy(held_by) from None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"run {run or '?'}, process {os.getpid()}, since {time.strftime('%H:%M:%S')}\n")
+    handle.flush()
+    _HELD[mac] = handle
+
+
+def busy() -> list[str]:
+    """The plugs another run is converting right now, each with who has it."""
+    found = []
+    if PLUGS.is_dir():
+        for lock in sorted(PLUGS.glob("*/run.lock")):
+            if oslock.held_elsewhere(lock):
+                mac = lock.parent.name.replace("-", ":")
+                try:
+                    held_by = lock.read_text(encoding="utf-8").strip()
+                except OSError:
+                    held_by = ""
+                found.append(f"{mac}{f' ({held_by})' if held_by else ''}")
+    return found
 
 
 def plug_dir(mac: str) -> Path:

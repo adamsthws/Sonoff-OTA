@@ -1418,9 +1418,23 @@ def step_pair(ctx: Context) -> dict[str, Any]:
     return {"plug_ip": ip, "plug_mac": mac}
 
 
+def hold_plug(ctx: Context, mac: str) -> None:
+    """One run on a plug at a time: two at once would each write over what the
+    other is doing."""
+    try:
+        plugs.hold(mac, run_name(ctx.dir) if hasattr(ctx, "dir") else "")
+    except plugs.PlugBusy as busy:
+        raise Abort(
+            f"another run is converting this plug ({mac}) right now"
+            + (f" - {busy}" if str(busy) else "")
+            + ". Let it finish, or stop it first, then run this again. Nothing was done"
+        ) from None
+
+
 def file_plug(ctx: Context, mac: str, account: AccountPlug | None) -> None:
     """Keep this run, and what is known of the plug, under its MAC; say if its
     Sonoff firmware is backed up from an earlier run."""
+    hold_plug(ctx, mac)
     if hasattr(ctx, "file_under_plug"):
         ctx.file_under_plug(mac)
     if account:
@@ -4272,6 +4286,8 @@ def run_steps(ctx: Context) -> int:
     tell("in, and this computer awake, until the last stage says complete.")
     tell("")
     try:
+        if ctx.state.input("plug_mac"):
+            hold_plug(ctx, ctx.state.input("plug_mac"))  # a run carried on: its plug is known
         firmware, source = settle_route(ctx)
     except NothingToDo as nothing:
         tell(str(nothing))
@@ -4743,6 +4759,29 @@ def cmd_cleanup(ctx: Context) -> int:
 
 
 
+def refused_for_another_run(command: str, ctx: Context) -> bool:
+    """Another run working on this plug - or, to clean up, on any - is asked
+    about first: before this one's log, report, firewall rule or safety locks
+    are touched, which are the other run's too. True when refused (and said)."""
+    mac = ctx.state.input("plug_mac")
+    if command in ("run", "step") and mac:
+        try:
+            plugs.hold(mac, run_name(ctx.dir))
+        except plugs.PlugBusy as busy:
+            tell(f"Stopped before anything was done: another run is converting this plug ({mac}) "
+                 f"right now{f' - {busy}' if str(busy) else ''}. Let it finish, or stop it first, "
+                 "then run this again.")
+            return True
+    if command == "cleanup":
+        busy = plugs.busy()
+        if busy:
+            tell(f"Not cleaning up: a run is converting a plug right now ({'; '.join(busy)}), and "
+                 "its firewall rule and secrets are in use. Let it finish, or stop it first, then "
+                 "run this again.")
+            return True
+    return False
+
+
 def main() -> int:
     try:
         return _main()
@@ -4852,6 +4891,9 @@ def _main() -> int:
         return 130
     except (Abort, ValueError, OSError) as exc:
         say(f"REFUSING: {exc}")
+        return 2
+
+    if refused_for_another_run(args.command, ctx):
         return 2
 
     if args.command == "list":

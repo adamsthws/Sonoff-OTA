@@ -1534,7 +1534,10 @@ class StartChoiceTests(unittest.TestCase):
         import tools.s60_autoflash as autoflash
         ctx = self.ctx()
         ctx.account_devices = lambda: None  # eWeLink could not be reached
-        with mock.patch.object(autoflash, "find_ewelink_plugs",
+        # Filed under its MAC in a scratch folder, not this checkout's captures.
+        with mock.patch.object(autoflash.plugs, "PLUGS", ctx.evidence.parent / "plugs"), \
+             mock.patch.object(autoflash.plugs, "hold"), \
+             mock.patch.object(autoflash, "find_ewelink_plugs",
                                side_effect=[[], [("10.0.0.5", "eWeLink device abc")]]), \
              mock.patch.object(autoflash, "ask_choice", return_value=0), \
              mock.patch.object(autoflash.hostsys, "mac_of", return_value="aa:bb:cc:dd:ee:ff"), \

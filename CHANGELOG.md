@@ -81,6 +81,10 @@ own firmware.
   after 30 seconds; a second within ten seconds stops at once, as before. At
   a question, or waiting on you, it stops at once. Closing the window stops
   the run, and the next one says that is why it stopped.
+- Two runs on the same plug at once are refused, the second told which run
+  has it: each would write over what the other was doing. The one refused
+  leaves the other's log, report and firewall rule as they are, and
+  `cleanup` waits until no run is converting a plug.
 - A plug that cannot be found can be set up through its own network by
   choice, for a computer that cannot see Wi-Fi networks. While waiting for a
   plug whose Wi-Fi went, the run says it will rejoin by itself, and that it has
