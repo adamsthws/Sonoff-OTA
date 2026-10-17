@@ -96,6 +96,10 @@ own firmware.
   network when it cannot join yours - two minutes after, if your Wi-Fi's name
   or password changed since the plug last joined - and the run sets it up
   through that, then gives ESPHome the same details.
+- An upload Tasmota refuses - an image damaged on the way, say - is noticed
+  from the page it answers with, and sent again, up to three times. Before,
+  it was taken for one that worked, and the run waited five minutes for a
+  restart that never came, then stopped blaming the network.
 
 ## 1.2.0
 

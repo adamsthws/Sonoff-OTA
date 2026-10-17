@@ -2434,6 +2434,48 @@ class PromoteTests(unittest.TestCase):
         self.assertEqual(events[:3], ["Restart 1", "rebooted", "upload"])
 
 
+class RefusedUploadTests(unittest.TestCase):
+    """An upload Tasmota took whole and refused (damaged on the way, say) is
+    sent again, three tries in all, before it is left to the person."""
+
+    def upload(self, outcomes):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        tries = iter(outcomes)
+        sent = []
+
+        def upload_firmware(path, timeout=None):
+            sent.append(path)
+            outcome = next(tries)
+            if isinstance(outcome, Exception):
+                raise outcome
+
+        ctx = SimpleNamespace(device=SimpleNamespace(upload_firmware=upload_firmware))
+        with mock.patch.object(autoflash, "upload_or_prompt_by_hand", return_value="manual") as by_hand, \
+             mock.patch.object(autoflash.time, "sleep"), \
+             mock.patch.object(autoflash, "tell") as told, mock.patch.object(autoflash, "say"):
+            result = autoflash.upload_or_prompt(ctx, Path("berry.bin"), "Berry Tasmota")
+        return result, len(sent), by_hand.called, " ".join(str(c.args[0]) for c in told.call_args_list)
+
+    def test_one_refusal_is_sent_again(self):
+        from tools.autoflash.device import UploadRefused
+        result, sent, by_hand, told = self.upload([UploadRefused("Bad magic byte"), None])
+        self.assertTrue(result.startswith("http:"))
+        self.assertEqual(sent, 2)
+        self.assertIn("refused the upload (Bad magic byte)", told)
+        self.assertFalse(by_hand)
+
+    def test_three_refusals_leave_it_to_the_person(self):
+        from tools.autoflash.device import UploadRefused
+        result, sent, by_hand, _ = self.upload([UploadRefused("Not enough space")] * 3)
+        self.assertEqual((result, sent, by_hand), ("manual", 3, True))
+
+    def test_any_other_failure_goes_to_the_person_at_once(self):
+        result, sent, by_hand, _ = self.upload([OSError("no route")])
+        self.assertEqual((result, sent, by_hand), ("manual", 1, True))
+
+
 class StalledUploadTests(unittest.TestCase):
     """F2 - an upload to the startup firmware that stalls is tried again from
     a restart, three tries in all, before it is left to the person."""
@@ -2490,6 +2532,13 @@ class StalledUploadTests(unittest.TestCase):
     def test_a_plug_too_stuck_to_restart_is_switched_off_and_on(self):
         _, _, _, told = self.upload([TimeoutError("stalled"), None], restart_answers=False)
         self.assertIn("switch it off and on", told)
+
+    def test_a_refused_upload_says_so_and_is_tried_again(self):
+        from tools.autoflash.device import UploadRefused
+        result, events, by_hand, told = self.upload([UploadRefused("Not enough space"), None])
+        self.assertTrue(result.startswith("http:"))
+        self.assertIn("refused the upload (Not enough space)", told)
+        self.assertFalse(by_hand)
 
     def test_one_that_never_comes_back_stops_with_a_reason(self):
         from tools import s60_autoflash

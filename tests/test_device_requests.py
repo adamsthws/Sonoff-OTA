@@ -156,3 +156,41 @@ class HeldRequestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# The page Tasmota 15.6.0 sent back for an image it would not take (the
+# emulator, an upload too big for its slot), and the end of one it took.
+REFUSED_PAGE = ("<div style='text-align:center;color:var(--c_ttl);'><h3>Sonoff S60TPG</h3><h2>Tasmota</h2></div>"
+                "<div style='text-align:center;'><b>Upload <font color='#ff5661'>Failed</font></b><br><br>"
+                "Not enough space</div><br><div></div><p></p><form id=but2 style=\"display:block;\" "
+                "action='.' method='get'><button>Main Menu</button></form>")
+TAKEN_PAGE = ("<div style='text-align:center;'><b>Upload <font color='#47c266'>Successful</font></b><br>"
+              "<br>Device will restart in a few seconds</div>")
+
+
+class UploadRefusalTests(unittest.TestCase):
+    """A refused upload comes back as an ordinary page, which must be read: an
+    image damaged on the way was once taken for a good one, and the run waited
+    five minutes on a restart that never came."""
+
+    def test_the_reason_is_read_off_the_page(self):
+        self.assertEqual(device.upload_refusal(REFUSED_PAGE), "Not enough space")
+        self.assertIsNone(device.upload_refusal(TAKEN_PAGE))
+        self.assertIsNone(device.upload_refusal(""))
+
+    def test_a_refused_upload_raises(self):
+        from unittest import mock
+        plug = Device("192.0.2.1")
+        with mock.patch.object(plug, "_get"), \
+             mock.patch.object(plug, "_request", return_value=REFUSED_PAGE.encode()):
+            with self.assertRaises(device.UploadRefused) as raised:
+                plug._upload("/up", "tasmota32c3.bin", b"\xe9" * 16, 10)
+        self.assertEqual(raised.exception.reason, "Not enough space")
+        self.assertIsInstance(raised.exception, DeviceError)
+
+    def test_a_taken_upload_returns_its_page(self):
+        from unittest import mock
+        plug = Device("192.0.2.1")
+        with mock.patch.object(plug, "_get"), \
+             mock.patch.object(plug, "_request", return_value=TAKEN_PAGE.encode()):
+            self.assertIn("Successful", plug._upload("/up", "tasmota32c3.bin", b"\xe9" * 16, 10))

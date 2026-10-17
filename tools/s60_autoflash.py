@@ -35,7 +35,7 @@ sys.path.insert(0, str(ROOT))
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
 from tools.autoflash import __version__, esphome, imprint, plugs, tasmota_settings  # noqa: E402
 from tools.autoflash import awake, detect, esphome_ota, interrupt, plans  # noqa: E402
-from tools.autoflash.device import Device, DeviceError  # noqa: E402
+from tools.autoflash.device import Device, DeviceError, UploadRefused  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import (  # noqa: E402
     PhaseError,
@@ -1205,14 +1205,23 @@ def upload_or_prompt(ctx: "Context", path: Path, what: str) -> str:
     identical, so offer that and carry on.
     """
     device = ctx.device
-    try:
-        started = time.monotonic()
-        device.upload_firmware(path)
-        seconds = round(time.monotonic() - started, 1)
-        say(f"{what} uploaded in {seconds}s")
-        return f"http:{seconds}s"
-    except Exception as exc:  # noqa: BLE001 - any failure falls back to the operator
-        return upload_or_prompt_by_hand(ctx, path, what, exc)
+    for attempt in range(1, UPLOAD_ATTEMPTS + 1):
+        try:
+            started = time.monotonic()
+            device.upload_firmware(path)
+            seconds = round(time.monotonic() - started, 1)
+            say(f"{what} uploaded in {seconds}s")
+            return f"http:{seconds}s"
+        except UploadRefused as exc:
+            # Refused whole, nothing written: most likely damaged on the way.
+            if attempt == UPLOAD_ATTEMPTS:
+                return upload_or_prompt_by_hand(ctx, path, what, exc)
+            tell(f"    The plug refused the upload ({exc.reason}); sending it again "
+                 f"(attempt {attempt + 1} of {UPLOAD_ATTEMPTS}).")
+            time.sleep(5)
+        except Exception as exc:  # noqa: BLE001 - any failure falls back to the operator
+            return upload_or_prompt_by_hand(ctx, path, what, exc)
+    raise AssertionError("unreachable")
 
 
 def upload_or_prompt_by_hand(ctx: "Context", path: Path, what: str, exc: Exception) -> str:
@@ -2670,7 +2679,9 @@ def upload_to_startup_firmware(ctx: Context, app: Path) -> str:
         except Exception as exc:  # noqa: BLE001 - tried again, then the person
             if attempt == UPLOAD_ATTEMPTS:
                 return upload_or_prompt_by_hand(ctx, app, "Official Tasmota (app0)", exc)
-            tell(f"    The upload stopped ({exc}); restarting the plug and trying again "
+            what_happened = (f"The plug refused the upload ({exc.reason})" if isinstance(exc, UploadRefused)
+                             else f"The upload stopped ({exc})")
+            tell(f"    {what_happened}; restarting the plug and trying again "
                  f"(attempt {attempt + 1} of {UPLOAD_ATTEMPTS}).")
             try:
                 device.command("Restart 1", timeout=10)

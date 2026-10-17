@@ -27,6 +27,25 @@ class DeviceError(RuntimeError):
     pass
 
 
+class UploadRefused(DeviceError):
+    """Tasmota (or its startup firmware) took a whole upload and refused it -
+    a damaged image, or one too big for its slot. Its page says which, and
+    nothing was written: it carries on as it was."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"the plug refused the upload: {reason}")
+        self.reason = reason
+
+
+def upload_refusal(page: str) -> str | None:
+    """Why Tasmota's page after an upload says it failed, or None if it does
+    not: "Upload Failed" in red, then the reason ("Not enough space", say)."""
+    found = re.search(r"Upload\s*<font[^>]*>\s*Failed\s*</font>\s*</b>(.*?)</div>", page, re.S | re.I)
+    if not found:
+        return None
+    return " ".join(re.sub(r"<[^>]+>", " ", found.group(1)).split()) or "no reason given"
+
+
 # A plug is on the LAN, so requests go straight to it: never through a proxy
 # from http_proxy/HTTPS_PROXY in the environment, which cannot route to
 # 192.168.x.x and fails exactly as if the device were absent.
@@ -474,4 +493,11 @@ class Device:
                 raise  # a restore must arm the restore page, or the file is taken as firmware
         reply = self._request("POST", "/u2", {"fsz": str(len(payload))}, timeout, body=body,
                               headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
-        return reply.decode("utf-8", errors="replace")
+        page = reply.decode("utf-8", errors="replace")
+        # A refusal comes back as an ordinary page: seen in the fault matrix,
+        # an image damaged on the way taken for a good one, and the run waiting
+        # on a restart that never came.
+        why = upload_refusal(page)
+        if why is not None:
+            raise UploadRefused(why)
+        return page
