@@ -2498,6 +2498,61 @@ class StalledUploadTests(unittest.TestCase):
         self.assertFalse(by_hand)
 
 
+class MoverOwnNetworkTests(unittest.TestCase):
+    """A mover that cannot join the home Wi-Fi raises its own network, and is
+    given new details through it - not left as a plug only a serial cable reaches."""
+
+    def wait(self, answers, network=None):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        tries = iter(answers)
+
+        def wait_for(ctx, check, what, timeout=240.0):
+            if not next(tries):
+                raise autoflash.Abort(f"{what} did not answer within 4 minutes")
+
+        adopted = []
+        ctx = SimpleNamespace(state=SimpleNamespace(input=lambda key: "12:34:56:ab:cd:ef"),
+                              adopt_wifi=lambda ssid, pw: adopted.append((ssid, pw)))
+        with mock.patch.object(autoflash, "wait_for", side_effect=wait_for), \
+             mock.patch.object(autoflash, "find_ssid", return_value=network), \
+             mock.patch.object(autoflash, "ask_credentials", return_value=("NewHome", "pw")), \
+             mock.patch.object(autoflash, "wait_until_joined"), \
+             mock.patch.object(autoflash.setup_network, "send_esphome_wifi") as sent, \
+             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "tell"):
+            try:
+                result = autoflash.wait_for_mover(ctx, "the mover")
+            except autoflash.Abort as exc:
+                result = exc
+        return result, sent, adopted
+
+    def test_a_mover_on_the_home_wifi_is_used_as_ever(self):
+        result, sent, _ = self.wait([True])
+        self.assertIs(result, False)
+        sent.assert_not_called()
+
+    def test_its_own_network_takes_new_details_which_esphome_gets_too(self):
+        result, sent, adopted = self.wait([False, True], network="sonoff-s60-mover-abcdef")
+        self.assertIs(result, True)
+        sent.assert_called_once_with("NewHome", "pw")
+        self.assertEqual(adopted, [("NewHome", "pw")])
+
+    def test_neither_says_to_switch_it_off_and_on(self):
+        result, sent, _ = self.wait([False], network=None)
+        from tools import s60_autoflash
+        self.assertIsInstance(result, s60_autoflash.Abort)
+        self.assertIn("switch the plug off and on", str(result))
+        self.assertIn("sonoff-s60-mover-abcdef", str(result))
+
+    def test_the_details_go_to_esphomes_own_page(self):
+        from unittest import mock
+        from tools.autoflash import setup_network
+        with mock.patch.object(setup_network, "page", return_value="ok") as page:
+            setup_network.send_esphome_wifi("My Wi-Fi", "p&ss")
+        self.assertEqual(page.call_args.args[1], "/wifisave?ssid=My+Wi-Fi&psk=p%26ss")
+
+
 class StartupSettingsReportTests(unittest.TestCase):
     """F2 keeps what the startup firmware said about saving the Wi-Fi."""
 

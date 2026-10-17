@@ -158,6 +158,14 @@ def wait_for_port(
     return False
 
 
+def send_esphome_wifi(ssid: str, password: str, *, host: str = SETUP_HOST) -> None:
+    """Give ESPHome's captive portal (the mover's own network) the Wi-Fi
+    details, as its own page would: it saves them and joins at once."""
+    query = urllib.parse.urlencode({"ssid": ssid, "psk": password})
+    if page(host, f"/wifisave?{query}", timeout=10.0) is None:
+        raise SetupError(f"the plug's page at {host} did not answer")
+
+
 def send_wifi(
     ssid: str,
     password: str,

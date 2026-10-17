@@ -167,6 +167,12 @@ def note_setup_network(ctx: "Context", network: str) -> None:
         ctx.state.set_input("device_name", network)
 
 
+def mover_network_hint(ctx: "Context") -> str:
+    """The mover's own network, named after the plug (name_add_mac_suffix)."""
+    mac = ctx.state.input("plug_mac")
+    return f"sonoff-s60-mover-{_mac_tail(mac).lower()}" if mac else "sonoff-s60-mover-xxxxxx"
+
+
 def esphome_network_hint(ctx: "Context") -> str:
     """ESPHome's own network, named after the plug (name_add_mac_suffix)."""
     mac = ctx.state.input("plug_mac")
@@ -1181,7 +1187,7 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
             "type its password and save. When it says the connection worked:",
         ])
     section("Back to your usual Wi-Fi", [
-        "Your computer should rejoin your usual Wi-Fi by itself, if it doesn't,",
+        "Your computer should rejoin your usual Wi-Fi by itself; if it doesn't,",
         "join it now.",
     ])
     return locate_plug(ctx, timeout=600.0)
@@ -3177,9 +3183,58 @@ def step_leave_tasmota(ctx: Context) -> dict[str, Any]:
         ctx.device.command("Restart 99")
         result = {"plan": plan.name, "restarted_after": "a stopped report"}
     if not ctx.dry_run:
-        wait_for(ctx, lambda address: esphome_ota.probe(address), "the plug to start the mover")
+        wait_for_mover(ctx, "the plug to start the mover")
         say("    The plug is running the mover, on Sonoff's memory layout.")
     return result
+
+
+def wait_for_mover(ctx: Context, what: str) -> bool:
+    """The mover on the home network - or, when it cannot join that (its
+    details changed since the plug last joined, say), set up through its own:
+    two minutes away from the home network it raises one, whose page takes new
+    details. True when it was given new ones, which ESPHome then needs too."""
+    try:
+        wait_for(ctx, lambda address: esphome_ota.probe(address), what)
+        return False
+    except Abort:
+        pass
+    network = find_ssid((mover_network_hint(ctx),), timeout=30)
+    if not network:
+        raise Abort(
+            f"{what} did not answer on your Wi-Fi, and its own network "
+            f"({mover_network_hint(ctx)}) is not to be seen either. If your Wi-Fi is "
+            "on, switch the plug off and on: two minutes after it cannot join your "
+            "Wi-Fi, it raises its own network, and running this again sets it up "
+            "through that")
+    tell(f"    The plug cannot join your Wi-Fi, so it has raised its own network, {network}.")
+    tell("    Most likely your Wi-Fi's name or password changed since it last joined.")
+    output.transient_begin()
+    section("The Wi-Fi details the plug should use", [
+        "Type the name and password of the 2.4 GHz network the plug should be on",
+        "now. They are sent to the plug through its own network, and written into",
+        "ESPHome as well.",
+    ])
+    ssid, password = ask_credentials()
+    output.transient_end()
+    section("Join the plug's own network", [
+        f"In {hostsys.wifi_menu_hint()}, join:",
+        f"    {network}      (open - no password)",
+        "",
+        "If a page opens by itself, close it: this sends the details for you.",
+    ])
+    wait_until_joined(network)
+    try:
+        setup_network.send_esphome_wifi(ssid, password)
+    except setup_network.SetupError as exc:
+        raise Abort(f"the Wi-Fi details could not be sent to the plug: {exc}") from exc
+    ctx.adopt_wifi(ssid, password)
+    tell(f"    Sent. The plug joins '{ssid}' now.")
+    section("Back to your usual Wi-Fi", [
+        "Your computer should rejoin your usual Wi-Fi by itself; if it doesn't,",
+        "join it now.",
+    ])
+    wait_for(ctx, lambda address: esphome_ota.probe(address), what, timeout=600.0)
+    return True
 
 
 def table_written(ctx: Context) -> bool:
@@ -3225,7 +3280,13 @@ def step_esphome_from_mover(ctx: Context) -> dict[str, Any]:
         raise Abort(f"the ESPHome image cannot be used: {exc}") from exc
     if ctx.dry_run:
         return {"dry_run": True}
-    wait_for(ctx, lambda address: esphome_ota.probe(address), "the mover")
+    if wait_for_mover(ctx, "the mover"):
+        # Given new Wi-Fi details on its own network: ESPHome gets those too.
+        ssid, password = ctx.wifi()
+        try:
+            image = esphome.image_for(ssid, password, own=ctx.esphome_firmware)
+        except (esphome.ImageError, imprint.ImprintError, OSError) as exc:
+            raise Abort(f"the ESPHome image cannot be used: {exc}") from exc
     seconds = send_as_esphome_update(ctx, image, "ESPHome")
     say(f"    ESPHome sent in {seconds}s; the plug restarts into it.")
     return {"seconds": seconds, "size": len(image)}

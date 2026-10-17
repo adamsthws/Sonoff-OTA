@@ -92,6 +92,10 @@ own firmware.
   choice, for a computer that cannot see Wi-Fi networks. While waiting for a
   plug whose Wi-Fi went, the run says it will rejoin by itself, and that it has
   no network of its own at that stage.
+- The mover, which takes a plug from Tasmota to ESPHome, raises its own
+  network when it cannot join yours - two minutes after, if your Wi-Fi's name
+  or password changed since the plug last joined - and the run sets it up
+  through that, then gives ESPHome the same details.
 
 ## 1.2.0
 

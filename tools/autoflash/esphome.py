@@ -97,8 +97,8 @@ def published_bootloader() -> bytes:
 # The mover (ESPHome/sonoff_s60_mover.yaml): a small ESPHome, run only while a
 # plug leaves Tasmota, that takes the next firmware as an ESPHome update.
 MOVER = ROOT / "artifacts" / "esphome-sonoff-s60-mover-1.0.0.bin"
-MOVER_SHA256 = "d6e07f7f04e4eee0c61601ca4a101b8ba8a941c7ba816ee9bb675be9e2ff5f28"
-MOVER_SIZE = 742_144
+MOVER_SHA256 = "970f29fd81ec862cdd10f8a812c4ee66d26c1b1e5bbff6256072d6b9a6613956"
+MOVER_SIZE = 758_960
 # Sonoff's partition table, written back when a plug leaves Tasmota's layout.
 SONOFF_TABLE = ROOT / "artifacts" / "sonoff-s60-partition-table.bin"
 

@@ -4,11 +4,10 @@
 #
 # Leaving Tasmota, the plug is on Tasmota's layout, and its running Tasmota
 # sits across both of the app slots Sonoff's layout has, so nothing it runs
-# can write into either. This is small enough for Tasmota's safeboot slot,
-# which it can: started from there, ESPHome's own partition-table update
-# (allow_partition_access) moves it into a slot of the new layout, writes
-# that layout, and starts it there. The tool then sends what comes next as an
-# ordinary update.
+# can write into either. This is small enough to go in front of it, at
+# 0x20000, Sonoff's first slot: the tool writes it there, with Sonoff's
+# layout last, and the plug starts it. The tool then sends what comes next as
+# an ordinary update.
 #
 # Like sonoff_s60.yaml it is published pre-built with Wi-Fi placeholders the
 # tool writes the plug's Wi-Fi into; it saves nothing, as it never stays.
@@ -54,10 +53,19 @@ esp32:
 
 wifi:
   reboot_timeout: 0s
-  # Never a hotspot (a timeout of 0 never starts it; ESPHome wants one named):
-  # the mover only works on the home network, and the tool waits for it there.
+  # Two minutes away from the home network, and it raises its own, where the
+  # captive portal's page takes new Wi-Fi details - the home network changed
+  # since the plug last joined it, say - while it goes on trying the home one.
+  # Without it a mover that cannot join is a plug only a serial cable reaches.
   ap:
-    ap_timeout: 0s
+    ap_timeout: 2min
+
+captive_portal:
+
+# Not needed - the tool finds the mover by its address and its update service -
+# and leaving it out keeps the mover small enough to go in front of Tasmota.
+mdns:
+  disabled: true
 
 ota:
   - platform: esphome
