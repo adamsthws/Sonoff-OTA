@@ -199,6 +199,22 @@ def describe_cloud(message: dict[str, Any], seq: str) -> str | None:
     return f"Cloud: {action or 'message'}{error}{detail}"
 
 
+# How long a plug offline in eWeLink is waited for before the send is refused.
+OFFLINE_WAIT = 180.0
+
+
+def until_online(device: dict, look_again, *, sleep=time.sleep) -> dict:
+    """`device` as eWeLink has it once it is online, or after OFFLINE_WAIT."""
+    waited = 0.0
+    while not device.get("online") and waited < OFFLINE_WAIT:
+        if waited == 0:
+            print(f"Device is offline in eWeLink; waiting up to {OFFLINE_WAIT:.0f}s for it to come back...")
+        sleep(10)
+        waited += 10
+        device = look_again()
+    return device
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--listen-ip", required=True)
@@ -277,10 +293,17 @@ def main():
             raise EwelinkError(
                 f"Device model is {identity['model']}, not the S60's {S60_DEVICE_MODEL}; refusing"
             )
+        # Offline a while after a send cut off part way (this computer stopped
+        # mid-download, say): the plug keeps Sonoff's firmware and comes back
+        # to eWeLink in its own time - or, seen in the emulator, only once it
+        # is switched off and on.  Waited for, not refused at once.
+        device = until_online(device, lambda: select_device(get_devices(region, session["at"]), device_id))
         if not device.get("online"):
             raise EwelinkError(
-                "Device is offline in eWeLink; refusing to send. The upgrade command "
-                "reaches the plug only through eWeLink, so allow it internet access for this run"
+                "Device is offline in eWeLink; refusing to send - the upgrade command "
+                "reaches the plug only through eWeLink. If it has internet access, "
+                "switch the plug off and on (after a send cut off part way it can "
+                "stay away from eWeLink until it restarts), then run this again"
             )
         if identity["version"] != args.expected_current_version:
             raise EwelinkError(

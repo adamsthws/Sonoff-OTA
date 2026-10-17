@@ -61,6 +61,10 @@ own firmware.
   way from ESPHome and sent it round steps that need Sonoff's layout, which
   never finished. This computer's record of the plug now tells the two
   apart, and the run goes on from official Tasmota.
+- A plug offline in eWeLink when the installer is to be sent - after a send
+  cut off part way, say - is waited for for up to three minutes, then the
+  run says to switch it off and on, where before it was refused at once
+  and the firewall blamed.
 - A plug that cannot be found can be set up through its own network by
   choice, for a computer that cannot see Wi-Fi networks. While waiting for a
   plug whose Wi-Fi went, the run says it will rejoin by itself, and that it has

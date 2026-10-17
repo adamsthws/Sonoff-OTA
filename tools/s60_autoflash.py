@@ -1502,6 +1502,12 @@ def cut_off(sighting: Sighting) -> bool:
     return sighting.answering and sighting.plug.online is False
 
 
+# An update cut off part way - this computer stopped while it was being sent -
+# can leave the plug on Sonoff's firmware but away from eWeLink until it restarts.
+AFTER_A_CUT_OFF_SEND = ("switch the plug off and on: after an update cut off part way "
+                        "it can stay away from eWeLink until it restarts.")
+
+
 def why_not_found(sighting: Sighting) -> str:
     """What to do about an account plug that is not answering here, or that
     is answering but cannot be converted from here."""
@@ -1510,10 +1516,12 @@ def why_not_found(sighting: Sighting) -> str:
         return (f"{describe_plug(plug)} answers at {sighting.ip}, but eWeLink shows it "
                 "offline - it cannot reach the internet. The conversion is sent to the "
                 "plug through eWeLink, so allow it internet access for this run (you can "
-                "block it again once it runs Tasmota, which needs no cloud).")
+                "block it again once it runs Tasmota, which needs no cloud). If it has "
+                f"that already, {AFTER_A_CUT_OFF_SEND}")
     if plug.online is False:
         return (f"{describe_plug(plug)}: eWeLink shows it offline - check it is switched "
-                "on at the wall, on your Wi-Fi, and allowed to reach the internet.")
+                "on at the wall, on your Wi-Fi, and allowed to reach the internet. If "
+                f"it is, {AFTER_A_CUT_OFF_SEND}")
     if sighting.ip:
         return (f"{describe_plug(plug)} is at {sighting.ip} but does not answer on the "
                 "network - turn on LAN Control in its settings in the eWeLink app.")
@@ -1884,6 +1892,7 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
         # Some of it served means the plug reached this computer: not the
         # firewall, but its Wi-Fi going part way (a router restarting, say).
         started = output.tool_said("Served /user") or output.tool_said("did not request every")
+        offline = output.tool_said("offline in eWeLink")
         section("The bridge was not delivered", [
             *(["The sender reported:", *(f"  {line}" for line in reported), ""] if reported else []),
             *([
@@ -1891,7 +1900,12 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
                 "way - most likely its Wi-Fi dropped: a router restarting, or a weak",
                 "signal. It keeps its Sonoff firmware, so nothing is lost; run this",
                 "again once its Wi-Fi is steady.",
-            ] if started else firewall_hint(ctx)),
+            ] if started else [
+                "eWeLink does not see the plug, so the installer cannot be sent. It",
+                "keeps its Sonoff firmware, so nothing is lost: switch the plug off",
+                "and on, wait for it to show online in the eWeLink app, and run this",
+                "again.",
+            ] if offline else firewall_hint(ctx)),
         ])
         raise Abort("bridge delivery stopped part way" if started else "bridge delivery failed")
     return {"seconds": round(time.monotonic() - started, 1)}

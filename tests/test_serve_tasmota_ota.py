@@ -88,6 +88,33 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class OfflineTests(unittest.TestCase):
+    """A plug offline in eWeLink - after a send cut off part way, say - is
+    waited for, not refused at once."""
+
+    def test_one_that_comes_back_is_sent_to(self):
+        from unittest import mock
+        import tools.serve_tasmota_ota as sender
+        looks = iter([{"online": False}, {"online": True}])
+        with mock.patch("builtins.print"):
+            device = sender.until_online({"online": False}, lambda: next(looks), sleep=lambda _: None)
+        self.assertTrue(device["online"])
+
+    def test_one_that_stays_away_is_given_up_on(self):
+        from unittest import mock
+        import tools.serve_tasmota_ota as sender
+        looks = []
+
+        def look():
+            looks.append(1)
+            return {"online": False}
+
+        with mock.patch("builtins.print"):
+            device = sender.until_online({"online": False}, look, sleep=lambda _: None)
+        self.assertFalse(device["online"])
+        self.assertEqual(len(looks), sender.OFFLINE_WAIT // 10)
+
+
 class DescribeCloudTests(unittest.TestCase):
     def test_offline_and_online(self):
         from tools.serve_tasmota_ota import describe_cloud
