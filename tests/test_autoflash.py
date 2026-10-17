@@ -2403,6 +2403,70 @@ class PromoteTests(unittest.TestCase):
         self.assertEqual(events[:3], ["Restart 1", "rebooted", "upload"])
 
 
+class StalledUploadTests(unittest.TestCase):
+    """F2 - an upload to the startup firmware that stalls is tried again from
+    a restart, three tries in all, before it is left to the person."""
+
+    def upload(self, uploads, back=True, restart_answers=True):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        events = []
+        tries = iter(uploads)
+
+        def upload_firmware(path, timeout=None):
+            events.append(("upload", timeout))
+            outcome = next(tries)
+            if isinstance(outcome, Exception):
+                raise outcome
+
+        def command(c, timeout=None):
+            events.append(c)
+            if not restart_answers:
+                raise OSError("not answering")
+
+        ctx = SimpleNamespace(device=SimpleNamespace(upload_firmware=upload_firmware, command=command))
+        with mock.patch.object(autoflash, "recovery_firmware_up", return_value=back), \
+             mock.patch.object(autoflash, "upload_or_prompt_by_hand", return_value="manual") as by_hand, \
+             mock.patch.object(autoflash.time, "sleep"), \
+             mock.patch.object(autoflash, "tell") as told, mock.patch.object(autoflash, "say"):
+            try:
+                result = autoflash.upload_to_startup_firmware(ctx, Path("tasmota32c3.bin"))
+            except autoflash.Abort as exc:
+                result = exc
+        return result, events, by_hand.called, " ".join(str(c.args[0]) for c in told.call_args_list)
+
+    def test_an_upload_that_goes_through_is_done_once(self):
+        result, events, by_hand, _ = self.upload([None])
+        self.assertTrue(result.startswith("http:"))
+        self.assertEqual(events, [("upload", 120.0)])  # a stall noticed in two minutes, not ten
+        self.assertFalse(by_hand)
+
+    def test_a_stalled_upload_is_tried_again_after_a_restart(self):
+        result, events, by_hand, told = self.upload([TimeoutError("stalled"), TimeoutError("stalled"), None])
+        self.assertEqual([e for e in events if e == "Restart 1"], ["Restart 1"] * 2)
+        self.assertEqual(len([e for e in events if e != "Restart 1"]), 3)
+        self.assertTrue(result.startswith("http:"))
+        self.assertIn("attempt 3 of 3", told)
+        self.assertFalse(by_hand)
+
+    def test_three_stalls_leave_it_to_the_person(self):
+        result, events, by_hand, _ = self.upload([TimeoutError("stalled")] * 5)
+        self.assertEqual(len([e for e in events if e != "Restart 1"]), 3)
+        self.assertTrue(by_hand)
+        self.assertEqual(result, "manual")
+
+    def test_a_plug_too_stuck_to_restart_is_switched_off_and_on(self):
+        _, _, _, told = self.upload([TimeoutError("stalled"), None], restart_answers=False)
+        self.assertIn("switch it off and on", told)
+
+    def test_one_that_never_comes_back_stops_with_a_reason(self):
+        from tools import s60_autoflash
+        result, _, by_hand, _ = self.upload([TimeoutError("stalled")], back=False)
+        self.assertIsInstance(result, s60_autoflash.Abort)
+        self.assertFalse(by_hand)
+
+
 class StartupSettingsReportTests(unittest.TestCase):
     """F2 keeps what the startup firmware said about saving the Wi-Fi."""
 

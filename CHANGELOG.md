@@ -65,6 +65,9 @@ own firmware.
   cut off part way, say - is waited for for up to three minutes, then the
   run says to switch it off and on, where before it was refused at once
   and the firewall blamed.
+- An upload of official Tasmota to the startup firmware that stalls is
+  noticed after two minutes, not ten, and tried again from a restart - up
+  to three times - before it is left to be done by hand.
 - A plug that cannot be found can be set up through its own network by
   choice, for a computer that cannot see Wi-Fi networks. While waiting for a
   plug whose Wi-Fi went, the run says it will rejoin by itself, and that it has

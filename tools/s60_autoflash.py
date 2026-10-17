@@ -1195,16 +1195,22 @@ def upload_or_prompt(ctx: "Context", path: Path, what: str) -> str:
         say(f"{what} uploaded in {seconds}s")
         return f"http:{seconds}s"
     except Exception as exc:  # noqa: BLE001 - any failure falls back to the operator
-        output.transient_begin()
-        tell(f"    Automatic upload failed: {exc}")
-        say("")
-        tell(f"    Upload it by hand instead - the file is identical:")
-        tell(f"        open http://{device.host}/  ->  Firmware Upgrade  ->  choose file")
-        tell(f"        {path}")
-        if not confirm(f"{what} uploaded through the web UI?"):
-            raise Abort(f"{what} was not uploaded")
-        output.transient_end()
-        return "manual"
+        return upload_or_prompt_by_hand(ctx, path, what, exc)
+
+
+def upload_or_prompt_by_hand(ctx: "Context", path: Path, what: str, exc: Exception) -> str:
+    """The upload left to the operator's browser, after it failed with `exc`."""
+    device = ctx.device
+    output.transient_begin()
+    tell(f"    Automatic upload failed: {exc}")
+    say("")
+    tell(f"    Upload it by hand instead - the file is identical:")
+    tell(f"        open http://{device.host}/  ->  Firmware Upgrade  ->  choose file")
+    tell(f"        {path}")
+    if not confirm(f"{what} uploaded through the web UI?"):
+        raise Abort(f"{what} was not uploaded")
+    output.transient_end()
+    return "manual"
 
 
 
@@ -2579,6 +2585,50 @@ def commit_once(ctx: Context) -> dict[str, Any]:
     return {"exit": code}
 
 
+# An upload making no progress for this long has stalled: official Tasmota takes
+# well under a minute, even on a busy plug.
+UPLOAD_STALL = 120.0
+
+
+# Tries at the upload, as the commit and the installer's sends are tried.
+UPLOAD_ATTEMPTS = 3
+
+
+def upload_to_startup_firmware(ctx: Context, app: Path) -> str:
+    """Official Tasmota to the startup firmware (F2); a stalled upload is tried
+    again from a restart, up to UPLOAD_ATTEMPTS in all, before it is left to
+    the person.
+
+    Seen once in the fault matrix: an upload began and never finished, the
+    startup firmware neither taking it nor saying why.  A restart clears that,
+    and is safe here: until a whole image is taken, the plug starts the startup
+    firmware again."""
+    device = ctx.device
+    for attempt in range(1, UPLOAD_ATTEMPTS + 1):
+        started = time.monotonic()
+        try:
+            device.upload_firmware(app, timeout=UPLOAD_STALL)
+        except Exception as exc:  # noqa: BLE001 - tried again, then the person
+            if attempt == UPLOAD_ATTEMPTS:
+                return upload_or_prompt_by_hand(ctx, app, "Official Tasmota (app0)", exc)
+            tell(f"    The upload stopped ({exc}); restarting the plug and trying again "
+                 f"(attempt {attempt + 1} of {UPLOAD_ATTEMPTS}).")
+            try:
+                device.command("Restart 1", timeout=10)
+            except (DeviceError, OSError):
+                tell("    The plug is not answering: switch it off and on - at this stage that is")
+                tell("    safe, it starts the startup firmware again - and this carries on.")
+            restart = time.monotonic()
+            time.sleep(5)
+            if not recovery_firmware_up(ctx, restart, within=300):
+                raise Abort("the startup firmware did not come back after the upload stopped") from exc
+            continue
+        seconds = round(time.monotonic() - started, 1)
+        say(f"Official Tasmota (app0) uploaded in {seconds}s")
+        return f"http:{seconds}s"
+    raise AssertionError("unreachable")
+
+
 def recovery_firmware_up(ctx: Context, started: float, *, within: float) -> bool:
     """Wait up to `within` seconds for the plug to answer on its recovery firmware."""
     window = time.monotonic()
@@ -2642,7 +2692,7 @@ def step_canonical(ctx: Context) -> dict[str, Any]:
     if ctx.dry_run:
         say("[dry-run] would upload the official application")
         return {"safeboot_seconds": round(waited, 1), "startup_settings": saved}
-    how = upload_or_prompt(ctx, app, "Official Tasmota (app0)")
+    how = upload_to_startup_firmware(ctx, app)
 
     # The startup firmware normally saved the Wi-Fi where Tasmota reads it, so
     # Tasmota comes back on the network.  If it did not, Tasmota raises its own
