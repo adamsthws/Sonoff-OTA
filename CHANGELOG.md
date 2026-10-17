@@ -85,6 +85,9 @@ own firmware.
   has it: each would write over what the other was doing. The one refused
   leaves the other's log, report and firewall rule as they are, and
   `cleanup` waits until no run is converting a plug.
+- This computer is kept awake while a run works, with what each system has
+  already (systemd-inhibit, caffeinate, Windows' own setting) - nothing
+  installed, and let go however the run ends.
 - A plug that cannot be found can be set up through its own network by
   choice, for a computer that cannot see Wi-Fi networks. While waiting for a
   plug whose Wi-Fi went, the run says it will rejoin by itself, and that it has

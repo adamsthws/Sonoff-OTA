@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
 from tools.autoflash import __version__, esphome, imprint, plugs, tasmota_settings  # noqa: E402
-from tools.autoflash import detect, esphome_ota, interrupt, plans  # noqa: E402
+from tools.autoflash import awake, detect, esphome_ota, interrupt, plans  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import (  # noqa: E402
@@ -4232,11 +4232,14 @@ def unexpected(exc: BaseException) -> str:
 
 
 def cmd_run(ctx: Context) -> int:
+    # Asleep part way, this computer would leave the plug waiting on it.
+    say(f"This computer is {awake.keep_awake()} while the run works.")
     try:
         return run_steps(ctx)
     finally:
         # However the run ends - finished, failed, quit, Ctrl-C or stopped.
         forget_run_secrets(ctx.dir)
+        awake.let_sleep()
 
 
 def restore_left_locks() -> None:
@@ -4283,7 +4286,7 @@ def run_steps(ctx: Context) -> int:
     tell("")
     tell("Converting a plug usually takes under 10 minutes. Some stages take a")
     tell("minute or two with little to see - that's normal. Keep the plug plugged")
-    tell("in, and this computer awake, until the last stage says complete.")
+    tell("in, and this computer on, until the last stage says complete.")
     tell("")
     try:
         if ctx.state.input("plug_mac"):
