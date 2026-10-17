@@ -86,16 +86,68 @@ and 120 MB. Past one per core the plugs slow down enough for their timeouts to
 fail where nothing is wrong, so the load is kept at or under the number of
 cores.
 
+**The cloud, one plug at a time.** Every emulated plug is a copy of the same
+real one, and eWeLink keeps one connection per plug. So a plug's way to the
+internet is open only while its run may need the cloud - to send the
+installer - and shut for the rest, and runs take turns at that: from the
+start until the plug is downloading the installer from this computer. The
+Sonoff directions start from a plug saved just after the installer was sent,
+switched off; it starts Sonoff's firmware again, as the installer means it
+to, so each run sends the installer again first.
+
 ### What it cannot show
 
 - **ESPHome's hotspot.** ESPHome away from its network for 90 s raises its
   own hotspot, and goes on trying its network every 30 s (its source says so);
   the emulator's Wi-Fi cannot be both at once, so a plug there never rejoins.
   Those scenarios are marked as the emulator's limit, not passed.
+- **The installer's own network.** Away from its network for more than 45 s,
+  the installer raises a network of its own, which the emulator cannot join
+  (it has no WPA2). Longer outages during the backup or D1 are marked as the
+  emulator's limit too.
+- **A plug gone back to Sonoff's firmware, during the backup or D1.** A power
+  cut or a fault there sends the plug back to Sonoff's firmware, and the run
+  sends the installer again - once it sees Sonoff's firmware. In the emulator,
+  Sonoff's firmware does not open its local port again after such a fault, so
+  the run cannot see it. Those scenarios are left out (untested, not passed)
+  until a real plug shows what it does.
 - **Timings.** The emulated plug is slower than a real one, and its flash
   never wears or fails: the one real moment of risk, a power cut while the
   bootloader or partition table is written (well under a second), is not
   something it can measure.
+
+### Results
+
+On 16-17 October 2026, on the code as of `e3ae70e`, the latest result of each
+scenario:
+
+| Direction | Scenarios | Passed | Emulator's limit | Failed | Untested |
+|---|---:|---:|---:|---:|---:|
+| Sonoff to Tasmota | 192 | 161 | - | - | 31 |
+| Sonoff to ESPHome | 112 | 90 | - | - | 22 |
+| Tasmota to ESPHome | 48 | 48 | - | - | - |
+| Tasmota to Sonoff | 112 | 112 | - | - | - |
+| ESPHome to Tasmota | 176 | 175 | 1 | - | - |
+| ESPHome to Sonoff | 96 | 96 | - | - | - |
+| **All** | **736** | **682** | **1** | **-** | **53** |
+
+The emulator's limit is ESPHome's hotspot after a 180 s outage. The untested
+are the faults during the backup and D1 (above).
+
+### Still open
+
+- **Back on Sonoff's firmware, during the backup or D1.** Whether a real plug
+  opens its local port again, so the run sees it and sends the installer
+  again, or the run needs eWeLink to tell it the plug is back. A real plug
+  switched off during the backup answers it.
+- **The first send after a restart.** Switched off and on after a send cut
+  off part way, the plug came back to eWeLink but ignored the first update
+  command; the next run's went through. A run could send again by itself when
+  nothing was downloaded - but a firewall in the way looks the same.
+- **An upload that hung.** Once in all the runs, official Tasmota's upload to
+  the startup firmware (F2) started and never finished; the run waited ten
+  minutes, then asked for it by hand. Not seen again; F2 could restart the
+  plug and try once more, as D4 now does.
 
 ### What it has found
 
@@ -122,12 +174,19 @@ Each fixed, with a test, and the scenario run again:
 - Tried again after an upload of the interim Tasmota cut off by the network
   (D4), the next upload hung without a word: Tasmota still held the cut one.
   The plug is now restarted first.
+- On a busy plug, setting Tasmota up (F4) gave up on a slow answer, then
+  restarted the plug again on every try, and left the next step asking a
+  plug not answering yet - which asked the person for the Wi-Fi.
+- With this computer stopped part way through sending the installer, the
+  plug stays away from eWeLink; the run refused at once and blamed the
+  firewall. It now waits for it, then says to switch it off and on.
 - A power cut while the memory layout was rebuilt for Tasmota cost Tasmota
   its settings - the rebuild wrote over where it kept them - so the plug came
   back waiting on its setup network, and the next run stopped for good. The
   settings are now moved aside first; cuts timed off the plug's own output at
   each point of the rebuild, then each way on from there (Tasmota, ESPHome,
-  Sonoff's firmware), all came back with the settings and were converted.
+  Sonoff's firmware), all came back with the settings and were converted -
+  and the run now carries on by itself, trying the commit up to three times.
 
 ## Real plugs
 
