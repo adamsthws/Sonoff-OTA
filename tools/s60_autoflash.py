@@ -2177,10 +2177,10 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
 # How the backup went, for the stage line and the report: BACKUP_OUTCOMES.
 BACKUP_OUTCOMES = {
     "saved": ("complete", "Completed"),
-    "existing": ("already done", "Already taken by an earlier run"),
-    "failed": ("skipped", "Failed - carried on without one"),
+    "existing": ("already done", "Taken by an earlier run"),
+    "failed": ("skipped", "Failed"),
     "not wanted": ("skipped", "Not taken (--no-backup)"),
-    "unreadable": ("skipped", "Not taken - the installer could not read the plug"),
+    "unreadable": ("skipped", "Not taken (plug unreadable)"),
     "not taken": ("skipped", "Not taken"),
 }
 
@@ -4718,14 +4718,14 @@ def python_description() -> str:
     running = Path(sys.executable).resolve()
     portable = Path(os.environ.get("S60_PYTHON_HOME") or ROOT / ".python").resolve()
     if portable in running.parents:
-        source = "portable, downloaded by this tool"
+        source = "portable"
     elif (hostsys.IS_MAC and (portable / "installed-by-s60").exists()
           and "Python.framework" in running.parts):
-        source = "python.org's, installed by this tool"
+        source = "installed by start.sh"
     elif sys.prefix != sys.base_prefix:
         source = "in a virtual environment"
     else:
-        source = "already installed on this computer"
+        source = "existing installation"
     return f"{platform.python_version()} ({source})"
 
 
@@ -4788,7 +4788,7 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
               or captures.get("D1.resumed") is True
               or (captures.get("D1.upload_route") == "home network" and captures.get("D1.wifi") != "preset")
               or captures.get("F4.wifi_route") == "setup network")
-    took = output.elapsed(seconds) + (" (this session; the run was resumed)" if resumed else "")
+    took = output.elapsed(seconds) + (" (since resuming)" if resumed else "")
     retries = {number: captures[f"{step}.attempts"] - 1 for number, (step, _, _) in enumerate(STEPS, 1)
                if isinstance(captures.get(f"{step}.attempts"), int) and captures[f"{step}.attempts"] > 1}
     retried = [f"{number} ({count} {'retry' if count == 1 else 'retries'})"
@@ -4802,9 +4802,9 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Result", result),
         ("Firmware", FIRMWARES[run_firmware(ctx.state)]),
         ("Converted from", {"sonoff": "Sonoff", "tasmota": "Tasmota", "esphome": "ESPHome",
-                            "midway": "part way through a conversion",
-                            "committed": "part way through a conversion",
-                            "installer": "part way through a conversion"}[run_source(ctx.state)]),
+                            "midway": "unfinished conversion",
+                            "committed": "unfinished conversion",
+                            "installer": "unfinished conversion"}[run_source(ctx.state)]),
         ("Tool version", __version__),
         ("Plug model", model or "__"),
         ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),
@@ -4829,9 +4829,14 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     ]
     if os.environ.get("S60_EMULATOR_URL"):
         fields.append(("Ran in the emulator", "yes"))
-    # Each answer starts with a capital: "No", "Converted".  Only the first
-    # letter, so "S60TPG" and "6m 32s" stay as they are.
-    return [(label, value[:1].upper() + value[1:]) for label, value in fields]
+    return [(label, answer(value)) for label, value in fields]
+
+
+def answer(value: str) -> str:
+    """A report answer as shown, here and as the run checks it: starting with a
+    capital - "No", "Converted".  Only the first letter, so "S60TPG" and
+    "6m 32s" stay as they are."""
+    return value[:1].upper() + value[1:]
 
 
 def report_markdown(fields: list[tuple[str, str]]) -> str:
@@ -4877,11 +4882,11 @@ def describe_hardware(switched: bool, restored: bool,
     seen = ((v_on is not None and v_off is not None and v_on >= MAINS_VOLTS and v_off < DEAD_VOLTS)
             or (p_on is not None and p_off is not None and p_on >= LOAD_WATTS and p_off < IDLE_WATTS))
     if not (switched and restored):
-        relay = "did not switch on command"
+        relay = "did not switch"
     elif seen:
-        relay = "switches (seen on the meter)"
+        relay = "switches (meter confirms)"
     else:
-        relay = "switches on command (no change on the meter)"
+        relay = "switches (meter unchanged)"
     return {
         "Relay": relay,
         "Power meter": "no readings" if on is None and off is None
@@ -4922,7 +4927,7 @@ def check_hardware(ctx: Context) -> dict[str, str]:
     on, off = (second, first) if was_on else (first, second)
     result = describe_hardware(switched, restored, on, off)
     for label, value in result.items():
-        say(f"    {label}: {value}")
+        say(f"    {label}: {answer(value)}")
     return result
 
 
@@ -4943,7 +4948,7 @@ def check_esphome_hardware(ctx: Context) -> dict[str, str]:
     on, off = (second, first) if was_on else (first, second)
     result = describe_hardware(switched, restored, on, off)
     for label, value in result.items():
-        say(f"    {label}: {value}")
+        say(f"    {label}: {answer(value)}")
     return result
 
 

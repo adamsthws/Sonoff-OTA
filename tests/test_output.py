@@ -710,10 +710,10 @@ class ReportTests(OutputTestCase):
         portable = Path(self.tmp.name) / ".python"
         with mock.patch.dict(os.environ, {"S60_PYTHON_HOME": str(portable)}):
             with mock.patch.object(af.sys, "executable", str(portable / "linux-x86_64/python/bin/python3")):
-                self.assertIn("(portable, downloaded by this tool)", af.python_description())
+                self.assertIn("(portable)", af.python_description())
             with mock.patch.object(af.sys, "executable", "/usr/bin/python3"), \
                  mock.patch.object(af.sys, "prefix", "/usr"), mock.patch.object(af.sys, "base_prefix", "/usr"):
-                self.assertIn("(already installed on this computer)", af.python_description())
+                self.assertIn("(existing installation)", af.python_description())
             with mock.patch.object(af.sys, "executable", "/home/me/venv/bin/python3"), \
                  mock.patch.object(af.sys, "prefix", "/home/me/venv"), \
                  mock.patch.object(af.sys, "base_prefix", "/usr"):
@@ -740,8 +740,8 @@ class ReportTests(OutputTestCase):
     def test_the_report_says_how_the_backup_went_but_not_where_it_is(self):
         import tools.s60_autoflash as af
         mac_path = "captures/plugs/58-cf-79-01-02-03/sonoff-backup"
-        for outcome, said in (("saved", "Completed"), ("failed", "Failed - carried on without one"),
-                              ("existing", "Already taken by an earlier run")):
+        for outcome, said in (("saved", "Completed"), ("failed", "Failed"),
+                              ("existing", "Taken by an earlier run")):
             with self.subTest(outcome=outcome):
                 ctx = self.ctx(backup_outcome=outcome, stock_backup=mac_path,
                                plug_mac="58:cf:79:01:02:03")
@@ -766,9 +766,9 @@ class ReportTests(OutputTestCase):
     def test_every_answer_starts_with_a_capital_and_only_that_changes(self):
         import tools.s60_autoflash as af
         fields = dict(af.report_fields(self.ctx(), 441, False,
-                                       {"Relay": "switches (seen on the meter)",
+                                       {"Relay": "switches (meter confirms)",
                                         "Power meter": "on: 239 V, 0 W; off: 0 V, 0 W"}))
-        self.assertEqual(fields["Relay"], "Switches (seen on the meter)")
+        self.assertEqual(fields["Relay"], "Switches (meter confirms)")
         self.assertEqual(fields["Power meter"], "On: 239 V, 0 W; off: 0 V, 0 W")
         self.assertEqual(fields["Plug model"], "S60TPG")
 
@@ -796,7 +796,7 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Typed the Wi-Fi"], "Yes")
         self.assertEqual(fields["Joined setup network"], "Yes")
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60")
-        self.assertIn("(this session; the run was resumed)", fields["Time taken"])
+        self.assertIn("(since resuming)", fields["Time taken"])
 
     def test_the_invitation_links_the_thread_and_copies_the_report(self):
         import tools.s60_autoflash as af
@@ -804,7 +804,7 @@ class ReportTests(OutputTestCase):
 
         def body():
             with mock.patch.object(af.hostsys, "copy_to_clipboard", side_effect=lambda text: copied.append(text) or True), \
-                 mock.patch.object(af, "check_hardware", return_value={"Relay": "switches (seen on the meter)"}):
+                 mock.patch.object(af, "check_hardware", return_value={"Relay": "switches (meter confirms)"}):
                 af.invite_report(self.ctx(), 441, False)
         screen, _ = self.run_with(io.StringIO(), False, body)
         self.assertIn(af.REPORTS_URL, screen)
@@ -818,7 +818,7 @@ class ReportTests(OutputTestCase):
         self.assertNotIn("**", screen)                       # the terminal shows no Markdown
         self.assertRegex(screen, r"Plug model: +S60TPG")
         self.assertIn("**Plug model:** S60TPG", copied[0])   # the thread gets bold labels
-        self.assertIn("**Relay:** Switches (seen on the meter)", copied[0])
+        self.assertIn("**Relay:** Switches (meter confirms)", copied[0])
 
 
 
