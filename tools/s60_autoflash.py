@@ -3839,8 +3839,18 @@ def past_the_commit(ctx: Context, running: str) -> str:
             except (OSError, ValueError):
                 continue
         committed = state.is_done("E3") or report.get("status") == "PASS"
-        if committed and not state.is_done("H1"):
-            say("    This computer's record of it says its last run got past the commit:")
+        # Stopped as the commit ran (seen in the fault suite: Ctrl-C a second
+        # after the plug fetched the new table), with no report: it finished if
+        # the plug fetched the table and runs the startup firmware now, which
+        # starts only once the new layout is in place - as E3's own check says.
+        finished_alone = (not committed and state.status("E3") == ATTEMPTED
+                          and table_fetched(directory / "live") and ctx.device.is_safeboot())
+        if (committed or finished_alone) and not state.is_done("H1"):
+            if finished_alone:
+                say("    Its last run was stopped as the commit ran, and the plug finished it:")
+                say("    it fetched the new layout, and runs the startup firmware now.")
+            else:
+                say("    This computer's record of it says its last run got past the commit:")
             say("    it is on Tasmota's layout, so official Tasmota goes on first.")
             # G1 puts the official startup firmware back over the one that run
             # put on, and checks it is that one by the run's own record of it.
@@ -4258,6 +4268,15 @@ def commit_report(ctx: "Context") -> str | None:
     return status if status in {"PASS", "FAIL"} else None
 
 
+def table_fetched(evidence: Path) -> bool:
+    """Whether the plug fetched the new layout in the commit this evidence is of."""
+    try:
+        return "GET /target-table" in (evidence / "commit-server.log").read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
 def evidence_commit_finished(ctx: "Context") -> tuple[bool | None, str]:
     status = commit_report(ctx)
     if status == "PASS":
@@ -4271,12 +4290,7 @@ def evidence_commit_finished(ctx: "Context") -> tuple[bool | None, str]:
     # finished).  The commit writes nothing before it has the new table, and
     # the plug boots the startup firmware only once the new layout is in
     # place - so together those two say how far it got.
-    try:
-        fetched = "GET /target-table" in (ctx.evidence / "commit-server.log").read_text(
-            encoding="utf-8", errors="replace")
-    except OSError:
-        fetched = False
-    if not fetched:
+    if not table_fetched(ctx.evidence):
         return False, (
             "The plug never fetched the new layout, so it wrote nothing - it is safe\n"
             "  to do this step again."

@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 from tools.autoflash.phases import ARM_RE, LOADER_RE, PhaseRunner, PhaseError, short_loader
-from tools.autoflash.state import DONE, FAILED, RunState
+from tools.autoflash.state import ATTEMPTED, DONE, FAILED, RunState
 
 
 class RunStateTests(unittest.TestCase):
@@ -1734,7 +1734,7 @@ class PastTheCommitTests(unittest.TestCase):
     """A plug left on the startup firmware is on Tasmota's layout if this
     computer's run of it got past the commit - Sonoff's otherwise."""
 
-    def source(self, earlier):
+    def source(self, earlier, safeboot=False):
         import json
         from types import SimpleNamespace
         from unittest import mock
@@ -1744,18 +1744,22 @@ class PastTheCommitTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
         runs = []
-        for index, (done, report) in enumerate(earlier):
+        for index, (done, report, *stopped) in enumerate(earlier):
             run = root / f"run{index}"
             (run / "live").mkdir(parents=True)
             state = RunState.open(run)
             for step in done:
                 state.mark(step, "done")
+            if stopped:  # stopped as E3 ran: what its server saw of the plug
+                state.mark("E3", ATTEMPTED)
+                (run / "live" / "commit-server.log").write_text(stopped[0])
             if report:
                 (run / "live" / "commit-report.json").write_text(json.dumps({"phase": "commit", "status": report}))
             runs.append(run)
         now = root / "now"
         now.mkdir()
-        ctx = SimpleNamespace(dir=now, state=RunState.open(now), evidence=now / "live")
+        ctx = SimpleNamespace(dir=now, state=RunState.open(now), evidence=now / "live",
+                              device=SimpleNamespace(is_safeboot=lambda: safeboot))
         self.evidence = ctx.evidence
         ctx.state.set_input("plug_mac", "12:34:56:ab:cd:ef")
         with mock.patch.object(autoflash, "run_directories", return_value=runs), \
@@ -1776,6 +1780,16 @@ class PastTheCommitTests(unittest.TestCase):
         self.assertEqual(self.source([]), "midway")                           # no record of it
         # The latest run decides: one past the commit, then one that started over.
         self.assertEqual(self.source([(["E3"], None), (["X1"], None)]), "midway")
+
+
+    def test_a_commit_the_plug_finished_after_its_run_was_stopped(self):
+        # Seen in the fault suite: Ctrl-C a second after the plug fetched the
+        # new table; it finished alone, and a --new run took it for the
+        # ESPHome route's, whose steps need Sonoff's layout.
+        fetched = "GET /target-table HTTP/1.1 200\n"
+        self.assertEqual(self.source([(["E1", "E2"], None, fetched)], safeboot=True), "committed")
+        self.assertEqual(self.source([(["E1", "E2"], None, "")], safeboot=True), "midway")      # never fetched
+        self.assertEqual(self.source([(["E1", "E2"], None, fetched)], safeboot=False), "midway")  # not finished
 
 
 class WaitForBridgeTests(unittest.TestCase):

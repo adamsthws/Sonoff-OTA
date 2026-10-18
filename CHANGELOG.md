@@ -124,6 +124,11 @@ own firmware.
   firmware not settled in yet - which the run took for Tasmota, then waited
   for Tasmota in vain at every run after. It now sees which firmware is
   running, and sends the startup firmware again first.
+- A run stopped a second into the commit (E3), which the plug then finished
+  by itself, left a plug a new run (`--new`) took for one on its way from
+  ESPHome: its steps need Sonoff's layout, and failed every time. The new
+  run now sees the plug fetched the new layout and runs the startup
+  firmware, and goes on from official Tasmota.
 
 ## 1.2.0
 
