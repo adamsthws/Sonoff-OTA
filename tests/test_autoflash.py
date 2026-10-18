@@ -3055,3 +3055,32 @@ class LeftLockTests(unittest.TestCase):
             self.assertTrue((root / "RECOVERY_LOCK").exists())
             self.assertFalse((root / "RECOVERY_LOCK.owner-authorized").exists())
             self.assertTrue((root / "REPARTITION_LOCK").exists())
+
+
+class ComputerDescriptionTests(unittest.TestCase):
+    """Windows 11 is named so, on a Python before 3.12 that calls it "10"."""
+
+    def describe(self, release, build, product_type=1):
+        from types import SimpleNamespace
+        import tools.s60_autoflash as autoflash
+        from tools.autoflash import hostsys
+        winver = SimpleNamespace(product_type=product_type)
+        with mock.patch.object(hostsys, "IS_WINDOWS", True), \
+                mock.patch.object(autoflash.platform, "release", return_value=release), \
+                mock.patch.object(autoflash.platform, "version", return_value=build), \
+                mock.patch.object(autoflash.sys, "getwindowsversion",
+                                  return_value=winver, create=True):
+            return autoflash.computer_description()
+
+    def test_windows_10_stays_10(self):
+        self.assertEqual(self.describe("10", "10.0.19045"), "Windows 10 (build 10.0.19045)")
+
+    def test_windows_11_called_10_by_an_older_python(self):
+        self.assertEqual(self.describe("10", "10.0.22631"), "Windows 11 (build 10.0.22631)")
+
+    def test_windows_11_named_by_python_3_12(self):
+        self.assertEqual(self.describe("11", "10.0.26100"), "Windows 11 (build 10.0.26100)")
+
+    def test_a_server_is_not_called_11(self):
+        self.assertEqual(self.describe("10", "10.0.26100", product_type=3),
+                         "Windows 10 (build 10.0.26100)")

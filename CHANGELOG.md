@@ -40,6 +40,8 @@ own firmware.
   advance, as an unattended run must.
 - The report says which firmware the plug ended up with, and the relay and
   meter are checked through ESPHome on its route.
+- The report calls Windows 11 so where Python 3.10 or 3.11, not the tool's
+  portable one, called it Windows 10.
 - The plug's own network is looked for by this plug's names only - Tasmota's,
   and the `ESP_` name it sometimes shows instead, which was missed before - so
   a neighbour's Tasmota is never mistaken for it. Wherever you are asked to

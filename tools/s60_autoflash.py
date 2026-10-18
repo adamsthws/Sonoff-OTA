@@ -4691,7 +4691,13 @@ def plug_page_url(plug_ip: str | None) -> str | None:
 def computer_description() -> str:
     """The operating system and its version, as someone else would want to know it."""
     if hostsys.IS_WINDOWS:
-        system = f"Windows {platform.release()} (build {platform.version()})"
+        release, build = platform.release(), platform.version()
+        # Python before 3.12 calls every 10.0 build "10"; Windows 11 is 10.0
+        # from build 22000 (the server releases there are named otherwise).
+        if (release == "10" and sys.getwindowsversion().product_type == 1
+                and int(build.rpartition(".")[2] or 0) >= 22000):
+            release = "11"
+        system = f"Windows {release} (build {build})"
     elif hostsys.IS_MAC:
         system = f"macOS {platform.mac_ver()[0]}"
     else:
