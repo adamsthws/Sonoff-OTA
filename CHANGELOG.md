@@ -129,6 +129,11 @@ own firmware.
   ESPHome: its steps need Sonoff's layout, and failed every time. The new
   run now sees the plug fetched the new layout and runs the startup
   firmware, and goes on from official Tasmota.
+- Just after its restart into the high slot (D4), Tasmota could not yet say
+  which slot it ran from; that was taken for the wrong slot, and a second
+  upload sent into a plug still starting, which failed as "something
+  unexpected". The run now waits until the plug reports which slot it runs
+  from.
 
 ## 1.2.0
 

@@ -2418,7 +2418,7 @@ class PromoteTests(unittest.TestCase):
     """D4 - tried again after an upload cut off, Tasmota is restarted first:
     it still holds that upload, and the next hangs."""
 
-    def promote(self, failed_before):
+    def promote(self, failed_before, slots=(0, 1)):
         from types import SimpleNamespace
         from unittest import mock
         import tools.s60_autoflash as autoflash
@@ -2429,16 +2429,22 @@ class PromoteTests(unittest.TestCase):
         if failed_before:
             state.mark("D4", FAILED, error="Berry Tasmota was not uploaded")
         events = []
-        slots = iter([0, 1])
-        device = SimpleNamespace(
+        slots = iter(slots)
+        device = SimpleNamespace(host="192.168.60.50",
             wait_reachable=lambda **_: None, started_at=lambda: "t", uptime_seconds=lambda: 10,
             current_ota=lambda: next(slots), wait_for_reboot=lambda **_: events.append("rebooted"),
             command=lambda c, timeout=None: events.append(c))
         ctx = SimpleNamespace(device=device, state=state, dry_run=False)
         with mock.patch.object(autoflash, "upload_or_prompt", side_effect=lambda *a: events.append("upload")), \
-             mock.patch.object(autoflash, "say"):
+             mock.patch.object(autoflash.time, "sleep"), mock.patch.object(autoflash, "say"):
             autoflash.step_promote(ctx)
         return events
+
+    def test_a_slot_not_known_yet_after_the_restart_is_waited_for(self):
+        # Seen in the fault suite: just restarted, Berry not up, the slot read
+        # as unknown - taken for "not slot 1", and a second upload sent.
+        events = self.promote(False, slots=(0, None, None, 1))
+        self.assertEqual(events.count("upload"), 1)
 
     def test_a_first_try_uploads_at_once(self):
         self.assertEqual(self.promote(False)[0], "upload")

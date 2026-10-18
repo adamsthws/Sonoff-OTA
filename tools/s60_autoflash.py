@@ -2395,12 +2395,31 @@ def finish_tasmota_setup(ctx: Context, *, route: str, wait: float = 120.0) -> di
 
 
 
+def running_slot(device: Device, timeout: float = 60.0) -> int:
+    """Which slot Tasmota runs from, once it can say: just after a restart its
+    Berry is not up, and the slot reads as unknown (seen in the fault suite,
+    taken for "not slot 1", and another upload sent into a plug starting)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            device.wait_reachable(timeout=30)
+            slot = device.current_ota()
+        except (DeviceError, OSError):
+            slot = None
+        if slot is not None:
+            return slot
+        if time.monotonic() > deadline:
+            raise Abort(f"the plug at {device.host} did not say which slot it runs from "
+                        f"within {timeout:.0f}s")
+        time.sleep(3)
+
+
 def step_promote(ctx: Context) -> dict[str, Any]:
     """D4/D5 - move Tasmota to the high slot and freeze NVS."""
     device = ctx.device
     image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
     device.wait_reachable(timeout=120)
-    slot = device.current_ota()
+    slot = running_slot(device)
     say(f"The plug is running from slot {slot}. The next steps need slot 1.")
     if slot == 1:
         device.command("SaveData 0")
@@ -2431,7 +2450,7 @@ def step_promote(ctx: Context) -> dict[str, Any]:
         uploads += 1
         say("Waiting for the plug to restart into the other slot...")
         device.wait_for_reboot(timeout=300, started_at=booted, before=uptime)
-        slot = device.current_ota()
+        slot = running_slot(device)
         say(f"Now running from slot {slot}.")
         if slot == 1:
             break
