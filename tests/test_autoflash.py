@@ -1698,6 +1698,16 @@ class BackOnSonoffTests(unittest.TestCase):
         self.assertIs(address, failed)
         self.assertEqual(sent, s60_autoflash.BRIDGE_SENDS)
 
+    def test_a_failed_send_is_followed_by_the_next_though_the_plug_is_quiet(self):
+        # Seen in the fault suite: a send refused (the plug offline in eWeLink),
+        # then the plug not answering here for a moment - and the run asked the
+        # person to join an installer network that was never raised.
+        from tools import s60_autoflash
+        failed = s60_autoflash.Abort("eWeLink does not see the plug")
+        address, sent, waited, _ = self.reach(["sonoff"] + [None] * 10, sends=(failed, None),
+                                              found=(None, "192.168.1.51"))
+        self.assertEqual((address, sent, waited), ("192.168.1.51", 2, 0))
+
     def test_back_on_sonoff_after_every_send_stops_asking_after_three(self):
         # Sent, but the plug went back each time (its power keeps going): after
         # three it falls through to the usual wait, which says what is wrong.

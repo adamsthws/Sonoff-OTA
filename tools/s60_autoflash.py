@@ -2070,7 +2070,12 @@ def resend_if_back_on_sonoff(ctx: Context) -> str | None:
     """The installer sent again while the plug is back on Sonoff's firmware, up
     to BRIDGE_SENDS in a run; its address once it joined the home network."""
     sends = getattr(ctx, "bridge_sends", 0)
-    while sends < BRIDGE_SENDS and back_on_sonoff(ctx):
+    # A send that failed left the plug on Sonoff's firmware, whether or not it
+    # answers here this moment (offline in eWeLink, it can be slow to): the
+    # next goes ahead - never on to asking for the installer's network.
+    failed = False
+    while sends < BRIDGE_SENDS and (failed or back_on_sonoff(ctx)):
+        failed = False
         if not ctx.state.input("stock_version"):
             # A run started on the installer has none of eWeLink's details.
             raise Abort("the plug is back on Sonoff's own firmware, so the installer has to "
@@ -2089,6 +2094,7 @@ def resend_if_back_on_sonoff(ctx: Context) -> str | None:
             if sends == BRIDGE_SENDS:
                 raise
             tell(f"    {exc}.")
+            failed = True
             continue
         address = bridge_on_home_network(ctx, timeout=120.0)
         if address:

@@ -69,6 +69,10 @@ own firmware.
   cut off part way, say - is waited for for up to three minutes, then the
   run says to switch it off and on, where before it was refused at once
   and the firewall blamed.
+- After the installer could not be sent again (the plug offline in
+  eWeLink), a plug slow to answer made the run ask you to join the
+  installer's own network, which it had never raised. The next try now
+  follows.
 - An upload of Tasmota to the installer cut off by the network is noticed
   after two minutes, not five, and tried again - through the installer's
   own network, if it has raised that and you have joined it.
