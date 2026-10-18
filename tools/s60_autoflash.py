@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
 from tools.autoflash import __version__, esphome, imprint, plugs, tasmota_settings  # noqa: E402
-from tools.autoflash import awake, detect, esphome_ota, interrupt, plans  # noqa: E402
+from tools.autoflash import awake, detect, esphome_ota, interrupt, plans, safety_locks  # noqa: E402
 from tools.autoflash.device import Device, DeviceError, UploadRefused  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import (  # noqa: E402
@@ -1289,8 +1289,8 @@ def step_check(ctx: Context) -> dict[str, Any]:
     say("published artifact checksums: OK")
 
     restore_left_locks()
-    for lock in ("RECOVERY_LOCK", "REPARTITION_LOCK"):
-        if not (ROOT / lock).exists():
+    for lock in safety_locks.NAMES:
+        if not safety_locks.in_place(ROOT, lock):
             raise Abort(f"{lock} is not in place; refusing to start from an unsafe state")
     say("both safety locks in place")
 
@@ -1907,11 +1907,8 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
         raise Abort("not confirmed - nothing has been written to the plug")
     output.transient_end()  # agreed: the note and the question have done their job
 
-    lock = ROOT / "RECOVERY_LOCK"
-    moved = ROOT / "RECOVERY_LOCK.owner-authorized"
     started = time.monotonic()
-    hostsys.replace_file(lock, moved)
-    try:
+    with safety_locks.lifted(ROOT, "RECOVERY_LOCK"):
         code = run_tool(
             hostsys.python_script(
                 "tools/serve_tasmota_ota.py",
@@ -1924,9 +1921,7 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
             interactive=True,
             env=env,
         )
-    finally:
-        hostsys.replace_file(moved, lock)
-        say("RECOVERY_LOCK restored")
+    say_lock_back("RECOVERY_LOCK")
     if code != 0:
         # The sender can fail after the plug already has everything - the cloud
         # reporting it offline is exactly what a successful install looks like.
@@ -2622,18 +2617,13 @@ def commit_once(ctx: Context) -> dict[str, Any]:
         # by typing PROCEED before the first write (C2), and covers this step.
         return True
 
-    lock = ROOT / "REPARTITION_LOCK"
-    moved = ROOT / "REPARTITION_LOCK.owner-authorized"
-    hostsys.replace_file(lock, moved)
-    try:
+    with safety_locks.lifted(ROOT, "REPARTITION_LOCK"):
         code, captured = ctx.phase_runner().run(
             "commit",
             extra_flags=["--i-accept-power-loss-may-require-opening-the-plug"],
             confirm=gate,
         )
-    finally:
-        hostsys.replace_file(moved, lock)
-        say("REPARTITION_LOCK restored")
+    say_lock_back("REPARTITION_LOCK")
     if code != 0:
         reason = failure_reason(captured) or ""
         if COMMIT_REFUSED_AS_CHANGED_RE.search(reason):
@@ -4314,6 +4304,13 @@ def cmd_run(ctx: Context) -> int:
         awake.let_sleep()
 
 
+def say_lock_back(name: str) -> None:
+    if (ROOT / name).exists():
+        say(f"{name} restored")
+    else:
+        say(f"{name} left lifted: another run, on another plug, still needs it")
+
+
 def restore_left_locks() -> None:
     """Put back a safety lock a run left moved aside.
 
@@ -4322,11 +4319,8 @@ def restore_left_locks() -> None:
     while it ran.  Moved aside, the lock then fails every run: put back, the
     step simply asks for it again.
     """
-    for name in ("RECOVERY_LOCK", "REPARTITION_LOCK"):
-        lock, moved = ROOT / name, ROOT / f"{name}.owner-authorized"
-        if moved.exists() and not lock.exists():
-            hostsys.replace_file(moved, lock)
-            say(f"{name} put back: a run stopped while it was moved aside")
+    for name in safety_locks.restore_left(ROOT):
+        say(f"{name} put back: a run stopped while it was moved aside")
 
 
 def stop_here_after_ctrl_c(step: str) -> bool:

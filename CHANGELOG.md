@@ -85,6 +85,11 @@ own firmware.
   has it: each would write over what the other was doing. The one refused
   leaves the other's log, report and firewall rule as they are, and
   `cleanup` waits until no run is converting a plug.
+- Two plugs converted at once, in two windows, no longer trip over this
+  computer's safety locks: a run starting put back a lock the other had
+  lifted for its installer or its memory-layout change, and that one then
+  failed putting it back itself. Each run that lifts one now says so, and the
+  lock goes back when the last of them is done.
 - This computer is kept awake while a run works, with what each system has
   already (systemd-inhibit, caffeinate, Windows' own setting) - nothing
   installed, and let go however the run ends.
