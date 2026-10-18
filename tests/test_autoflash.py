@@ -1858,7 +1858,9 @@ class TasmotaWifiPresetTests(unittest.TestCase):
         self.ts = ts
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
-        self.ctx = SimpleNamespace()
+        self.inputs = {}
+        self.ctx = SimpleNamespace(state=SimpleNamespace(set_input=self.inputs.__setitem__,
+                                                         input=self.inputs.get))
 
     def run_preset(self, template, send_error=None):
         from unittest import mock
@@ -1880,6 +1882,53 @@ class TasmotaWifiPresetTests(unittest.TestCase):
 
     def test_with_a_template_the_bridge_gets_it(self):
         self.assertEqual(self.run_preset(b"T" * 4096), (True, [b"T" * 4096]))
+        self.assertTrue(self.inputs.get("tasmota_wifi_preset"))  # outlasts a cut-off upload
+
+    def through_the_bridges_network(self, *, preset, at_home):
+        """D1 sent through the bridge's own network: what follows."""
+        from types import SimpleNamespace
+        from unittest import mock
+        from tools import s60_autoflash
+        from tools.autoflash import setup_network
+        self.inputs.update(tasmota_wifi_preset=preset)
+        ctx = SimpleNamespace(state=self.ctx.state)
+        clock = iter(range(0, 10_000, 5))
+        with mock.patch.object(s60_autoflash, "find_ssid", return_value=None), \
+             mock.patch.object(s60_autoflash, "our_setup_networks", return_value=("Sonoff-Setup-",)), \
+             mock.patch.object(s60_autoflash, "setup_networks", return_value=("tasmota-",)), \
+             mock.patch.object(s60_autoflash, "reach_bridge", return_value=setup_network.SETUP_HOST), \
+             mock.patch.object(s60_autoflash, "upload_tasmota"), \
+             mock.patch.object(s60_autoflash, "tasmota_at_home",
+                               return_value="192.168.1.51" if at_home else None), \
+             mock.patch.object(s60_autoflash, "configure_plug_wifi", return_value="192.168.1.52") as by_hand, \
+             mock.patch.object(s60_autoflash, "section") as shown, \
+             mock.patch.object(s60_autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(s60_autoflash.time, "sleep"), \
+             mock.patch.object(s60_autoflash.output, "progress"), \
+             mock.patch.object(s60_autoflash, "say"):
+            result = s60_autoflash.step_berry_tasmota(ctx)
+        return result, by_hand.called, [call.args[0] for call in shown.call_args_list]
+
+    def test_tasmota_given_the_wifi_before_a_cut_off_joins_by_itself(self):
+        # Seen in the fault suite: the bridge saved Tasmota's settings, the
+        # upload was cut off, and the next went through the bridge's own
+        # network - Tasmota then joined the home Wi-Fi with them, and the run
+        # waited on a setup network it never raised.
+        result, by_hand, shown = self.through_the_bridges_network(preset=True, at_home=True)
+        self.assertEqual(result["plug_ip"], "192.168.1.51")
+        self.assertFalse(by_hand)
+        self.assertIn("Back to your usual Wi-Fi", shown)
+
+    def test_tasmota_found_at_home_is_not_asked_for_its_setup_network(self):
+        # Without the record - settings saved by an earlier run - it is seen anyway.
+        result, by_hand, _ = self.through_the_bridges_network(preset=False, at_home=True)
+        self.assertEqual(result["plug_ip"], "192.168.1.51")
+        self.assertFalse(by_hand)
+
+    def test_tasmota_on_neither_is_set_up_through_its_network(self):
+        result, by_hand, _ = self.through_the_bridges_network(preset=False, at_home=False)
+        self.assertTrue(by_hand)
+        self.assertEqual(result["plug_ip"], "192.168.1.52")
 
     def test_without_a_template_tasmota_is_set_up_by_hand(self):
         self.assertEqual(self.run_preset(None), (False, []))

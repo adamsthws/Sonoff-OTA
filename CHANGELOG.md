@@ -69,6 +69,12 @@ own firmware.
   cut off part way, say - is waited for for up to three minutes, then the
   run says to switch it off and on, where before it was refused at once
   and the firewall blamed.
+- Tasmota sent through the installer's own network, after an earlier try
+  cut off by the network had the installer save your Wi-Fi for it, joined
+  your Wi-Fi by itself - while the run waited for a setup network it never
+  raised, and asked you to join it. The run now sends you back to your usual
+  Wi-Fi and finds it there; any wait for Tasmota's setup network also looks
+  for Tasmota on your network.
 - A Tasmota plug too busy to say its template in time - just started, or
   answering the run's look round the network - was taken for a Tasmota not
   yet set up as an S60, and sent down the wrong route, which never finished.

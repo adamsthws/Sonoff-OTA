@@ -56,7 +56,6 @@ from tools.autoflash.prompts import (  # noqa: E402
     wait_for_key,
     wait_for_taller_window,
     warning_box,
-    wait_for_ssid,
     wait_or_ask,
 )
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED, RunState  # noqa: E402
@@ -2161,6 +2160,16 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
     address = reach_bridge(ctx)
     if address == setup_network.SETUP_HOST:
         upload_tasmota(image)
+        if ctx.state.input("tasmota_wifi_preset"):
+            # An earlier try, cut off, had the bridge save Tasmota's settings
+            # with your Wi-Fi: Tasmota joins it by itself, with no setup network
+            # of its own, even sent through the bridge's.
+            say("    Tasmota will start with your Wi-Fi details, so it joins by itself.")
+            section("Back to your usual Wi-Fi", [
+                "Your computer should rejoin your usual Wi-Fi by itself; if it doesn't,",
+                "join it now.",
+            ])
+            return finish_tasmota_setup(ctx, route="bridge network", wait=240.0)
         return finish_tasmota_setup(ctx, route="bridge network")
     preset = give_tasmota_the_wifi(ctx, address)
     upload_tasmota(image, host=address)
@@ -2386,6 +2395,8 @@ def give_tasmota_the_wifi(ctx: Context, address: str) -> bool:
     except setup_network.SetupError as exc:
         say(f"    Tasmota will need its Wi-Fi given by hand: {exc}")
         return False
+    # Kept for the run: saved in the bridge, they outlast an upload cut off.
+    ctx.state.set_input("tasmota_wifi_preset", True)
     say("    Tasmota will start with your Wi-Fi details, so it joins by itself.")
     return True
 
@@ -2395,25 +2406,34 @@ def tasmota_on_home_network(ctx: Context, *, timeout: float = 240.0) -> str | No
     say("Waiting for Tasmota to start and join your network...")
     started = time.monotonic()
     while time.monotonic() - started < timeout:
-        address = ctx.finder.poll()
-        body = setup_network.page(address, timeout=3.0) if address else None
-        if body and "tasmota" in body.lower() and \
-                setup_network.BRIDGE_PAGE_MARKER.lower() not in body.lower():
-            output.progress_clear()
-            ctx.set_plug_ip(address)
-            try:
-                status = Device(address).command("Status 5")
-                name = status.get("StatusNET", {}).get("Hostname") if isinstance(status, dict) else None
-            except (DeviceError, OSError):
-                name = None
-            if name:
-                ctx.state.set_input("device_name", name)
-            say(f"    Tasmota is on your network at {address}" + (f" as {name}." if name else "."))
+        address = tasmota_at_home(ctx)
+        if address:
             return address
         output.progress(f"waiting for Tasmota on your network... {time.monotonic() - started:.0f}s")
         time.sleep(3.0)
     output.progress_clear()
     return None
+
+
+def tasmota_at_home(ctx: Context) -> str | None:
+    """Tasmota's address if it answers on the home network now, at the plug's
+    own MAC - the bridge's page, there before it, is not Tasmota's."""
+    address = ctx.finder.poll()
+    body = setup_network.page(address, timeout=3.0) if address else None
+    if not (body and "tasmota" in body.lower() and
+            setup_network.BRIDGE_PAGE_MARKER.lower() not in body.lower()):
+        return None
+    output.progress_clear()
+    ctx.set_plug_ip(address)
+    try:
+        status = Device(address).command("Status 5")
+        name = status.get("StatusNET", {}).get("Hostname") if isinstance(status, dict) else None
+    except (DeviceError, OSError):
+        name = None
+    if name:
+        ctx.state.set_input("device_name", name)
+    say(f"    Tasmota is on your network at {address}" + (f" as {name}." if name else "."))
+    return address
 
 
 def upload_tasmota(image: Path, host: str = setup_network.SETUP_HOST) -> None:
@@ -2426,10 +2446,33 @@ def upload_tasmota(image: Path, host: str = setup_network.SETUP_HOST) -> None:
     say(f"    Upload verified in {time.monotonic() - started:.0f}s; the plug is restarting into Tasmota.")
 
 
+def tasmota_or_its_network(ctx: Context, *, timeout: float) -> tuple[str, str] | None:
+    """("network", its name) once Tasmota's setup network shows, or ("home",
+    its address) if Tasmota is on the home network instead: with settings
+    the bridge saved earlier, it joins by itself and raises none."""
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        name = find_ssid(setup_networks(ctx), timeout=8.0)
+        if name:
+            output.progress_clear()
+            return "network", name
+        address = tasmota_at_home(ctx)
+        if address:
+            return "home", address
+        output.progress(f"looking for Tasmota's setup network... {time.monotonic() - started:.0f}s")
+        time.sleep(4.0)
+    output.progress_clear()
+    return None
+
+
 def finish_tasmota_setup(ctx: Context, *, route: str, wait: float = 120.0) -> dict[str, Any]:
     say("")
     say("Waiting for Tasmota to start and make its setup network...")
-    device_name = wait_for_ssid(setup_networks(ctx), timeout=wait)
+    found = tasmota_or_its_network(ctx, timeout=wait)
+    if found and found[0] == "home":
+        return {"plug_ip": found[1], "upload_route": route, "wifi": "preset",
+                "device_name": ctx.state.input("device_name")}
+    device_name = found[1] if found else None
     if device_name and device_name.startswith(TASMOTA_AP_PREFIX):
         note_setup_network(ctx, device_name)
         say(f"    This plug is {device_name} - the same name shows in your router.")
