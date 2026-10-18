@@ -119,6 +119,11 @@ own firmware.
   taken for Tasmota for not answering for a moment, and the next stage then
   failed every time. Now the upload is sent again, up to three times, and a
   run carried on that finds the startup firmware at that stage sends it too.
+- A plug switched off and on just as Berry Tasmota began to go on, from
+  ESPHome or the mover (X2), starts the firmware it ran before - the startup
+  firmware not settled in yet - which the run took for Tasmota, then waited
+  for Tasmota in vain at every run after. It now sees which firmware is
+  running, and sends the startup firmware again first.
 
 ## 1.2.0
 

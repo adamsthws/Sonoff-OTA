@@ -3368,12 +3368,13 @@ def step_esphome_from_mover(ctx: Context) -> dict[str, Any]:
     return {"seconds": seconds, "size": len(image)}
 
 
-def step_startup_from_esphome(ctx: Context) -> dict[str, Any]:
+def step_startup_from_esphome(ctx: Context, *, again: bool = False) -> dict[str, Any]:
     """X1 - the startup firmware, with the Wi-Fi written in, sent to ESPHome (or
     the mover) as an ESPHome update.  It joins the Wi-Fi by itself, and saves
-    the details where Tasmota reads them."""
+    the details where Tasmota reads them.  `again`: sent once more by X2, the
+    go-ahead given already."""
     host = ctx.state.input("plug_ip")
-    if run_source(ctx.state) in ("esphome", "midway"):
+    if run_source(ctx.state) in ("esphome", "midway") and not again:
         consent_to_leave(ctx, "ESPHome" if run_source(ctx.state) == "esphome" else "firmware")
     running = detect.identify(host) if host else None
     if running in ("startup", "hub"):
@@ -3401,17 +3402,29 @@ def step_berry_from_startup(ctx: Context) -> dict[str, Any]:
     """X2 - the Berry Tasmota, uploaded to the startup firmware, which writes it
     into the other slot; it starts with the Wi-Fi the startup firmware saved."""
     image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
-    device = ctx.device
-    if not ctx.dry_run and device.answers(timeout=4.0) and not device.is_safeboot():
-        say("The plug already runs Tasmota.")
-        return {"already": True}
     if ctx.dry_run:
         return {"dry_run": True}
+    running = detect.identify(ctx.device.host)
+    if running == "hub":
+        say("The plug already runs Tasmota.")
+        return {"already": True}
+    if running in ("mover", "esphome"):
+        # The startup firmware confirms itself only once it has been used: a
+        # plug switched off and on before then starts the firmware it ran
+        # before (seen in the fault suite, a power cut early in X2).
+        tell("    The plug is back on the firmware it ran before - switched off and on")
+        tell("    before the startup firmware was settled in - so that is sent again.")
+        step_startup_from_esphome(ctx, again=True)
     how = upload_or_prompt(ctx, image, "Berry Tasmota")
 
     def berry(address: str) -> bool:
-        plug = Device(address, timeout=4)
-        return plug.answers(timeout=4.0) and not plug.is_safeboot()
+        # Tasmota only once it says so: the page not answering, as while the
+        # plug restarts, is no sign of it.
+        try:
+            version = Device(address, timeout=4).firmware_version()
+        except (DeviceError, OSError):
+            return False
+        return bool(version) and "safeboot" not in version.lower()
 
     wait_for(ctx, berry, "Tasmota to start and join your Wi-Fi")
     say("    Tasmota is running and on your Wi-Fi.")

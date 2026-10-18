@@ -2434,6 +2434,54 @@ class PromoteTests(unittest.TestCase):
         self.assertEqual(events[:3], ["Restart 1", "rebooted", "upload"])
 
 
+class BerryFromStartupTests(unittest.TestCase):
+    """X2 - the startup firmware confirms itself only once used: switched off
+    and on before then, the plug starts the firmware it ran before (seen in the
+    fault suite, a power cut early in X2), which once passed for Tasmota."""
+
+    def x2(self, running, versions=("15.6.0.1(f5b34a2-bluetooth)",)):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        ctx = SimpleNamespace(dry_run=False, device=SimpleNamespace(host="192.168.60.50"))
+        answers = iter(versions)
+        seen = []
+
+        def wait_for(ctx_, check, what, timeout=240.0):
+            seen.append(check("192.168.60.50"))
+
+        with mock.patch.object(autoflash.detect, "identify", return_value=running), \
+             mock.patch.object(autoflash, "step_startup_from_esphome") as x1, \
+             mock.patch.object(autoflash, "upload_or_prompt", return_value="http:12s") as upload, \
+             mock.patch.object(autoflash, "wait_for", side_effect=wait_for), \
+             mock.patch.object(autoflash, "Device", lambda address, timeout=None: SimpleNamespace(
+                 firmware_version=lambda: next(answers))), \
+             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
+            result = autoflash.step_berry_from_startup(ctx)
+        return result, x1, upload.called, seen
+
+    def test_already_on_tasmota_does_nothing(self):
+        result, x1, uploaded, _ = self.x2("hub")
+        self.assertEqual(result, {"already": True})
+        self.assertFalse(uploaded or x1.called)
+
+    def test_back_on_the_mover_the_startup_firmware_goes_on_again_first(self):
+        result, x1, uploaded, _ = self.x2("mover")
+        x1.assert_called_once()
+        self.assertEqual(x1.call_args.kwargs, {"again": True})  # no second go-ahead
+        self.assertTrue(uploaded)
+
+    def test_on_the_startup_firmware_it_is_uploaded(self):
+        result, x1, uploaded, seen = self.x2("startup")
+        self.assertFalse(x1.called)
+        self.assertTrue(uploaded)
+        self.assertEqual(seen, [True])
+
+    def test_a_page_not_answering_is_not_tasmota(self):
+        _, _, _, seen = self.x2("startup", versions=("",))
+        self.assertEqual(seen, [False])
+
+
 class OfficialTasmotaSeenTests(unittest.TestCase):
     """F2 - official Tasmota is seen running only from what it says it is: a
     plug restarting does not answer its page for a moment (seen in the fault
