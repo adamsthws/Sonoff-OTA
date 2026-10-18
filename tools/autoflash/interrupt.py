@@ -9,6 +9,10 @@ every step is made to be stopped there, and checks the plug again next time.
 At a question, or while waiting on the person (joining a network, say),
 nothing is in flight, so Ctrl-C stops at once there, as before.
 
+Around the little that must not be cut off half done (`deferred`: a firewall
+rule being added and recorded), a Ctrl-C that would stop the run stops it as
+soon as that is done.
+
 The window being closed is taken as stopping at once, and remembered, so the
 next run can say why the last one stopped.
 
@@ -33,7 +37,8 @@ GRACE = 10.0
 CARRY_ON_AFTER = 30.0
 
 _lock = threading.Lock()
-_state: dict[str, Any] = {"first": None, "asking": 0, "closed": False, "installed": False}
+_state: dict[str, Any] = {"first": None, "asking": 0, "closed": False, "installed": False,
+                         "deferring": 0, "deferred": False}
 
 
 def install() -> None:
@@ -61,6 +66,12 @@ def _on_interrupt(signum: int, frame: Any) -> None:
     first = _state["first"]
     if _state["asking"] or (first is not None and now - first <= GRACE):
         _state["first"] = None
+        if _state["deferring"] and not _state["asking"]:
+            # A question inside the block (sudo's password) comes before
+            # anything is done: there it stops at once, as at any question.
+            _state["deferred"] = True  # stopped at the end of the block
+            _say("\n  Stopping as soon as this is finished.\n")
+            return
         raise KeyboardInterrupt
     _state["first"] = now
     _say(f"\n  Ctrl-C: the run stops at the end of this stage, if you say so then."
@@ -84,6 +95,21 @@ def pending() -> bool:
 
 def clear() -> None:
     _state["first"] = None
+
+
+@contextmanager
+def deferred():
+    """Around something that must not be cut off half done - a firewall rule
+    being added, and recorded so it is removed again: a Ctrl-C that would stop
+    the run stops it as soon as the block is done."""
+    _state["deferring"] += 1
+    try:
+        yield
+    finally:
+        _state["deferring"] -= 1
+        if not _state["deferring"] and _state["deferred"]:
+            _state["deferred"] = False
+            raise KeyboardInterrupt
 
 
 @contextmanager

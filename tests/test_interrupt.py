@@ -9,7 +9,7 @@ from tools.autoflash import interrupt
 class CtrlCTests(unittest.TestCase):
     def setUp(self):
         interrupt.clear()
-        interrupt._state["closed"] = False
+        interrupt._state.update(closed=False, deferring=0, deferred=False, asking=0)
         self.clock = [1000.0]
         patcher = mock.patch.object(interrupt.time, "monotonic", side_effect=lambda: self.clock[0])
         patcher.start()
@@ -46,6 +46,30 @@ class CtrlCTests(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             interrupt._on_closed(getattr(signal, "SIGHUP", 1), None)
         self.assertTrue(interrupt.window_closed())
+
+    def test_a_stop_inside_a_deferred_block_comes_at_its_end(self):
+        reached = []
+        with self.assertRaises(KeyboardInterrupt):
+            with interrupt.deferred():
+                self.press()
+                self.press()  # would stop at once
+                reached.append("rest of the block")
+        self.assertEqual(reached, ["rest of the block"])
+
+    def test_a_question_inside_a_deferred_block_still_stops_at_once(self):
+        reached = []
+        with self.assertRaises(KeyboardInterrupt):
+            with interrupt.deferred():
+                with interrupt.asking():
+                    self.press()
+                    reached.append("after the question")
+        self.assertEqual(reached, [])
+        self.assertFalse(interrupt._state["deferred"])
+
+    def test_one_press_inside_a_deferred_block_only_asks(self):
+        with interrupt.deferred():
+            self.press()
+        self.assertTrue(interrupt.pending())
 
     def test_helpers_are_kept_out_of_the_terminals_ctrl_c(self):
         self.assertTrue(interrupt.child_group())

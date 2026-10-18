@@ -109,6 +109,11 @@ own firmware.
   (F4) leaves it without its Wi-Fi, on its own setup network. The run now
   sets it up through that there and then, where it waited three minutes and
   stopped saying the plug had not restarted.
+- Stopping a run with Ctrl-C just as it added its firewall rule could leave
+  the rule behind for good: the next run took it for one this computer had
+  before, and left it. A stop there now waits for the rule to be recorded, so
+  it is removed as usual, and a rule an earlier run left (ufw keeps the
+  tool's comment on it) is recognised and removed too.
 
 ## 1.2.0
 

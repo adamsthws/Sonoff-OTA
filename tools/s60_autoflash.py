@@ -930,7 +930,11 @@ def ensure_firewall(ctx: Context) -> None:
         *prompt_note,
     ])
     try:
-        rule = hostsys.open_firewall(plug_ip, ports)
+        with interrupt.deferred():  # added and recorded, or neither
+            rule = hostsys.open_firewall(plug_ip, ports)
+            if rule is not None:
+                rules.append(rule)
+                ctx.state.set_input("firewall_rules", [r.to_json() for r in rules])
     except OSError:
         output.transient_end()
         section("The firewall rule could not be added", [
@@ -947,10 +951,11 @@ def ensure_firewall(ctx: Context) -> None:
         return
     output.transient_end()
     if rule is not None:
-        rules.append(rule)
-        ctx.state.set_input("firewall_rules", [r.to_json() for r in rules])
         say("The rule was already there, so it is left in place afterwards."
-            if rule.detail.get("preexisting") else "Firewall rule added.")
+            if rule.detail.get("preexisting") else
+            "The rule was there from an earlier run that stopped as it was added; "
+            "it is removed afterwards." if rule.detail.get("left_by_earlier_run") else
+            "Firewall rule added.")
         if rule.detail.get("paused"):
             say("Python had been blocked from networks here, most likely by a \"Cancel\" in")
             say("Windows Security once. That block is paused while this runs, and put back")

@@ -910,8 +910,22 @@ def open_firewall(plug_ip: str, ports: Sequence[int]) -> FirewallRule | None:
     if code != 0:
         raise OSError(f"could not add the firewall rule: {display(add)}")
     if any(phrase in output.lower() for phrase in ALREADY_PRESENT):
+        if kind == "ufw" and ufw_rule_is_ours(plug_ip, ports):
+            # Left by an earlier run that stopped as it was being added: ours
+            # to remove, not one this computer had before.
+            return FirewallRule(kind, plug_ip, list(ports), {**detail, "left_by_earlier_run": True})
         return FirewallRule(kind, plug_ip, list(ports), {**detail, "preexisting": True})
     return FirewallRule(kind, plug_ip, list(ports), detail)
+
+
+def ufw_rule_is_ours(plug_ip: str, ports: Sequence[int]) -> bool:
+    """Whether ufw's rule for the plug carries this tool's comment."""
+    code, listing = elevated_output(["ufw", "status"])
+    if code != 0:
+        return False
+    wanted = _ports(ports)
+    return any(plug_ip in line and wanted in line and f"# {RULE_NAME}" in line
+               for line in listing.splitlines())
 
 
 def close_firewall(rule: FirewallRule) -> bool:

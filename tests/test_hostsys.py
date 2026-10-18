@@ -66,6 +66,29 @@ class FirewallCommandTests(unittest.TestCase):
                 self.assertTrue(hostsys.close_firewall(rule))
             elevated.assert_not_called()
 
+    def test_one_an_earlier_run_left_is_known_by_its_comment_and_removed(self):
+        # Seen in the fault suite: a run stopped with Ctrl-C as ufw added the
+        # rule, before it was recorded; the next took it for the computer's own.
+        status = ("Status: active\n\nTo                         Action      From\n"
+                  "8088/tcp                   ALLOW       192.168.1.50               # S60 autoflash\n")
+        with mock.patch.object(hostsys, "active_firewall", return_value="ufw"), \
+             mock.patch.object(hostsys, "elevated_output",
+                               side_effect=[(0, "Skipping adding existing rule\n"), (0, status)]), \
+             mock.patch.object(hostsys, "elevated", return_value=0) as elevated:
+            rule = hostsys.open_firewall("192.168.1.50", [8088])
+            self.assertFalse(rule.detail.get("preexisting"))
+            self.assertTrue(rule.detail.get("left_by_earlier_run"))
+            self.assertTrue(hostsys.close_firewall(rule))
+        elevated.assert_called_once()
+
+    def test_one_without_the_comment_is_the_computers_own(self):
+        status = "Status: active\n\n8088/tcp                   ALLOW       192.168.1.50\n"
+        with mock.patch.object(hostsys, "active_firewall", return_value="ufw"), \
+             mock.patch.object(hostsys, "elevated_output",
+                               side_effect=[(0, "Skipping adding existing rule\n"), (0, status)]):
+            rule = hostsys.open_firewall("192.168.1.50", [8088])
+        self.assertTrue(rule.detail.get("preexisting"))
+
     def test_a_rule_this_run_added_is_removed_afterwards(self):
         with mock.patch.object(hostsys, "active_firewall", return_value="ufw"), \
              mock.patch.object(hostsys, "elevated_output", return_value=(0, "Rule added\n")), \
