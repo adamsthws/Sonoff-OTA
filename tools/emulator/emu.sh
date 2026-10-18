@@ -169,6 +169,10 @@ fi
 # Your browser, and with --windows the wire windows_link.py connects to.
 publish=(-p "127.0.0.1:$PORT:8080")
 [ "$windows" = 1 ] && publish+=(-p "127.0.0.1:$LINK_PORT:7860")
+# Developing the QEMU fork: S60_EMU_QEMU=path/to/qemu-system-riscv32 runs that
+# build in place of the image's (tools/emulator/qemu-build.Dockerfile builds one).
+dev=()
+[ -n "${S60_EMU_QEMU:-}" ] && dev=(-v "$(realpath "$S60_EMU_QEMU"):/opt/qemu/bin/qemu-system-riscv32:ro")
 # Awake while you are in it, so a conversion is not cut off by sleep: a lock
 # held only while this runs (systemd-inhibit), changing no setting.
 awake=()
@@ -180,7 +184,7 @@ exec "${awake[@]}" docker run --rm $tty --name "$NAME" --hostname s60-emu-comput
     --memory "${S60_EMU_MEMORY:-256m}" --cpus "${S60_EMU_CPUS:-2}" \
     --cap-add NET_ADMIN --device /dev/net/tun \
     --sysctl net.ipv4.ip_forward="$(( cloud || windows ))" \
-    "${publish[@]}" \
+    "${publish[@]}" "${dev[@]}" \
     -v "$STATE:/state" -v "$SRC/flash.bin:/secrets/stock-flash.bin:ro" \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e PLUG_MAC="$mac" \
     -e CLOUD="$cloud" -e PCAP="$pcap" -e FIREWALL="$firewall" -e WINDOWS="$windows" \

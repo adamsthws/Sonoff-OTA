@@ -487,6 +487,21 @@ Copies only; the original dump is never written.
   destination and signal strength unset, so the patch sets both, or the plug
   drops the frame. To cut the plug off from the computer instead, block its
   traffic in the container (`iptables -I INPUT -s 192.168.60.50 -j DROP`).
+- **`wifi-to-softap.patch` - the computer can join the plug's own network,
+  while the plug also tries the home one.** The fork treated a guest
+  broadcasting its own network as a guest that was now only an access point:
+  its virtual station probed it once (never answered), then ran a DHCP
+  exchange of its own (never answered either), and the guest could not also
+  be a station. Now the computer's station on the plug's network is a link of
+  its own, with its own MAC (02:53:36:30:00:02), apart from the guest's
+  station link with the fork's access points. It authenticates and associates
+  once a second until the plug answers, passes the computer's traffic through
+  untouched, and is dropped when the plug stops beaconing. The guest can run
+  both at once (AP+STA), as Tasmota and ESPHome do while trying Wi-Fi details
+  their setup page was given: an access point addressed by its MAC answers on
+  whatever channel the radio is on, as the plug's own network keeps it on its
+  channel. How far the station has got is written to
+  `$ESP32_WIFI_SOFTAP_STATE_FILE`, which `wifi join` waits on.
 - **`wifi-dma.patch` - frames go only where the hardware would put them.** The
   fork wrote each received frame through the next receive descriptor whether
   or not the driver had handed it over, and however big the buffer. Writing
@@ -527,10 +542,9 @@ gives each request its own connection.
   network has no password, and the bridge's own network (WPA2) cannot be
   joined. The bridge rejoins the home network instead, so the conversion
   does not need it.
-- **Joining the plug's own network does not work yet.** `wifi join` takes the
-  station MAC, but gets no address: the fork does its own DHCP as the
-  station before it passes traffic. Tasmota's setup-network path is untested
-  here.
+- **The bridge's own network cannot be joined** (WPA2, above). The plug's
+  open ones can - Tasmota's setup network: `wifi join NAME`, and `wifi home`
+  to go back.
 - **No power meter.** The CSE7766 is not emulated, so readings are absent and
   the end-of-run check reports no change on the meter.
 - **One plug, one region.** The emulator runs whatever the dump came from. A
@@ -543,6 +557,11 @@ gives each request its own connection.
   `tools/emulator/redact.py`, which masks the dump's secrets and drops panic
   memory dumps (they show RAM as words the masking cannot see into). Put any
   other log through it before reading it.
+- **A QEMU of your own build**: `S60_EMU_QEMU=path/to/qemu-system-riscv32
+  tools/emulator/emu.sh ...` runs it in place of the image's, without
+  rebuilding the image (`qemu-build.Dockerfile` builds one from a fork
+  checkout with the patches applied). Patches in `tools/emulator/fork/` apply
+  in name order, each on top of those before it.
 - **The QEMU monitor** is at `/run/s60emu/monitor.sock` in the container.
   It does not answer while the guest is in a tight crash loop.
 - **gdb** (PlatformIO's `riscv32-esp-elf-gdb`) against QEMU's `-s` needs a

@@ -1,43 +1,52 @@
 #!/bin/bash
 # Root half of `wifi`: puts this "computer" on one network or the other.
 #   wifi-root home         the emulated home Wi-Fi: we are its router (DHCP, DNS)
-#   wifi-root join SSID    the plug's own network: we are a client of the plug
+#   wifi-root join SSID    the plug's own network: this computer is a client of
+#                          the plug there, while the home network's router stays
+#                          up - the plug may be trying Wi-Fi details on it
 set -euo pipefail
 RUN=/run/s60emu
 . "$RUN/env"
 HOME_SSID=PICSimLabWifi
 NET=192.168.60
 PLUG_IP=$NET.50
+JOINED=plugnet   # this computer's interface on the plug's network
 
-stop_all() {
-    [ -f "$RUN/dnsmasq.pid" ] && kill "$(cat "$RUN/dnsmasq.pid")" 2>/dev/null || true
-    rm -f "$RUN/dnsmasq.pid"
-    pkill -x udhcpc 2>/dev/null || true
-    ip address flush dev "$LAN"
+# This computer's own traffic (the tool and its servers run as the user who
+# started the emulator); the router's, dnsmasq's, is root's.
+user=$(stat -c %u "$RUN/env")
+
+router_up() {
+    [ -f "$RUN/dnsmasq.pid" ] && kill -0 "$(cat "$RUN/dnsmasq.pid")" 2>/dev/null
 }
 
-# tap0's own MAC, kept so `home` can put it back after joining the plug's network
+leave_plug_network() {
+    pkill -f "udhcpc -i $JOINED" 2>/dev/null || true
+    ip link del "$JOINED" 2>/dev/null || true
+    while iptables -D OUTPUT -o "$LAN" -m owner --uid-owner "$user" -j DROP 2>/dev/null; do :; done
+    while iptables -D OUTPUT -o eth0 -m owner --uid-owner "$user" -j DROP 2>/dev/null; do :; done
+}
+
+# tap0's own MAC, from a join of an earlier version that took tap0 over
 [ -f "$RUN/tap-mac" ] || cat /sys/class/net/tap0/address > "$RUN/tap-mac"
-
-set_mac() {
-    ip link set tap0 down
-    ip link set tap0 address "$1" || echo "could not take MAC $1" >&2
-    ip link set tap0 up   # whatever happened, never leave the network down
-}
 
 case "${1:-}" in
 home)
-    stop_all
-    [ "$(cat /sys/class/net/tap0/address)" = "$(cat "$RUN/tap-mac")" ] || set_mac "$(cat "$RUN/tap-mac")"
-    ip address add "$NET.1/24" dev "$LAN"
+    leave_plug_network
     ip route replace 224.0.0.0/4 dev "$LAN"   # mDNS discovery goes to the plug's network
-    if [ "$CLOUD" = 1 ]; then dns=(--resolv-file=/etc/resolv.conf); else dns=(--no-resolv); fi
-    dnsmasq --interface="$LAN" --bind-interfaces --except-interface=lo \
-        --dhcp-range="$NET.100,$NET.199,255.255.255.0,1h" \
-        --dhcp-host="$PLUG_MAC,$PLUG_IP" \
-        --dhcp-option=option:router,"$NET.1" --dhcp-option=option:dns-server,"$NET.1" \
-        --dhcp-leasefile="$RUN/leases" --pid-file="$RUN/dnsmasq.pid" \
-        --log-dhcp --log-facility="$RUN/dnsmasq.log" "${dns[@]}"
+    if ! router_up; then
+        [ "$(cat /sys/class/net/tap0/address)" = "$(cat "$RUN/tap-mac")" ] || {
+            ip link set tap0 down; ip link set tap0 address "$(cat "$RUN/tap-mac")"; ip link set tap0 up; }
+        ip address flush dev "$LAN"
+        ip address add "$NET.1/24" dev "$LAN"
+        if [ "$CLOUD" = 1 ]; then dns=(--resolv-file=/etc/resolv.conf); else dns=(--no-resolv); fi
+        dnsmasq --interface="$LAN" --bind-interfaces --except-interface=lo \
+            --dhcp-range="$NET.100,$NET.199,255.255.255.0,1h" \
+            --dhcp-host="$PLUG_MAC,$PLUG_IP" \
+            --dhcp-option=option:router,"$NET.1" --dhcp-option=option:dns-server,"$NET.1" \
+            --dhcp-leasefile="$RUN/leases" --pid-file="$RUN/dnsmasq.pid" \
+            --log-dhcp --log-facility="$RUN/dnsmasq.log" "${dns[@]}"
+    fi
     echo "$HOME_SSID" > "$RUN/network"
     echo "$PLUG_IP:80" > "$RUN/browser-target"
     ;;
@@ -48,14 +57,27 @@ join)
         echo "the plug's own network from Windows is not emulated." >&2
         exit 1
     fi
-    stop_all
-    # The emulated Wi-Fi associates with the plug's network as one virtual
-    # station; this side of the tap has to be that station.
+    leave_plug_network
+    # Joined once the fork's station has associated with the plug's network
+    # (wifi-to-softap.patch): it has a MAC of its own, which this side takes.
+    for _ in $(seq 40); do
+        [ "$(cat "$RUN/softap.state" 2>/dev/null)" = associated ] && break
+        sleep 0.5
+    done
     station=$(cat "$RUN/softap.station" 2>/dev/null || true)
-    if [ -n "$station" ] && [ "$station" != 00:00:00:00:00:00 ]; then set_mac "$station"; fi
-    ip route replace 224.0.0.0/4 dev tap0
+    if [ -z "$station" ] || [ "$(cat "$RUN/softap.state" 2>/dev/null)" != associated ]; then
+        echo "the emulated Wi-Fi did not join $ssid" >&2
+        exit 1
+    fi
+    ip link add "$JOINED" link "$LAN" address "$station" type macvlan mode bridge
+    ip link set "$JOINED" up
+    # Off the home network while joined, as a laptop is: its traffic there and
+    # to the internet stops; the router's (root's) goes on.
+    iptables -I OUTPUT 1 -o "$LAN" -m owner --uid-owner "$user" -j DROP
+    iptables -I OUTPUT 1 -o eth0 -m owner --uid-owner "$user" -j DROP
+    ip route replace 224.0.0.0/4 dev "$JOINED"
     echo "$ssid" > "$RUN/network"
-    if udhcpc -i tap0 -q -n -t 8 -T 2 -s /opt/s60emu/udhcpc.script >"$RUN/udhcpc.log" 2>&1; then
+    if udhcpc -i "$JOINED" -q -n -t 8 -T 2 -s /opt/s60emu/udhcpc.script >"$RUN/udhcpc.log" 2>&1; then
         echo "$(cat "$RUN/gateway"):80" > "$RUN/browser-target"
     else
         echo "no address from $ssid" >&2
