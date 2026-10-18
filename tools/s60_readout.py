@@ -45,10 +45,11 @@ from tools.autoflash.prompts import (  # noqa: E402
 from tools.discover_ewelink import discover  # noqa: E402
 from tools.dump_stock_flash import fetch, is_readout_bridge, save_dump  # noqa: E402
 from tools.s60_autoflash import (  # noqa: E402
-    BRIDGE_AP_PREFIX,
-    BRIDGE_PASSWORD,
     DELIVERY_PORTS,
+    LEGACY_BRIDGE_PASSWORD,
+    LEGACY_BRIDGE_PREFIX,
     SETTINGS_PATH,
+    SETUP_SSID_PREFIX,
     find_ewelink_plugs,
 )
 from tools.serve_tasmota_ota import S60_DEVICE_MODEL  # noqa: E402
@@ -59,7 +60,7 @@ READOUT_OTA = Path("captures/flash-readout/s60-ota-bridge-flash-readout-4.4.3.ot
 # 4.4.3 is the one the conversion sends.  Pinned as in SHA256SUMS.
 CONTROL_FILES = {
     "4.4.3": (Path("artifacts/s60-ota-bridge-4.4.3.ota"),
-              "00bd6cca52d62cd7e2dc07e8af534bcf76d48935dbadc0834ffeea83767ffa01"),
+              "5c020b8b1105d681d5ce95875d883c26104d360cf519694e79ddec36d74c787b"),
 }
 CONFIRM_WORD = "readout"
 # How a bridge names itself: "bridge v5" up to v5, "bridge 4.4.1" from then on.
@@ -379,7 +380,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"Waiting for {name} to start and join your Wi-Fi...")
         host = find_bridge(plug_ip, mac, probe=probe)
         while host is None:
-            network = find_ssid(BRIDGE_AP_PREFIX)
+            network = find_ssid((SETUP_SSID_PREFIX, LEGACY_BRIDGE_PREFIX))
             if network is None and stock_answers(plug_ip):
                 raise Stop(
                     f"the plug restarted on its Sonoff firmware, so {name} is not running"
@@ -398,7 +399,8 @@ def run(args: argparse.Namespace) -> int:
                 continue
             section("The readout firmware did not join your Wi-Fi, but its own network is up", [
                 f"Connect this computer to the Wi-Fi network {network}",
-                f"(password {BRIDGE_PASSWORD}), then come back here.",
+                (f"(password {LEGACY_BRIDGE_PASSWORD}), then come back here."
+                 if network.startswith(LEGACY_BRIDGE_PREFIX) else "(open), then come back here."),
             ])
             ask_choice("Type 1 once this computer is on that network",
                        [f"I've joined {network} - read the plug"])

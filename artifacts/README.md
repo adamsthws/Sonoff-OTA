@@ -6,13 +6,13 @@ directory, never here.
 
 | File | Purpose | SHA-256 |
 |---|---|---|
-| `s60-ota-bridge-4.4.3.ota` | Wrapped one-shot bridge the run installs; joins the home Wi-Fi stock was on, raising its own network only if that fails, lets the run back up the whole flash, gives Tasmota its settings, and starts even after an upload cut off part way | `00bd6cca52d62cd7e2dc07e8af534bcf76d48935dbadc0834ffeea83767ffa01` |
+| `s60-ota-bridge-4.4.3.ota` | Wrapped one-shot bridge the run installs; joins the home Wi-Fi stock was on, raising its own network only if that fails, lets the run back up the whole flash, gives Tasmota its settings, and starts even after an upload cut off part way | `5c020b8b1105d681d5ce95875d883c26104d360cf519694e79ddec36d74c787b` |
 | `tasmota32c3-bluetooth.bin` | Berry-capable Tasmota used temporarily on the original partition layout | `a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708` |
 | `s60-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `aa32fafa4a9470152d5f8826fc6aedf94387575332353b50b8ce454ec1f9d364` |
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
 | `esphome-sonoff-s60-bootloader-1.0.0.bin` | ESPHome's bootloader, from the same build: it replaces Sonoff's when ESPHome is installed, so ESPHome can roll back an update that fails to start | `3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433` |
-| `esphome-sonoff-s60-imprintable-1.0.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `04cbad327cc4fd3b3109e34ec4d3a5832cb9bc5bce33f96103acdbf59ab1a09b` |
-| `esphome-sonoff-s60-mover-1.0.0.bin` | A small ESPHome the run uses for a minute or two when leaving Tasmota: it fits in front of Tasmota in Sonoff's layout, and takes the next firmware as an ordinary ESPHome update; two minutes away from the home Wi-Fi, it raises its own network, whose page takes new Wi-Fi details. Wi-Fi placeholders, like the image above | `970f29fd81ec862cdd10f8a812c4ee66d26c1b1e5bbff6256072d6b9a6613956` |
+| `esphome-sonoff-s60-imprintable-1.0.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `5b69737350aeffb140e915c6764213dca2ac30a2b4daa6754ce1454fb66b6c6b` |
+| `esphome-sonoff-s60-mover-1.0.0.bin` | A small ESPHome the run uses for a minute or two when leaving Tasmota: it fits in front of Tasmota in Sonoff's layout, and takes the next firmware as an ordinary ESPHome update; two minutes away from the home Wi-Fi, it raises its own network, whose page takes new Wi-Fi details. Wi-Fi placeholders, like the image above | `14c3ce4426508ec697c4f87544f1830332ae8dbd59f3271197debd12e7f709bf` |
 | `sonoff-s60-partition-table.bin` | Sonoff's partition table, read from a stock plug: the one every conversion starts from, which the Tasmota route's preflight requires byte for byte. Written back when a plug leaves Tasmota's layout. Holds no secrets | `f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf` |
 
 The Bluetooth image is the exact file used by the successful migrations. It
@@ -59,8 +59,11 @@ keep a backup of the Sonoff firmware. 4.4.3 is 4.4.2 that starts even when
 Sonoff's slot is no longer bootable - an upload of Tasmota into it cut off part
 way - where 4.4.2 refused to start, leaving a plug with no network at all; it
 reports `fallback: none` on its status page then. On its own network it also
-tries the home network again every three minutes while nobody is joined to it. Tried on the emulator; on
-hardware by the next run.
+tries the home network again every three minutes while nobody is joined to it,
+and that network is open and called `Sonoff-Setup-XXXX` (the last two bytes of
+the plug's Wi-Fi MAC), the name every setup network of this project's firmware
+has - it was `S60-OTA-Bridge-XXXX`, with a fixed password. Tried on the
+emulator; on hardware by the next run.
 
 The version is well above any Sonoff release so far (1.2.0). The stock 1.2.0
 updater does not compare versions - the upgrade command decides what is

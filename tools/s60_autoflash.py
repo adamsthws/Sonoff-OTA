@@ -104,9 +104,17 @@ CONSENT_WORD = "proceed"
 POINT_OF_NO_RETURN = "C2"
 # Below this the startup firmware may struggle to rejoin on its own after E3.
 WEAK_SIGNAL_DBM = -75
-BRIDGE_AP_PREFIX = "S60-OTA-Bridge"
-# Fixed in the published bridge firmware; not a secret.
-BRIDGE_PASSWORD = "s60-ota-bridge"
+# Every setup network this project's firmware raises - the installer's, the
+# mover's, ESPHome's - is open and called this, with the last two bytes of the
+# plug's Wi-Fi MAC (Sonoff-Setup-CDEF). Official Tasmota's are its own.
+SETUP_SSID_PREFIX = "Sonoff-Setup-"
+# The installer's network before 4.4.3, with a fixed password: a plug an earlier
+# release left on its installer still raises it.
+LEGACY_BRIDGE_PREFIX = "S60-OTA-Bridge"
+LEGACY_BRIDGE_PASSWORD = "s60-ota-bridge"
+# ESPHome's own network before it took the shared name (an ESPHome built from
+# an earlier sonoff_s60.yaml).
+LEGACY_ESPHOME_PREFIX = "sonoff-s60-"
 # 4.4.3: joins the home network the stock firmware was on, raising its own
 # only if that fails, gives Tasmota its Wi-Fi at D1, and lets the plug's whole
 # flash be read first, for the backup - and starts even once an upload into
@@ -167,16 +175,28 @@ def note_setup_network(ctx: "Context", network: str) -> None:
         ctx.state.set_input("device_name", network)
 
 
-def mover_network_hint(ctx: "Context") -> str:
-    """The mover's own network, named after the plug (name_add_mac_suffix)."""
+def our_setup_network(ctx: "Context") -> str:
+    """The name of the setup network this project's firmware raises for this
+    plug: the installer's, the mover's and ESPHome's alike."""
     mac = ctx.state.input("plug_mac")
-    return f"sonoff-s60-mover-{_mac_tail(mac).lower()}" if mac else "sonoff-s60-mover-xxxxxx"
+    return f"{SETUP_SSID_PREFIX}{_mac_tail(mac)[-4:]}" if mac else f"{SETUP_SSID_PREFIX}XXXX"
+
+
+def our_setup_networks(ctx: "Context", legacy: str) -> tuple[str, ...]:
+    """To look for: this plug's shared setup network, or `legacy`'s, the name
+    the same firmware had before."""
+    mac = ctx.state.input("plug_mac")
+    return (our_setup_network(ctx) if mac else SETUP_SSID_PREFIX, legacy)
+
+
+def mover_network_hint(ctx: "Context") -> str:
+    """The mover's own network."""
+    return our_setup_network(ctx)
 
 
 def esphome_network_hint(ctx: "Context") -> str:
-    """ESPHome's own network, named after the plug (name_add_mac_suffix)."""
-    mac = ctx.state.input("plug_mac")
-    return f"sonoff-s60-{_mac_tail(mac).lower()}" if mac else "sonoff-s60-xxxxxx"
+    """ESPHome's own network."""
+    return our_setup_network(ctx)
 
 
 class Abort(RuntimeError):
@@ -1167,13 +1187,27 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
     outcome = "manual"
     if credentials is not None:
         ssid, password = credentials
-        tell(f"    Sending the Wi-Fi details for '{ssid}'. The plug tests them first -")
-        tell("    stay on its network for about 20 seconds...")
-        try:
-            outcome, address = setup_network.send_wifi(ssid, password)
-        except setup_network.SetupError as exc:
-            outcome, address = "unknown", None
-            tell(f"    {exc}")
+        for attempt in range(1, SETUP_SEND_ATTEMPTS + 1):
+            tell(f"    Sending the Wi-Fi details for '{ssid}'. The plug tests them first -")
+            tell("    stay on its network for about 20 seconds...")
+            try:
+                outcome, address = setup_network.send_wifi(ssid, password)
+            except setup_network.SetupError as exc:
+                outcome, address = "unknown", None
+                tell(f"    {exc}")
+            if outcome == "saved" or attempt == SETUP_SEND_ATTEMPTS:
+                break
+            if outcome == "rejected":
+                if prompts.UNATTENDED:
+                    break  # nobody to type others: on to the plug's page, below
+                tell(f"    The plug could not connect to '{ssid}' with those details. Type them")
+                tell("    again - the network's name exactly as it appears, and its password:")
+                ssid, password = ask_credentials()
+            else:
+                tell(f"    No word from the plug; sending them again (attempt {attempt + 1} "
+                     f"of {SETUP_SEND_ATTEMPTS}).")
+                time.sleep(5)
+            wait_until_joined(network)  # dropped off it meanwhile, joined again
         if outcome == "saved":
             tell(f"    The plug connected to '{ssid}' and is restarting onto it"
                 + (f" at {address}." if address else "."))
@@ -2014,7 +2048,7 @@ def reach_bridge(ctx: Context) -> str:
         address = resend_if_back_on_sonoff(ctx)
         if address:
             return address
-        bridge = find_ssid(BRIDGE_AP_PREFIX) or "S60-OTA-Bridge-XXXX   (the XXXX varies)"
+        bridge = find_ssid(our_setup_networks(ctx, LEGACY_BRIDGE_PREFIX)) or our_setup_network(ctx)
         if not asked:
             ask_to_join_bridge(bridge)
             asked = True
@@ -2061,13 +2095,18 @@ def resend_if_back_on_sonoff(ctx: Context) -> str | None:
 
 
 def ask_to_join_bridge(bridge: str) -> None:
-    copied = hostsys.copy_to_clipboard(BRIDGE_PASSWORD)
+    if bridge.startswith(LEGACY_BRIDGE_PREFIX):
+        # An earlier release's installer: its network has a password.
+        copied = hostsys.copy_to_clipboard(LEGACY_BRIDGE_PASSWORD)
+        joining = [f"    network   {bridge}",
+                   f"    password  {LEGACY_BRIDGE_PASSWORD}"
+                   + ("      (already copied - just paste it)" if copied else "")]
+    else:
+        joining = [f"    {bridge}      (open - no password)"]
     section("Join the bridge's Wi-Fi network", [
         "The plug is running our small installer, which has made its own Wi-Fi",
         f"network. In {hostsys.wifi_menu_hint()}, join:",
-        f"    network   {bridge}",
-        f"    password  {BRIDGE_PASSWORD}"
-        + ("      (already copied - just paste it)" if copied else ""),
+        *joining,
         "",
         "Your Wi-Fi internet drops while joined - expected. A wired connection,",
         "if this computer has one, can stay connected. This carries on by itself.",
@@ -2106,7 +2145,7 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
     """D1/D2 - Berry-capable Tasmota through the bridge."""
     image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
     say("Looking for the plug's Wi-Fi network...")
-    bridge = find_ssid(BRIDGE_AP_PREFIX)
+    bridge = find_ssid(our_setup_networks(ctx, LEGACY_BRIDGE_PREFIX))
     setup = None if bridge else find_ssid(setup_networks(ctx))
     if setup:
         # Resuming after the upload: Tasmota is already installed and waiting.
@@ -3283,53 +3322,109 @@ def step_leave_tasmota(ctx: Context) -> dict[str, Any]:
     return result
 
 
-def wait_for_mover(ctx: Context, what: str) -> bool:
-    """The mover on the home network - or, when it cannot join that (its
-    details changed since the plug last joined, say), set up through its own:
-    two minutes away from the home network it raises one, whose page takes new
-    details. True when it was given new ones, which ESPHome then needs too."""
-    try:
-        wait_for(ctx, lambda address: esphome_ota.probe(address), what)
-        return False
-    except Abort:
-        pass
-    network = find_ssid((mover_network_hint(ctx),), timeout=30)
-    if not network:
-        raise Abort(
-            f"{what} did not answer on your Wi-Fi, and its own network "
-            f"({mover_network_hint(ctx)}) is not to be seen either. If your Wi-Fi is "
-            "on, switch the plug off and on: two minutes after it cannot join your "
-            "Wi-Fi, it raises its own network, and running this again sets it up "
-            "through that")
-    tell(f"    The plug cannot join your Wi-Fi, so it has raised its own network, {network}.")
-    tell("    Most likely your Wi-Fi's name or password changed since it last joined.")
-    output.transient_begin()
-    section("The Wi-Fi details the plug should use", [
-        "Type the name and password of the 2.4 GHz network the plug should be on",
-        "now. They are sent to the plug through its own network, and written into",
-        "ESPHome as well.",
-    ])
-    ssid, password = ask_credentials()
-    output.transient_end()
+# Sending Wi-Fi details through a plug's own network: tried this many times
+# while this computer is still joined to it, as other sends to the plug are.
+SETUP_SEND_ATTEMPTS = 3
+
+
+def on_a_plug_network() -> bool:
+    """Whether this computer is on a plug's own network now - joined to it
+    already, before being asked, say: something answers at its address."""
+    return setup_network.page(setup_network.SETUP_HOST, "/", timeout=2.0) is not None
+
+
+def send_through_own_network(network: str, ssid: str, password: str) -> None:
+    """ESPHome's (or the mover's) page given the details, up to
+    SETUP_SEND_ATTEMPTS times, once this computer has joined its network."""
     section("Join the plug's own network", [
         f"In {hostsys.wifi_menu_hint()}, join:",
         f"    {network}      (open - no password)",
         "",
         "If a page opens by itself, close it: this sends the details for you.",
     ])
-    wait_until_joined(network)
-    try:
-        setup_network.send_esphome_wifi(ssid, password)
-    except setup_network.SetupError as exc:
-        raise Abort(f"the Wi-Fi details could not be sent to the plug: {exc}") from exc
-    ctx.adopt_wifi(ssid, password)
-    tell(f"    Sent. The plug joins '{ssid}' now.")
-    section("Back to your usual Wi-Fi", [
-        "Your computer should rejoin your usual Wi-Fi by itself; if it doesn't,",
-        "join it now.",
+    for attempt in range(1, SETUP_SEND_ATTEMPTS + 1):
+        wait_until_joined(network)
+        try:
+            setup_network.send_esphome_wifi(ssid, password)
+        except setup_network.SetupError as exc:
+            if attempt == SETUP_SEND_ATTEMPTS:
+                raise Abort(f"the Wi-Fi details could not be sent to the plug: {exc}") from exc
+            tell(f"    {exc}; sending them again (attempt {attempt + 1} of {SETUP_SEND_ATTEMPTS}).")
+            time.sleep(5)
+            continue
+        tell(f"    Sent. The plug joins '{ssid}' now.")
+        return
+
+
+def set_up_through_own_network(ctx: Context, what: str, check: Callable[[str], Any],
+                               legacy: str) -> tuple[str, str] | None:
+    """A plug on ESPHome (or the mover) that cannot join the home network, set
+    up through its own: it raises one after a while away from the home one,
+    whose page takes Wi-Fi details. The details this run has go first - right
+    after a router outage, say - and new ones are asked for only if the plug
+    does not join with them. The details it joined with, or None when its
+    network is not to be seen."""
+    network = find_ssid(our_setup_networks(ctx, legacy), timeout=30)
+    if not network and on_a_plug_network():
+        network = our_setup_network(ctx)  # joined already: carried on through it
+    if not network:
+        return None
+    tell(f"    {what} cannot join your Wi-Fi, so it has raised its own network, {network}.")
+    ssid, password = ctx.wifi(why=[
+        f"{what} cannot join your Wi-Fi, and is waiting on its own network for its",
+        "details. Type them here and this sends them to the plug for you.",
     ])
-    wait_for(ctx, lambda address: esphome_ota.probe(address), what, timeout=600.0)
-    return True
+    for round_ in (1, 2):
+        send_through_own_network(network, ssid, password)
+        section("Back to your usual Wi-Fi", [
+            "Your computer should rejoin your usual Wi-Fi by itself; if it doesn't,",
+            "join it now.",
+        ])
+        try:
+            wait_for(ctx, check, what, timeout=300.0)
+            return ssid, password
+        except Abort:
+            if round_ == 2 or prompts.UNATTENDED:
+                raise Abort(f"{what} did not join '{ssid}' with the details sent through its own "
+                            "network. Check the network's name and password, then run this again")
+        tell(f"    {what} did not join '{ssid}' with those details: most likely your Wi-Fi's name")
+        tell("    or password changed since the plug last joined it.")
+        output.transient_begin()
+        section("The Wi-Fi details the plug should use", [
+            "Type the name and password of the 2.4 GHz network the plug should be on",
+            "now. They are sent to the plug through its own network.",
+        ])
+        ssid, password = ask_credentials()
+        output.transient_end()
+    raise AssertionError("unreachable")
+
+
+def wait_for_mover(ctx: Context, what: str) -> bool:
+    """The mover on the home network - or, when it cannot join that, set up
+    through its own (set_up_through_own_network). True when it was given other
+    details than the run had, which ESPHome then needs too."""
+    def mover(address: str) -> Any:
+        return esphome_ota.probe(address)
+
+    if not on_a_plug_network():
+        try:
+            wait_for(ctx, mover, what)
+            return False
+        except Abort:
+            pass
+    before = ctx._wifi
+    joined = set_up_through_own_network(ctx, what, mover, "sonoff-s60-mover-")
+    if joined is None:
+        raise Abort(
+            f"{what} did not answer on your Wi-Fi, and its own network "
+            f"({mover_network_hint(ctx)}) is not to be seen either. If your Wi-Fi is "
+            "on, switch the plug off and on: two minutes after it cannot join your "
+            "Wi-Fi, it raises its own network, and running this again sets it up "
+            "through that")
+    if joined != before:
+        ctx.adopt_wifi(*joined)
+        return True
+    return False
 
 
 def table_written(ctx: Context) -> bool:
@@ -3557,14 +3652,19 @@ def step_esphome_check(ctx: Context, wait: float = 180.0) -> dict[str, Any]:
             moved = ctx.finder.poll()
             if moved and moved != host:
                 continue
+        if on_a_plug_network():
+            break  # this computer joined its own network already: on through that
         output.progress(f"waiting for ESPHome... {time.monotonic() - started:.0f}s")
         time.sleep(3)
     output.progress_clear()
+    if set_up_through_own_network(ctx, "ESPHome", esphome.is_esphome, LEGACY_ESPHOME_PREFIX):
+        return {"seconds": round(time.monotonic() - started, 1), "resent": resent,
+                "set_up_through": "its own network"}
     raise Abort(
         "ESPHome was written and checked, but has not answered on your Wi-Fi within "
-        "three minutes - most likely it cannot join it. When it cannot, it puts up its "
-        f"own network, {esphome_network_hint(ctx)}: join that, and its page asks for "
-        "your Wi-Fi. Or switch the plug off and on, and run the same command again"
+        "three minutes - most likely it cannot join it, and its own network "
+        f"({esphome_network_hint(ctx)}) is not to be seen either. Switch the plug off and "
+        "on, and run the same command again"
     )
 
 
@@ -4223,11 +4323,11 @@ def evidence_bridge_installed(ctx: "Context") -> tuple[bool | None, str]:
             f"The installer firmware is answering on your network at {address},\n"
             "  so this step did finish."
         )
-    bridge = find_ssid(BRIDGE_AP_PREFIX)
+    bridge = find_ssid(our_setup_networks(ctx, LEGACY_BRIDGE_PREFIX))
     if bridge:
         return True, (
             f"The plug is broadcasting a Wi-Fi network called '{bridge}'.\n"
-            "  Only the installer firmware does that, so this step did finish."
+            "  At this stage only the installer firmware does that, so this step did finish."
         )
     return None, (
         "No installer network is visible from this computer. That does not mean\n"
@@ -4546,7 +4646,7 @@ def run_steps(ctx: Context) -> int:
         if code == 0 and step == POINT_OF_NO_RETURN and ctx.research_bridge:
             section("Research bridge installed - stopping here", [
                 f"{ctx.bridge.name} is on the plug. Join the bridge's network",
-                f"(password {BRIDGE_PASSWORD}) and run its research tool, e.g.:",
+                f"({our_setup_network(ctx)}, open) and run its research tool, e.g.:",
                 "  python tools/inspect_stock_nvs.py",
                 "Then switch the plug off and on: it goes back to its Sonoff",
                 "firmware. Or run this tool again to carry on the conversion.",

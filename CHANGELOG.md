@@ -134,6 +134,18 @@ own firmware.
   upload sent into a plug still starting, which failed as "something
   unexpected". The run now waits until the plug reports which slot it runs
   from.
+- Every setup network the conversion makes - the installer's, the mover's
+  and ESPHome's - is now open and has one name, `Sonoff-Setup-` and the last
+  four characters of the plug's hardware address (`Sonoff-Setup-CDEF`). The
+  installer's had a password to type (`S60-OTA-Bridge-XXXX`); the others were
+  `sonoff-s60-…` names. Official Tasmota's own keep Tasmota's names.
+- ESPHome that cannot join your Wi-Fi at the end (I2) is set up through its
+  own network by the run, as the mover already was, where before the run
+  stopped and left it to you - and both carry on by themselves when you have
+  joined that network already. The details the run has go first (right after
+  a router outage, say); new ones are asked for only if the plug does not join
+  with them. Every send of Wi-Fi details through a plug's own network, Tasmota's
+  too, is tried up to three times, and rejected ones can be typed again.
 
 ## 1.2.0
 

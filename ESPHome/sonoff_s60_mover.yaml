@@ -19,6 +19,19 @@ esphome:
     name: adamsthws.sonoff-s60-mover
     version: "1.0.0"
   on_boot:
+    - priority: 1000
+      then:
+        - lambda: |-
+            // Every setup network of the conversion has one name: Sonoff-Setup-
+            // and the last two bytes of the plug's Wi-Fi MAC (Sonoff-Setup-CDEF),
+            // open. Set before Wi-Fi starts (its priority is 250).
+            uint8_t mac[6];
+            get_mac_address_raw(mac);
+            char name[20];
+            snprintf(name, sizeof(name), "Sonoff-Setup-%02X%02X", mac[4], mac[5]);
+            wifi::WiFiAP ap;
+            ap.set_ssid(name);
+            wifi::global_wifi_component->set_ap(ap);
     - priority: -100
       then:
         - lambda: |-

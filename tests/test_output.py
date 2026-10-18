@@ -506,6 +506,53 @@ class FallbackScreenTests(OutputTestCase):
 
 
 
+    def send(self, outcomes, unattended=False):
+        import tools.s60_autoflash as af
+        from tools.autoflash import prompts, setup_network
+        polls = iter([None, "192.168.0.77"])
+        ctx = mock.Mock(wifi=lambda why=None: ("Home-2G", "password-one"))
+        ctx.finder.poll = lambda: next(polls, "192.168.0.77")
+        results = iter(outcomes)
+        sent = []
+
+        def send_wifi(ssid, password):
+            sent.append(ssid)
+            result = next(results)
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        def body():
+            with mock.patch.object(af.hostsys, "wifi_menu_hint", return_value="the Wi-Fi menu"), \
+                 mock.patch.object(setup_network, "wait_for_port", return_value=True), \
+                 mock.patch.object(setup_network, "send_wifi", side_effect=send_wifi), \
+                 mock.patch.object(af, "ask_credentials", return_value=("Home-New", "pw")) as asked, \
+                 mock.patch.object(prompts, "UNATTENDED", unattended), \
+                 mock.patch.object(af.time, "sleep"):
+                af.configure_plug_wifi(ctx, "tasmota-5A3C1F-7340")
+                self.asked = asked.called
+        screen, _ = self.run_with(io.StringIO(), False, body)
+        return sent, screen
+
+    def test_no_word_from_the_plug_it_is_sent_again(self):
+        from tools.autoflash import setup_network
+        sent, screen = self.send([setup_network.SetupError("no answer"), ("unknown", None),
+                                  ("saved", "192.168.0.77")])
+        self.assertEqual(sent, ["Home-2G"] * 3)
+        self.assertIn("sending them again (attempt 3 of 3)", screen)
+        self.assertIn("restarting onto it", screen)
+
+    def test_rejected_details_are_asked_for_again(self):
+        sent, _ = self.send([("rejected", None), ("saved", "192.168.0.77")])
+        self.assertEqual(sent, ["Home-2G", "Home-New"])
+        self.assertTrue(self.asked)
+
+    def test_unattended_rejected_details_go_to_the_plugs_page(self):
+        sent, screen = self.send([("rejected", None)], unattended=True)
+        self.assertEqual(sent, ["Home-2G"])
+        self.assertFalse(self.asked)
+        self.assertIn("Set the Wi-Fi up on the plug's page instead", screen)
+
 class FailureReasonTests(OutputTestCase):
     """When something fails, the reason reaches the screen, not only the log."""
 

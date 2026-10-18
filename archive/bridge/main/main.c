@@ -40,6 +40,13 @@
  * checked byte for byte against the chip - before Tasmota is written over its
  * Sonoff firmware.
  *
+ * 4.4.3: starts even when the peer slot holds no bootable Sonoff firmware (an
+ * upload into it cut off part way), so it can be uploaded again; on its own
+ * network with nobody joined, tries the home one again every three minutes;
+ * and its own network is open and named Sonoff-Setup-XXXX (the last two bytes
+ * of the plug's Wi-Fi MAC), as every setup network the conversion makes is -
+ * no password to type, where it was S60-OTA-Bridge-XXXX with a fixed one.
+ *
  * BRIDGE_FLASH_READOUT (research build, never shipped): the same reads without
  * /update or /tasmota-settings, so a stock plug can be imaged without being
  * converted.  The only flash it writes is the otadata selection at startup,
@@ -70,7 +77,6 @@
 #include "soc/efuse_reg.h"
 #include "soc/soc.h"
 
-#define BRIDGE_AP_PASSWORD "s60-ota-bridge"
 #define BRIDGE_MAX_IMAGE_SIZE 0x1f0000
 #define UPLOAD_BUFFER_SIZE 4096
 #define BRIDGE_HOSTNAME "s60-ota-bridge"
@@ -572,19 +578,17 @@ static esp_err_t start_access_point(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi_event, NULL));
 
+    /* Named after the plug's own Wi-Fi MAC, as the conversion's other setup
+     * networks are, and open like them. */
     uint8_t mac[6];
-    ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP));
+    ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
     wifi_config_t *config = &s_ap_config;
     snprintf((char *)config->ap.ssid, sizeof(config->ap.ssid),
-             "S60-OTA-Bridge-%02X%02X", mac[4], mac[5]);
+             "Sonoff-Setup-%02X%02X", mac[4], mac[5]);
     config->ap.ssid_len = strlen((char *)config->ap.ssid);
-    strlcpy((char *)config->ap.password, BRIDGE_AP_PASSWORD,
-            sizeof(config->ap.password));
     config->ap.channel = 1;
     config->ap.max_connection = 2;
-    config->ap.authmode = WIFI_AUTH_WPA2_PSK;
-    config->ap.pmf_cfg.capable = true;
-    config->ap.pmf_cfg.required = false;
+    config->ap.authmode = WIFI_AUTH_OPEN;
 
     if (sta_netif != NULL) {
         station.sta.pmf_cfg.capable = true;
@@ -702,5 +706,5 @@ void app_main(void)
 
     ESP_ERROR_CHECK(start_access_point());
     ESP_ERROR_CHECK(start_web_server());
-    ESP_LOGI(TAG, "open http://192.168.4.1/ (password: %s)", BRIDGE_AP_PASSWORD);
+    ESP_LOGI(TAG, "open http://192.168.4.1/ on %s", s_ap_config.ap.ssid);
 }

@@ -18,6 +18,11 @@ class RouteTestCase(unittest.TestCase):
         self.quiet = contextlib.redirect_stdout(io.StringIO())
         self.quiet.__enter__()
         self.addCleanup(self.quiet.__exit__, None, None, None)
+        # No plug's own network to be seen, nor joined: nothing goes on the network.
+        for name, value in (("on_a_plug_network", False), ("find_ssid", None)):
+            patch = mock.patch.object(af, name, return_value=value)
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def ctx(self, given=None, run="run", **inputs):
         state = RunState.open(Path(self.tmp.name) / run)
@@ -165,8 +170,24 @@ class CheckStepTests(RouteTestCase):
     def test_waiting_in_vain_points_at_the_wifi(self):
         with mock.patch.object(af.esphome, "is_esphome", return_value=False), \
                 mock.patch.object(af.time, "sleep"):
-            with self.assertRaisesRegex(af.Abort, "sonoff-s60-xxxxxx"):
+            with self.assertRaisesRegex(af.Abort, "Sonoff-Setup-XXXX"):
                 af.step_esphome_check(self.ctx(firmware="esphome"), wait=0.05)
+
+    def test_on_its_own_network_it_is_set_up_through_that(self):
+        with mock.patch.object(af.esphome, "is_esphome", return_value=False), \
+                mock.patch.object(af.time, "sleep"), \
+                mock.patch.object(af, "set_up_through_own_network", return_value=("Home", "pw")) as own:
+            result = af.step_esphome_check(self.ctx(firmware="esphome"), wait=0.05)
+        self.assertEqual(result["set_up_through"], "its own network")
+        self.assertEqual(own.call_args.args[1], "ESPHome")
+
+    def test_joined_already_it_stops_waiting_on_the_home_wifi(self):
+        with mock.patch.object(af.esphome, "is_esphome", return_value=False), \
+                mock.patch.object(af, "on_a_plug_network", return_value=True), \
+                mock.patch.object(af.time, "sleep") as slept, \
+                mock.patch.object(af, "set_up_through_own_network", return_value=("Home", "pw")):
+            af.step_esphome_check(self.ctx(firmware="esphome"), wait=600)
+        slept.assert_not_called()  # straight on, not three minutes first
 
     def test_a_dry_run_does_not_wait(self):
         ctx = self.ctx(firmware="esphome")

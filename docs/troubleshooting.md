@@ -91,10 +91,11 @@ If your home network itself uses 192.168.4.x addresses and the computer also
 has a wired connection, the two clash; unplug the cable while joined to the
 plug's network.
 
-**The bridge password is not on the clipboard**
+**An earlier installer's password is not on the clipboard**
 
-Copying needs `xclip`, `xsel` or `wl-copy` on Linux (`pbcopy` and `clip` are
-built into macOS and Windows). Without one, type it: `s60-ota-bridge`.
+Only an installer from an earlier release has a password on its network. Copying
+it needs `xclip`, `xsel` or `wl-copy` on Linux (`pbcopy` and `clip` are built
+into macOS and Windows). Without one, type it: `s60-ota-bridge`.
 
 ## The router rule (no longer used)
 
@@ -173,13 +174,16 @@ internet connection first.
 
 **The plug's own network**
 
-Wherever the tool asks you to join the plug's own network, it names it. Tasmota
-names it after the plug, `tasmota-` and six characters from its hardware
-address, such as `tasmota-ABCDEF-1234`. Sometimes it shows up instead as
-`ESP_` and six characters one higher, such as `ESP_ABCDF0`: that is the same
-network, and the tool looks for both. ESPHome's is `sonoff-s60-` and six
-characters, such as `sonoff-s60-abcdef`. All of them are open, with no
-password, and the plug's page on them is at `http://192.168.4.1`.
+Wherever the tool asks you to join the plug's own network, it names it. The
+installer, the mover and ESPHome all call theirs `Sonoff-Setup-` and the last
+four characters of the plug's hardware address, such as `Sonoff-Setup-CDEF`.
+Official Tasmota names its own after the plug, `tasmota-` and six characters,
+such as `tasmota-ABCDEF-1234`; sometimes it shows up instead as `ESP_` and six
+characters one higher, such as `ESP_ABCDF0` - the same network, and the tool
+looks for both. All of them are open, with no password, and the plug's page on
+them is at `http://192.168.4.1`. (An installer from an earlier release calls
+its network `S60-OTA-Bridge-XXXX`, with the password `s60-ota-bridge`; the
+tool says so when it sees one.)
 
 ## The first install
 
@@ -187,7 +191,7 @@ password, and the plug's page on them is at `http://192.168.4.1`.
 
 That means it worked. The installer firmware does not talk to eWeLink, so the
 cloud reports the plug offline, and the tool refuses to send the update twice.
-The tool checks for the installer's `S60-OTA-Bridge-XXXX` network and, when it
+The tool checks for the installer's `Sonoff-Setup-XXXX` network and, when it
 can see it, carries on by itself. If this computer's Wi-Fi is off it cannot
 look; turn it on and run again.
 
@@ -350,7 +354,7 @@ process that cannot be fixed by running the tool again.
 After a new router or a changed Wi-Fi password, the plug cannot join any more.
 
 - **ESPHome** opens its own network by itself after a minute and a half
-  without your Wi-Fi (`sonoff-s60-` and six characters). Join it, and its page
+  without your Wi-Fi (`Sonoff-Setup-` and four characters). Join it, and its page
   asks for your Wi-Fi. It keeps trying your Wi-Fi meanwhile, so after a router
   restart it simply rejoins.
 - **Tasmota** keeps trying your Wi-Fi and never opens a network by itself, so

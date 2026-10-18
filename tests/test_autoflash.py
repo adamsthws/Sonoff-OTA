@@ -2742,31 +2742,44 @@ class StalledUploadTests(unittest.TestCase):
 
 class MoverOwnNetworkTests(unittest.TestCase):
     """A mover that cannot join the home Wi-Fi raises its own network, and is
-    given new details through it - not left as a plug only a serial cable reaches."""
+    set up through it - with the details the run has first, new ones only if
+    those fail - not left as a plug only a serial cable reaches."""
 
-    def wait(self, answers, network=None):
+    def wait(self, answers, network=None, sends=(None,), joined_already=False, unattended=False):
         from types import SimpleNamespace
         from unittest import mock
         import tools.s60_autoflash as autoflash
         tries = iter(answers)
+        outcomes = iter(sends)
 
         def wait_for(ctx, check, what, timeout=240.0):
             if not next(tries):
                 raise autoflash.Abort(f"{what} did not answer within 4 minutes")
 
+        def send(ssid, password):
+            outcome = next(outcomes, None)
+            if outcome:
+                raise autoflash.setup_network.SetupError(outcome)
+
         adopted = []
         ctx = SimpleNamespace(state=SimpleNamespace(input=lambda key: "12:34:56:ab:cd:ef"),
+                              _wifi=("Home", "pw0"), wifi=lambda why=None: ("Home", "pw0"),
                               adopt_wifi=lambda ssid, pw: adopted.append((ssid, pw)))
-        with mock.patch.object(autoflash, "wait_for", side_effect=wait_for), \
+        self.home_waits = 0
+        with mock.patch.object(autoflash, "wait_for", side_effect=wait_for) as waited, \
              mock.patch.object(autoflash, "find_ssid", return_value=network), \
+             mock.patch.object(autoflash, "on_a_plug_network", return_value=joined_already), \
              mock.patch.object(autoflash, "ask_credentials", return_value=("NewHome", "pw")), \
+             mock.patch.object(autoflash.prompts, "UNATTENDED", unattended), \
              mock.patch.object(autoflash, "wait_until_joined"), \
-             mock.patch.object(autoflash.setup_network, "send_esphome_wifi") as sent, \
+             mock.patch.object(autoflash.time, "sleep"), \
+             mock.patch.object(autoflash.setup_network, "send_esphome_wifi", side_effect=send) as sent, \
              mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "tell"):
             try:
                 result = autoflash.wait_for_mover(ctx, "the mover")
             except autoflash.Abort as exc:
                 result = exc
+            self.home_waits = waited.call_count
         return result, sent, adopted
 
     def test_a_mover_on_the_home_wifi_is_used_as_ever(self):
@@ -2774,18 +2787,42 @@ class MoverOwnNetworkTests(unittest.TestCase):
         self.assertIs(result, False)
         sent.assert_not_called()
 
-    def test_its_own_network_takes_new_details_which_esphome_gets_too(self):
-        result, sent, adopted = self.wait([False, True], network="sonoff-s60-mover-abcdef")
+    def test_after_a_router_outage_the_runs_own_details_do(self):
+        result, sent, adopted = self.wait([False, True], network="Sonoff-Setup-CDEF")
+        self.assertIs(result, False)  # the same details: ESPHome has them already
+        sent.assert_called_once_with("Home", "pw0")
+        self.assertEqual(adopted, [])
+
+    def test_new_details_when_those_fail_which_esphome_gets_too(self):
+        result, sent, adopted = self.wait([False, False, True], network="Sonoff-Setup-CDEF")
         self.assertIs(result, True)
-        sent.assert_called_once_with("NewHome", "pw")
+        self.assertEqual([c.args for c in sent.call_args_list], [("Home", "pw0"), ("NewHome", "pw")])
         self.assertEqual(adopted, [("NewHome", "pw")])
+
+    def test_unattended_it_stops_rather_than_asking(self):
+        result, _, _ = self.wait([False, False], network="Sonoff-Setup-CDEF", unattended=True)
+        from tools import s60_autoflash
+        self.assertIsInstance(result, s60_autoflash.Abort)
+        self.assertIn("did not join 'Home'", str(result))
+
+    def test_a_send_that_gets_no_answer_is_tried_again(self):
+        result, sent, _ = self.wait([False, True], network="Sonoff-Setup-CDEF",
+                                    sends=("no answer", "no answer", None))
+        self.assertIs(result, False)
+        self.assertEqual(sent.call_count, 3)
+
+    def test_joined_already_it_carries_on_through_that(self):
+        result, sent, _ = self.wait([True], network="Sonoff-Setup-CDEF", joined_already=True)
+        self.assertIs(result, False)
+        sent.assert_called_once()
+        self.assertEqual(self.home_waits, 1)  # only after sending: no wait first
 
     def test_neither_says_to_switch_it_off_and_on(self):
         result, sent, _ = self.wait([False], network=None)
         from tools import s60_autoflash
         self.assertIsInstance(result, s60_autoflash.Abort)
         self.assertIn("switch the plug off and on", str(result))
-        self.assertIn("sonoff-s60-mover-abcdef", str(result))
+        self.assertIn("Sonoff-Setup-CDEF", str(result))
 
     def test_the_details_go_to_esphomes_own_page(self):
         from unittest import mock
@@ -2949,7 +2986,7 @@ class TemplateNameTests(unittest.TestCase):
 
 
 class BridgeEvidenceTests(unittest.TestCase):
-    """Bridge v6 raises its own network only when the home one fails."""
+    """The installer raises its own network only when the home one fails."""
 
     def test_bridge_on_the_home_network_counts(self):
         from unittest import mock
@@ -2964,8 +3001,8 @@ class BridgeEvidenceTests(unittest.TestCase):
         from unittest import mock
         from tools import s60_autoflash
         with mock.patch.object(s60_autoflash, "bridge_on_home_network", return_value=None), \
-             mock.patch.object(s60_autoflash, "find_ssid", return_value="S60-OTA-Bridge-A04D"):
-            installed, _ = s60_autoflash.evidence_bridge_installed(mock.Mock())
+             mock.patch.object(s60_autoflash, "find_ssid", return_value="Sonoff-Setup-CDEF"):
+            installed, _ = s60_autoflash.evidence_bridge_installed(self.ctx())
         self.assertTrue(installed)
 
     def test_neither_is_not_proof_of_failure(self):
@@ -2973,8 +3010,36 @@ class BridgeEvidenceTests(unittest.TestCase):
         from tools import s60_autoflash
         with mock.patch.object(s60_autoflash, "bridge_on_home_network", return_value=None), \
              mock.patch.object(s60_autoflash, "find_ssid", return_value=None):
-            installed, _ = s60_autoflash.evidence_bridge_installed(mock.Mock())
+            installed, _ = s60_autoflash.evidence_bridge_installed(self.ctx())
         self.assertIsNone(installed)
+
+    def ctx(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(state=SimpleNamespace(input=lambda key: "12:34:56:ab:cd:ef" if key == "plug_mac" else None))
+
+
+class JoinBridgeTests(unittest.TestCase):
+    """The installer's network is open, like every setup network of this
+    project's firmware; only an earlier release's has a password."""
+
+    def shown(self, network):
+        from unittest import mock
+        from tools import s60_autoflash
+        with mock.patch.object(s60_autoflash, "section") as section, \
+             mock.patch.object(s60_autoflash.hostsys, "copy_to_clipboard", return_value=False) as copied:
+            s60_autoflash.ask_to_join_bridge(network)
+        return " ".join(section.call_args.args[1]), copied.called
+
+    def test_open_no_password(self):
+        text, copied = self.shown("Sonoff-Setup-CDEF")
+        self.assertIn("Sonoff-Setup-CDEF      (open - no password)", text)
+        self.assertNotIn("password  ", text)
+        self.assertFalse(copied)
+
+    def test_an_earlier_installers_network_has_its_password(self):
+        text, copied = self.shown("S60-OTA-Bridge-A04D")
+        self.assertIn("password  s60-ota-bridge", text)
+        self.assertTrue(copied)
 
 
 class LeftLockTests(unittest.TestCase):

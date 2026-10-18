@@ -539,12 +539,9 @@ gives each request its own connection.
 ## Known gaps
 
 - **Open networks only.** The fork's access points have no WPA2, so the home
-  network has no password, and the bridge's own network (WPA2) cannot be
-  joined. The bridge rejoins the home network instead, so the conversion
-  does not need it.
-- **The bridge's own network cannot be joined** (WPA2, above). The plug's
-  open ones can - Tasmota's setup network: `wifi join NAME`, and `wifi home`
-  to go back.
+  network has no password. Every setup network the conversion makes is open
+  from the installer 4.4.3 on, so all can be joined (`wifi join NAME`, and
+  `wifi home` to go back); an earlier release's installer, with WPA2, cannot.
 - **No power meter.** The CSE7766 is not emulated, so readings are absent and
   the end-of-run check reports no change on the meter.
 - **One plug, one region.** The emulator runs whatever the dump came from. A
