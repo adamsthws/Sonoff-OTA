@@ -69,6 +69,9 @@ own firmware.
   cut off part way, say - is waited for for up to three minutes, then the
   run says to switch it off and on, where before it was refused at once
   and the firewall blamed.
+- An upload of Tasmota to the installer cut off by the network is noticed
+  after two minutes, not five, and tried again - through the installer's
+  own network, if it has raised that and you have joined it.
 - Tasmota sent through the installer's own network, after an earlier try
   cut off by the network had the installer save your Wi-Fi for it, joined
   your Wi-Fi by itself - while the run waited for a setup network it never

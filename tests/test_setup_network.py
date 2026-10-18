@@ -109,6 +109,31 @@ class SetupNetworkTests(unittest.TestCase):
         self.assertIn("Upload verified", reply)
         self.assertEqual(plug.uploaded, bytes(range(256)) * 300)
 
+    def test_an_upload_the_bridge_stops_taking_is_given_up(self):
+        # The network gone part way: noticed after the stall limit, not left
+        # hanging, so the run can try again (through the bridge's own network).
+        import socket
+        import threading
+        import time
+        server = socket.socket()
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        self.addCleanup(server.close)
+        held = []
+        threading.Thread(target=lambda: held.append(server.accept()), daemon=True).start()
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "tasmota.bin"
+            image.write_bytes(b"\xe9" * 8_000_000)
+            started = time.monotonic()
+            with self.assertRaisesRegex(setup_network.SetupError, "did not complete"):
+                setup_network.upload_to_bridge(image, host=f"127.0.0.1:{server.getsockname()[1]}",
+                                               timeout=0.5)
+        self.assertLess(time.monotonic() - started, 10)
+        for connection, _ in held:
+            connection.close()
+        self.assertLessEqual(setup_network.UPLOAD_STALL, 120)
+
     def test_wifi_details_are_sent_and_the_new_address_is_read(self):
         plug = self.start("tasmota")
         outcome = setup_network.send_wifi(

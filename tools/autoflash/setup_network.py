@@ -74,7 +74,14 @@ def wait_for_page(
     return False
 
 
-def upload_to_bridge(image: Path, *, host: str = SETUP_HOST, timeout: float = 300.0) -> str:
+# How long the upload may go without the bridge taking a byte or answering:
+# its first wait, the slot erased, is about 20 s. A network gone part way is
+# noticed after this, and the upload tried again - through the bridge's own
+# network, if it has raised that meanwhile.
+UPLOAD_STALL = 120.0
+
+
+def upload_to_bridge(image: Path, *, host: str = SETUP_HOST, timeout: float = UPLOAD_STALL) -> str:
     """POST the image to the bridge exactly as the documented curl command does.
 
     One raw body, HTTP/1.1, an explicit length and no `Expect: 100-continue` -
