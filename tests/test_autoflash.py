@@ -1190,6 +1190,36 @@ class CommitEvidenceTests(unittest.TestCase):
             self.assertIs(result, failure)
             self.assertEqual((tries, recoveries), (1, 0))
 
+    def test_a_commit_the_plug_finished_after_its_window_closed_is_not_tried(self):
+        # Seen in the fault suite: the window closed as the commit ran; the plug
+        # finished it, and the run carried on at E3 ran its network check on
+        # the startup firmware, which cannot say its network - and went back
+        # to E1 with no way forward.
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        evidence = Path(directory.name)
+        (evidence / "commit-server.log").write_text('[192.168.1.51] "GET /target-table HTTP/1.1" 200 -\n')
+        ctx = SimpleNamespace(evidence=evidence, state=RunState.open(evidence),
+                              device=mock.Mock(is_safeboot=mock.Mock(return_value=True)))
+        with mock.patch.object(autoflash, "commit_once") as commit, \
+             mock.patch.object(autoflash, "plug_back_on_wifi"), \
+             mock.patch.object(autoflash, "say"):
+            result = autoflash.step_commit(ctx)
+        commit.assert_not_called()
+        self.assertEqual(result, {"exit": 0, "finished_unseen": True})
+        # Still on Tasmota, the table fetched but the commit not finished:
+        # tried as ever.
+        ctx.device.is_safeboot.return_value = False
+        with mock.patch.object(autoflash, "commit_once", return_value={"exit": 0}) as commit, \
+             mock.patch.object(autoflash, "plug_back_on_wifi"), \
+             mock.patch.object(autoflash, "say"):
+            self.assertEqual(autoflash.step_commit(ctx), {"exit": 0})
+        commit.assert_called_once()
+
     def test_a_commit_that_finished_unseen_is_not_done_again(self):
         # The cut came after the final table: the plug runs the startup firmware.
         from tools.autoflash.phases import PhaseError

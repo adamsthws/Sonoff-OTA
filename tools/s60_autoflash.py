@@ -2631,6 +2631,15 @@ def step_commit(ctx: Context) -> dict[str, Any]:
         say("The plug already reported the new layout written and checked;")
         say("there is nothing to do again here.")
         return {"exit": 0, "already_written": True}
+    # Stopped as the commit ran - its window closed, say - and finished by the
+    # plug alone: it fetched the new layout and runs the startup firmware,
+    # which starts only once that is in place. Its report never got here, and
+    # a first try would fail its network check on the startup firmware (seen
+    # in the fault suite), sending the run back to E1 with no way forward.
+    if table_fetched(ctx.evidence) and plug_on_startup_firmware(ctx):
+        say("The plug finished the commit after this computer's run was stopped: it")
+        say("fetched the new layout, and runs the startup firmware now.")
+        return {"exit": 0, "finished_unseen": True}
 
     for attempt in range(1, COMMIT_ATTEMPTS + 1):
         ctx.state.capture("E3.attempts", attempt)
@@ -2673,6 +2682,15 @@ def commit_retry_reason(ctx: Context, exc: Exception) -> str | None:
     if isinstance(exc, PhaseError) or TRANSIENT_RE.search(text):
         return "The plug stopped part way - a power cut, or its Wi-Fi going."
     return None
+
+
+def plug_on_startup_firmware(ctx: Context) -> bool:
+    """Whether the plug runs the startup firmware now, once it is back."""
+    try:
+        plug_back_on_wifi(ctx)
+        return ctx.device.is_safeboot()
+    except (Abort, DeviceError, OSError):
+        return False
 
 
 def commit_recovered(ctx: Context) -> bool:

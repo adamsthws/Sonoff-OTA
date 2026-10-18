@@ -69,6 +69,11 @@ own firmware.
   cut off part way, say - is waited for for up to three minutes, then the
   run says to switch it off and on, where before it was refused at once
   and the firewall blamed.
+- A run stopped as the memory layout was committed - its window closed, say -
+  whose plug then finished the commit by itself, carried on by checking the
+  plug's network on the startup firmware, which cannot say it, and went back
+  to the start of the conversion with no way forward. It now sees the commit
+  done and carries on from there.
 - After the installer could not be sent again (the plug offline in
   eWeLink), a plug slow to answer made the run ask you to join the
   installer's own network, which it had never raised. The next try now
