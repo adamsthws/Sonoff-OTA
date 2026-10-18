@@ -2434,6 +2434,50 @@ class PromoteTests(unittest.TestCase):
         self.assertEqual(events[:3], ["Restart 1", "rebooted", "upload"])
 
 
+class BackAfterResetTests(unittest.TestCase):
+    """F4 - Tasmota keeps its Wi-Fi through Reset 4 only once it has saved its
+    defaults: cut off in the second before, it comes back on its own setup
+    network, and is set up through that rather than the run failing."""
+
+    def back(self, reboot_ok, setup):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        from tools.autoflash.device import DeviceError
+
+        def wait_for_reboot(**kwargs):
+            if not reboot_ok:
+                raise DeviceError("192.168.60.50 did not restart within 180s")
+            return 5.0
+
+        device = SimpleNamespace(wait_for_reboot=wait_for_reboot, wait_reachable=mock.Mock())
+        ctx = SimpleNamespace(device=device, state=SimpleNamespace(input=lambda key: None))
+        with mock.patch.object(autoflash, "find_ssid", return_value=setup) as looked, \
+             mock.patch.object(autoflash, "setup_networks", return_value=("tasmota-ABCDEF-1234",)), \
+             mock.patch.object(autoflash, "configure_plug_wifi") as configured, \
+             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
+            try:
+                autoflash.back_after_reset(ctx, "boot", 12)
+                outcome = "back"
+            except autoflash.Abort as exc:
+                outcome = str(exc)
+        return outcome, looked.called, configured.call_args
+
+    def test_back_as_usual_looks_no_further(self):
+        outcome, looked, configured = self.back(True, None)
+        self.assertEqual((outcome, looked, configured), ("back", False, None))
+
+    def test_back_on_its_setup_network_is_set_up_through_it(self):
+        outcome, looked, configured = self.back(False, "tasmota-ABCDEF-1234")
+        self.assertEqual(outcome, "back")
+        self.assertEqual(configured.args[1], "tasmota-ABCDEF-1234")
+
+    def test_nowhere_to_be_seen_says_to_switch_it_off_and_on(self):
+        outcome, _, configured = self.back(False, None)
+        self.assertIn("Switch it off and on", outcome)
+        self.assertIsNone(configured)
+
+
 class RefusedUploadTests(unittest.TestCase):
     """An upload Tasmota took whole and refused (damaged on the way, say) is
     sent again, three tries in all, before it is left to the person."""

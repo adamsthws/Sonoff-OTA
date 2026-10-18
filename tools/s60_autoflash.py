@@ -2847,8 +2847,8 @@ def step_configure(ctx: Context) -> dict[str, Any]:
     booted, uptime = device.started_at(), device.uptime_seconds()
     device.command("Reset 4", timeout=SLOW_COMMAND)
     say("Settings reset to Tasmota's defaults, keeping the Wi-Fi; the plug restarts")
-    device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
-    device.wait_reachable(timeout=120)
+    back_after_reset(ctx, booted, uptime)
+    device = ctx.device
     booted, uptime = device.started_at(), device.uptime_seconds()
     device.command("SaveData 1", timeout=SLOW_COMMAND)
     device.command(f"Template {template}", timeout=SLOW_COMMAND)
@@ -2858,6 +2858,32 @@ def step_configure(ctx: Context) -> dict[str, Any]:
     # Restarted is not yet answering: the next step asks the plug at once.
     device.wait_reachable(timeout=120)
     return {"template": "applied", "wifi_route": route}
+
+
+def back_after_reset(ctx: Context, booted: str | None, uptime: int | None) -> None:
+    """The plug back after Reset 4 - or set up through its own network, when it
+    came back without its Wi-Fi details.
+
+    Tasmota keeps the Wi-Fi through Reset 4 only once it has saved its new
+    defaults; cut off in the second before (a power cut, seen in the fault
+    suite) it starts with none, and raises its setup network."""
+    device = ctx.device
+    try:
+        device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
+        device.wait_reachable(timeout=120)
+        return
+    except DeviceError:
+        pass
+    setup = find_ssid(setup_networks(ctx), timeout=30)
+    if not setup:
+        raise Abort(
+            "the plug did not come back after its settings were reset, and its own "
+            f"network ({setup_network_hint(ctx)}) is not to be seen either. Switch it "
+            "off and on, then run this again")
+    tell("    The plug restarted without its Wi-Fi details - cut off just after the")
+    tell("    reset, say - and raised its own network, so it is set up through that.")
+    configure_plug_wifi(ctx, setup)
+    ctx.device.wait_reachable(timeout=300)
 
 
 # Commands that rewrite Tasmota's settings answer slowly on a busy plug: given

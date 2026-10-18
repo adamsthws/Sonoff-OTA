@@ -105,6 +105,10 @@ own firmware.
   from the page it answers with, and sent again, up to three times. Before,
   it was taken for one that worked, and the run waited five minutes for a
   restart that never came, then stopped blaming the network.
+- A power cut in the second after official Tasmota's settings are reset
+  (F4) leaves it without its Wi-Fi, on its own setup network. The run now
+  sets it up through that there and then, where it waited three minutes and
+  stopped saying the plug had not restarted.
 
 ## 1.2.0
 
