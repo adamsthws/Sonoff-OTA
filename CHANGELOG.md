@@ -69,6 +69,10 @@ own firmware.
   cut off part way, say - is waited for for up to three minutes, then the
   run says to switch it off and on, where before it was refused at once
   and the firewall blamed.
+- A Tasmota plug too busy to say its template in time - just started, or
+  answering the run's look round the network - was taken for a Tasmota not
+  yet set up as an S60, and sent down the wrong route, which never finished.
+  It is asked again, and left to the next look rather than guessed at.
 - A plug switched on as the run starts - offline in eWeLink, and not yet
   answering on the network - is waited for for up to a minute while it joins
   the Wi-Fi and the cloud, where before the run stopped at once to ask.

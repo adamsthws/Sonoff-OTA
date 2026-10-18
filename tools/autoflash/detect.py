@@ -94,14 +94,30 @@ def _tasmota(host: str, timeout: float) -> tuple[str, str | None] | None:
     # Tasmota, so leaving it carries on (the plan finds its writes done).
     if sonoff_layout and "bluetooth" in version:
         return "hub", name
-    try:
-        template = device.command("Template")
-    except Exception:  # noqa: BLE001
-        template = {}
+    template = _template(device)
+    if template is None:
+        # Not a Tasmota without the S60's template: one too busy to say.
+        raise Unreadable(host)
     named = f"{status.get('Status', {}).get('Module')} {template}"
     if "S60" not in named:
         return None  # a Tasmota, but not an S60's
     return "tasmota", name
+
+
+class Unreadable(RuntimeError):
+    """A Tasmota that answered, but not what its template is."""
+
+
+def _template(device: Device) -> str | None:
+    """The template Tasmota runs, or None if it would not say.  Asked again,
+    then as its module, which names the template too: a plug just started, or
+    answering other questions, can take longer than one ask allows."""
+    for command in ("Template", "Template", "Module", "Module"):
+        try:
+            return str(device.command(command))
+        except Exception:  # noqa: BLE001
+            continue
+    return None
 
 
 def _answers_as_tasmota(host: str, timeout: float) -> bool:
@@ -120,7 +136,10 @@ def identify(host: str, *, timeout: float = 3.0) -> str | None:
     if _port_open(host, 80, timeout):
         if _is_installer(host, timeout):
             return "installer"
-        found = _tasmota(host, timeout)
+        try:
+            found = _tasmota(host, timeout)
+        except Unreadable:
+            return None  # asked again later, not taken for something else
         if found:
             return found[0]
     if esphome_ota.probe(host, timeout=timeout) is not None:
@@ -152,7 +171,12 @@ def converted_s60s(near: str, *, known_macs: set[str] = frozenset(), timeout: fl
             return None
         if _is_installer(host, timeout):
             return Found(host, "installer", mac, "the installer")
-        found = _tasmota(host, timeout)
+        try:
+            found = _tasmota(host, timeout)
+        except Unreadable:
+            # Left out this time - it is looked for again - rather than taken
+            # for a Tasmota not set up as an S60, and sent the wrong way.
+            return None
         known = hostsys.normalise_mac(mac) in known_macs
         if not found:
             # Official Tasmota put on by a run stopped before it gave it the

@@ -59,6 +59,44 @@ class TasmotaTests(unittest.TestCase):
         self.assertIsNone(self.kind(FakeTasmota(version="15.6.0(release-tasmota)", table=TASMOTA_TABLE,
                                                 module="Jomarto SH0617")))
 
+    def test_a_template_slow_to_answer_is_asked_again(self):
+        fake = FakeTasmota(version="15.6.0(release-tasmota32)", table=TASMOTA_TABLE, module=0)
+        answers = fake.command
+        tries = []
+
+        def busy_at_first(command):
+            if command in ("Template", "Module"):
+                tries.append(command)
+                if len(tries) < 3:
+                    raise TimeoutError("timed out")
+                return {"Module": {"0": "Sonoff S60TPG"}}
+            return answers(command)
+        fake.command = busy_at_first
+        self.assertEqual(self.kind(fake), "tasmota")
+        self.assertEqual(tries, ["Template", "Template", "Module"])
+
+    def test_a_set_up_s60_that_will_not_say_its_template_is_not_taken_for_one_not_set_up(self):
+        # Seen once in the emulator: Tasmota busy answering the network sweep
+        # did not say its template in time, the plug was taken for a Tasmota
+        # not yet set up as an S60, and the run sent it the wrong way.
+        fake = FakeTasmota(version="15.6.0(release-tasmota32)", table=TASMOTA_TABLE, module=0)
+        answers = fake.command
+
+        def no_template(command):
+            if command in ("Template", "Module"):
+                raise TimeoutError("timed out")
+            return answers(command)
+        fake.command = no_template
+        neighbours = {"192.168.0.37": "12:34:56:ab:cd:ef"}
+        with mock.patch.object(detect, "Device", fake), \
+                mock.patch.object(detect.hostsys, "sweep"), \
+                mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
+                mock.patch.object(detect, "_port_open", return_value=True), \
+                mock.patch.object(detect, "_is_installer", return_value=False), \
+                mock.patch.object(detect.esphome, "is_esphome", return_value=False):
+            self.assertEqual(detect.converted_s60s("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"}), [])
+            self.assertIsNone(detect.identify("192.168.0.37"))
+
     def test_a_safeboot_is_taken_only_with_a_mac_this_computer_knows(self):
         # It answers no commands: nothing else tells this tool's startup
         # firmware from any Tasmota part way through an update.
