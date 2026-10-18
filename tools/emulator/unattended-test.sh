@@ -71,9 +71,18 @@ keep_plug() {
 
 as_you=(docker exec -u "$(id -u):$(id -g)" -w /work)
 waited=0
-until "${as_you[@]}" "$NAME" tmux has-session -t s60 >/dev/null 2>&1 &&
-        docker exec "$NAME" ping -c1 -W1 "$PLUG" >/dev/null 2>&1; do
-    [ $((waited += 2)) -le 120 ] || { echo "The emulated plug did not come up within 120s." >&2; exit 1; }
+until "${as_you[@]}" "$NAME" tmux has-session -t s60 >/dev/null 2>&1; do
+    [ $((waited += 2)) -le 120 ] || { echo "The emulator did not start within 120s." >&2; exit 1; }
+    sleep 2
+done
+# A plug off the network - on its own setup network after a power cut, say -
+# is one the run must find for itself: waited for, but not required.
+waited=0
+until docker exec "$NAME" ping -c1 -W1 "$PLUG" >/dev/null 2>&1; do
+    if [ $((waited += 2)) -gt 120 ]; then
+        echo "The emulated plug is not on the network after 120s; running anyway."
+        break
+    fi
     sleep 2
 done
 echo "The emulated plug is up; converting it unattended..."
