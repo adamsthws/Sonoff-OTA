@@ -1637,8 +1637,8 @@ def sight_plugs(plugs: list[AccountPlug]) -> list[Sighting]:
     return match_plugs(plugs, answers, hostsys.neighbour_table())
 
 
-# A plug that has just started answers here before eWeLink shows it online:
-# how long to wait for eWeLink to catch up before asking about its internet.
+# A plug that has just started shows offline in eWeLink for a while, answering
+# here or not yet: how long to wait for it to catch up before asking.
 CLOUD_CATCH_UP = 60.0
 
 
@@ -1682,10 +1682,14 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
                 ctx.account_plug = ready[choice].plug
                 return str(ready[choice].ip)
             waited = time.monotonic() - started
-            if all(map(cut_off, sightings)) and waited < CLOUD_CATCH_UP:
-                # Answering here but offline in eWeLink: usually a plug that has
-                # only just started, and is a few seconds from reaching the cloud.
-                say(f"    It answers here but eWeLink shows it offline; checking again ({waited:.0f}s)...")
+            if all(sighting.plug.online is False for sighting in sightings) and waited < CLOUD_CATCH_UP:
+                # Offline in eWeLink: usually a plug that has only just started -
+                # plugged in as the run began - and is seconds from joining the
+                # Wi-Fi and the cloud. Answering here already, or not yet.
+                if all(map(cut_off, sightings)):
+                    say(f"    It answers here but eWeLink shows it offline; checking again ({waited:.0f}s)...")
+                else:
+                    say(f"    eWeLink shows it offline - just switched on, perhaps; checking again ({waited:.0f}s)...")
                 output.progress(f"waiting for eWeLink to see the plug online... {waited:.0f}s")
                 time.sleep(10.0)
                 output.progress_clear()

@@ -67,6 +67,9 @@ own firmware.
   cut off part way, say - is waited for for up to three minutes, then the
   run says to switch it off and on, where before it was refused at once
   and the firewall blamed.
+- A plug switched on as the run starts - offline in eWeLink, and not yet
+  answering on the network - is waited for for up to a minute while it joins
+  the Wi-Fi and the cloud, where before the run stopped at once to ask.
 - An upload of official Tasmota to the startup firmware that stalls is
   noticed after two minutes, not ten, and tried again from a restart - up
   to three times - before it is left to be done by hand.

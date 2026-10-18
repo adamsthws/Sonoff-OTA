@@ -136,6 +136,37 @@ class FindAccountPlugTests(unittest.TestCase):
             self.assertEqual(af.find_account_plug(ctx, [offline]), "192.168.0.50")
         asked.assert_not_called()
 
+    def test_a_plug_just_switched_on_is_waited_for_before_asking(self):
+        # Plugged in as the run began: neither answering here nor online yet.
+        offline = {**S60, "online": False}
+        ctx = self.ctx()
+        ctx.account_devices = mock.Mock(side_effect=[[offline], [S60]])
+        plug = af.account_plug(offline)
+        monotonic, sleep = self.clock()
+        with mock.patch.object(af, "sight_plugs", side_effect=[
+                [af.Sighting(plug, None, False)],
+                [af.Sighting(af.account_plug(S60), "192.168.0.50", True)]]), \
+             mock.patch.object(af, "ask_choice") as asked, monotonic, sleep, \
+             mock.patch.object(af, "tell"), mock.patch.object(af, "say"):
+            self.assertEqual(af.find_account_plug(ctx, [offline]), "192.168.0.50")
+        asked.assert_not_called()
+
+    def test_a_plug_offline_for_a_minute_is_asked_about(self):
+        offline = {**S60, "online": False}
+        ctx = self.ctx()
+        ctx.account_devices = mock.Mock(return_value=[offline])
+        monotonic, sleep = self.clock()
+        with mock.patch.object(af, "sight_plugs",
+                               side_effect=lambda plugs: [af.Sighting(p, None, False) for p in plugs]), \
+             mock.patch.object(af, "ask_choice", return_value=2), \
+             mock.patch.object(af, "ask_ipv4", return_value="192.168.0.99"), \
+             mock.patch.object(af, "section") as shown, monotonic, sleep, \
+             mock.patch.object(af, "tell"), mock.patch.object(af, "say"):
+            self.assertEqual(af.find_account_plug(ctx, [offline]), "192.168.0.99")
+        self.assertIn("eWeLink shows it offline", shown.call_args.args[1][0])
+        # Looked again every 10 s for the minute before asking.
+        self.assertEqual(ctx.account_devices.call_count, int(af.CLOUD_CATCH_UP // 10))
+
     def test_a_plug_without_internet_is_not_chosen(self):
         sighting = af.Sighting(af.account_plug({**S60, "online": False}), "192.168.0.50", True)
         monotonic, sleep = self.clock()
