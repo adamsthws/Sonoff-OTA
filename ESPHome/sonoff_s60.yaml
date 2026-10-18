@@ -22,20 +22,9 @@ esphome:
         - lambda: |-
             gpio_hold_dis(GPIO_NUM_4);
             gpio_hold_dis(GPIO_NUM_5);
-        - lambda: |-
-            // Every setup network of the conversion has one name: Sonoff-Setup-
-            // and the last two bytes of the plug's Wi-Fi MAC (Sonoff-Setup-CDEF),
-            // open. Set before Wi-Fi starts (its priority is 250).
-            uint8_t mac[6];
-            get_mac_address_raw(mac);
-            char name[20];
-            snprintf(name, sizeof(name), "Sonoff-Setup-%02X%02X", mac[4], mac[5]);
-            wifi::WiFiAP ap;
-            ap.set_ssid(name);
-            wifi::global_wifi_component->set_ap(ap);
-    # After Wi-Fi is set up (its priority is 250); on_boot's default, 600, is before.
-    - priority: -100
-      then:
+        # Before Wi-Fi starts (its priority is 250): the network to join, from
+        # the image, and its own network's name. Wi-Fi details saved earlier
+        # (from Home Assistant, say) take their place as Wi-Fi starts.
         - lambda: |-
             // Written by the conversion tool: each a marker, then filler, and
             // each must appear exactly once in the image. Read through volatile
@@ -46,19 +35,33 @@ esphome:
             const char *volatile at_password = password;
             id(imprinted_ssid) = at_ssid;
             id(imprinted_password) = at_password;
-        - if:
-            condition:
-              # Imprinted, and nothing saved yet: once saved, the Wi-Fi is used
-              # from there, and a later change in Home Assistant is not undone.
-              lambda: |-
-                return !id(imprinted_ssid).empty()
-                    && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0
-                    && !wifi::global_wifi_component->has_sta();
-            then:
-              - wifi.configure:
-                  ssid: !lambda 'return id(imprinted_ssid);'
-                  password: !lambda 'return id(imprinted_password);'
-                  save: true
+            if (!id(imprinted_ssid).empty() && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0) {
+              wifi::WiFiAP sta;
+              sta.set_ssid(id(imprinted_ssid));
+              sta.set_password(id(imprinted_password));
+              wifi::global_wifi_component->set_sta(sta);
+            }
+            // Every setup network of the conversion has one name: Sonoff-Setup-
+            // and the last two bytes of the plug's Wi-Fi MAC (Sonoff-Setup-CDEF),
+            // open.
+            uint8_t mac[6];
+            get_mac_address_raw(mac);
+            char name[20];
+            snprintf(name, sizeof(name), "Sonoff-Setup-%02X%02X", mac[4], mac[5]);
+            wifi::WiFiAP ap;
+            ap.set_ssid(name);
+            wifi::global_wifi_component->set_ap(ap);
+    # After Wi-Fi is set up: on the image's details (nothing saved before),
+    # saved, so they stay. Not wifi.configure, which - when its first try takes
+    # over 30 s, a router restarting, say - puts back what was there before
+    # (nothing, on a first boot) and saves that.
+    - priority: -100
+      then:
+        - lambda: |-
+            if (!id(imprinted_ssid).empty() && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0 &&
+                wifi::global_wifi_component->get_sta().get_ssid() == id(imprinted_ssid)) {
+              wifi::global_wifi_component->save_wifi_sta(id(imprinted_ssid), id(imprinted_password));
+            }
 
 # Adopting the plug in Home Assistant's ESPHome builder takes this config.
 dashboard_import:

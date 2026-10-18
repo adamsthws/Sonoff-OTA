@@ -146,6 +146,11 @@ own firmware.
   a router outage, say); new ones are asked for only if the plug does not join
   with them. Every send of Wi-Fi details through a plug's own network, Tasmota's
   too, is tried up to three times, and rejected ones can be typed again.
+- ESPHome, and the mover, no longer lose the Wi-Fi details the run wrote in
+  when their first join takes over 30 seconds - a router restarting just then,
+  say. ESPHome's `wifi.configure` put back what was there before - nothing, on
+  a first boot - and saved that, leaving a plug with no network until it was
+  switched off and on. They now start with the details, and keep trying.
 
 ## 1.2.0
 

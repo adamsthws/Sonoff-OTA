@@ -19,20 +19,10 @@ esphome:
     name: adamsthws.sonoff-s60-mover
     version: "1.0.0"
   on_boot:
+    # Before Wi-Fi starts (its priority is 250): the network to join, and its
+    # own network's name. Joined from that for as long as it takes - a router
+    # restarting meanwhile, say - and nothing saved, as the mover never stays.
     - priority: 1000
-      then:
-        - lambda: |-
-            // Every setup network of the conversion has one name: Sonoff-Setup-
-            // and the last two bytes of the plug's Wi-Fi MAC (Sonoff-Setup-CDEF),
-            // open. Set before Wi-Fi starts (its priority is 250).
-            uint8_t mac[6];
-            get_mac_address_raw(mac);
-            char name[20];
-            snprintf(name, sizeof(name), "Sonoff-Setup-%02X%02X", mac[4], mac[5]);
-            wifi::WiFiAP ap;
-            ap.set_ssid(name);
-            wifi::global_wifi_component->set_ap(ap);
-    - priority: -100
       then:
         - lambda: |-
             static const char ssid[] = "S60-IMPRINT-SSID>.................................";
@@ -41,16 +31,22 @@ esphome:
             const char *volatile at_password = password;
             id(imprinted_ssid) = at_ssid;
             id(imprinted_password) = at_password;
-        - if:
-            condition:
-              lambda: |-
-                return !id(imprinted_ssid).empty()
-                    && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0;
-            then:
-              - wifi.configure:
-                  ssid: !lambda 'return id(imprinted_ssid);'
-                  password: !lambda 'return id(imprinted_password);'
-                  save: false
+            if (!id(imprinted_ssid).empty() && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0) {
+              wifi::WiFiAP sta;
+              sta.set_ssid(id(imprinted_ssid));
+              sta.set_password(id(imprinted_password));
+              wifi::global_wifi_component->set_sta(sta);
+            }
+            // Every setup network of the conversion has one name: Sonoff-Setup-
+            // and the last two bytes of the plug's Wi-Fi MAC (Sonoff-Setup-CDEF),
+            // open.
+            uint8_t mac[6];
+            get_mac_address_raw(mac);
+            char name[20];
+            snprintf(name, sizeof(name), "Sonoff-Setup-%02X%02X", mac[4], mac[5]);
+            wifi::WiFiAP ap;
+            ap.set_ssid(name);
+            wifi::global_wifi_component->set_ap(ap);
 
 globals:
   - id: imprinted_ssid

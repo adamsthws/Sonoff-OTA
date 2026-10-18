@@ -24,8 +24,8 @@ from . import imprint
 ROOT = Path(__file__).resolve().parents[2]
 # The published image, pinned: a changed file is refused, never used unseen.
 IMAGE = ROOT / "artifacts" / "esphome-sonoff-s60-imprintable-1.0.0.bin"
-IMAGE_SHA256 = "5b69737350aeffb140e915c6764213dca2ac30a2b4daa6754ce1454fb66b6c6b"
-IMAGE_SIZE = 950_144
+IMAGE_SHA256 = "0dfa93a98962eac73a07a3b5a7ee620a0faf9aacf5ed829b674b5a7afa32b06d"
+IMAGE_SIZE = 948_256
 # ESPHome's bootloader, from the same build, put in place of Sonoff's: Sonoff's
 # (ESP-IDF 4.4) starts ESPHome but cannot roll back an update that fails to
 # start ("Bootloader too old for OTA rollback").  It is all that sits before
@@ -97,8 +97,8 @@ def published_bootloader() -> bytes:
 # The mover (ESPHome/sonoff_s60_mover.yaml): a small ESPHome, run only while a
 # plug leaves Tasmota, that takes the next firmware as an ESPHome update.
 MOVER = ROOT / "artifacts" / "esphome-sonoff-s60-mover-1.0.0.bin"
-MOVER_SHA256 = "14c3ce4426508ec697c4f87544f1830332ae8dbd59f3271197debd12e7f709bf"
-MOVER_SIZE = 759_232
+MOVER_SHA256 = "ee0c38278d48d0112515e2e61d7bede9575771042381acf5c8eb6086449c36fb"
+MOVER_SIZE = 756_928
 # Sonoff's partition table, written back when a plug leaves Tasmota's layout.
 SONOFF_TABLE = ROOT / "artifacts" / "sonoff-s60-partition-table.bin"
 
