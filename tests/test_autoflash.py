@@ -2362,7 +2362,7 @@ class ConfigureStepTests(unittest.TestCase):
         sent = []
         device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
                                  uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
-                                 command=lambda c, timeout=None: sent.append(c))
+                                 command=lambda c, timeout=None: sent.append(c), is_safeboot=lambda: False)
         state = SimpleNamespace(input=lambda key: {"product_model": "S60TPF"}.get(key))
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device, state=state)
         with mock.patch.object(autoflash, "say") as said:
@@ -2391,7 +2391,7 @@ class ConfigureStepTests(unittest.TestCase):
             sent.append(c)
             return answers.get(c)
 
-        device = SimpleNamespace(wait_reachable=lambda **_: None, command=command)
+        device = SimpleNamespace(wait_reachable=lambda **_: None, command=command, is_safeboot=lambda: False)
         state = SimpleNamespace(input=lambda key: {"product_model": "S60TPF"}.get(key))
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device, state=state)
         with mock.patch.object(autoflash, "say"):
@@ -2432,6 +2432,77 @@ class PromoteTests(unittest.TestCase):
     def test_tried_again_it_restarts_first(self):
         events = self.promote(True)
         self.assertEqual(events[:3], ["Restart 1", "rebooted", "upload"])
+
+
+class OfficialTasmotaSeenTests(unittest.TestCase):
+    """F2 - official Tasmota is seen running only from what it says it is: a
+    plug restarting does not answer its page for a moment (seen in the fault
+    suite taken for Tasmota, while it came back on the startup firmware)."""
+
+    def wait(self, versions, setup=None):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        answers = iter(versions)
+        clock = [0.0]
+
+        def sleep(seconds):
+            clock[0] += seconds
+
+        device = SimpleNamespace(host="192.168.60.50", firmware_version=lambda: next(answers))
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.60.50"), device=device)
+        with mock.patch.object(autoflash.time, "sleep", side_effect=sleep), \
+             mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: clock[0]), \
+             mock.patch.object(autoflash, "find_ssid", return_value=setup), \
+             mock.patch.object(autoflash, "say"):
+            return autoflash.wait_for_official(ctx)
+
+    def test_silence_is_not_tasmota(self):
+        outcome = self.wait(["", "", "15.6.0(release-tasmota32)"])
+        self.assertEqual(outcome, "rejoined the network")
+
+    def test_still_on_the_startup_firmware_a_minute_on_did_not_take(self):
+        self.assertEqual(self.wait(["15.6.0(safeboot)"] * 20), "startup firmware")
+
+    def test_one_that_did_not_take_is_sent_again(self):
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        with mock.patch.object(autoflash, "upload_to_startup_firmware", return_value="http:20s") as up, \
+             mock.patch.object(autoflash, "wait_for_official",
+                               side_effect=["startup firmware", "rejoined the network"]), \
+             mock.patch.object(autoflash, "tell") as told:
+            how, outcome = autoflash.install_official(object(), Path("tasmota32c3.bin"))
+        self.assertEqual((up.call_count, outcome), (2, "rejoined the network"))
+        self.assertIn("did not take", " ".join(str(c.args[0]) for c in told.call_args_list))
+
+    def test_three_that_do_not_take_stop_with_the_reason(self):
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        with mock.patch.object(autoflash, "upload_to_startup_firmware", return_value="http:20s"), \
+             mock.patch.object(autoflash, "wait_for_official", return_value="startup firmware"), \
+             mock.patch.object(autoflash, "tell"):
+            with self.assertRaisesRegex(autoflash.Abort, "did not take"):
+                autoflash.install_official(object(), Path("tasmota32c3.bin"))
+
+    def test_f4_finding_the_startup_firmware_sends_official_tasmota_again(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        on_startup = [True]
+        device = SimpleNamespace(wait_reachable=lambda **_: None, is_safeboot=lambda: on_startup[0],
+                                 command=lambda c, timeout=None: None)
+        state = SimpleNamespace(input=lambda key: {"product_model": "S60TPF"}.get(key))
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.60.50"), device=device, state=state)
+
+        def installed(ctx_, app):
+            on_startup[0] = False
+            return "http:20s", "rejoined the network"
+
+        with mock.patch.object(autoflash, "install_official", side_effect=installed) as install, \
+             mock.patch.object(autoflash, "s60_settings_in_place", return_value=True), \
+             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
+            autoflash.step_configure(ctx)
+        install.assert_called_once()
 
 
 class BackAfterResetTests(unittest.TestCase):
@@ -2542,7 +2613,14 @@ class StalledUploadTests(unittest.TestCase):
             if not restart_answers:
                 raise OSError("not answering")
 
-        ctx = SimpleNamespace(device=SimpleNamespace(upload_firmware=upload_firmware, command=command))
+        answering = iter([True, True, False] * 10)  # gone a few seconds after "Restart 1"
+
+        def reachable(timeout=None):
+            events.append("reachable")
+            return next(answering)
+
+        ctx = SimpleNamespace(device=SimpleNamespace(upload_firmware=upload_firmware, command=command,
+                                                     reachable=reachable))
         with mock.patch.object(autoflash, "recovery_firmware_up", return_value=back), \
              mock.patch.object(autoflash, "upload_or_prompt_by_hand", return_value="manual") as by_hand, \
              mock.patch.object(autoflash.time, "sleep"), \
@@ -2562,14 +2640,17 @@ class StalledUploadTests(unittest.TestCase):
     def test_a_stalled_upload_is_tried_again_after_a_restart(self):
         result, events, by_hand, told = self.upload([TimeoutError("stalled"), TimeoutError("stalled"), None])
         self.assertEqual([e for e in events if e == "Restart 1"], ["Restart 1"] * 2)
-        self.assertEqual(len([e for e in events if e != "Restart 1"]), 3)
+        self.assertEqual(len([e for e in events if isinstance(e, tuple)]), 3)
+        # sent again only once the plug was seen to go for its restart
+        restart = events.index("Restart 1")
+        self.assertEqual(events[restart + 1:restart + 4], ["reachable"] * 3)
         self.assertTrue(result.startswith("http:"))
         self.assertIn("attempt 3 of 3", told)
         self.assertFalse(by_hand)
 
     def test_three_stalls_leave_it_to_the_person(self):
         result, events, by_hand, _ = self.upload([TimeoutError("stalled")] * 5)
-        self.assertEqual(len([e for e in events if e != "Restart 1"]), 3)
+        self.assertEqual(len([e for e in events if isinstance(e, tuple)]), 3)
         self.assertTrue(by_hand)
         self.assertEqual(result, "manual")
 

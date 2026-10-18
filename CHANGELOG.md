@@ -114,6 +114,11 @@ own firmware.
   before, and left it. A stop there now waits for the rule to be recorded, so
   it is removed as usual, and a rule an earlier run left (ufw keeps the
   tool's comment on it) is recognised and removed too.
+- Official Tasmota is taken as running only once it says so. A plug
+  restarting back onto the startup firmware - the upload not taken - was
+  taken for Tasmota for not answering for a moment, and the next stage then
+  failed every time. Now the upload is sent again, up to three times, and a
+  run carried on that finds the startup firmware at that stage sends it too.
 
 ## 1.2.0
 

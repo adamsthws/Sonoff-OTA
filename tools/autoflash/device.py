@@ -452,7 +452,8 @@ class Device:
                 return time.monotonic() - started
         raise DeviceError(
             f"{self.host} did not restart within {timeout:.0f}s "
-            f"(uptime never reset below {before}s)"
+            + (f"(uptime never reset below {before}s)" if before is not None
+               else "(it never said how long it had been up)")
         )
 
     # -- firmware upload ----------------------------------------------------

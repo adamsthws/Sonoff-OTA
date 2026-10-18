@@ -2684,7 +2684,12 @@ def upload_to_startup_firmware(ctx: Context, app: Path) -> str:
                 tell("    The plug is not answering: switch it off and on - at this stage that is")
                 tell("    safe, it starts the startup firmware again - and this carries on.")
             restart = time.monotonic()
-            time.sleep(5)
+            # Gone first: the restart comes some seconds after its answer, and
+            # the old start still answering is no sign of the new one (seen in
+            # the fault suite: the upload sent again went to a plug about to go).
+            gone_by = time.monotonic() + 30
+            while time.monotonic() < gone_by and device.reachable(timeout=2.0):
+                time.sleep(1)
             if not recovery_firmware_up(ctx, restart, within=300):
                 raise Abort("the startup firmware did not come back after the upload stopped") from exc
             continue
@@ -2757,8 +2762,38 @@ def step_canonical(ctx: Context) -> dict[str, Any]:
     if ctx.dry_run:
         say("[dry-run] would upload the official application")
         return {"safeboot_seconds": round(waited, 1), "startup_settings": saved}
-    how = upload_to_startup_firmware(ctx, app)
+    how, outcome = install_official(ctx, app)
+    return {"safeboot_seconds": round(waited, 1), "app_upload": how, "outcome": outcome,
+            "startup_settings": saved}
 
+
+def install_official(ctx: Context, app: Path) -> tuple[str, str]:
+    """Official Tasmota uploaded to the startup firmware, and seen running -
+    sent again when the plug comes back on the startup firmware instead (the
+    upload did not take), up to UPLOAD_ATTEMPTS in all."""
+    for attempt in range(1, UPLOAD_ATTEMPTS + 1):
+        how = upload_to_startup_firmware(ctx, app)
+        outcome = wait_for_official(ctx)
+        if outcome != "startup firmware":
+            return how, outcome
+        if attempt < UPLOAD_ATTEMPTS:
+            tell("    The plug came back on the startup firmware: the upload did not take. "
+                 f"Sending it again (attempt {attempt + 1} of {UPLOAD_ATTEMPTS}).")
+    raise Abort("official Tasmota did not take: the plug came back on its startup firmware "
+                f"after {UPLOAD_ATTEMPTS} uploads")
+
+
+# Still on the startup firmware this long after an upload, it did not take:
+# a good one restarts the plug into Tasmota within seconds.
+STILL_STARTUP_AFTER = 60.0
+
+
+def wait_for_official(ctx: Context) -> str:
+    """After the upload: Tasmota back on the network, or on its own setup
+    network - or "startup firmware" when the plug is still, or again, on that.
+
+    Seen running only from what it says it is: a plug restarting does not
+    answer its page for a moment, which is no sign of Tasmota."""
     # The startup firmware normally saved the Wi-Fi where Tasmota reads it, so
     # Tasmota comes back on the network.  If it did not, Tasmota raises its own
     # setup network instead and F4 sets it up through that.  Both mean it worked.
@@ -2766,26 +2801,28 @@ def step_canonical(ctx: Context) -> dict[str, Any]:
     say("Waiting for the full Tasmota to start. It will either rejoin your")
     say("Wi-Fi, or put up its own setup network - both are normal.")
     started = time.monotonic()
-    outcome = None
     while time.monotonic() - started < 300:
         time.sleep(5)
-        if ctx.finder.poll() and not ctx.device.is_safeboot():
-            outcome = "rejoined the network"
-            say(f"    The plug is back at {ctx.device.host} running the full Tasmota.")
-            break
+        if ctx.finder.poll():
+            try:
+                version = ctx.device.firmware_version()
+            except (DeviceError, OSError):
+                version = ""
+            if version and "safeboot" not in version.lower():
+                say(f"    The plug is back at {ctx.device.host} running the full Tasmota ({version}).")
+                return "rejoined the network"
+            if "safeboot" in version.lower() and time.monotonic() - started > STILL_STARTUP_AFTER:
+                return "startup firmware"
+            continue
         setup = find_ssid(setup_networks(ctx), timeout=10)
         if setup:
-            outcome = f"raised its setup network {setup}"
             say(f"    The plug has started and is asking to be set up on {setup}.")
             note_setup_network(ctx, setup)
-            break
-    if outcome is None:
-        raise Abort(
-            "the plug neither rejoined the network nor put up a setup network "
-            f"({setup_network_hint(ctx)}) within five minutes"
-        )
-    return {"safeboot_seconds": round(waited, 1), "app_upload": how, "outcome": outcome,
-            "startup_settings": saved}
+            return f"raised its setup network {setup}"
+    raise Abort(
+        "the plug neither rejoined the network nor put up a setup network "
+        f"({setup_network_hint(ctx)}) within five minutes"
+    )
 
 
 STARTUP_LOG_PREFIX = "S60 recovery:"
@@ -2838,6 +2875,13 @@ def step_configure(ctx: Context) -> dict[str, Any]:
             locate_plug(ctx, setup=True)
     device = ctx.device
     device.wait_reachable(timeout=300)
+    if device.is_safeboot():
+        # F2 saw it as done, but official Tasmota did not take (a run from
+        # before F2 checked for that): sent again, as F2 would.
+        tell("    The plug is still on its startup firmware: official Tasmota is sent again.")
+        install_official(ctx, ROOT / "captures/safeboot-recovery-migration/tasmota32c3.bin")
+        device = ctx.device
+        device.wait_reachable(timeout=300)
     template = s60_template(ctx.state.input("product_model"))
     if s60_settings_in_place(device, template):
         # Tried again after the plug took the template but its answer was slow
