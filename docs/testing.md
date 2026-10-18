@@ -5,7 +5,7 @@ Three layers, each catching what the one before cannot:
 1. **Unit tests** - fast, no plug: the pieces on their own.
 2. **The emulator** - a virtual S60 running the plug's real Sonoff firmware
    ([emulator.md](emulator.md)): whole conversions, and every fault the
-   matrix below puts in their way.
+   suite below puts in their way.
 3. **Real plugs** - what no emulator shows: real flash, real radios, real
    timings.
 
@@ -46,40 +46,59 @@ tools/emulator/unattended-test.sh --from=on-tasmota --plug=MAC -- --firmware esp
 That is how every direction is tested: from a plug the tool converted, as a
 person converting it again would have.
 
-## The fault matrix
+## The fault suite
 
-`tools/emulator/fault_matrix.py` puts every fault in the way of every step, in
-every direction:
+`tools/emulator/fault_suite.py` puts every fault in the way of every step, in
+every direction - 1,453 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
-- **Steps:** each step that writes to the plug or waits on it - 46 in all.
-- **Faults** (16):
-  - the network gone (the router off) for 1, 5, 15, 30, 60, 120 or 180 s;
+- **Steps:** each step that writes to the plug or waits on it.
+- **Faults:**
+  - the network gone (the router off) for 1, 5, 15, 30, 60, 120 or 180 s, or
+    weak - one packet in ten lost - for a minute;
   - the plug's power off for 1, 5, 30 or 180 s;
   - the computer crashing - the tool and what it serves killed outright -
-    and started again 1, 60 or 180 s later;
-  - Ctrl-C, then carrying on;
-  - Ctrl-C, then starting again from the beginning (`--new`).
+    and started again 1, 60 or 180 s later; asleep for 2 or 10 minutes; or
+    switched off for 30 s or 2 minutes, and its run started again;
+  - Ctrl-C once, twice apart, or at the question it asks; Ctrl-C twice, then
+    carrying on, starting again from the beginning (`--new`), or choosing the
+    other firmware; the terminal window closed;
+  - a packet changed on its way, its checksum made good, so that only the
+    tool's and the plug's own checks can tell;
+  - a second run started while the first works, which must be refused
+    without disturbing it;
+  - the disk filling during the backup;
+  - the plug falling back to its own setup network, and the person joining
+    it before being asked: the run must find the plug there and carry on by
+    itself.
+- **When:** at 40% of the step's usual time; at the riskiest steps also at 10%
+  and 90%, and two faults running.
 
-Each scenario converts a saved plug and, when the step under test has been
-going for about 40% of its usual time, brings the fault. Then the tool is run
-again, as a person would - switching the plug off and on where the run says
-to - until the plug is converted, or four runs have failed. A scenario
-**passes** when the plug ends up converted and checked: Tasmota read back
-against the official files, ESPHome answering and confirmed, Sonoff's firmware
-back on the network.
+Each scenario converts a saved plug and brings the fault while the step under
+test is under way - checked from the run's own log, or marked MISTIMED. Then
+the tool is run again, as a person would - switching the plug off and on, or
+joining the plug's own network, where the run says to - until the plug is
+converted, or four runs have failed. A scenario **passes** when the plug ends
+up converted and checked - Tasmota read back against the official files,
+ESPHome answering and confirmed, Sonoff's firmware back on the network - and
+the run left no firewall rule or helper behind.
 
 ```sh
-tools/emulator/fault_matrix.py --plug=MAC prep        # the starting plugs (eWeLink, one at a time)
-tools/emulator/fault_matrix.py --plug=MAC run 5       # on 5 emulators, C2 on a sixth
-tools/emulator/fault_matrix.py --plug=MAC rerun 5     # what has not passed yet, again
-tools/emulator/fault_matrix.py --plug=MAC subset 5    # the backup and D1 faults, shortest and longest
-tools/emulator/fault_matrix.py report
+tools/emulator/fault_suite.py --plug=MAC prep           # the starting plugs (eWeLink)
+tools/emulator/fault_suite.py list > all.txt            # every scenario, cloud or not
+S60_CLOUD_WORKERS=3 S60_ANY_WORKERS=3 \
+    tools/emulator/fault_suite.py --plug=MAC batch all.txt   # what has not passed yet
+tools/emulator/fault_suite.py report
 ```
 
 Results, a log per scenario and what each failure leaves (its run records and
-the plug's serial output) are kept in `captures/emulation/matrix/`.
+the plug's serial output) are kept in `captures/emulation/suite/`.
+
+**Several machines.** The scenarios that do not need eWeLink (every step after
+D1) run on any machine with Docker: copy the repository and the saved plugs
+(`captures/emulation/saved/`), give each machine part of the list, and set
+`S60_NO_CLOUD=1` there - only one machine may let its plugs reach eWeLink.
 
 **How many at once.** Each emulator converting takes about half a CPU core
 and 120 MB. Past one per core the plugs slow down enough for their timeouts to
@@ -88,33 +107,38 @@ cores.
 
 **The cloud, one plug at a time.** Every emulated plug is a copy of the same
 real one, and eWeLink keeps one connection per plug, so two online at once
-knock each other off. A plug's way to the internet is shut, and opened only
-for a turn: when its run is about to need the cloud (the eWeLink steps, or
-the installer sent again), until the plug connects to this computer to
-download the installer - typically 10-30 s. A plug back on Sonoff's firmware
-part way through a run takes its turn before one starting a scenario. The
-Sonoff directions start from a plug saved just after the installer was sent,
-switched off; it starts Sonoff's firmware again, as the installer means it
-to, so each run sends the installer again first.
+knock each other off. A plug's way to the internet is shut - its connections
+reset at both ends, so eWeLink lets go of them at once - and opened only for a
+turn: when its run is about to need the cloud (the eWeLink steps, or the
+installer sent again), until the plug has downloaded the installer and
+started it - typically 30-60 s: Sonoff's firmware that loses eWeLink part way
+through the download gives it up. Its run ending gives the turn
+up too; a run after it asks again. Turns are given by how long the run can
+wait: finding the plug in eWeLink first, then a plug back on Sonoff's
+firmware part way, then the rest, and last a C2 scenario's plug, whose turn
+starts before its run does. Between two plugs' turns there is a short pause
+(5 s) while eWeLink lets go of the last one. The suite can feel out how many
+at once the cloud allows - one more at a time while the cloud scenarios pass,
+or one fewer at each trouble - and lengthen the pause when eWeLink is the
+trouble (`S60_CLOUD_MOST`, `S60_CLOUD_BACK_OFF`, `S60_CLOUD_PAUSE_UP`).
 
 ### What it cannot show
 
-- **ESPHome's hotspot.** ESPHome away from its network for 90 s raises its
-  own hotspot, and goes on trying its network every 30 s (its source says so);
-  the emulator's Wi-Fi cannot be both at once, so a plug there never rejoins.
-  Those scenarios are marked as the emulator's limit, not passed.
-- **The installer's own network.** Away from its network for more than 45 s,
-  the installer raises a network of its own, which the emulator cannot join
-  (it has no WPA2). Longer outages during the backup or D1 are marked as the
-  emulator's limit too.
 - **Timings.** The emulated plug is slower than a real one, and its flash
   never wears or fails: the one real moment of risk, a power cut while the
   bootloader or partition table is written (well under a second), is not
   something it can measure.
+- **Radio.** Its Wi-Fi is a network cable with a Wi-Fi driver on top: a weak
+  signal is lost packets, not a plug at the edge of range.
+
+Every network a plug raises of its own - Tasmota's, ESPHome's, the mover's and
+the installer's - can be joined from the emulated computer, as a person's
+laptop or phone would join it ([emulator.md](emulator.md)).
 
 ### Results
 
-On 16-17 October 2026 the matrix ran every scenario, and on 17 October the
+On 16-17 October 2026 the fault matrix this suite grew from (its first 736
+scenarios) ran every one, and on 17 October the
 faults during the backup and D1 in the Sonoff directions again, the shortest
 and longest of each kind (32), on the code as of `e0a8cd3`. The latest result
 of each scenario:
