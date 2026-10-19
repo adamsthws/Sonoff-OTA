@@ -410,10 +410,17 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
 ```
 
 - **QEMU.** Espressif's QEMU has no Wi-Fi; the emulator uses
-  [lcgamboa's fork](https://github.com/lcgamboa/qemu) (branch `picsimlab-esp32`,
-  pinned in `emu.Dockerfile`), which emulates the ESP32-C3's Wi-Fi hardware
-  and offers three open access points. Its Wi-Fi is wired to a tap device in
-  the container.
+  [lcgamboa's fork](https://github.com/lcgamboa/qemu) (branch `picsimlab-esp32`),
+  which emulates the ESP32-C3's Wi-Fi hardware and offers three open access
+  points. Its Wi-Fi is wired to a tap device in the container. The fork's
+  source at the pinned commit (`e39508f`), with the subprojects its build
+  fetches, is a release asset of this repository
+  ([`emulator-source`](https://github.com/adamsthws/Sonoff-OTA/releases/tag/emulator-source));
+  `emu.sh` downloads it once into `captures/emulation/cache/`, checks it
+  against the SHA-256 in `emu.Dockerfile`, and the image is built from it with
+  no network - so building needs nothing outside this repository. QEMU is
+  GPL-2.0: the archive is its unmodified source, and this project's changes
+  to it are the patches in `tools/emulator/fork/`.
 - **The home network.** `tap0` is the home network, and the container is its
   router: dnsmasq hands out addresses (the plug's MAC always gets
   192.168.60.50), and mDNS discovery works as on a real LAN. Without

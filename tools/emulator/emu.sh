@@ -98,6 +98,30 @@ if [ "$mac" != "$was" ]; then
 fi
 
 # -- the image -----------------------------------------------------------------
+# The QEMU fork's source, as emu.Dockerfile pins it (QEMU_SOURCE_SHA256): from
+# this repository's release, downloaded once into captures/emulation/cache and
+# checked, so the image builds from nothing but this repository - and again
+# without a network once it is there.
+QEMU_SOURCE=qemu-lcgamboa-e39508f.tar.xz
+QEMU_SOURCE_URL=${S60_QEMU_SOURCE_URL:-https://github.com/adamsthws/Sonoff-OTA/releases/download/emulator-source/$QEMU_SOURCE}
+qemu_source() {
+    local want cache=$EMU/cache/$QEMU_SOURCE
+    want=$(sed -n 's/^ARG QEMU_SOURCE_SHA256=//p' "$ROOT/tools/emulator/emu.Dockerfile")
+    [ -n "$want" ] || return 0   # a Dockerfile that fetches the source itself
+    mkdir -p "$EMU/cache"
+    if [ ! -f "$cache" ] || [ "$(sha256sum < "$cache" | cut -c1-64)" != "$want" ]; then
+        echo "Downloading the emulator's QEMU source ($QEMU_SOURCE, about 33 MB)..."
+        curl -fsSL --retry 3 -o "$cache.part" "$QEMU_SOURCE_URL" \
+            || { echo "Could not download $QEMU_SOURCE_URL" >&2; exit 1; }
+        mv "$cache.part" "$cache"
+    fi
+    if [ "$(sha256sum < "$cache" | cut -c1-64)" != "$want" ]; then
+        echo "$cache is not the source emu.Dockerfile pins; delete it and run this again" >&2
+        exit 1
+    fi
+    cp "$cache" "$1"
+}
+
 # Labelled with a hash of what it is built from, and rebuilt when that changes:
 # an image from an older checkout would otherwise run unseen.
 built_from=$(cd "$ROOT/tools/emulator" && find emu.Dockerfile fork container -type f -print0 \
@@ -108,6 +132,7 @@ if [ "$rebuild" = 1 ] || [ "$(docker image inspect -f '{{index .Config.Labels "s
     trap 'rm -rf "$context"' EXIT
     cp -r "$ROOT/tools/emulator/emu.Dockerfile" "$ROOT/tools/emulator/fork" \
           "$ROOT/tools/emulator/container" "$context/"
+    qemu_source "$context/qemu-source.tar.xz"
     echo "Building the emulator image (the first time takes a few minutes)..."
     docker build -q -t "$IMAGE" --label "s60.built-from=$built_from" \
         -f "$context/emu.Dockerfile" "$context" >/dev/null

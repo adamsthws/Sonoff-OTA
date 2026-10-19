@@ -6,18 +6,22 @@
 # tools/emulator/emu.sh, never by hand - that script prepares the private
 # state it needs under captures/emulation/.
 
-# -- build the QEMU fork, pinned, with our small patch --------------------------
+# -- build the QEMU fork, pinned, with this project's patches --------------------
 FROM ubuntu:24.04 AS qemu
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         build-essential ninja-build pkg-config python3 python3-venv git ca-certificates \
         libglib2.0-dev libpixman-1-dev libslirp-dev libgcrypt20-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
-ARG QEMU_REPO=https://github.com/lcgamboa/qemu.git
-ARG QEMU_COMMIT=e39508f79cb0681bbe15cfcebd40a3f45cdc3c48
-RUN git init -q /src && cd /src && git remote add origin "$QEMU_REPO" \
-    && git fetch -q --depth 1 origin "$QEMU_COMMIT" && git checkout -q FETCH_HEAD
+# The fork's source at its pinned commit (lcgamboa/qemu e39508f), with the
+# subprojects its build would otherwise fetch, published with this repository
+# (emu.sh downloads it and checks it): nothing else is needed to build it, and
+# it is built with no network at all.
+ARG QEMU_SOURCE_SHA256=863c653128bd9dafd353e5321d5e31e00337dfd42346ee30e8d496eadaaf3b82
+COPY qemu-source.tar.xz /tmp/
+RUN echo "$QEMU_SOURCE_SHA256  /tmp/qemu-source.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/qemu-source.tar.xz -C / && mv /qemu /src && rm /tmp/qemu-source.tar.xz
 COPY fork/ /patches/
-RUN cd /src && for p in /patches/*.patch; do git apply "$p"; done \
+RUN --network=none cd /src && for p in /patches/*.patch; do git apply "$p"; done \
     && mkdir build && cd build \
     && ../configure --target-list=riscv32-softmmu --enable-slirp --enable-gcrypt \
          --disable-werror --disable-docs --disable-gtk --disable-sdl --disable-opengl --disable-vnc \
