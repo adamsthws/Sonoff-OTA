@@ -78,6 +78,10 @@ own firmware.
   eWeLink), a plug slow to answer made the run ask you to join the
   installer's own network, which it had never raised. The next try now
   follows.
+- A power cut while the official startup firmware was written back (G1)
+  left the sector being written half done, and every later run refused to
+  carry on - the conversion stuck for good, though the plug kept running
+  Tasmota. That one sector is now written again.
 - The installer gives up an upload that has gone silent for a minute. A
   computer going to sleep part way through sending it Tasmota (D1) - its lid
   closed, say - left the installer waiting for good: it answered nothing

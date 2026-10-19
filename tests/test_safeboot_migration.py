@@ -537,6 +537,24 @@ class MigrationValidationTests(unittest.TestCase):
             self.assertEqual(restore_resume_point(self.digests(partition), official, recovery),
                              expected, done)
 
+    def test_a_sector_a_power_cut_came_in_is_written_again(self):
+        # Seen in the fault suite: the plug switched off during G1 left the
+        # sector being written erased and part written - and every later
+        # restore refused, the conversion stuck for good.
+        from tools.serve_safeboot_migration import restore_resume_point
+        official = bytes((i * 7) & 0xFF for i in range(20_000))
+        recovery = bytes((i * 11 + 3) & 0xFF for i in range(21_000))
+        for written in (0, 256, 2048, SECTOR_SIZE - 256):
+            partition = bytearray(self.factory(official, recovery, 2))
+            sector = slice(2 * SECTOR_SIZE, 3 * SECTOR_SIZE)
+            partition[sector] = official[sector][:written] + b"\xff" * (SECTOR_SIZE - written)
+            self.assertEqual(restore_resume_point(self.digests(bytes(partition)), official, recovery),
+                             2, written)
+        # Only that one: two sectors from neither image are refused.
+        partition[3 * SECTOR_SIZE + 10] ^= 0xFF
+        with self.assertRaisesRegex(ValueError, "sector 3 holds neither"):
+            restore_resume_point(self.digests(bytes(partition)), official, recovery)
+
     def test_anything_else_in_the_partition_is_refused(self):
         from tools.serve_safeboot_migration import restore_resume_point
         official = bytes((i * 7) & 0xFF for i in range(20_000))

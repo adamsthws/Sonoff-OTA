@@ -151,8 +151,10 @@ def restore_resume_point(digests: list[bytes], official: bytes, recovery: bytes)
     official Safeboot, for a restore to carry on after.
 
     A restore writes sector by sector from the start, so one cut off part way
-    leaves official sectors, then the recovery Safeboot's.  Anything else is
-    refused: the partition holds something this run did not put there.
+    leaves official sectors, then the recovery Safeboot's - with, between
+    them, the one sector a power cut came in the middle of: erased, or part
+    written.  That one is written again.  Anything else is refused: the
+    partition holds something this run did not put there.
     """
     official_sectors, recovery_sectors = sector_digests(official), sector_digests(recovery)
     if len(digests) != len(official_sectors):
@@ -162,6 +164,8 @@ def restore_resume_point(digests: list[bytes], official: bytes, recovery: bytes)
         done += 1
     for index in range(done, len(digests)):
         if digests[index] != recovery_sectors[index]:
+            if index == done:
+                continue  # the sector the cut came in: written again from here
             raise ValueError(
                 f"factory partition sector {index} holds neither the official nor "
                 "the recovery Safeboot"
