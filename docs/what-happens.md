@@ -107,6 +107,13 @@ The small temporary firmware that runs after the rebuild saves your Wi-Fi again,
 If any of that does not work, the tool falls back to asking you to
 join the plug's own setup network.
 
+Each time the plug restarts into another firmware, that firmware has to join
+your Wi-Fi on its own, and a weak signal makes that less certain. So the tool
+reads the plug's Wi-Fi signal as early in the run as the plug can say it, and
+again at later stages. If one reading is weak (below -75 dBm) it suggests
+moving the plug nearer your router first, and asks whether to carry on - once
+a run. The run's report gives the lowest reading.
+
 ## The run, step by step
 
 This is what `python3 tools/s60_autoflash.py run` does, in order, for a plug
@@ -130,6 +137,10 @@ advance); steps 1-7 are the same for both.
    Control off, or on a different network.
 4. **Ask the plug what firmware it has** and where it downloads updates from.
    It stops here, before anything is written, unless the device is an S60.
+   It also reads the plug's Wi-Fi signal, from what Sonoff's firmware
+   announces on your network (encrypted with the plug's own key, which your
+   eWeLink account holds): a weak one is best fixed now, by moving the plug,
+   while nothing has been written.
 5. **Replace the Sonoff firmware** with a small installer of ours. *This is the
    point of no return,* and the one place it asks you to confirm: after a
    short warning - which also says the Sonoff firmware is backed up first,
@@ -234,6 +245,10 @@ first half, checks them, and switches to them.
 - **A plug left part way** - running the mover, the startup firmware or the
   full Tasmota on Sonoff's layout - is recognised by a new run, and can go on
   to any of the three from where it is.
+
+The Wi-Fi signal is read first from Tasmota, before anything is changed. From
+ESPHome it is read once the full Tasmota is running: neither ESPHome nor the
+startup firmware says what it is.
 
 ## Safety, and why you can believe the checks
 

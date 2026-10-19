@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
 from tools.autoflash import __version__, esphome, imprint, plugs, tasmota_settings  # noqa: E402
-from tools.autoflash import awake, detect, esphome_ota, interrupt, plans, safety_locks  # noqa: E402
+from tools.autoflash import awake, detect, esphome_ota, ewelink_lan, interrupt, plans, safety_locks  # noqa: E402
 from tools.autoflash.device import Device, DeviceError, UploadRefused  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import (  # noqa: E402
@@ -1440,17 +1440,64 @@ def check_plug_network(ctx: Context) -> dict[str, Any]:
     output.transient_end()
     say(f"Network check: the plug is on '{connected}', the network the startup "
         f"firmware will join (signal {signal} dBm).")
-    if isinstance(signal, int) and signal < WEAK_SIGNAL_DBM:
-        output.transient_begin()
-        section("The plug's Wi-Fi signal is weak", [
-            f"It reports {signal} dBm. After the next stage the startup firmware has",
-            "to rejoin on its own, and a weak signal makes that less certain.",
-            "Moving the plug nearer the access point first is worth it.",
-        ])
-        if not ask_yes_no("Carry on anyway", default=False):
-            raise Abort("stopped for a weak Wi-Fi signal; nothing was written")
-        output.transient_end()
+    warn_if_weak_signal(ctx, signal, ["After the next stage the startup firmware has",
+                                      "to rejoin on its own, and a weak signal makes that less certain."])
     return {"network": connected, "signal_dbm": signal}
+
+
+def plug_signal(device: Device) -> int | None:
+    """The Wi-Fi signal in dBm that the Tasmota on the plug reports, or None
+    when it does not say."""
+    try:
+        status = device.command("Status 11")
+    except (DeviceError, OSError):
+        return None
+    wifi = status.get("StatusSTS", {}).get("Wifi", {}) if isinstance(status, dict) else {}
+    signal = wifi.get("Signal")
+    return signal if isinstance(signal, int) else None
+
+
+def advert_signal(ctx: Context, report: dict[str, Any], plug_ip: str) -> int | None:
+    """The Wi-Fi signal Sonoff's own firmware gives in its eWeLink advert, which
+    is encrypted with the plug's LAN key: opened with the key the account holds
+    for it.  None when it cannot be read."""
+    ids = {str(value)[3:] for packet in report.get("packets", []) if packet.get("source") == plug_ip
+           for record in packet.get("records", []) if record.get("type") == "TXT"
+           for value in record.get("value") or [] if str(value).startswith("id=")}
+    fields = ewelink_lan.advert_fields(report, next(iter(ids))) if len(ids) == 1 else None
+    if not fields:
+        return None
+    key = next((device.get("devicekey") for device in ctx.account_devices() or []
+                if device.get("deviceid") == fields.get("id")), None)
+    return ewelink_lan.signal(ewelink_lan.advert_state(fields, key)) if key else None
+
+
+def note_signal(ctx: Context, signal: int | None, then: list[str]) -> int | None:
+    """Say a reading of the plug's Wi-Fi signal, and ask about a weak one."""
+    if signal is not None:
+        say(f"Wi-Fi signal at the plug: {signal} dBm.")
+        warn_if_weak_signal(ctx, signal, then)
+    return signal
+
+
+def warn_if_weak_signal(ctx: Context, signal: Any, then: list[str]) -> None:
+    """A weak signal, asked about before going on; `then` says what has to join
+    the Wi-Fi on its own afterwards.  Asked once a run: a weak signal agreed to
+    is not asked about again at the next reading."""
+    if not (isinstance(signal, int) and signal < WEAK_SIGNAL_DBM):
+        return
+    if ctx.state.input("weak_signal_agreed"):
+        say("    The signal is still weak; carrying on, as agreed.")
+        return
+    output.transient_begin()
+    section("The plug's Wi-Fi signal is weak", [
+        f"It reports {signal} dBm. {then[0]}", *then[1:],
+        "Moving the plug nearer the access point first is worth it.",
+    ])
+    if not ask_yes_no("Carry on anyway", default=False):
+        raise Abort("stopped for a weak Wi-Fi signal; nothing was written")
+    ctx.state.set_input("weak_signal_agreed", True)
+    output.transient_end()
 
 
 
@@ -1915,9 +1962,16 @@ def step_discover(ctx: Context) -> dict[str, Any]:
         "The plug fetches our firmware straight from this computer, so no",
         "router rule is needed.",
     ])
+    # The earliest reading of a run from Sonoff's firmware: before anything is
+    # written, while moving the plug costs nothing.
+    signal = note_signal(ctx, advert_signal(ctx, report, plug_ip), [
+        "Nothing has been written yet. The conversion restarts the plug",
+        "several times, and each time it has to rejoin your Wi-Fi on its own;",
+        "a weak signal makes that less certain."])
     ctx.state.set_input("stock_version", version)
     ctx.state.set_input("product_model", product)
-    return {"stock_version": version, "update_offered": bool(endpoints), "model": model}
+    return {"stock_version": version, "update_offered": bool(endpoints), "model": model,
+            "signal_dbm": signal}
 
 
 
@@ -2511,6 +2565,11 @@ def step_promote(ctx: Context) -> dict[str, Any]:
     device = ctx.device
     image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
     device.wait_reachable(timeout=120)
+    # The first reading of a run from ESPHome (neither ESPHome nor the startup
+    # firmware before it gives one), and another of a run from Sonoff's.
+    ctx.state.capture("D4.signal_dbm", note_signal(ctx, plug_signal(device), [
+        "From here the plug restarts several times, and each time it has to",
+        "rejoin your Wi-Fi on its own; a weak signal makes that less certain."]))
     slot = running_slot(device)
     say(f"The plug is running from slot {slot}. The next steps need slot 1.")
     if slot == 1:
@@ -3283,6 +3342,11 @@ def step_esphome_install(ctx: Context) -> dict[str, Any]:
         say("The plug already runs ESPHome; there is nothing to install again.")
         return {"already_installed": True}
     ssid, password = ctx.wifi()
+    # Read off the temporary Tasmota, as E1 reads it on the way to Tasmota:
+    # once ESPHome is written, it has to join the Wi-Fi on its own.
+    signal = note_signal(ctx, plug_signal(ctx.device), [
+        "Once ESPHome is written, it has to join",
+        "your Wi-Fi on its own, and a weak signal makes that less certain."])
     try:
         image = esphome.image_for(ssid, password, own=ctx.esphome_firmware)
     except (esphome.ImageError, imprint.ImprintError, OSError) as exc:
@@ -3297,7 +3361,8 @@ def step_esphome_install(ctx: Context) -> dict[str, Any]:
     if ctx.dry_run:
         say(f"[dry-run] would install {name}")
         return {"dry_run": True, "image": name}
-    return run_plan(ctx, plans.esphome(image)) | {"image": name, "size": len(image)}
+    return run_plan(ctx, plans.esphome(image)) | {"image": name, "size": len(image),
+                                                   "signal_dbm": signal}
 
 
 def run_plan(ctx: Context, plan: plans.Plan) -> dict[str, Any]:
@@ -3370,6 +3435,11 @@ def step_leave_tasmota(ctx: Context) -> dict[str, Any]:
         say("The plug already runs the mover.")
         return {"already": True}
     ssid, password = ctx.wifi()
+    # The earliest reading of a run from Tasmota, before it makes way: the
+    # mover, and each firmware after it, has to join the Wi-Fi on its own.
+    signal = note_signal(ctx, plug_signal(ctx.device), [
+        "After this stage the mover, and each firmware after it, has",
+        "to join your Wi-Fi on its own, and a weak signal makes that less certain."])
     consent_to_leave(ctx, "Tasmota")
     try:
         plan = plans.leave_tasmota(esphome.mover_for(ssid, password), esphome.sonoff_table(),
@@ -3390,7 +3460,7 @@ def step_leave_tasmota(ctx: Context) -> dict[str, Any]:
     if not ctx.dry_run:
         wait_for_mover(ctx, "the plug to start the mover")
         say("    The plug is running the mover, on Sonoff's memory layout.")
-    return result
+    return result | {"signal_dbm": signal}
 
 
 # Sending Wi-Fi details through a plug's own network: tried this many times
@@ -4860,7 +4930,11 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
                if isinstance(captures.get(f"{step}.attempts"), int) and captures[f"{step}.attempts"] > 1}
     retried = [f"{number} ({count} {'retry' if count == 1 else 'retries'})"
                for number, count in retries.items()]
-    signal = captures.get("E1.signal_dbm")
+    # The lowest of the run's readings: from Sonoff's advert at A2, from Tasmota
+    # at L1, D4, E1 or I1 - wherever the plug's firmware could give one.
+    readings = [value for key, value in captures.items() if key.endswith(".signal_dbm")
+                and isinstance(value, int) and not isinstance(value, bool)]
+    signal = min(readings) if readings else None
     try:
         name = json.loads(s60_template(product))["NAME"]
     except (ValueError, KeyError, TypeError):

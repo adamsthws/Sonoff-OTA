@@ -181,7 +181,8 @@ class NetworkCheckTests(unittest.TestCase):
         from types import SimpleNamespace
         wifi = {"SSId": ssid, "Signal": signal} if ssid else {}
         device = SimpleNamespace(command=lambda _: {"StatusSTS": {"Wifi": wifi}})
-        return SimpleNamespace(device=device, manifest_path=Path("unused"))
+        state = SimpleNamespace(input=lambda key: None, set_input=lambda key, value: None)
+        return SimpleNamespace(device=device, manifest_path=Path("unused"), state=state)
 
     def test_a_matching_network_passes(self):
         result = self.autoflash.check_plug_network(self.ctx("Home-2G"))
@@ -224,6 +225,110 @@ class NetworkCheckTests(unittest.TestCase):
             self.assertEqual(
                 self.autoflash.check_plug_network(self.ctx("Home-2G", signal=-82))["signal_dbm"], -82
             )
+
+
+class EsphomeSignalTests(unittest.TestCase):
+    """On the way to ESPHome the signal is read too, off the Tasmota the plug
+    still runs, before what then has to join the Wi-Fi on its own is written."""
+
+    def setUp(self):
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+
+        self.autoflash = autoflash
+        self.run_plan = mock.Mock(return_value={"plan": "written"})
+        self.consent = mock.Mock()
+        for patch in (mock.patch.object(autoflash, "say"),
+                      mock.patch.object(autoflash, "section"),
+                      mock.patch.object(autoflash, "run_plan", self.run_plan),
+                      mock.patch.object(autoflash, "consent_to_leave", self.consent),
+                      mock.patch.object(autoflash, "wait_for_mover"),
+                      mock.patch.object(autoflash.esphome, "is_esphome", return_value=False),
+                      mock.patch.object(autoflash.esphome, "image_for", return_value=b"\0" * 64),
+                      mock.patch.object(autoflash.esphome, "mover_for", return_value=b"\0" * 64),
+                      mock.patch.object(autoflash.esphome, "sonoff_table", return_value=b""),
+                      mock.patch.object(autoflash.esphome, "published_bootloader", return_value=b""),
+                      mock.patch.object(autoflash.esphome_ota, "probe", return_value=None),
+                      mock.patch.object(autoflash.plans, "esphome", return_value="plan"),
+                      mock.patch.object(autoflash.plans, "leave_tasmota", return_value="plan")):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def ctx(self, status):
+        from types import SimpleNamespace
+
+        def command(_):
+            if isinstance(status, Exception):
+                raise status
+            return status
+
+        inputs = {"plug_ip": "192.168.60.50"}
+        state = SimpleNamespace(input=inputs.get, set_input=inputs.__setitem__)
+        return SimpleNamespace(state=state, wifi=lambda: ("Home-2G", "pass"), esphome_firmware=None,
+                               dry_run=False, device=SimpleNamespace(command=command))
+
+    def signal(self, dbm):
+        return {"StatusSTS": {"Wifi": {"SSId": "Home-2G", "Signal": dbm}}}
+
+    def test_the_signal_is_recorded_with_the_install(self):
+        for step in (self.autoflash.step_esphome_install, self.autoflash.step_leave_tasmota):
+            self.run_plan.reset_mock()
+            self.assertEqual(step(self.ctx(self.signal(-58)))["signal_dbm"], -58, step.__name__)
+            self.run_plan.assert_called_once()
+
+    def test_a_weak_signal_stops_before_anything_is_written(self):
+        from unittest import mock
+        for step in (self.autoflash.step_esphome_install, self.autoflash.step_leave_tasmota):
+            with mock.patch.object(self.autoflash, "ask_yes_no", return_value=False):
+                with self.assertRaisesRegex(self.autoflash.Abort, "weak Wi-Fi signal"):
+                    step(self.ctx(self.signal(-82)))
+        self.run_plan.assert_not_called()
+        self.consent.assert_not_called()  # asked first, before the go-ahead to leave Tasmota
+
+    def test_a_plug_that_does_not_say_is_installed_all_the_same(self):
+        from tools.autoflash.device import DeviceError
+        for status in ({"StatusSTS": {}}, DeviceError("no answer")):
+            self.run_plan.reset_mock()
+            self.assertIsNone(self.autoflash.step_esphome_install(self.ctx(status))["signal_dbm"])
+            self.run_plan.assert_called_once()
+
+    def test_a_weak_signal_agreed_to_is_not_asked_about_again(self):
+        from unittest import mock
+        ctx = self.ctx(self.signal(-82))
+        with mock.patch.object(self.autoflash, "ask_yes_no", return_value=True) as asked:
+            self.autoflash.step_leave_tasmota(ctx)        # the earliest reading: asked
+            self.autoflash.step_esphome_install(ctx)      # a later one: told, not asked
+        asked.assert_called_once()
+        self.assertEqual(self.run_plan.call_count, 2)
+
+
+class AdvertSignalTests(unittest.TestCase):
+    """From Sonoff's firmware the signal is read at A2, before anything is
+    written, from the plug's own eWeLink advert, opened with its LAN key."""
+
+    def report(self, source="192.168.0.50"):
+        from tests.test_ewelink_lan import ADVERT
+        return {"packets": [{"source": source, "records": [
+            {"type": "TXT", "value": [f"{k}={v}" for k, v in ADVERT.items()]}]}]}
+
+    def ctx(self, devices):
+        from types import SimpleNamespace
+        return SimpleNamespace(account_devices=lambda: devices)
+
+    def test_the_plugs_own_advert_gives_its_signal(self):
+        import tools.s60_autoflash as af
+        from tests.test_ewelink_lan import ADVERT, KEY
+        ctx = self.ctx([{"deviceid": "1000ffffff", "devicekey": "other"},
+                        {"deviceid": ADVERT["id"], "devicekey": KEY}])
+        self.assertEqual(af.advert_signal(ctx, self.report(), "192.168.0.50"), -61)
+
+    def test_another_devices_advert_or_no_key_gives_nothing(self):
+        import tools.s60_autoflash as af
+        from tests.test_ewelink_lan import ADVERT, KEY
+        key = [{"deviceid": ADVERT["id"], "devicekey": KEY}]
+        self.assertIsNone(af.advert_signal(self.ctx(key), self.report("192.168.0.7"), "192.168.0.50"))
+        self.assertIsNone(af.advert_signal(self.ctx([]), self.report(), "192.168.0.50"))
+        self.assertIsNone(af.advert_signal(self.ctx(None), self.report(), "192.168.0.50"))
 
 
 class SecretPromptTests(unittest.TestCase):
@@ -2598,7 +2703,8 @@ class PromoteTests(unittest.TestCase):
         device = SimpleNamespace(host="192.168.60.50",
             wait_reachable=lambda **_: None, started_at=lambda: "t", uptime_seconds=lambda: 10,
             current_ota=lambda: next(slots), wait_for_reboot=lambda **_: events.append("rebooted"),
-            command=lambda c, timeout=None: events.append(c))
+            # What the plug is told, in order; a status read changes nothing.
+            command=lambda c, timeout=None: {} if c.startswith("Status") else events.append(c))
         ctx = SimpleNamespace(device=device, state=state, dry_run=False)
         with mock.patch.object(autoflash, "upload_or_prompt", side_effect=lambda *a: events.append("upload")), \
              mock.patch.object(autoflash.time, "sleep"), mock.patch.object(autoflash, "say"):

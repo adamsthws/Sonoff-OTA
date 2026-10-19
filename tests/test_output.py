@@ -643,6 +643,26 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Retries"], f"{number['E2']} (1 retry)")
         self.assertEqual(fields["Plug Wi-Fi signal"], "-61 dBm")
 
+    def test_on_the_way_to_esphome_the_signal_is_from_its_install(self):
+        import tools.s60_autoflash as af
+        ctx = self.ctx(firmware="esphome")
+        ctx.state.capture("I1.signal_dbm", -58)
+        self.assertEqual(dict(af.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-58 dBm")
+
+    def test_from_tasmota_to_esphome_the_signal_is_from_leaving_tasmota(self):
+        import tools.s60_autoflash as af
+        ctx = self.ctx(firmware="esphome", source="tasmota")
+        ctx.state.capture("L1.signal_dbm", -63)
+        self.assertEqual(dict(af.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-63 dBm")
+
+    def test_with_several_readings_the_report_gives_the_lowest(self):
+        import tools.s60_autoflash as af
+        ctx = self.ctx()
+        for key, value in {"A2.signal_dbm": -48, "D4.signal_dbm": -71, "E1.signal_dbm": -55,
+                           "I1.signal_dbm": None}.items():
+            ctx.state.capture(key, value)
+        self.assertEqual(dict(af.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-71 dBm")
+
     def test_a_run_from_before_the_timings_says_so(self):
         import tools.s60_autoflash as af
         fields = dict(af.report_fields(self.ctx(), 441, False))
