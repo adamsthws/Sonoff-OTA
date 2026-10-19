@@ -160,8 +160,11 @@ chmod 0600 "$STATE"/*.bin
 # The code is refreshed on every start, and the run's captures are kept.
 # Not .env: a run you sit through asks for the eWeLink account, as a real
 # one does. unattended-test.sh hands it to its run alone.
+# Excluded whatever they are: in a git worktree .git is a file, and captures or
+# .venv may be symlinks to the main checkout's - copied, a dangling link would
+# replace the run's own captures.
 mkdir -p "$STATE/work/captures"
-rsync -a --delete --exclude /captures/ --exclude /.venv/ --exclude /.python/ --exclude /.git/ \
+rsync -a --delete --exclude /captures --exclude /.venv --exclude /.python --exclude /.git \
       --exclude /.env --exclude __pycache__/ "$ROOT/" "$STATE/work/"
 rm -f "$STATE/work/.env"  # one copied before it was left out: --delete spares excluded files
 # Not the firmware bundle in captures/safeboot-recovery-migration: a real
