@@ -17,6 +17,7 @@ import json
 import struct
 import urllib.error
 import urllib.request
+import zlib
 from pathlib import Path
 
 from . import imprint
@@ -150,7 +151,10 @@ def _request(host: str, path: str, *, post: bool = False, timeout: float = 4.0) 
             if response.headers.get("Content-Encoding", "").lower() == "gzip":
                 body = gzip.decompress(body)
             return body.decode("utf-8", errors="replace")
-    except (urllib.error.URLError, OSError, http.client.HTTPException, EOFError, gzip.BadGzipFile):
+    # zlib.error: a page damaged on its way (seen in the fault suite: one
+    # changed byte), which is the network, as a connection dropped is.
+    except (urllib.error.URLError, OSError, http.client.HTTPException, EOFError, gzip.BadGzipFile,
+            zlib.error):
         return None
 
 

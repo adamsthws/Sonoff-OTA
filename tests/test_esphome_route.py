@@ -227,6 +227,17 @@ class ESPHomePageTests(unittest.TestCase):
         host = self.serve(gzip.compress(page), {"Content-Type": "text/html", "Content-Encoding": "gzip"})
         self.assertTrue(af.esphome.is_esphome(host))
 
+    def test_a_page_damaged_on_its_way_is_no_answer_not_a_crash(self):
+        # Seen in the fault suite: one byte changed in the gzipped page, and
+        # decompressing it raised zlib.error - "something unexpected went
+        # wrong" - where a dropped connection is simply asked again.
+        import gzip
+        page = bytes(range(256)) * 64 + b"<esp-app></esp-app>"
+        damaged = bytearray(gzip.compress(page))
+        damaged[len(damaged) // 2] ^= 0x5A
+        host = self.serve(bytes(damaged), {"Content-Type": "text/html", "Content-Encoding": "gzip"})
+        self.assertFalse(af.esphome.is_esphome(host))
+
     def test_a_tasmota_page_is_not(self):
         host = self.serve(b"<html><body>Tasmota</body></html>", {"Content-Type": "text/html"})
         self.assertFalse(af.esphome.is_esphome(host))

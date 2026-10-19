@@ -78,6 +78,9 @@ own firmware.
   eWeLink), a plug slow to answer made the run ask you to join the
   installer's own network, which it had never raised. The next try now
   follows.
+- ESPHome's page arriving damaged - a byte changed on its way - stopped the
+  run with "something unexpected went wrong". It is now asked for again, as
+  when the connection drops.
 - A power cut while the official startup firmware was written back (G1)
   left the sector being written half done, and every later run refused to
   carry on - the conversion stuck for good, though the plug kept running
