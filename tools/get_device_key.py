@@ -37,6 +37,14 @@ API = {
     "eu": "https://eu-apia.coolkit.cc",
 }
 
+# A --stub-cloud run points every region at the local cloud stub instead of
+# coolkit (self-hosting; see docs/cloud-stub.md). The value is a full
+# base URL, e.g. https://apia.s60-stub.test; trust it by setting SSL_CERT_FILE
+# to a bundle holding the stub's CA. Unset in a normal run: coolkit is used.
+_STUB_API_BASE = os.environ.get("S60_EWELINK_API_BASE", "").rstrip("/")
+if _STUB_API_BASE:
+    API = {region: _STUB_API_BASE for region in API}
+
 
 # A certificate this computer does not trust, from a site that has a good one -
 # even after Windows was asked for the root it needs (hostsys.urlopen): almost
