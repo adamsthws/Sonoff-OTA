@@ -78,6 +78,11 @@ own firmware.
   eWeLink), a plug slow to answer made the run ask you to join the
   installer's own network, which it had never raised. The next try now
   follows.
+- The installer gives up an upload that has gone silent for a minute. A
+  computer going to sleep part way through sending it Tasmota (D1) - its lid
+  closed, say - left the installer waiting for good: it answered nothing
+  more, neither on your network nor on its own, until it was switched off
+  and on.
 - An upload of Tasmota to the installer cut off by the network is noticed
   after two minutes, not five, and tried again - through the installer's
   own network, if it has raised that and you have joined it.

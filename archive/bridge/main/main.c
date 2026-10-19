@@ -79,6 +79,11 @@
 
 #define BRIDGE_MAX_IMAGE_SIZE 0x1f0000
 #define UPLOAD_BUFFER_SIZE 4096
+/* An upload silent for this many receive timeouts in a row (20 s each) is
+ * given up: a computer gone without closing the connection - asleep, or off
+ * the Wi-Fi - otherwise holds the one server task for good, and the bridge
+ * answers nothing more until it is switched off and on. */
+#define UPLOAD_QUIET_TIMEOUTS 3
 #define BRIDGE_HOSTNAME "s60-ota-bridge"
 /* On its own network, how often to try the home network again - only while
  * nobody is joined to it - and for how long each time. */
@@ -320,10 +325,14 @@ static esp_err_t tasmota_settings_handler(httpd_req_t *req)
         return settings_reply(req, "400 Bad Request", "Wrong size. Nothing was saved.\n");
     }
     size_t received = 0;
+    int quiet = 0;
     while (received < TASMOTA_SETTINGS_SIZE) {
         int got = httpd_req_recv(req, (char *)s_settings + received, TASMOTA_SETTINGS_SIZE - received);
-        if (got == HTTPD_SOCK_ERR_TIMEOUT) {
+        if (got == HTTPD_SOCK_ERR_TIMEOUT && ++quiet < UPLOAD_QUIET_TIMEOUTS) {
             continue;
+        }
+        if (got > 0) {
+            quiet = 0;
         }
         if (got <= 0) {
             return settings_reply(req, "400 Bad Request", "Upload interrupted. Nothing was saved.\n");
@@ -408,13 +417,17 @@ static esp_err_t update_handler(httpd_req_t *req)
     }
 
     int remaining = req->content_len;
+    int quiet = 0;
     while (remaining > 0) {
         int wanted = remaining < (int)sizeof(s_upload_buffer)
                          ? remaining
                          : (int)sizeof(s_upload_buffer);
         int received = httpd_req_recv(req, s_upload_buffer, wanted);
-        if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+        if (received == HTTPD_SOCK_ERR_TIMEOUT && ++quiet < UPLOAD_QUIET_TIMEOUTS) {
             continue;
+        }
+        if (received > 0) {
+            quiet = 0;
         }
         if (received <= 0) {
             esp_ota_abort(handle);

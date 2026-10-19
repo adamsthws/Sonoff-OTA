@@ -87,7 +87,8 @@ python3 tools/analyze_vendor_ota.py artifacts/s60-ota-bridge-4.4.3.ota
 ```
 
 When it cannot join the stock network, or stock saved none, it creates
-`S60-OTA-Bridge-XXXX`, protected with `s60-ota-bridge`. Browse to `http://192.168.4.1/` to upload a native ESP32-C3
+`Sonoff-Setup-XXXX` (the last four hex digits of the plug's Wi-Fi MAC), an open
+network. Browse to `http://192.168.4.1/` to upload a native ESP32-C3
 application image. The browser sends the selected file as a raw request body;
 JavaScript must be enabled.
 

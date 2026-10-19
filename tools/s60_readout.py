@@ -60,7 +60,7 @@ READOUT_OTA = Path("captures/flash-readout/s60-ota-bridge-flash-readout-4.4.3.ot
 # 4.4.3 is the one the conversion sends.  Pinned as in SHA256SUMS.
 CONTROL_FILES = {
     "4.4.3": (Path("artifacts/s60-ota-bridge-4.4.3.ota"),
-              "5c020b8b1105d681d5ce95875d883c26104d360cf519694e79ddec36d74c787b"),
+              "0d179df29612d14a258f6926bd8f248cd46f3e78f0cf5c6cd0c427d6780b7f7f"),
 }
 CONFIRM_WORD = "readout"
 # How a bridge names itself: "bridge v5" up to v5, "bridge 4.4.1" from then on.
