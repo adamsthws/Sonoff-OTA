@@ -14,8 +14,10 @@ import gzip
 import hashlib
 import http.client
 import json
+import math
 import struct
 import urllib.error
+import urllib.parse
 import urllib.request
 import zlib
 from pathlib import Path
@@ -24,14 +26,14 @@ from . import imprint
 
 ROOT = Path(__file__).resolve().parents[2]
 # The published image, pinned: a changed file is refused, never used unseen.
-IMAGE = ROOT / "artifacts" / "esphome-sonoff-s60-imprintable-1.0.0.bin"
-IMAGE_SHA256 = "0dfa93a98962eac73a07a3b5a7ee620a0faf9aacf5ed829b674b5a7afa32b06d"
-IMAGE_SIZE = 948_256
+IMAGE = ROOT / "artifacts" / "esphome-sonoff-s60-imprintable-1.1.0.bin"
+IMAGE_SHA256 = "eb5c2f6922fb913c05c08324f48ce1e4bf519c7b5b4da7bc59797c72352cce0a"
+IMAGE_SIZE = 955_408
 # ESPHome's bootloader, from the same build, put in place of Sonoff's: Sonoff's
 # (ESP-IDF 4.4) starts ESPHome but cannot roll back an update that fails to
 # start ("Bootloader too old for OTA rollback").  It is all that sits before
 # the partition table at 0x8000, and the one part the plug cannot start without.
-BOOTLOADER = ROOT / "artifacts" / "esphome-sonoff-s60-bootloader-1.0.0.bin"
+BOOTLOADER = ROOT / "artifacts" / "esphome-sonoff-s60-bootloader-1.1.0.bin"
 BOOTLOADER_SHA256 = "3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433"
 BOOTLOADER_SIZE = 21_088
 BOOTLOADER_ROOM = 0x8000
@@ -181,6 +183,20 @@ def switch_relay(host: str, on: bool) -> bool:
     """Switch the relay, and say whether it then reads as asked."""
     _request(host, f"/switch/Relay/{'turn_on' if on else 'turn_off'}", post=True)
     return relay(host) is on
+
+
+# The Wi-Fi signal sensor, by its name in ESPHome/sonoff_s60.yaml (from 1.1.0).
+SIGNAL_SENSOR = "WiFi Signal"
+
+
+def signal(host: str) -> int | None:
+    """The plug's Wi-Fi signal in dBm, from its Wi-Fi signal sensor: None from
+    an ESPHome built without one (ours before 1.1.0), or before its first
+    reading."""
+    value = _state(host, "/sensor/" + urllib.parse.quote(SIGNAL_SENSOR))
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+        return round(value)
+    return None
 
 
 def meter(host: str) -> dict[str, float]:

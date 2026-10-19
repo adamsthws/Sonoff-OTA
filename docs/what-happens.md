@@ -247,8 +247,9 @@ first half, checks them, and switches to them.
   to any of the three from where it is.
 
 The Wi-Fi signal is read first from Tasmota, before anything is changed. From
-ESPHome it is read once the full Tasmota is running: neither ESPHome nor the
-startup firmware says what it is.
+ESPHome it is read before anything is written when the plug's ESPHome has a
+Wi-Fi signal sensor, as this project's has from 1.1.0; from one without, once
+the full Tasmota is running, as the startup firmware cannot say either.
 
 ## Safety, and why you can believe the checks
 

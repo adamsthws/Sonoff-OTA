@@ -10,8 +10,8 @@ directory, never here.
 | `tasmota32c3-bluetooth.bin` | Berry-capable Tasmota used temporarily on the original partition layout | `a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708` |
 | `s60-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `aa32fafa4a9470152d5f8826fc6aedf94387575332353b50b8ce454ec1f9d364` |
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
-| `esphome-sonoff-s60-bootloader-1.0.0.bin` | ESPHome's bootloader, from the same build: it replaces Sonoff's when ESPHome is installed, so ESPHome can roll back an update that fails to start | `3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433` |
-| `esphome-sonoff-s60-imprintable-1.0.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `0dfa93a98962eac73a07a3b5a7ee620a0faf9aacf5ed829b674b5a7afa32b06d` |
+| `esphome-sonoff-s60-bootloader-1.1.0.bin` | ESPHome's bootloader, from the same build: it replaces Sonoff's when ESPHome is installed, so ESPHome can roll back an update that fails to start | `3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433` |
+| `esphome-sonoff-s60-imprintable-1.1.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `eb5c2f6922fb913c05c08324f48ce1e4bf519c7b5b4da7bc59797c72352cce0a` |
 | `esphome-sonoff-s60-mover-1.0.0.bin` | A small ESPHome the run uses for a minute or two when leaving Tasmota: it fits in front of Tasmota in Sonoff's layout, and takes the next firmware as an ordinary ESPHome update; two minutes away from the home Wi-Fi, it raises its own network, whose page takes new Wi-Fi details. Wi-Fi placeholders, like the image above | `ee0c38278d48d0112515e2e61d7bede9575771042381acf5c8eb6086449c36fb` |
 | `sonoff-s60-partition-table.bin` | Sonoff's partition table, read from a stock plug: the one every conversion starts from, which the Tasmota route's preflight requires byte for byte. Written back when a plug leaves Tasmota's layout. Holds no secrets | `f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf` |
 
@@ -86,3 +86,13 @@ encryption key, as ESPHome's own ready-made images have none: the plug is open
 on the home network until its owner adds them, as official Tasmota is. To
 publish a new one, change the config and its `project` version, build it,
 and replace both files, their rows above and their lines in `SHA256SUMS`.
+
+ESPHome 1.1.0 adds a Wi-Fi signal sensor, which the run reads before it
+changes the firmware of a plug on ESPHome, and an `s60_wifi` action that gives
+the run the plug's Wi-Fi name and password, so that leaving ESPHome needs
+neither typed. It also saves its Wi-Fi where a build of the config with none
+written in looks for it, so a plug that Home Assistant's ESPHome builder
+rebuilds stays on the home Wi-Fi. Its bootloader is byte for byte
+1.0.0's, so no plug is given a new one. 1.0.0 is in the Git history:
+`git log --all -- artifacts/esphome-sonoff-s60-imprintable-1.0.0.bin` finds
+the last commit that has it.

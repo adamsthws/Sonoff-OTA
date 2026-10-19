@@ -2,8 +2,8 @@
 aa32fafa4a9470152d5f8826fc6aedf94387575332353b50b8ce454ec1f9d364  artifacts/s60-recovery-safeboot-imprintable.bin
 a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708  artifacts/tasmota32c3-bluetooth.bin
 d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5  artifacts/tasmota-settings-template-15.6.0.0.bin
-3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433  artifacts/esphome-sonoff-s60-bootloader-1.0.0.bin
-0dfa93a98962eac73a07a3b5a7ee620a0faf9aacf5ed829b674b5a7afa32b06d  artifacts/esphome-sonoff-s60-imprintable-1.0.0.bin
+3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433  artifacts/esphome-sonoff-s60-bootloader-1.1.0.bin
+eb5c2f6922fb913c05c08324f48ce1e4bf519c7b5b4da7bc59797c72352cce0a  artifacts/esphome-sonoff-s60-imprintable-1.1.0.bin
 ee0c38278d48d0112515e2e61d7bede9575771042381acf5c8eb6086449c36fb  artifacts/esphome-sonoff-s60-mover-1.0.0.bin
 7d41da7e04dbd6f81b6edcff8a47d565d6df077bdaf8d8d68873a5b2f424bf40  archive/artifacts/s60-ota-bridge-v3-idf5.3.1.bin
 2b0ec6c49549d09bdb4c15cf975d24bdaee9ae309ca4786cbbc2522c6f152c1e  archive/artifacts/s60-tasmota-15.6.0-trial-cse7766.bin

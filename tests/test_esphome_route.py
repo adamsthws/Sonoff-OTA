@@ -243,6 +243,83 @@ class ESPHomePageTests(unittest.TestCase):
         self.assertFalse(af.esphome.is_esphome(host))
 
 
+class SignalSensorTests(unittest.TestCase):
+    """An ESPHome built with the Wi-Fi signal sensor (ours from 1.1.0) gives the
+    plug's signal; one without it gives nothing, and the run goes on."""
+
+    def serve(self, pages):
+        import http.server
+        import threading
+        asked = []
+
+        class Page(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                asked.append(self.path)
+                body = pages.get(self.path)
+                self.send_response(200 if body is not None else 404)
+                self.send_header("Content-Length", str(len(body or b"")))
+                self.end_headers()
+                self.wfile.write(body or b"")
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Page)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"127.0.0.1:{server.server_address[1]}", asked
+
+    def test_the_sensor_gives_the_signal_in_whole_dbm(self):
+        host, asked = self.serve({"/sensor/WiFi%20Signal":
+                                  b'{"id":"sensor-wifi_signal","value":-58.4,"state":"-58 dBm"}'})
+        self.assertEqual(af.esphome.signal(host), -58)
+        self.assertEqual(asked, ["/sensor/WiFi%20Signal"])
+
+    def test_no_sensor_or_no_reading_yet_gives_nothing(self):
+        for pages in ({}, {"/sensor/WiFi%20Signal": b'{"value":NaN,"state":"NA"}'},
+                      {"/sensor/WiFi%20Signal": b'{"state":"NA"}'}):
+            host, _ = self.serve(pages)
+            self.assertIsNone(af.esphome.signal(host), pages)
+
+
+class SignalBeforeLeavingESPHomeTests(RouteTestCase):
+    """X1 reads the signal before anything is written, where ESPHome gives it."""
+
+    def x1(self, signal, carry_on=True):
+        ctx = self.ctx(source="esphome")
+        with mock.patch.object(af.esphome, "signal", return_value=signal), \
+                mock.patch.object(af, "consent_to_leave") as consent, \
+                mock.patch.object(af.detect, "identify", return_value="startup"), \
+                mock.patch.object(af, "ask_yes_no", return_value=carry_on) as asked, \
+                mock.patch.object(af, "section"):
+            try:
+                af.step_startup_from_esphome(ctx)
+            except af.Abort as exc:
+                return ctx, consent, asked, exc
+        return ctx, consent, asked, None
+
+    def test_a_weak_signal_is_asked_about_before_the_go_ahead(self):
+        _, consent, asked, stopped = self.x1(-82, carry_on=False)
+        self.assertRegex(str(stopped), "weak Wi-Fi signal")
+        asked.assert_called_once()
+        consent.assert_not_called()
+
+    def test_a_good_signal_is_recorded(self):
+        ctx, consent, asked, stopped = self.x1(-58)
+        self.assertIsNone(stopped)
+        self.assertEqual(ctx.state.data["captures"]["X1.signal_dbm"], -58)
+        asked.assert_not_called()
+        consent.assert_called_once()
+
+    def test_an_esphome_without_the_sensor_goes_on_unasked(self):
+        ctx, consent, asked, stopped = self.x1(None)
+        self.assertIsNone(stopped)
+        self.assertIsNone(ctx.state.data["captures"]["X1.signal_dbm"])
+        asked.assert_not_called()
+        consent.assert_called_once()
+
+
 class FromAConvertedPlugTests(RouteTestCase):
     """A plug this tool converted, found on the network, offered the other two."""
 

@@ -12,7 +12,7 @@ esphome:
   name_add_mac_suffix: true
   project:
     name: adamsthws.sonoff-s60
-    version: "1.0.0"
+    version: "1.1.0"
   on_boot:
     # Tasmota holds the relay and LED pins through a software restart, and
     # the install ends with one: release them before anything drives them,
@@ -62,6 +62,25 @@ esphome:
                 wifi::global_wifi_component->get_sta().get_ssid() == id(imprinted_ssid)) {
               wifi::global_wifi_component->save_wifi_sta(id(imprinted_ssid), id(imprinted_password));
             }
+            // Saved, too, where a build of this config with no Wi-Fi written
+            // in looks for them - one Home Assistant's ESPHome builder makes,
+            // say. ESPHome keys saved details by the whole config and its
+            // version when a build has a network at start-up, as this one has
+            // with the details written in, and by one fixed key when it has
+            // none: without this, that build finds none, and raises its own
+            // network. Kept to the network in use, written only when changed.
+            const auto &sta = wifi::global_wifi_component->get_sta();
+            if (!sta.get_ssid().empty()) {
+              auto fixed = global_preferences->make_preference<wifi::SavedWifiSettings>(88491487UL, true);
+              wifi::SavedWifiSettings saved{};
+              if (!fixed.load(&saved) || sta.get_ssid() != saved.ssid || sta.get_password() != saved.password) {
+                wifi::SavedWifiSettings save{};
+                strncpy(save.ssid, sta.get_ssid().c_str(), sizeof(save.ssid) - 1);
+                strncpy(save.password, sta.get_password().c_str(), sizeof(save.password) - 1);
+                fixed.save(&save);
+                global_preferences->sync();
+              }
+            }
 
 # Adopting the plug in Home Assistant's ESPHome builder takes this config.
 dashboard_import:
@@ -90,6 +109,20 @@ api:
   # Not restarting when Home Assistant is away: a plug without it would cut
   # the power to what it runs every 15 minutes (the default).
   reboot_timeout: 0s
+  actions:
+    # The Wi-Fi the plug is on, name and password, for the conversion tool to
+    # hand to the next firmware when the plug leaves ESPHome: ESPHome says
+    # neither otherwise. Anything that can use this API can ask - anything on
+    # the network, while the API has no encryption key, as Tasmota's settings
+    # backup gives them too. Give the API a key to close it; the tool then
+    # asks for the details instead.
+    - action: s60_wifi
+      supports_response: only
+      then:
+        - api.respond:
+            data: !lambda |-
+              root["ssid"] = wifi::global_wifi_component->get_sta().get_ssid();
+              root["password"] = wifi::global_wifi_component->get_sta().get_password();
 
 ota:
   - platform: esphome
@@ -321,3 +354,11 @@ sensor:
     restore: true
     filters:
       - multiply: 0.001	# W → kWh
+
+  # The Wi-Fi signal where the plug is, in dBm. The conversion tool reads it
+  # (/sensor/WiFi Signal) before it changes the plug's firmware, to suggest
+  # moving a plug whose signal is weak; keep its name for that.
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    entity_category: diagnostic
+    update_interval: 60s
