@@ -10,6 +10,11 @@ plug, every fault - on emulators side by side, on one machine or several
                                           scenario without), skipping those passed
     fault_suite.py report                 the latest result of each
 
+Add --stub-cloud to prep/batch to run against a local eWeLink stub per emulator
+(emu.sh --stub-cloud): fully offline, no cloud lock, every scenario in parallel
+on S60_STUB_WORKERS emulators (from S60_FIRST_INSTANCE, default 1). Without it
+the real cloud is used and the cloud scenarios take turns, as below.
+
 Each scenario: a conversion from a saved plug; when the step under test has
 been going for a share of its usual time (40%, or 10% and 90% at the riskiest
 steps), the fault; then the tool run again, as a person would - switching the
@@ -30,7 +35,8 @@ How many at once, from the environment:
     S60_ANY_WORKERS    emulators for the rest, after those
     S60_NO_CLOUD=1     a machine whose plugs never reach the internet: only
                        the scenarios that do not need it
-    S60_SUITE_DIR      where results go (captures/emulation/suite)
+    S60_SUITE_DIR      where results go (captures/emulation/suite; with
+                       --stub-cloud, captures/emulation/suite-stub)
 
 Results: results.jsonl, a log per scenario, and what a failure leaves (its
 run records and the plug's serial output).
@@ -54,6 +60,19 @@ RESULTS = OUT / "results.jsonl"
 LOGS = OUT / "logs"
 # A machine whose plugs never get a turn at the cloud.
 NO_CLOUD = os.environ.get("S60_NO_CLOUD") == "1"
+# Each emulator serves its own local eWeLink stub (emu.sh --stub-cloud): the
+# plugs never share a cloud, so nothing is serialised and every scenario can run
+# in parallel. Set by --stub-cloud; see docs/cloud-stub.md.
+STUB_CLOUD = os.environ.get("S60_STUB_CLOUD") == "1"
+
+
+def saved(name):
+    """A saved starting plug's name. A stub run's are kept apart from the real
+    cloud's: their flash is the other kind (emu.sh), so each would be refused,
+    or replaced, by a batch of the other."""
+    return f"stub-{name}" if STUB_CLOUD else name
+
+
 MAC = None  # --plug: the backed-up plug the emulators run copies of
 PLUG_CMD = "/opt/s60emu/bin/plug"
 MAX_RUNS = 4
@@ -190,6 +209,8 @@ class CloudQueue:
         self.released = 0.0
 
     def acquire(self, n, priority, give_up):
+        if STUB_CLOUD:
+            return True  # own stub per instance: no shared cloud to take turns at
         with self.cv:
             self.tickets += 1
             entry = (priority, self.tickets, n)
@@ -207,6 +228,8 @@ class CloudQueue:
             return True
 
     def release(self, n):
+        if STUB_CLOUD:
+            return
         with self.cv:
             if self.holder == n:
                 self.holder = None
@@ -257,7 +280,7 @@ class Tuner:
         """Judged on the cloud scenarios started since the last change, WINDOW
         at a time: two of them failing is trouble (one alone may be anything),
         WINDOW passing in a row a step on."""
-        if not needs_cloud(row) or self.phase == "held" or started < self.changed:
+        if STUB_CLOUD or not needs_cloud(row) or self.phase == "held" or started < self.changed:
             return
         with self.lock:
             ok = row["verdict"] in ("PASS", "EMULATOR-LIMIT", "NO-TRAFFIC")
@@ -337,7 +360,8 @@ class PlugMonitor:
         self.stop = threading.Event()
 
     def start(self):
-        threading.Thread(target=self.watch, daemon=True).start()
+        if not STUB_CLOUD:  # a stub per instance: its plug never needs a turn
+            threading.Thread(target=self.watch, daemon=True).start()
         return self
 
     def run_text(self):
@@ -495,10 +519,12 @@ class Scenario:
     def run_tool(self, target, extra=(), source=None, fresh=False):
         args = [str(REPO / "tools/emulator/unattended-test.sh"), f"--instance={self.n}",
                 f"--plug={MAC}", "--keep"]
+        if STUB_CLOUD:
+            args.append("--stub-cloud")
         if fresh:
             args.append("--fresh")
         if source:
-            args.append(f"--from={source}")
+            args.append(f"--from={saved(source)}")
         args += ["--", "--firmware", target, *extra]
         env = dict(os.environ)
         if (self.sc["fault"], self.sc["arg"]) == ("ctrlc", "countdown"):
@@ -798,7 +824,7 @@ class Scenario:
 
     def go(self):
         monitor = PlugMonitor(self)
-        if self.sc.get("step") == "C2" and not NO_CLOUD:
+        if self.sc.get("step") == "C2" and not NO_CLOUD and not STUB_CLOUD:
             # The turn before the run, not beside it: A1 looks the plug up in
             # eWeLink within seconds of starting, and finds it offline if it
             # is still waiting for its turn then.
@@ -1013,15 +1039,27 @@ def batch(ids_file=None):
     cloud, anywhere = queue.Queue(), queue.Queue()
     ids = Path(ids_file).read_text().split() if ids_file else list(known)
     for i in ids:
-        if i not in done and not (NO_CLOUD and needs_cloud(known[i])):
+        if i in done:
+            continue
+        # With a stub per instance nothing is shared, so every scenario runs in
+        # the one parallel pool; otherwise the cloud ones take turns at eWeLink,
+        # and a no-cloud machine skips them.
+        if STUB_CLOUD:
+            anywhere.put(known[i])
+        elif not (NO_CLOUD and needs_cloud(known[i])):
             (cloud if needs_cloud(known[i]) else anywhere).put(known[i])
-    nc = int(os.environ.get("S60_CLOUD_WORKERS", "0"))
-    na = int(os.environ.get("S60_ANY_WORKERS", "0"))
+    if STUB_CLOUD:
+        nc = 0
+        na = int(os.environ.get("S60_STUB_WORKERS", os.environ.get("S60_ANY_WORKERS", "3")))
+        first = int(os.environ.get("S60_FIRST_INSTANCE", "1"))
+    else:
+        nc = int(os.environ.get("S60_CLOUD_WORKERS", "0"))
+        na = int(os.environ.get("S60_ANY_WORKERS", "0"))
+        first = int(os.environ.get("S60_FIRST_INSTANCE", nc + 1))  # clear of another batch's emulators
     print(f"batch: {cloud.qsize()} cloud on {nc}, {anywhere.qsize()} others on {na}", flush=True)
     lock = threading.Lock()
-    threads = [threading.Thread(target=worker, args=(n, cloud, lock, True))
-               for n in range(1, max(nc, TUNER.most) + 1)]
-    first = int(os.environ.get("S60_FIRST_INSTANCE", nc + 1))  # clear of another batch's emulators
+    threads = [] if STUB_CLOUD else [threading.Thread(target=worker, args=(n, cloud, lock, True))
+                                     for n in range(1, max(nc, TUNER.most) + 1)]
     threads += [threading.Thread(target=worker, args=(n, anywhere, lock)) for n in range(first, first + na)]
     for t in threads:
         t.start()
@@ -1056,19 +1094,22 @@ def prep():
         since = time.time()
         if stop_after:
             threading.Thread(target=stopped_after, args=(stop_after, sc, since), daemon=True).start()
+        stub = ["--stub-cloud"] if STUB_CLOUD else []
         with open(log, "w") as out:
-            subprocess.call([unattended, f"--instance={n}", f"--plug={MAC}", f"--save={save}", *args],
-                            stdout=out, stderr=subprocess.STDOUT)
+            subprocess.call([unattended, f"--instance={n}", f"--plug={MAC}", f"--save={saved(save)}",
+                             *stub, *args], stdout=out, stderr=subprocess.STDOUT)
         monitor.stop.set()
         plug_internet(n, False)
         CLOUD.release(n)
-        print(save, "saved" if (EMU / "saved" / save / "flash.bin").exists() else "MISSING", flush=True)
+        print(saved(save), "saved" if (EMU / "saved" / saved(save) / "flash.bin").exists() else "MISSING",
+              flush=True)
 
     for target in ("tasmota", "esphome"):
         make(ROUTES[f"{target}>sonoff"][0], ["--fresh", "--", "--firmware", target])
         stock = ROUTES[f"sonoff>{target}"][0]
         make(stock, ["--fresh", "--", "--firmware", target], stop_after="C2")
-        make(AFTER_D1[f"sonoff>{target}"], [f"--from={stock}", "--", "--firmware", target], stop_after="D1")
+        make(AFTER_D1[f"sonoff>{target}"], [f"--from={saved(stock)}", "--", "--firmware", target],
+             stop_after="D1")
 
 
 def listing():
@@ -1087,12 +1128,21 @@ def report():
 
 def main():
     import argparse
-    global MAC
+    global MAC, STUB_CLOUD, OUT, RESULTS, LOGS
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--plug", help="the backed-up plug's MAC, as emu.sh --plug takes it")
+    parser.add_argument("--stub-cloud", action="store_true",
+                        help="each emulator serves its own local eWeLink stub (offline, fully "
+                             "parallel, no cloud lock); the default uses the real cloud")
     parser.add_argument("command", choices=["prep", "list", "batch", "report"])
     parser.add_argument("file", nargs="?", help="batch: the scenario ids to run (else all)")
     args = parser.parse_args()
+    STUB_CLOUD = STUB_CLOUD or args.stub_cloud
+    if STUB_CLOUD and "S60_SUITE_DIR" not in os.environ:
+        # Apart from the real cloud's results, whose batch would otherwise
+        # take a stub run's passes for its own.
+        OUT = EMU / "suite-stub"
+        RESULTS, LOGS = OUT / "results.jsonl", OUT / "logs"
     if args.command in ("prep", "batch") and not args.plug:
         parser.error("--plug is needed: the backed-up plug the emulators run copies of")
     MAC = args.plug

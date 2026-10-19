@@ -3,6 +3,9 @@
 #
 #   tools/emulator/emu.sh            plug offline: nothing reaches the internet
 #   tools/emulator/emu.sh --cloud    plug and tool online (real plug must be unplugged)
+#   tools/emulator/emu.sh --stub-cloud  a local eWeLink stub serves this instance alone, so
+#                                    it comes online with no real cloud; the plug stays
+#                                    offline (docs/cloud-stub.md). Not with --cloud.
 #   tools/emulator/emu.sh --yes      with --cloud: the real plug is known to be unplugged; don't ask
 #   tools/emulator/emu.sh --plug MAC which backed-up plug to run; asked when there are several
 #   tools/emulator/emu.sh --fresh    put the plug back to its Sonoff backup, and forget the run and the account
@@ -34,10 +37,12 @@ case "$ROOT" in /mnt/[a-z]/*) STATE=$HOME/.local/share/s60-emu/state ;; esac
 PY=$ROOT/.venv/bin/python
 # A Windows checkout's .venv is Windows' own: under WSL the NVS generator lives here.
 [ -x "$PY" ] || PY=$HOME/.local/share/s60-emu/venv/bin/python
-IMAGE=s60-emu
+# The image tag; override to build/run an isolated image (e.g. the cloud-stub
+# work) without disturbing the shared one.
+IMAGE=${S60_EMU_IMAGE:-s60-emu}
 NAME=s60-emu PORT=8080 LINK_PORT=7860
 
-cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 yes=0 tty=-it plug="" instance=""
+cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 yes=0 stub=0 tty=-it plug="" instance=""
 while [ $# -gt 0 ]; do
     arg=$1
     case "$arg" in
@@ -46,6 +51,7 @@ while [ $# -gt 0 ]; do
     --instance) [ $# -ge 2 ] || { echo "--instance needs a number, 1-30" >&2; exit 2; }; instance=$2; shift ;;
     --instance=*) instance=${arg#--instance=} ;;
     --cloud) cloud=1 ;;
+    --stub-cloud) stub=1 ;;
     --yes) yes=1 ;;
     --fresh) fresh=1 ;;
     --pcap) pcap=1 ;;
@@ -53,7 +59,7 @@ while [ $# -gt 0 ]; do
     --detach) tty=-dt ;;
     --no-firewall) firewall=0 ;;
     --windows) windows=1 ;;
-    *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
     shift
 done
@@ -62,10 +68,22 @@ if [ -n "$instance" ]; then
     STATE=$STATE-$instance NAME=s60-emu-$instance
     PORT=$((8080 + instance)) LINK_PORT=$((7860 + instance))
 fi
+# The local cloud stub stands in for eWeLink for this instance alone, so it
+# cannot be combined with the real cloud (--cloud). See docs/cloud-stub.md.
+STUB_CA=$EMU/stub-cloud
+if [ "$stub" = 1 ] && [ "$cloud" = 1 ]; then
+    echo "--stub-cloud cannot be combined with --cloud" >&2; exit 2
+fi
 "$PY" -c 'import esp_idf_nvs_partition_gen' 2>/dev/null || {
     venv=$(dirname "$(dirname "$PY")")
     echo "The emulator needs ESP-IDF's NVS generator in $venv:" >&2
     echo "    python3 -m venv $venv && $PY -m pip install esp-idf-nvs-partition-gen" >&2
+    exit 1
+}
+# The stub's CA and the trust swap are made with `cryptography`.
+[ "$stub" = 0 ] || "$PY" -c 'import cryptography' 2>/dev/null || {
+    echo "--stub-cloud needs the cryptography package in $(dirname "$(dirname "$PY")"):" >&2
+    echo "    $PY -m pip install cryptography" >&2
     exit 1
 }
 if docker ps -q --filter "name=^$NAME$" | grep -q .; then
@@ -91,10 +109,62 @@ fi
 SRC=$(sed -n 1p "$STATE/plug")
 mac=$(sed -n 2p "$STATE/plug")
 # Another plug than last time: its own flash, kept from its last run, comes
-# back, and the one that was running is put by for its next.
+# back, and the one that was running is put by for its next - each with the
+# mode its flash was built for (below).
 if [ "$mac" != "$was" ]; then
-    [ -n "$was" ] && [ -f "$STATE/flash.bin" ] && mv "$STATE/flash.bin" "$STATE/plugs/${was//:/-}.bin"
-    [ -f "$STATE/plugs/${mac//:/-}.bin" ] && mv "$STATE/plugs/${mac//:/-}.bin" "$STATE/flash.bin"
+    if [ -n "$was" ] && [ -f "$STATE/flash.bin" ]; then
+        mv "$STATE/flash.bin" "$STATE/plugs/${was//:/-}.bin"
+        if [ -f "$STATE/.flash-mode" ]; then mv "$STATE/.flash-mode" "$STATE/plugs/${was//:/-}.mode"; fi
+    fi
+    if [ -f "$STATE/plugs/${mac//:/-}.bin" ]; then
+        mv "$STATE/plugs/${mac//:/-}.bin" "$STATE/flash.bin"
+        rm -f "$STATE/.flash-mode"
+        if [ -f "$STATE/plugs/${mac//:/-}.mode" ]; then mv "$STATE/plugs/${mac//:/-}.mode" "$STATE/.flash-mode"; fi
+    fi
+fi
+# A stub run's flash differs from a cloud run's: it trusts the stub's CA and
+# points dispatch at the stub. A plug's flash is the plug as the last run left
+# it, so it is never thrown away to switch: --fresh does that, knowingly.
+# (A flash from before modes were recorded is a cloud one.)
+mode=plain; [ "$stub" = 1 ] && mode=stub
+built_for=$(cat "$STATE/.flash-mode" 2>/dev/null || echo plain)
+if [ "$fresh" = 0 ] && [ -f "$STATE/flash.bin" ] && [ "$built_for" != "$mode" ]; then
+    want=$([ "$stub" = 1 ] && echo "--stub-cloud" || echo "a run without --stub-cloud")
+    echo "This instance's plug was set up for $([ "$built_for" = stub ] && echo "the local stub" || echo "the real cloud")," >&2
+    echo "not for $want. Add --fresh to put it back to its Sonoff backup, or use another --instance." >&2
+    exit 1
+fi
+# The plug's product model (S60TPG UK, S60TPF Europe) is eWeLink's name for it,
+# given when it was paired, and is not in its dump. The stub reports the one
+# eWeLink gave this plug in the tool's own records of earlier runs (a real
+# conversion's, a kept plug's, an instance's), or S60_STUB_PRODUCT_MODEL; with
+# neither, none - and the run's report leaves it blank rather than guess.
+product_seen() {
+    "$PY" -I - "$ROOT/captures" "$EMU/saved" "$(dirname "$STATE")" "${mac//:/-}" <<'EOF'
+import glob, json, os, re, sys
+captures, saved, states, plug = sys.argv[1:]
+seen = []
+for runs in (f"{captures}/plugs/{plug}/runs", f"{saved}/*/captures/plugs/{plug}/runs",
+             f"{states}/state*/work/captures/plugs/{plug}/runs"):
+    for path in glob.glob(f"{runs}/*/autoflash-state.json"):
+        try:
+            with open(path) as f:
+                model = str((json.load(f).get("inputs") or {}).get("product_model") or "").strip().upper()
+        except (OSError, ValueError, AttributeError):
+            continue
+        if re.fullmatch(r"S60TP[A-Z]", model):
+            seen.append((os.path.getmtime(path), model))
+print(max(seen)[1] if seen else "")
+EOF
+}
+product=""
+if [ "$stub" = 1 ]; then
+    product=$(printf '%s' "${S60_STUB_PRODUCT_MODEL:-}" | tr '[:lower:]' '[:upper:]')
+    [ -n "$product" ] || product=$(product_seen)
+    case "$product" in
+    ""|S60TP[A-Z]) ;;
+    *) echo "S60_STUB_PRODUCT_MODEL is S60TPG or S60TPF, not '$product'" >&2; exit 2 ;;
+    esac
 fi
 
 # -- the image -----------------------------------------------------------------
@@ -140,16 +210,29 @@ fi
 
 # -- the plug's flash and eFuses ---------------------------------------------
 if [ "$fresh" = 1 ]; then
-    rm -rf "$STATE/flash.bin" "$STATE/work/captures"
+    rm -rf "$STATE/flash.bin" "$STATE/work/captures" "$STATE/.flash-mode"
     echo "The plug is back to its Sonoff backup; the previous run and eWeLink account are forgotten."
+fi
+if [ "$stub" = 1 ]; then
+    # Our own CA + leaf for the stub domain (once; kept stable - it is flashed in).
+    # The plug's own identity is read from its dump inside the container, so the
+    # LAN key stays on that network (see entrypoint.sh).
+    "$PY" -I "$ROOT/tools/emulator/stub_cloud/make_ca.py" --out-dir "$STUB_CA" >/dev/null
 fi
 if [ ! -f "$STATE/flash.bin" ]; then
     # Home Wi-Fi rewritten to the emulator's open network, Bluetooth start-up
-    # skipped (the emulator has no Bluetooth), re-sealed for the bootloader.
-    "$PY" -I "$ROOT/tools/emulator/rewrite_nvs.py" "$SRC/flash.bin" "$STATE/wifi-flash.bin" \
+    # skipped (the emulator has no Bluetooth), re-sealed for the bootloader. In
+    # stub mode, dispatch is also redirected to the stub and our CA is trusted.
+    nvs_args=() patch_args=()
+    if [ "$stub" = 1 ]; then
+        nvs_args=(--dis-server disp.s60-stub.test --dis-port 443)
+        patch_args=(--trust-ca "$STUB_CA/ca.crt")
+    fi
+    "$PY" -I "$ROOT/tools/emulator/rewrite_nvs.py" "$SRC/flash.bin" "$STATE/wifi-flash.bin" "${nvs_args[@]}" \
         2>&1 | grep -v 'absolute path given' >/dev/null
-    "$PY" -I "$ROOT/tools/emulator/patch_stock.py" "$STATE/wifi-flash.bin" "$STATE/flash.bin" >/dev/null
+    "$PY" -I "$ROOT/tools/emulator/patch_stock.py" "$STATE/wifi-flash.bin" "$STATE/flash.bin" "${patch_args[@]}" >/dev/null
     rm -f "$STATE/wifi-flash.bin"
+    echo "$mode" > "$STATE/.flash-mode"
 fi
 # Copied by content: the backup's files are read-only, and a copy would be too.
 rm -f "$STATE/efuse.bin" && cat "$SRC/efuse.bin" > "$STATE/efuse.bin" && truncate -s 1024 "$STATE/efuse.bin"
@@ -169,7 +252,7 @@ rsync -a --delete --exclude /captures --exclude /.venv --exclude /.python --excl
 rm -f "$STATE/work/.env"  # one copied before it was left out: --delete spares excluded files
 # Not the firmware bundle in captures/safeboot-recovery-migration: a real
 # bundle is set up for the real home Wi-Fi. The run builds its own, as a new
-# user's would (it downloads the official files, so it needs --cloud).
+# user's would (it downloads the official files: --cloud or --stub-cloud).
 # The eWeLink account email last used here (captures/settings.json) is offered
 # to save typing it - but not with --fresh, which starts as a new user would.
 if [ "$fresh" = 0 ] && [ ! -f "$STATE/work/captures/settings.json" ] && [ -f "$ROOT/captures/settings.json" ]; then
@@ -201,6 +284,9 @@ publish=(-p "127.0.0.1:$PORT:8080")
 # build in place of the image's (tools/emulator/qemu-build.Dockerfile builds one).
 dev=()
 [ -n "${S60_EMU_QEMU:-}" ] && dev=(-v "$(realpath "$S60_EMU_QEMU"):/opt/qemu/bin/qemu-system-riscv32:ro")
+# The stub's CA and leaf cert, read-only, for the in-container stub server.
+stubvol=()
+[ "$stub" = 1 ] && stubvol=(-v "$STUB_CA:/stub-cloud:ro")
 # Awake while you are in it, so a conversion is not cut off by sleep: a lock
 # held only while this runs (systemd-inhibit), changing no setting.
 awake=()
@@ -213,8 +299,9 @@ exec "${awake[@]}" docker run --rm $tty --name "$NAME" --hostname s60-emu-comput
     --cap-add NET_ADMIN --device /dev/net/tun \
     --sysctl net.ipv4.ip_forward="$(( cloud || windows ))" \
     "${publish[@]}" "${dev[@]}" \
-    -v "$STATE:/state" -v "$SRC/flash.bin:/secrets/stock-flash.bin:ro" \
+    -v "$STATE:/state" -v "$SRC/flash.bin:/secrets/stock-flash.bin:ro" "${stubvol[@]}" \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e PLUG_MAC="$mac" \
     -e CLOUD="$cloud" -e PCAP="$pcap" -e FIREWALL="$firewall" -e WINDOWS="$windows" \
+    -e STUB_CLOUD="$stub" -e STUB_PRODUCT_MODEL="$product" \
     -e S60_EMULATOR_URL="http://localhost:$PORT" \
     "$IMAGE"

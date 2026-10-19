@@ -3,7 +3,7 @@
 # hands over to you, as your own user id, in a tmux session.
 set -euo pipefail
 
-: "${HOST_UID:?}" "${HOST_GID:?}" "${PLUG_MAC:?}" "${CLOUD:=0}" "${PCAP:=0}" "${FIREWALL:=1}" "${WINDOWS:=0}"
+: "${HOST_UID:?}" "${HOST_GID:?}" "${PLUG_MAC:?}" "${CLOUD:=0}" "${PCAP:=0}" "${FIREWALL:=1}" "${WINDOWS:=0}" "${STUB_CLOUD:=0}" "${STUB_PRODUCT_MODEL:=}"
 RUN=/run/s60emu
 # The home network: the plug's tap on its own, or with emu.sh --windows a
 # bridge of it and the wire to Windows, which is then the computer on it.
@@ -47,6 +47,7 @@ if [ "$FIREWALL" = 1 ]; then
     ufw default allow outgoing >/dev/null
     ufw allow in on "$LAN" to any port 67 proto udp comment 'emulator: DHCP for the plug' >/dev/null
     ufw allow in on "$LAN" to any port 53 comment 'emulator: DNS for the plug' >/dev/null
+    [ "$STUB_CLOUD" = 1 ] && ufw allow in on "$LAN" to any port 443 proto tcp comment 'emulator: the local cloud stub' >/dev/null
     ufw allow in on eth0 to any port 8080 proto tcp comment 'emulator: your browser' >/dev/null
     if [ "$WINDOWS" = 1 ]; then
         ufw allow in on eth0 to any port 7860 proto tcp comment 'emulator: the wire to Windows' >/dev/null
@@ -60,8 +61,8 @@ else
     sed -i "s|$on|$off|" /opt/s60emu/motd
 fi
 
-# -- internet: only with --cloud ----------------------------------------------
-# Without it nothing in here reaches the internet - neither the plug nor the
+# -- internet: only with --cloud, or for this computer with --stub-cloud -------
+# Without either nothing in here reaches the internet - neither the plug nor the
 # conversion tool - so the plug's shared eWeLink identity cannot be used by
 # mistake. Replies to your browser (published port 8080) still get out.
 iptables -P FORWARD DROP
@@ -69,6 +70,14 @@ if [ "$CLOUD" = 1 ]; then
     iptables -A FORWARD -i "$LAN" -o eth0 -j ACCEPT
     iptables -A FORWARD -i eth0 -o "$LAN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     iptables -t nat -A POSTROUTING -s 192.168.60.0/24 -o eth0 -j MASQUERADE
+elif [ "$STUB_CLOUD" = 1 ]; then
+    # The local stub is the plug's cloud, so the plug stays on its own network.
+    # This computer may fetch what a new user's run downloads (the official
+    # firmware files), but not eWeLink: the tool is pointed at the stub, and
+    # eWeLink's own addresses lead nowhere from here.
+    for host in {eu,us,as}-apia.coolkit.cc cn-apia.coolkit.cn {eu,us,as}-dispa.coolkit.cc cn-dispa.coolkit.cn; do
+        echo "0.0.0.0 $host" >> /etc/hosts
+    done
 else
     iptables -A OUTPUT -o eth0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     iptables -A OUTPUT -o eth0 -j DROP
@@ -79,7 +88,7 @@ fi
 # through here, so a browser there reaches the plug at its own address, as the
 # conversion's last link gives it. Only that computer (this container's
 # gateway) to the plug, and the plug's replies: nothing else is forwarded, and
-# without --cloud nothing in here reaches the internet still.
+# without --cloud the plug reaches no internet still.
 gateway=$(ip route show default | awk '{print $3; exit}')
 if [ -n "$gateway" ]; then
     iptables -A FORWARD -i eth0 -o "$LAN" -s "$gateway" -d 192.168.60.50 -j ACCEPT
@@ -121,17 +130,61 @@ CLOUD=$CLOUD
 PCAP=$PCAP
 EOF
 echo on > "$RUN/power"
-if [ "$CLOUD" = 1 ]; then echo "internet: ON (cloud)" > "$RUN/cloud-label"; else echo "internet: off" > "$RUN/cloud-label"; fi
+if [ "$CLOUD" = 1 ]; then echo "internet: ON (cloud)" > "$RUN/cloud-label"
+elif [ "$STUB_CLOUD" = 1 ]; then echo "cloud: local stub" > "$RUN/cloud-label"
+else echo "internet: off" > "$RUN/cloud-label"; fi
 : > "$RUN/softap"
 chown -R "$HOST_UID:$HOST_GID" "$RUN"
+# The local cloud stub answers on the router's own address, under names only
+# this instance's dnsmasq resolves (it reads /etc/hosts). Added before the
+# router starts, so the plug resolves them from its first dispatch lookup.
+if [ "$STUB_CLOUD" = 1 ]; then
+    grep -q s60-stub.test /etc/hosts 2>/dev/null \
+        || echo "192.168.60.1 disp.s60-stub.test iot.s60-stub.test apia.s60-stub.test" >> /etc/hosts
+fi
 /opt/s60emu/bin/wifi-root home >/dev/null
-
 ln -sfn /state/work /work
+# Start the stub once the router address (192.168.60.1) is up. It serves both
+# the plug (dispatch + IoT) and the tool (account API) from the repo copy at
+# /state/work, using the CA/leaf mounted at /stub-cloud and this plug's identity
+# from its own dump. Logs (device values redacted) go to the instance's log dir.
+# Kept non-fatal: a stub problem must not bring the whole emulator down.
+if [ "$STUB_CLOUD" = 1 ]; then
+    stub=/state/work/tools/emulator/stub_cloud
+    # The tool's trust: this system's roots and the stub's CA, so trusting the
+    # stub takes nothing away from any other site.
+    cat /etc/ssl/certs/ca-certificates.crt /stub-cloud/ca.crt > "$RUN/stub-ca-bundle.pem" 2>/dev/null \
+        || cp /stub-cloud/ca.crt "$RUN/stub-ca-bundle.pem"
+    chmod 0644 "$RUN/stub-ca-bundle.pem"
+    # Run as root, so -B: no bytecode left in your state directory that only
+    # root could delete.
+    # Its product model, when eWeLink gave it one before (emu.sh looks it up),
+    # and its MAC, both of which eWeLink's record of it carries.
+    if /opt/venv/bin/python3 -I -B "$stub/device_identity.py" /secrets/stock-flash.bin \
+            ${STUB_PRODUCT_MODEL:+--product-model "$STUB_PRODUCT_MODEL"} --sta-mac "$PLUG_MAC" \
+            --out "$RUN/stub-device.json" 2>>/state/logs/stub.log; then
+        /opt/venv/bin/python3 -I -B "$stub/stub_server.py" \
+            --bind 192.168.60.1 --port 443 --cert /stub-cloud/server.crt --key /stub-cloud/server.key \
+            --iot-host 192.168.60.1 --iot-port 443 --device-json "$RUN/stub-device.json" \
+            >> /state/logs/stub.log 2>&1 &
+    else
+        echo "stub: could not read the device identity; stub not started" >> /state/logs/stub.log
+    fi
+fi
 cp /opt/s60emu/tmux.conf "$home/.tmux.conf"
 grep -q s60emu-motd "$home/.bashrc" 2>/dev/null || cat >> "$home/.bashrc" <<'EOF'
 # s60emu-motd
 [ -n "${TMUX:-}" ] && [ "$(tmux display -p '#W')" = conversion ] && cat /opt/s60emu/motd
 EOF
+# In stub mode the conversion tool talks to the local stub, not coolkit, and
+# trusts the stub's CA. Exported for any conversion the user starts in here.
+if [ "$STUB_CLOUD" = 1 ] && ! grep -q s60emu-stub "$home/.bashrc" 2>/dev/null; then
+    cat >> "$home/.bashrc" <<'EOF'
+# s60emu-stub
+export S60_EWELINK_API_BASE=https://apia.s60-stub.test
+export SSL_CERT_FILE=/run/s60emu/stub-ca-bundle.pem
+EOF
+fi
 chown "$HOST_UID:$HOST_GID" "$home/.tmux.conf" "$home/.bashrc"
 
 as_you() { runuser -u "$user" -- env HOME="$home" PATH="$PATH" S60_EMULATOR_URL="${S60_EMULATOR_URL:-}" \

@@ -11,11 +11,15 @@
 #                                                   captures (its backup, its runs), as NAME
 #   tools/emulator/unattended-test.sh --from=NAME   start from a plug kept with --save: one
 #                                                   converted earlier, on this computer
+#   tools/emulator/unattended-test.sh --stub-cloud  convert against the local cloud stub, with
+#                                                   no eWeLink account and no .env (emu.sh --stub-cloud)
 #   tools/emulator/unattended-test.sh -- --new   anything after -- goes to the run itself
 #
 # Needs .env with the eWeLink account the dump's plug is in. It starts the
 # emulator with --cloud --yes: the real plug, which the emulated one is a
-# clone of, must be unplugged - it is not asked.
+# clone of, must be unplugged - it is not asked. With --stub-cloud none of that
+# applies: a local stub is the cloud, the plug stays offline, and the account
+# is a placeholder the stub ignores.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -24,10 +28,11 @@ case "$ROOT" in /mnt/[a-z]/*) STATE=$HOME/.local/share/s60-emu/state ;; esac
 NAME=s60-emu PORT=8080
 PLUG=192.168.60.50
 
-emu_args=(--cloud --yes --detach) keep=0 run_args=() from="" save=""
+emu_args=(--detach) keep=0 stub=0 run_args=() from="" save=""
 while [ $# -gt 0 ]; do
     case "$1" in
     --fresh|--pcap|--rebuild|--no-firewall|--plug=*) emu_args+=("$1") ;;
+    --stub-cloud) stub=1 ;;
     --instance=[1-9]|--instance=[12][0-9]|--instance=30)  # another emulator beside the first: see emu.sh
         n=${1#--instance=}; emu_args+=("$1")
         NAME=s60-emu-$n PORT=$((8080 + n)) STATE=$STATE-$n ;;
@@ -35,25 +40,52 @@ while [ $# -gt 0 ]; do
     --from=*) from=${1#--from=} ;;
     --save=*) save=${1#--save=} ;;
     --) shift; run_args=("$@"); break ;;
-    *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
     shift
 done
 
-[ -s "$ROOT/.env" ] || { echo "No .env with the eWeLink account - see docs/unattended.md" >&2; exit 1; }
+# The stub is its own cloud and needs no account; otherwise the real cloud is
+# used, which needs the account in .env and the real plug unplugged.
+if [ "$stub" = 1 ]; then
+    emu_args=(--stub-cloud "${emu_args[@]}")
+else
+    emu_args=(--cloud --yes "${emu_args[@]}")
+    [ -s "$ROOT/.env" ] || { echo "No .env with the eWeLink account - see docs/unattended.md" >&2; exit 1; }
+fi
 
-# Plugs kept with --save: the flash, and the captures of the runs that made it.
+# Plugs kept with --save: the flash, the mode it was built for (a stub run's
+# flash differs from a cloud run's - see emu.sh), and the captures of the runs
+# that made it. A plug kept before modes were recorded is a cloud one.
 SAVED=$ROOT/captures/emulation/saved
+mode=plain; [ "$stub" = 1 ] && mode=stub
 if [ -n "$from" ]; then
     [ -f "$SAVED/$from/flash.bin" ] || { echo "No plug kept as '$from' (--save=$from)" >&2; exit 1; }
+    kept_for=$(cat "$SAVED/$from/flash-mode" 2>/dev/null || echo plain)
+    if [ "$kept_for" != "$mode" ]; then
+        echo "'$from' was kept from a run $([ "$kept_for" = stub ] && echo "with" || echo "without") --stub-cloud;" \
+             "carry it on the same way, or keep one with --save from a run like this one." >&2
+        exit 1
+    fi
     docker stop "$NAME" >/dev/null 2>&1 || true
     mkdir -p "$STATE/work"
     cp "$SAVED/$from/flash.bin" "$STATE/flash.bin"
+    echo "$kept_for" > "$STATE/.flash-mode"
     rm -rf "$STATE/work/captures" && cp -a "$SAVED/$from/captures" "$STATE/work/captures"
 fi
 
 # One left running (--keep) is carried on with as it is - the plug, its network
 # and the computer's firewall - as a person running the tool again would find them.
+# Not one running the other way, against the real cloud or the stub.
+if [ -z "$from" ] && [[ " ${emu_args[*]} " != *" --fresh "* ]] && \
+        [ -n "$(docker ps -q -f "name=^$NAME\$")" ]; then
+    running=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$NAME" | sed -n 's/^STUB_CLOUD=//p')
+    if [ "${running:-0}" != "$stub" ]; then
+        echo "$NAME is running $([ "${running:-0}" = 1 ] && echo "against the local stub" || echo "against the real cloud")," \
+             "not as asked: stop it (docker stop $NAME) or use another --instance." >&2
+        exit 1
+    fi
+fi
 if [ -n "$from" ] || [[ " ${emu_args[*]} " == *" --fresh "* ]] || \
         [ -z "$(docker ps -q -f "name=^$NAME\$")" ]; then
     "$ROOT/tools/emulator/emu.sh" "${emu_args[@]}" >/dev/null
@@ -63,6 +95,7 @@ keep_plug() {
     docker exec "$NAME" /opt/s60emu/bin/plug off >/dev/null 2>&1 || true
     rm -rf "${SAVED:?}/$save" && mkdir -p "$SAVED/$save"
     cp "$STATE/flash.bin" "$SAVED/$save/flash.bin"
+    cat "$STATE/.flash-mode" 2>/dev/null > "$SAVED/$save/flash-mode" || echo plain > "$SAVED/$save/flash-mode"
     cp -a "$STATE/work/captures" "$SAVED/$save/captures"
     rm -rf "$SAVED/$save/captures/unattended"
     echo "Kept as '$save' (--from=$save)."
@@ -91,18 +124,28 @@ echo "The emulated plug is up; converting it unattended..."
 # repository has no .env, so a run you sit through asks for it. Kept in the
 # container's /tmp, gone when it stops, and removed after the run anyway.
 answers=/tmp/s60-unattended.env
-# Not the Wi-Fi in it, if any: that is your real network's, and the emulated
-# plug's is its own (given below).
-grep -v '^ *\(export \)\?S60_WIFI_' "$ROOT/.env" | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
+if [ "$stub" = 1 ]; then
+    # A placeholder account: the stub answers the account API and ignores it.
+    printf 'EWELINK_EMAIL=%s\nEWELINK_PASSWORD=%s\n' stub@s60-stub.test stub \
+        | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
+else
+    # Not the Wi-Fi in it, if any: that is your real network's, and the emulated
+    # plug's is its own (given below).
+    grep -v '^ *\(export \)\?S60_WIFI_' "$ROOT/.env" | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
+fi
 [ "$keep" = 1 ] && trap 'docker exec "$NAME" rm -f "$answers" 2>/dev/null || true' EXIT
 
 # On a terminal the run is shown live; otherwise its final screen is printed.
 [ -t 1 ] && as_you+=(-t)
 stamp=$(date +%Y%m%d-%H%M%S)
 status=0
+# In stub mode the tool talks to the local stub and trusts its CA.
+stub_env=()
+[ "$stub" = 1 ] && stub_env=(-e S60_EWELINK_API_BASE=https://apia.s60-stub.test
+                             -e SSL_CERT_FILE=/run/s60emu/stub-ca-bundle.pem)
 # The emulator's Wi-Fi, for a run from ESPHome, which cannot say what it is.
 "${as_you[@]}" -e S60_EMULATOR_URL="http://localhost:$PORT" -e S60_EMULATOR_SUDO_PASSWORD=s60 \
-    -e S60_WIFI_SSID=PICSimLabWifi -e S60_EMULATOR_COUNTDOWN="${S60_EMULATOR_COUNTDOWN:-}" \
+    "${stub_env[@]}" -e S60_WIFI_SSID=PICSimLabWifi -e S60_EMULATOR_COUNTDOWN="${S60_EMULATOR_COUNTDOWN:-}" \
     -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/unattended_run.py --size 100x40 \
     --save "captures/unattended/$stamp" -- --env-file "$answers" "${run_args[@]}" || status=$?
 
