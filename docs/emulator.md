@@ -107,6 +107,7 @@ On Linux or macOS (on Windows, see "On Windows" below):
 tools/emulator/emu.sh            # plug offline: nothing reaches the internet
 tools/emulator/emu.sh --cloud    # plug and tool online - asks you to confirm the real plug is unplugged
 tools/emulator/emu.sh --cloud --yes  # ... without asking: you have unplugged it (for unattended tests)
+tools/emulator/emu.sh --stub-cloud  # a local eWeLink stub serves this instance alone (its own cloud; see docs/cloud-stub.md)
 tools/emulator/emu.sh --plug 58:cf:79:01:02:03  # run that backed-up plug, without asking which
 tools/emulator/emu.sh --fresh    # put the plug back to its Sonoff backup, and forget the previous run and the eWeLink account
 tools/emulator/emu.sh --pcap     # also record the plug's Wi-Fi traffic
@@ -117,8 +118,13 @@ tools/emulator/emu.sh --windows  # Windows is the computer (see "On Windows"; st
 tools/emulator/emu.sh --instance 2  # a second emulator beside the first (see "Several at once")
 ```
 
-A conversion needs `--cloud`: the upgrade to the bridge firmware is sent
-through eWeLink. The first start builds the image, which takes a few minutes.
+A conversion needs the cloud: the upgrade to the bridge firmware is sent
+through eWeLink. Use `--cloud` for the real one (the real plug must be
+unplugged, since the emulated one is its clone), or `--stub-cloud` for a local
+stand-in that serves this instance alone — then nothing reaches the real
+eWeLink, and any number of instances convert at once. See
+[cloud-stub.md](cloud-stub.md). The first start builds the image, which takes a
+few minutes.
 
 ### Several at once
 

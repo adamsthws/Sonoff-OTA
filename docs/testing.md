@@ -92,6 +92,19 @@ S60_CLOUD_WORKERS=3 S60_ANY_WORKERS=3 \
 tools/emulator/fault_suite.py report
 ```
 
+Add `--stub-cloud` to `prep` and `batch` to give each emulator its own local
+eWeLink stand-in instead of the shared real cloud: no cloud lock, so every
+scenario runs in parallel on `S60_STUB_WORKERS` emulators, and no eWeLink
+account is needed. Its starting plugs (`stub-suite-*`) and results
+(`captures/emulation/suite-stub/`) are its own: a stub plug's flash is the
+other kind, and a stub run's passes are not the real cloud's. See
+[cloud-stub.md](cloud-stub.md).
+
+```sh
+S60_STUB_WORKERS=3 tools/emulator/fault_suite.py --plug=MAC --stub-cloud prep
+S60_STUB_WORKERS=3 tools/emulator/fault_suite.py --plug=MAC --stub-cloud batch all.txt
+```
+
 Results, a log per scenario and what each failure leaves (its run records and
 the plug's serial output) are kept in `captures/emulation/suite/`.
 
