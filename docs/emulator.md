@@ -516,6 +516,13 @@ Copies only; the original dump is never written.
   in `free()` (`tlsf_free`) - seen as a crash when the plug's Wi-Fi stopped. A
   frame is now written only into a descriptor the driver owns with room for it,
   and dropped otherwise, as the hardware drops it.
+- **`wifi-rssi.patch` - the signal strength has its minus sign.** The fork
+  added 96 to the strength of every frame the plug received, so the -25 dBm of
+  the plug's network reached the firmware as +71 to +80 dBm, and the firmware
+  passes it on as it is: the conversion's report said "Plug Wi-Fi signal:
+  72 dBm", where runs on the real plugs recorded -44 to -52 dBm. A frame now
+  carries its access point's own strength, as the hardware gives it, plus the
+  fork's jitter of up to 9 dB: -25 to -16 dBm for the plug's network.
 
 ### How QEMU is run (`container/bin/plug-supervisor`)
 
