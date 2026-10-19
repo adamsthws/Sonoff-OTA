@@ -6,7 +6,8 @@ that is allowed to drop at any moment, with a plug that has to survive it. When
 something went wrong and the cause was not ours, we chased it into the project
 it came from, fixed it there, and sent the fix back.
 
-This page lists those fixes and how each was proven.
+This page lists those fixes, grouped by what they were about, and how each
+was proven.
 
 ## How it started
 
@@ -22,24 +23,18 @@ it looking open for ever.
 That same unbounded wait turned out to have been copied, over the years, into
 several other HTTP clients, and following it led to a few more bugs nearby.
 
-## The fixes
+## What was sent, by topic
 
-| Project | Pull request | What it fixes |
-|---|---|---|
-| Tasmota | [#25139](https://github.com/arendst/Tasmota/pull/25139) | `HttpClientLight` waited for ever for the rest of a body |
-| Tasmota | [#25141](https://github.com/arendst/Tasmota/pull/25141) | The same in `AsyncHttpClientLight`, in its sync and async paths, and it never noticed a server closing the connection |
-| Tasmota | [#25142](https://github.com/arendst/Tasmota/pull/25142) | Every chunked response through `AsyncHttpClientLight` failed after 5 s |
-| arduino-esp32 | [#12990](https://github.com/espressif/arduino-esp32/pull/12990) | `HTTPClient` waited for ever for the rest of a body, and polled without pause between TLS packets |
-| arduino-esp32 | [#12991](https://github.com/espressif/arduino-esp32/pull/12991) | A stalled `HTTPUpdate` blocked for about 40 minutes, not the 30 s its code intended |
-| ESP-IDF | [#19243](https://github.com/espressif/esp-idf/pull/19243) | `esp_https_ota()` crashed when the staging and final partitions were the same |
-| ESP-IDF | [#19246](https://github.com/espressif/esp-idf/pull/19246) | `esp_https_ota()` retried a stalled download for ever |
-| ESPEasy | [#5649](https://github.com/letscontrolit/ESPEasy/pull/5649) | Its copy of `HttpClientLight` had the same unbounded wait |
-| LibreTiny | [#420](https://github.com/libretiny-eu/libretiny/pull/420) | Its `HTTPClient` had the same unbounded wait |
-| LibreTiny | [#421](https://github.com/libretiny-eu/libretiny/pull/421) | Any sketch using `HTTPClient` failed to link on Beken and Realtek chips |
-| LibreTiny | [#422](https://github.com/libretiny-eu/libretiny/pull/422) | Every build failed with PlatformIO 6.2.0 |
-| SCons | [#4924](https://github.com/SCons/scons/pull/4924) | Build scripts were compiled with SCons's own `from __future__ import annotations`, the root cause of LibreTiny's build failure |
+- [HTTP clients that waited for ever](#http-clients-that-waited-for-ever) -
+  Tasmota, arduino-esp32, ESPEasy, LibreTiny
+- [Firmware updates that never gave up](#firmware-updates-that-never-gave-up) -
+  arduino-esp32, ESP-IDF
+- [A build failure, followed to its root](#a-build-failure-followed-to-its-root) -
+  LibreTiny, SCons
+- [The emulator's Wi-Fi](#the-emulators-wi-fi) - QEMU (lcgamboa's fork)
+- [Smaller fixes found along the way](#smaller-fixes-found-along-the-way) - Tasmota
 
-### One bug, five HTTP clients
+## HTTP clients that waited for ever
 
 Tasmota's `HttpClientLight` is a copy of arduino-esp32's `HTTPClient`, and so
 are ESPEasy's `HttpClientLight` (copied from Tasmota's) and LibreTiny's
@@ -47,6 +42,15 @@ are ESPEasy's `HttpClientLight` (copied from Tasmota's) and LibreTiny's
 connection closed or the body was complete. The fix is the same idea in each:
 give up once no data has arrived for the client's timeout, as they already did
 for the headers. A body that keeps arriving, however slowly, still completes.
+
+| Project | Pull request | What it fixes |
+|---|---|---|
+| Tasmota | [#25139](https://github.com/arendst/Tasmota/pull/25139) | `HttpClientLight` waited for ever for the rest of a body |
+| Tasmota | [#25141](https://github.com/arendst/Tasmota/pull/25141) | The same in `AsyncHttpClientLight`, in its sync and async paths, and it never noticed a server closing the connection |
+| Tasmota | [#25142](https://github.com/arendst/Tasmota/pull/25142) | Every chunked response through `AsyncHttpClientLight` failed after 5 s |
+| arduino-esp32 | [#12990](https://github.com/espressif/arduino-esp32/pull/12990) | `HTTPClient` waited for ever for the rest of a body, and polled without pause between TLS packets |
+| ESPEasy | [#5649](https://github.com/letscontrolit/ESPEasy/pull/5649) | Its copy of `HttpClientLight` had the same unbounded wait |
+| LibreTiny | [#420](https://github.com/libretiny-eu/libretiny/pull/420) | Its `HTTPClient` had the same unbounded wait |
 
 The details differed enough that each needed its own work:
 
@@ -60,7 +64,11 @@ The details differed enough that each needed its own work:
 - **ESPEasy and LibreTiny** carry the original loop, so the fix carried over
   almost as it was.
 
-### OTA updates that never give up
+**Related:** Berry's `webclient` had a `connected()` method that was written
+but never exposed to scripts, which came up while fixing #25141; Tasmota's
+maintainer exposed it in [#25145](https://github.com/arendst/Tasmota/pull/25145).
+
+## Firmware updates that never gave up
 
 With the HTTP clients done, we checked the two other ways ESP32 firmware
 commonly downloads an update:
@@ -77,7 +85,17 @@ commonly downloads an update:
 Testing that led to one more ESP-IDF bug: telling `esp_https_ota()` to write
 into the same partition it downloads to crashed it on a NULL pointer.
 
-### A build failure, followed to its root
+| Project | Pull request | What it fixes |
+|---|---|---|
+| arduino-esp32 | [#12991](https://github.com/espressif/arduino-esp32/pull/12991) | A stalled `HTTPUpdate` blocked for about 40 minutes, not the 30 s its code intended |
+| ESP-IDF | [#19246](https://github.com/espressif/esp-idf/pull/19246) | `esp_https_ota()` retried a stalled download for ever |
+| ESP-IDF | [#19243](https://github.com/espressif/esp-idf/pull/19243) | `esp_https_ota()` crashed when the staging and final partitions were the same |
+
+**Related:** the endless retry had been reported before, in ESP-IDF issue
+[#6364](https://github.com/espressif/esp-idf/issues/6364), which was closed
+without it being fixed.
+
+## A build failure, followed to its root
 
 Testing the LibreTiny fix on its own toolchain found two more problems: sketches
 using its `HTTPClient` did not link (a missing `extern "C"`), and with the
@@ -86,6 +104,35 @@ a change in 4.11 made every build script inherit SCons's own
 `from __future__ import annotations`, which breaks `dataclasses` `InitVar`
 fields. LibreTiny got a workaround and SCons got the root-cause fix, with a
 test.
+
+| Project | Pull request | What it fixes |
+|---|---|---|
+| LibreTiny | [#421](https://github.com/libretiny-eu/libretiny/pull/421) | Any sketch using `HTTPClient` failed to link on Beken and Realtek chips |
+| LibreTiny | [#422](https://github.com/libretiny-eu/libretiny/pull/422) | Every build failed with PlatformIO 6.2.0 |
+| SCons | [#4924](https://github.com/SCons/scons/pull/4924) | Build scripts were compiled with SCons's own `from __future__ import annotations`, the root cause of LibreTiny's build failure |
+
+## The emulator's Wi-Fi
+
+The [emulator](emulator.md) runs on [lcgamboa's QEMU fork](https://github.com/lcgamboa/qemu),
+the one QEMU that emulates the ESP32-C3's Wi-Fi. Making an emulated plug behave
+on its network as a real one does took three changes to that Wi-Fi emulation,
+each found because a conversion went wrong on the emulator where it would not
+on a plug. They are kept in this repository as patches, and offered back:
+
+| Project | Pull request | What it fixes |
+|---|---|---|
+| QEMU (lcgamboa) | [#13](https://github.com/lcgamboa/qemu/pull/13) | A received frame was written into a buffer the guest's driver had taken back, corrupting its heap - a crash when the guest stopped its Wi-Fi |
+| QEMU (lcgamboa) | [#14](https://github.com/lcgamboa/qemu/pull/14) | On a tap or bridged network, the guest's frames carried the emulated access point's address, not its own: the host could not tell it apart, nor give it an address by its MAC |
+| QEMU (lcgamboa) | [#15](https://github.com/lcgamboa/qemu/pull/15) | The host could not join a network the guest raised itself - Tasmota's or ESPHome's setup network - nor could the guest stay a station while it did |
+
+The last one let the emulator test what a person does when a plug falls back
+to its own setup network: join it, and let the conversion carry on through it.
+
+## Smaller fixes found along the way
+
+| Project | Pull request | What it fixes |
+|---|---|---|
+| Tasmota | [#25163](https://github.com/arendst/Tasmota/pull/25163) | Berry's `webclient` logged a connection timeout's error code as its time: "Connection timeout after -1 ms" |
 
 ## How each fix was proven
 
@@ -115,7 +162,8 @@ people's code:
 It took several fixes to the QEMU fork to get here (see
 [What is changed, and why](emulator.md#what-is-changed-and-why)): real MAC
 addresses on the wire, a button that is not held down, a router that can be
-restarted, and Wi-Fi frames written only where the hardware would put them.
+restarted, and Wi-Fi frames written only where the hardware would put them -
+those that belong upstream are [offered back](#the-emulators-wi-fi).
 
 ### Real hardware
 
@@ -140,4 +188,4 @@ showed too, and every fix behaved the same on both.
 ## Related
 
 [How the tool is tested](testing.md): the unit tests, the emulator and the
-fault matrix that found these bugs, and what has been run on real plugs.
+fault tests that found these bugs, and what has been run on real plugs.
