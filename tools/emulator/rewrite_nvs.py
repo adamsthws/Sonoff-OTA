@@ -63,7 +63,16 @@ def set_json_string(content: bytes, name: str, value: str) -> bytes:
     return new
 
 
-def rewritten(nvs: bytes, ssid: str) -> list[tuple[str, str, str, str]]:
+def set_json_number(content: bytes, name: str, value: int) -> bytes:
+    pattern = re.compile(rb'("' + name.encode() + rb'"\s*:\s*)\d+')
+    new, count = pattern.subn(lambda m: m.group(1) + str(value).encode(), content)
+    if count != 1:
+        raise SystemExit(f"frame_params: expected one `{name}` number field, found {count}")
+    return new
+
+
+def rewritten(nvs: bytes, ssid: str, dis_server: str | None = None,
+              dis_port: int | None = None) -> list[tuple[str, str, str, str]]:
     """CSV rows (key, type, encoding, value) for the whole changed partition."""
     names, values = parse(nvs)
     rows: list[tuple[str, str, str, str]] = []
@@ -83,6 +92,10 @@ def rewritten(nvs: bytes, ssid: str) -> list[tuple[str, str, str, str]]:
                     data = bytes(len(data))
             elif space == "frame_params" and key == "content":
                 data = set_json_string(set_json_string(data, "ssid", ssid), "passwd", "")
+                if dis_server is not None:
+                    data = set_json_string(data, "dis_server", dis_server)
+                if dis_port is not None:
+                    data = set_json_number(data, "dis_port", dis_port)
             if value.kind in INTS:
                 signed = value.kind & 0x10 != 0
                 rows.append((key, "data", INTS[value.kind], str(int.from_bytes(data, "little", signed=signed))))
@@ -108,12 +121,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("source", type=Path, help="whole-flash dump")
     parser.add_argument("output", type=Path, help="whole-flash copy to write")
     parser.add_argument("--ssid", default="PICSimLabWifi", help="open network to join")
+    parser.add_argument("--dis-server", default=None,
+                        help="redirect the plug's dispatch host (cloud-stub mode)")
+    parser.add_argument("--dis-port", type=int, default=None,
+                        help="dispatch port to go with --dis-server (default unchanged)")
     args = parser.parse_args(argv)
     if args.source.resolve() == args.output.resolve():
         raise SystemExit("refusing to overwrite the source dump")
     flash = bytearray(args.source.read_bytes())
     old = bytes(flash[NVS_OFFSET : NVS_OFFSET + NVS_SIZE])
-    new = rebuild(rewritten(old, args.ssid))
+    new = rebuild(rewritten(old, args.ssid, args.dis_server, args.dis_port))
     # Check the rebuilt partition holds the same keys, minus the dropped one,
     # and each key exactly once.
     old_names, old_values = parse(old)
