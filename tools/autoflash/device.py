@@ -415,9 +415,10 @@ class Device:
     ) -> float:
         """Wait for the plug to restart.  Returns seconds waited.
 
-        A restart is confirmed by uptime going backwards, not by catching the
-        device offline between two pings - a reboot can easily complete inside
-        one polling gap, and then nothing looks like it happened.
+        A restart is confirmed by uptime going backwards, or by an uptime
+        shorter than the wait so far, not by catching the device offline
+        between two pings - a reboot can easily complete inside one polling
+        gap, and then nothing looks like it happened.
         """
         started = time.monotonic()
         deadline = started + timeout
@@ -435,15 +436,30 @@ class Device:
                 if current is not None and current != started_at:
                     time.sleep(settle)
                     return time.monotonic() - started
-                if before is None:
-                    continue  # same boot as before the upload: keep waiting
-            now = self.uptime_seconds()
+            # Read before asking, so a slow answer cannot make the plug look
+            # younger than it is.
+            asked = time.monotonic()
+            try:
+                now = self.uptime_seconds()
+            except (DeviceError, urllib.error.URLError, OSError):
+                continue  # restarting as it was asked, say
+            if now is not None and now + 2 < asked - started:
+                # Up for less time than this wait has lasted: it has started
+                # again since.  The checks below miss that on a plug with no
+                # clock when a settings reset brought its boot count back to
+                # the same number and it first answers with its uptime
+                # already past `before` - held up by the request the restart
+                # cut off, say.
+                time.sleep(settle)
+                return time.monotonic() - started
             if before is not None:
                 # The reliable signal: the device's clock went backwards.
                 if now is not None and now < before:
                     time.sleep(settle)
                     return time.monotonic() - started
                 continue
+            if started_at is not None:
+                continue  # same boot as before the upload: keep waiting
             # No baseline to compare against.  Fall back to having seen it go
             # away, or to a low uptime, rather than returning on the first
             # successful poll - which would prove nothing at all.

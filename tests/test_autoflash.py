@@ -1329,6 +1329,82 @@ class RebootDetectionTests(unittest.TestCase):
         with self.assertRaises(DeviceError):
             self.wait(plug, started_at="2026-10-06T13:25:45#2")
 
+    class Clock:
+        """Time that passes only as the code under test sleeps."""
+
+        def __init__(self):
+            self.now = 1000.0
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.now += seconds
+
+    def wait_on_clock(self, device, clock, **kwargs):
+        from unittest import mock
+        import tools.autoflash.device as device_module
+        with mock.patch.object(device_module, "time", clock):
+            return device.wait_for_reboot(timeout=60, settle=0, **kwargs)
+
+    def test_a_restart_answered_late_on_a_plug_with_no_clock_is_seen(self):
+        # F4's Reset 4 at 10s of uptime, just as Tasmota counted the boot: with
+        # no clock both boots read "#1", and the request the restart cut off
+        # held the first answer back until the new boot was 14s up.
+        from tools.autoflash.device import Device
+        clock = self.Clock()
+        start, restart = clock.now, clock.now + 3.2
+
+        class Fake(Device):
+            def reachable(self, timeout=3.0):
+                return not restart <= clock.now < restart + 12
+
+            def started_at(self):
+                return "#1"
+
+            def uptime_seconds(self):
+                if clock.now < restart:
+                    return 10 + int(clock.now - start)
+                return int(clock.now - restart)
+
+        self.wait_on_clock(Fake("10.0.0.5"), clock, started_at="#1", before=10)
+
+    def test_a_plug_with_no_clock_that_does_not_restart_is_still_waited_for(self):
+        from tools.autoflash.device import Device, DeviceError
+        clock = self.Clock()
+        start = clock.now
+
+        class Fake(Device):
+            def reachable(self, timeout=3.0):
+                return True
+
+            def started_at(self):
+                return "#1"
+
+            def uptime_seconds(self):
+                return 10 + int(clock.now - start)
+
+        with self.assertRaises(DeviceError):
+            self.wait_on_clock(Fake("10.0.0.5"), clock, started_at="#1", before=10)
+
+    def test_an_uptime_question_the_restart_cuts_off_is_asked_again(self):
+        import urllib.error
+        from tools.autoflash.device import Device
+        clock = self.Clock()
+        answers = iter([urllib.error.URLError("connection reset"), 3])
+
+        class Fake(Device):
+            def reachable(self, timeout=3.0):
+                return True
+
+            def uptime_seconds(self):
+                answer = next(answers)
+                if isinstance(answer, Exception):
+                    raise answer
+                return answer
+
+        self.wait_on_clock(Fake("10.0.0.5"), clock, before=10)
+
 
 class PhaseDisplayTests(unittest.TestCase):
     """Hundreds of server request lines become a few readable ones."""
