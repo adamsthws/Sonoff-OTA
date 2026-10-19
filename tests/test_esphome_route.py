@@ -273,14 +273,77 @@ class SignalSensorTests(unittest.TestCase):
     def test_the_sensor_gives_the_signal_in_whole_dbm(self):
         host, asked = self.serve({"/sensor/WiFi%20Signal":
                                   b'{"id":"sensor-wifi_signal","value":-58.4,"state":"-58 dBm"}'})
-        self.assertEqual(af.esphome.signal(host), -58)
+        self.assertEqual(af.esphome.sensor_signal(host), -58)
         self.assertEqual(asked, ["/sensor/WiFi%20Signal"])
 
     def test_no_sensor_or_no_reading_yet_gives_nothing(self):
         for pages in ({}, {"/sensor/WiFi%20Signal": b'{"value":NaN,"state":"NA"}'},
                       {"/sensor/WiFi%20Signal": b'{"state":"NA"}'}):
             host, _ = self.serve(pages)
-            self.assertIsNone(af.esphome.signal(host), pages)
+            self.assertIsNone(af.esphome.sensor_signal(host), pages)
+
+    def test_without_the_sensor_the_api_is_asked(self):
+        with mock.patch.object(af.esphome, "sensor_signal", return_value=None), \
+                mock.patch.object(af.esphome, "api_signal", return_value=-66) as api:
+            self.assertEqual(af.esphome.signal("192.168.0.50"), -66)
+        api.assert_called_once_with("192.168.0.50")
+        with mock.patch.object(af.esphome, "sensor_signal", return_value=-58), \
+                mock.patch.object(af.esphome, "api_signal") as api:
+            self.assertEqual(af.esphome.signal("192.168.0.50"), -58)
+        api.assert_not_called()
+
+
+class ApiSignalTests(unittest.TestCase):
+    """ESPHome's native API, spoken plainly: its configuration dump gives the
+    signal, as an ESPHome without the signal sensor (ours, 1.0.0) prints it."""
+
+    def serve(self, answer):
+        """A fake ESPHome API that reads the client's request, then sends `answer`."""
+        import socket
+        import threading
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        self.addCleanup(server.close)
+
+        def run():
+            connection, _ = server.accept()
+            with connection:
+                connection.recv(4096)
+                connection.sendall(answer)
+                connection.recv(4096)  # its Disconnect, or the close
+
+        threading.Thread(target=run, daemon=True).start()
+        return server.getsockname()[1]
+
+    @staticmethod
+    def log(text):
+        from tools.autoflash.esphome import _frame, _varint
+        return _frame(29, b"\x08\x04" + b"\x1a" + _varint(len(text)) + text)
+
+    def test_the_configuration_dump_gives_the_signal(self):
+        from tools.autoflash.esphome import _frame
+        hello = _frame(2, b"\x08\x01\x10\x10\x1a\x082026.9.1")
+        dump = (self.log(b"\x1b[0;35m[C][logger:250]: Logger:\x1b[0m")
+                + self.log("[C][wifi:1297]:   SSID: 'Home'\n  Signal strength: -61 dB ▂▄▆_".encode()))
+        port = self.serve(hello + _frame(7) + dump)
+        self.assertEqual(af.esphome.api_signal("127.0.0.1", port), -61)
+
+    def test_an_encrypted_api_gives_nothing(self):
+        port = self.serve(b"\x01\x00\x08Bad indicator")
+        self.assertIsNone(af.esphome.api_signal("127.0.0.1", port))
+
+    def test_an_api_that_never_says_gives_nothing_in_time(self):
+        port = self.serve(self.log(b"[C][logger:250]: Logger:"))
+        self.assertIsNone(af.esphome.api_signal("127.0.0.1", port, timeout=1.0))
+
+    def test_no_api_at_all_gives_nothing(self):
+        import socket
+        unused = socket.socket()
+        unused.bind(("127.0.0.1", 0))
+        port = unused.getsockname()[1]
+        unused.close()
+        self.assertIsNone(af.esphome.api_signal("127.0.0.1", port, timeout=2.0))
 
 
 class SignalBeforeLeavingESPHomeTests(RouteTestCase):

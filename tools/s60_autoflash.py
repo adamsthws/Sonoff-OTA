@@ -2565,9 +2565,9 @@ def step_promote(ctx: Context) -> dict[str, Any]:
     device = ctx.device
     image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
     device.wait_reachable(timeout=120)
-    # The first reading of a run from an ESPHome without the Wi-Fi signal
-    # sensor (the startup firmware gives none either), and another of every
-    # other run through here.
+    # The first reading of a run from an ESPHome that gives none (no signal
+    # sensor, an encrypted API; the startup firmware gives none either), and
+    # another of every other run through here.
     ctx.state.capture("D4.signal_dbm", note_signal(ctx, plug_signal(device), [
         "From here the plug restarts several times, and each time it has to",
         "rejoin your Wi-Fi on its own; a weak signal makes that less certain."]))
@@ -3632,8 +3632,9 @@ def step_startup_from_esphome(ctx: Context, *, again: bool = False) -> dict[str,
     host = ctx.state.input("plug_ip")
     if run_source(ctx.state) in ("esphome", "midway") and not again:
         # The earliest reading of a run from ESPHome, before anything is
-        # written: from an ESPHome built with the Wi-Fi signal sensor (ours
-        # from 1.1.0). Without one, the first is at D4.
+        # written: from its Wi-Fi signal sensor (ours from 1.1.0), else from
+        # its native API, where that is unencrypted (ours, 1.0.0 too). From
+        # an ESPHome that gives neither, the first is at D4.
         ctx.state.capture("X1.signal_dbm", note_signal(ctx, esphome.signal(host) if host else None, [
             "Nothing has been written yet. From here the plug restarts several",
             "times, and each time it has to rejoin your Wi-Fi on its own; a weak",

@@ -30,9 +30,10 @@ and the plug keeps Sonoff's.
    alone leaves it the same (1.1.0's is 1.0.0's).
 
 The `WiFi Signal` sensor is read by the tool, by that name, before it changes
-the firmware of a plug on ESPHome: keep the name. A plug whose ESPHome has no
-such sensor (one built before 1.1.0, or from a config without it) is simply
-not read there.
+the firmware of a plug on ESPHome: keep the name. From a plug whose ESPHome has
+no such sensor (one built before 1.1.0, or from a config without it), the tool
+asks the native API for the configuration dump instead, which prints the
+signal - unless the API has an encryption key, when it is not read there.
 
 The `s60_wifi` action gives the tool the plug's Wi-Fi name and password when
 the plug leaves ESPHome: the next firmware needs them written in, and ESPHome

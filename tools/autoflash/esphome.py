@@ -15,11 +15,15 @@ import hashlib
 import http.client
 import json
 import math
+import re
+import socket
 import struct
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import zlib
+from collections.abc import Callable
 from pathlib import Path
 
 from . import imprint
@@ -190,12 +194,114 @@ SIGNAL_SENSOR = "WiFi Signal"
 
 
 def signal(host: str) -> int | None:
+    """The plug's Wi-Fi signal in dBm: from its Wi-Fi signal sensor, else from
+    its native API; None when neither gives it."""
+    reading = sensor_signal(host)
+    return reading if reading is not None else api_signal(host)
+
+
+def sensor_signal(host: str) -> int | None:
     """The plug's Wi-Fi signal in dBm, from its Wi-Fi signal sensor: None from
     an ESPHome built without one (ours before 1.1.0), or before its first
     reading."""
     value = _state(host, "/sensor/" + urllib.parse.quote(SIGNAL_SENSOR))
     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
         return round(value)
+    return None
+
+
+# ESPHome's native API, spoken plainly as an ESPHome without an API encryption
+# key speaks it (ours), and only far enough for it to print its configuration,
+# which gives the Wi-Fi signal: for an ESPHome without the signal sensor. One
+# with an encryption key answers in its own framing, and gives nothing.
+API_PORT = 6053
+_HELLO, _CONNECT, _DISCONNECT, _PING, _PONG, _SUBSCRIBE_LOGS, _LOG = 1, 3, 5, 7, 8, 28, 29
+_SIGNAL_LINE = re.compile(rb"Signal strength: (-?\d+) dB")
+
+
+def _varint(number: int) -> bytes:
+    out = bytearray()
+    while True:
+        byte, number = number & 0x7F, number >> 7
+        out.append(byte | (0x80 if number else 0))
+        if not number:
+            return bytes(out)
+
+
+def _frame(kind: int, payload: bytes = b"") -> bytes:
+    return b"\x00" + _varint(len(payload)) + _varint(kind) + payload
+
+
+def _read_varint(read: Callable[[int], bytes]) -> int:
+    value = shift = 0
+    while True:
+        byte = read(1)[0]
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value
+        shift += 7
+
+
+def _fields(payload: bytes) -> dict[int, int | bytes]:
+    """The varint and length-delimited fields of a protobuf message."""
+    fields: dict[int, int | bytes] = {}
+    at = 0
+
+    def read(size: int) -> bytes:
+        nonlocal at
+        if at + size > len(payload):
+            raise ValueError("protobuf message cut short")
+        at += size
+        return payload[at - size:at]
+
+    while at < len(payload):
+        key = _read_varint(read)
+        if key & 7 == 0:
+            fields[key >> 3] = _read_varint(read)
+        elif key & 7 == 2:
+            fields[key >> 3] = read(_read_varint(read))
+        else:
+            raise ValueError(f"protobuf wire type {key & 7}")
+    return fields
+
+
+def api_signal(host: str, port: int = API_PORT, timeout: float = 8.0) -> int | None:
+    """The plug's Wi-Fi signal in dBm from ESPHome's native API: asked for its
+    logs with its configuration, ESPHome prints it ("Signal strength: -50 dB").
+    None from an ESPHome whose API is encrypted, or that does not say."""
+    client = b"s60-autoflash"
+    hello = b"\x0a" + _varint(len(client)) + client + b"\x10\x01\x18\x0a"  # API 1.10
+    deadline = time.monotonic() + timeout
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            reader = sock.makefile("rb")
+
+            def read(size: int) -> bytes:
+                sock.settimeout(max(0.1, deadline - time.monotonic()))
+                data = reader.read(size)
+                if len(data) < size:
+                    raise ConnectionError("the API connection closed")
+                return data
+
+            # Hello; Connect, which older servers want and newer ones let
+            # pass; then the logs at DEBUG, the configuration dump with them.
+            sock.sendall(_frame(_HELLO, hello) + _frame(_CONNECT)
+                         + _frame(_SUBSCRIBE_LOGS, b"\x08\x05\x10\x01"))
+            while time.monotonic() < deadline:
+                if read(1) != b"\x00":
+                    return None  # an encrypted API's framing
+                size, kind = _read_varint(read), _read_varint(read)
+                payload = read(size)
+                if kind == _PING:
+                    sock.sendall(_frame(_PONG))
+                elif kind == _LOG:
+                    text = _fields(payload).get(3, b"")
+                    found = _SIGNAL_LINE.search(text) if isinstance(text, bytes) else None
+                    if found:
+                        sock.sendall(_frame(_DISCONNECT))
+                        return int(found.group(1))
+    except (OSError, ValueError, IndexError):
+        return None
     return None
 
 
