@@ -510,10 +510,10 @@ class Context:
             self.state.set_input("web_user", args.web_user)
         # The plug's Tasmota web password, if it has one: given, or asked for
         # when it is found wanting one (ask_web_password). Held in memory only.
-        self.web_password = args.web_password or credentials.get("S60_TASMOTA_PASSWORD")
+        self.web_password = args.web_password or credentials.get("AUTOFLASH_TASMOTA_PASSWORD")
         output.private(self.web_password, "tasmota-password")
         # The same for ESPHome's update password (ask_esphome_password).
-        self.esphome_password = credentials.get("S60_ESPHOME_OTA_PASSWORD")
+        self.esphome_password = credentials.get("AUTOFLASH_ESPHOME_OTA_PASSWORD")
         output.private(self.esphome_password, "esphome-password")
         self._ewelink_password: str | None = None
         # From .env or the environment: tried once, then asked for if eWeLink refuses it.
@@ -570,11 +570,11 @@ class Context:
             if found is not None:
                 self.adopt_wifi(*found)
                 self.state.set_input("wifi_typed", False)
-        given = credentials.get("S60_WIFI_SSID")
+        given = credentials.get("AUTOFLASH_WIFI_SSID")
         if self._wifi is None and not forced and given:
             # Given in advance (.env), for a run nobody sits through; no
             # password given means an open network.
-            self.adopt_wifi(given, credentials.get("S60_WIFI_PASSWORD") or "")
+            self.adopt_wifi(given, credentials.get("AUTOFLASH_WIFI_PASSWORD") or "")
             self.state.set_input("wifi_typed", False)
         if self._wifi is not None:
             return self._wifi
@@ -905,7 +905,7 @@ def firewall_ports(ctx: Context) -> list[int]:
 def emulator_password_hint() -> list[str]:
     """Inside the emulator (tools/emulator) only: the password sudo asks for
     there, so nobody has to look it up.  A real computer's is never known."""
-    known = os.environ.get("S60_EMULATOR_SUDO_PASSWORD")
+    known = os.environ.get("AUTOFLASH_EMULATOR_SUDO_PASSWORD")
     if not known or hostsys.IS_WINDOWS:
         return []
     return [f"In the emulator, the password is: {known}"]
@@ -4242,7 +4242,7 @@ def ask_web_password(ctx: Context, host: str) -> None:
         raise Abort(str(NeedsPassword(host, wrong)))
     ctx.web_password = password_or_retry("Tasmota's web password", [
         f"Tasmota on the plug at {host} has a web password.",
-        *(["The one given (--web-password, or S60_TASMOTA_PASSWORD) is not it."] if wrong else []),
+        *(["The one given (--web-password, or AUTOFLASH_TASMOTA_PASSWORD) is not it."] if wrong else []),
         "Type it to go on (Tasmota's one user name, admin, is filled in); or clear it",
         "in Tasmota yourself - Configuration > Other > Web Admin Password, emptied",
         "and saved, or the console command WebPassword 0 - and try again without one.",
@@ -4252,7 +4252,7 @@ def ask_web_password(ctx: Context, host: str) -> None:
         kind="web password", prompt="Tasmota web password", label="tasmota-password")
 
 
-ESPHOME_PASSWORD_HINT = "give it as S60_ESPHOME_OTA_PASSWORD in .env or the environment"
+ESPHOME_PASSWORD_HINT = "give it as AUTOFLASH_ESPHOME_OTA_PASSWORD in .env or the environment"
 
 
 def ask_esphome_password(ctx: Context, host: str) -> None:
@@ -4267,7 +4267,7 @@ def ask_esphome_password(ctx: Context, host: str) -> None:
         "Assistant, say). The next firmware goes on as an ESPHome update, which needs",
         "it. Type it to go on; or remove it from the plug's ESPHome config yourself",
         "(password: under ota:), install that, and try again without one.",
-        *(["The one given (S60_ESPHOME_OTA_PASSWORD) is not it."] if wrong else []),
+        *(["The one given (AUTOFLASH_ESPHOME_OTA_PASSWORD) is not it."] if wrong else []),
         "A password typed is held in memory for this run only, never written to disk.",
     ], lambda password: esphome_update_check(host, password),
         still="ESPHome there still has an update password.",
@@ -4311,7 +4311,7 @@ def encrypted_only(host: str) -> bool | None:
 def unlock_esphome(ctx: Context) -> None:
     """ESPHome's update password, when the plug's has one, known before the
     go-ahead - so that nothing is asked once the plug is being changed: given
-    (S60_ESPHOME_OTA_PASSWORD), or asked for.  The same for one that takes
+    (AUTOFLASH_ESPHOME_OTA_PASSWORD), or asked for.  The same for one that takes
     only encrypted updates, which has to be changed first."""
     host = ctx.state.input("plug_ip")
     if not host:
@@ -5093,7 +5093,7 @@ def plug_page_url(plug_ip: str | None) -> str | None:
     Inside the emulator (tools/emulator) the plug's address only exists in its
     container; the emulator says where your browser reaches it instead.
     """
-    emulated = os.environ.get("S60_EMULATOR_URL")
+    emulated = os.environ.get("AUTOFLASH_EMULATOR_URL")
     if emulated:
         return emulated
     return f"http://{plug_ip}/" if plug_ip else None
@@ -5123,7 +5123,7 @@ def computer_description() -> str:
 def python_description() -> str:
     """The Python the tool ran on, and where it came from (start.sh, start.ps1)."""
     running = Path(sys.executable).resolve()
-    portable = Path(os.environ.get("S60_PYTHON_HOME") or ROOT / ".python").resolve()
+    portable = Path(os.environ.get("AUTOFLASH_PYTHON_HOME") or ROOT / ".python").resolve()
     if portable in running.parents:
         source = "portable"
     elif (hostsys.IS_MAC and (portable / "installed-by-s60").exists()
@@ -5238,7 +5238,7 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Relay", hardware.get("Relay", "not checked")),
         ("Power meter", hardware.get("Power meter", "not checked")),
     ]
-    if os.environ.get("S60_EMULATOR_URL"):
+    if os.environ.get("AUTOFLASH_EMULATOR_URL"):
         fields.append(("Ran in the emulator", "yes"))
     return [(label, answer(value)) for label, value in fields]
 
@@ -5512,17 +5512,17 @@ def admin_password() -> str:
     given in advance if sudo takes it, else asked for in this tool's own
     words, so every row on screen is its own.  An unattended run has nobody
     to ask, so it says what to give instead (OSError, as for a refused one)."""
-    given = credentials.get("S60_SUDO_PASSWORD")
+    given = credentials.get("AUTOFLASH_SUDO_PASSWORD")
     if given is None and prompts.UNATTENDED:
         # Inside the emulator (tools/emulator) its password is known.
-        given = os.environ.get("S60_EMULATOR_SUDO_PASSWORD")
+        given = os.environ.get("AUTOFLASH_EMULATOR_SUDO_PASSWORD")
     if given is not None:
         if hostsys.check_sudo_password(given) is None:
             return given
-        tell("    The sudo password given in advance (S60_SUDO_PASSWORD) was not accepted.")
+        tell("    The sudo password given in advance (AUTOFLASH_SUDO_PASSWORD) was not accepted.")
     if prompts.UNATTENDED:
         raise OSError("sudo needs this computer's password, and an unattended run cannot "
-                      "ask for it: put it in .env as S60_SUDO_PASSWORD")
+                      "ask for it: put it in .env as AUTOFLASH_SUDO_PASSWORD")
     return ask_admin_password()
 
 
@@ -5656,6 +5656,9 @@ def _main() -> int:
     if given:
         say(f"Given in advance ({display_path(args.env_file or credentials.ENV_FILE)}): "
             f"{', '.join(given)}")
+    if credentials.renamed:
+        say("Old names, still read for now - rename them: " + ", ".join(
+            f"{old} is now {credentials.RENAMED[old]}" for old in credentials.renamed))
     code = None  # 130 only when the operator chose to quit, not for Ctrl-C
     ending = None  # "crashed", or "cancelled" by the operator: see run_result()
     try:

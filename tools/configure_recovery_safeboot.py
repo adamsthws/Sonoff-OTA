@@ -47,7 +47,7 @@ def render_header(ssid: str, password: str) -> bytes:
         "/* PRIVATE: generated locally; contains encoded Wi-Fi credentials. */\n"
         "#ifndef _USER_CONFIG_OVERRIDE_H_\n"
         "#define _USER_CONFIG_OVERRIDE_H_\n\n"
-        "#define S60_RECOVERY_WIFI_DEFAULTS\n"
+        "#define AUTOFLASH_RECOVERY_WIFI_DEFAULTS\n"
         "#undef STA_SSID1\n"
         f"#define STA_SSID1 {c_byte_literal(ssid)}\n"
         "#undef STA_PASS1\n"

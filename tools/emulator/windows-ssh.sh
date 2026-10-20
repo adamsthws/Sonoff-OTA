@@ -15,12 +15,12 @@
 # which Windows lets in once it has logged on (start.ps1), about a minute after
 # the run starts; before that, --wait. Its host key is not checked: it is a VM
 # on 127.0.0.1 that is set up afresh now and then. The port is
-# S60_WINDOWS_SSH_PORT (2222), as windows-test.sh's. The checkout is
+# AUTOFLASH_WINDOWS_SSH_PORT (2222), as windows-test.sh's. The checkout is
 # C:\S60\repo, the conversion's captures C:\S60\repo\captures.
 set -euo pipefail
 
-CACHE=${S60_WINDOWS_CACHE:-$HOME/.cache/s60-emu/windows}
-PORT=${S60_WINDOWS_SSH_PORT:-2222}
+CACHE=${AUTOFLASH_WINDOWS_CACHE:-$HOME/.cache/s60-emu/windows}
+PORT=${AUTOFLASH_WINDOWS_SSH_PORT:-2222}
 KEY=$CACHE/ssh/id_ed25519
 
 case "${1:-}" in -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; esac

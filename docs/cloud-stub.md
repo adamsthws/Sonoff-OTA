@@ -162,7 +162,7 @@ makes it necessary. The evidence is in [the firmware facts](#firmware-facts-stat
 
 **The tool (touchpoint A, and the app side)**
 
-- **Point it at the stub with no new code paths.** `S60_EWELINK_API_BASE`
+- **Point it at the stub with no new code paths.** `AUTOFLASH_EWELINK_API_BASE`
   replaces every region's account-API base (`get_device_key.py`) and the
   hard-coded app dispatch (`probe_ota_command.py`). Trust comes from
   `SSL_CERT_FILE`, which the tool's `ssl.create_default_context()` already
@@ -219,7 +219,7 @@ makes it necessary. The evidence is in [the firmware facts](#firmware-facts-stat
   (`state-N/.flash-mode`); switching an instance between stub and cloud is
   refused without `--fresh`, and the mode moves with `--save`/`--from` and a
   plug swap ([harness wiring](#harness-wiring-and-how-to-run-it)).
-- **Leave the shared image alone.** `S60_EMU_IMAGE` builds and runs a separate
+- **Leave the shared image alone.** `AUTOFLASH_EMU_IMAGE` builds and runs a separate
   image (here `s60-emu-stub`), so a worktree's build does not replace the
   `s60-emu` that other work runs.
 
@@ -426,7 +426,7 @@ plug, given when it was paired. It is not in the dump — no `S60TP*` string
 anywhere in the flash — so the stub cannot read it from the plug. Instead
 `emu.sh` looks up the one eWeLink gave this plug in the tool's own records of
 earlier runs (`plugs/<mac>/runs/*/autoflash-state.json`: a real conversion's, a
-kept plug's or an instance's), and `S60_STUB_PRODUCT_MODEL=S60TPG|S60TPF`
+kept plug's or an instance's), and `AUTOFLASH_STUB_PRODUCT_MODEL=S60TPG|S60TPF`
 overrides it or covers a plug never seen by the real cloud. With neither, none is
 served and the run's report leaves "Plug model" and "Plug type / region" blank
 (and the Tasmota template is named plainly "Sonoff S60") rather than guess.
@@ -492,13 +492,13 @@ after the list.
 
 - **`emu.sh --stub-cloud`** builds the stub flash (changes A + B), generates the
   CA, mounts the certs read-only at `/stub-cloud`, and sets `STUB_CLOUD=1`.
-  `S60_EMU_IMAGE` builds/runs an isolated image (so a worktree's build need not
+  `AUTOFLASH_EMU_IMAGE` builds/runs an isolated image (so a worktree's build need not
   disturb a shared `s60-emu`); instances run 1–30.
 - **`container/entrypoint.sh`**, in stub mode, adds the `/etc/hosts` records for
   the three stub hosts → `192.168.60.1`, opens inbound 443 on the LAN in ufw,
   builds a CA bundle of the system roots plus the stub's CA, reads the plug's
   identity from its dump in-container, and starts the stub (non-fatally — a stub
-  problem can't take the emulator down). It also exports `S60_EWELINK_API_BASE` /
+  problem can't take the emulator down). It also exports `AUTOFLASH_EWELINK_API_BASE` /
   `SSL_CERT_FILE` for an interactive conversion.
 - **The internet** is handled like a `--cloud` run with one difference: this
   computer may reach the internet (so the conversion downloads the official
@@ -508,14 +508,14 @@ after the list.
 - **The tool** trusts the stub by `SSL_CERT_FILE` pointing at a bundle of the
   system roots **and** our CA (so trusting the stub takes nothing away from other
   TLS, e.g. the firmware downloads), and is pointed at the stub by
-  `S60_EWELINK_API_BASE`, honoured in `get_device_key.py` (the account API) and
+  `AUTOFLASH_EWELINK_API_BASE`, honoured in `get_device_key.py` (the account API) and
   `probe_ota_command.py` (the app dispatch).
 - **`unattended-test.sh --stub-cloud`** runs a whole conversion with no eWeLink
   account and a placeholder `.env` the stub ignores.
-- **`fault_suite.py --stub-cloud`** (or `S60_STUB_CLOUD=1`) drops the
+- **`fault_suite.py --stub-cloud`** (or `AUTOFLASH_STUB_CLOUD=1`) drops the
   cross-instance cloud lock entirely: every emulator has its own stub, so every
-  scenario runs in parallel on `S60_STUB_WORKERS` emulators (from
-  `S60_FIRST_INSTANCE`, default 1) with no turns at the cloud and no cloud-turn
+  scenario runs in parallel on `AUTOFLASH_STUB_WORKERS` emulators (from
+  `AUTOFLASH_FIRST_INSTANCE`, default 1) with no turns at the cloud and no cloud-turn
   monitor. Its saved starting plugs are `stub-suite-*` and its results go to
   `captures/emulation/suite-stub/`, apart from the real cloud's: their flash is
   the other kind, which the other mode's batch would refuse, and a stub pass is
@@ -650,7 +650,7 @@ key + metadata from the stub (touchpoint A), the plug is online via the stub
 
 **4a — the tool-facing account API.** `stub_server.py` gained `/v2/user/login`,
 `/v2/device/thing` and `/v2/device/ota/query`; `get_device_key.py` gained the
-`S60_EWELINK_API_BASE` override; trust via `SSL_CERT_FILE` (the tool's `urlopen`
+`AUTOFLASH_EWELINK_API_BASE` override; trust via `SSL_CERT_FILE` (the tool's `urlopen`
 uses `ssl.create_default_context()`, which honours it: no code change for trust).
 Live (instance 18):
 `get_device_key.py` logged in and saved the LAN key, and `query_ota.py` read
@@ -658,7 +658,7 @@ Live (instance 18):
 contact. (Fixed along the way: the stub redacts `devicekey`/`encrypt_key`.)
 
 **4b — the `--stub-cloud` flag.** Wired into `emu.sh` / `entrypoint.sh` /
-`unattended-test.sh` with `device_identity.py` and `S60_EMU_IMAGE`. Live:
+`unattended-test.sh` with `device_identity.py` and `AUTOFLASH_EMU_IMAGE`. Live:
 `emu.sh --stub-cloud --instance 19` brought the plug online entirely hands-off
 (stub auto-started, dispatch, `/api/ws` register, LAN 8081) with zero manual
 steps.
@@ -880,10 +880,10 @@ Added under `tools/emulator/stub_cloud/`: `__init__.py`, `make_ca.py`,
 `device_identity.py`, `stub_server.py`. Changed:
 `tools/emulator/patch_stock.py` (CA-swap patch), `rewrite_nvs.py`
 (`--dis-server`/`--dis-port`), `emu.sh` and `unattended-test.sh` (`--stub-cloud`,
-`S60_EMU_IMAGE`), `container/entrypoint.sh` (stub DNS/firewall/launch),
+`AUTOFLASH_EMU_IMAGE`), `container/entrypoint.sh` (stub DNS/firewall/launch),
 `fault_suite.py` (drop the cloud lock under `--stub-cloud`), and
 `tools/get_device_key.py` / `tools/probe_ota_command.py` (the
-`S60_EWELINK_API_BASE` override).
+`AUTOFLASH_EWELINK_API_BASE` override).
 
 ## Ground rules
 
@@ -893,7 +893,7 @@ Added under `tools/emulator/stub_cloud/`: `__init__.py`, `make_ca.py`,
   working copy under `captures/emulation/state-N/`.
 - **Don't disturb the `esphome` emulator tests or files** when running cloud-stub
   work on the same machine (use a fresh unused `--instance N`; the isolated
-  `S60_EMU_IMAGE` keeps the shared image untouched).
+  `AUTOFLASH_EMU_IMAGE` keeps the shared image untouched).
 - **Change it deliberately.** The mechanics (a trust-store edit plus a server
   answering the dispatch protocol) resemble a TLS man-in-the-middle even though
   this is self-hosting; keep each change reviewed, and the stub confined to the

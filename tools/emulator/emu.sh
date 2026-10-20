@@ -39,7 +39,7 @@ PY=$ROOT/.venv/bin/python
 [ -x "$PY" ] || PY=$HOME/.local/share/s60-emu/venv/bin/python
 # The image tag; override to build/run an isolated image (e.g. the cloud-stub
 # work) without disturbing the shared one.
-IMAGE=${S60_EMU_IMAGE:-s60-emu}
+IMAGE=${AUTOFLASH_EMU_IMAGE:-s60-emu}
 NAME=s60-emu PORT=8080 LINK_PORT=7860
 
 cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 yes=0 stub=0 tty=-it plug="" instance=""
@@ -137,7 +137,7 @@ fi
 # The plug's product model (S60TPG UK, S60TPF Europe) is eWeLink's name for it,
 # given when it was paired, and is not in its dump. The stub reports the one
 # eWeLink gave this plug in the tool's own records of earlier runs (a real
-# conversion's, a kept plug's, an instance's), or S60_STUB_PRODUCT_MODEL; with
+# conversion's, a kept plug's, an instance's), or AUTOFLASH_STUB_PRODUCT_MODEL; with
 # neither, none - and the run's report leaves it blank rather than guess.
 product_seen() {
     "$PY" -I - "$ROOT/captures" "$EMU/saved" "$(dirname "$STATE")" "${mac//:/-}" <<'EOF'
@@ -159,11 +159,11 @@ EOF
 }
 product=""
 if [ "$stub" = 1 ]; then
-    product=$(printf '%s' "${S60_STUB_PRODUCT_MODEL:-}" | tr '[:lower:]' '[:upper:]')
+    product=$(printf '%s' "${AUTOFLASH_STUB_PRODUCT_MODEL:-}" | tr '[:lower:]' '[:upper:]')
     [ -n "$product" ] || product=$(product_seen)
     case "$product" in
     ""|S60TP[A-Z]) ;;
-    *) echo "S60_STUB_PRODUCT_MODEL is S60TPG or S60TPF, not '$product'" >&2; exit 2 ;;
+    *) echo "AUTOFLASH_STUB_PRODUCT_MODEL is S60TPG or S60TPF, not '$product'" >&2; exit 2 ;;
     esac
 fi
 
@@ -173,7 +173,7 @@ fi
 # checked, so the image builds from nothing but this repository - and again
 # without a network once it is there.
 QEMU_SOURCE=qemu-lcgamboa-e39508f.tar.xz
-QEMU_SOURCE_URL=${S60_QEMU_SOURCE_URL:-https://github.com/adamsthws/Sonoff-OTA/releases/download/emulator-source/$QEMU_SOURCE}
+QEMU_SOURCE_URL=${AUTOFLASH_QEMU_SOURCE_URL:-https://github.com/adamsthws/Sonoff-OTA/releases/download/emulator-source/$QEMU_SOURCE}
 qemu_source() {
     local want cache=$EMU/cache/$QEMU_SOURCE
     want=$(sed -n 's/^ARG QEMU_SOURCE_SHA256=//p' "$ROOT/tools/emulator/emu.Dockerfile")
@@ -280,10 +280,10 @@ fi
 # Your browser, and with --windows the wire windows_link.py connects to.
 publish=(-p "127.0.0.1:$PORT:8080")
 [ "$windows" = 1 ] && publish+=(-p "127.0.0.1:$LINK_PORT:7860")
-# Developing the QEMU fork: S60_EMU_QEMU=path/to/qemu-system-riscv32 runs that
+# Developing the QEMU fork: AUTOFLASH_EMU_QEMU=path/to/qemu-system-riscv32 runs that
 # build in place of the image's (tools/emulator/qemu-build.Dockerfile builds one).
 dev=()
-[ -n "${S60_EMU_QEMU:-}" ] && dev=(-v "$(realpath "$S60_EMU_QEMU"):/opt/qemu/bin/qemu-system-riscv32:ro")
+[ -n "${AUTOFLASH_EMU_QEMU:-}" ] && dev=(-v "$(realpath "$AUTOFLASH_EMU_QEMU"):/opt/qemu/bin/qemu-system-riscv32:ro")
 # The stub's CA and leaf cert, read-only, for the in-container stub server.
 stubvol=()
 [ "$stub" = 1 ] && stubvol=(-v "$STUB_CA:/stub-cloud:ro")
@@ -295,7 +295,7 @@ if [ "$tty" = -it ] && systemd-inhibit --what=sleep:idle true 2>/dev/null; then
 fi
 # Capped: the plug, its router and the tool used about 80 MB between them.
 exec "${awake[@]}" docker run --rm $tty --name "$NAME" --hostname s60-emu-computer \
-    --memory "${S60_EMU_MEMORY:-256m}" --cpus "${S60_EMU_CPUS:-2}" \
+    --memory "${AUTOFLASH_EMU_MEMORY:-256m}" --cpus "${AUTOFLASH_EMU_CPUS:-2}" \
     --cap-add NET_ADMIN --device /dev/net/tun \
     --sysctl net.ipv4.ip_forward="$(( cloud || windows ))" \
     "${publish[@]}" "${dev[@]}" \
@@ -303,5 +303,5 @@ exec "${awake[@]}" docker run --rm $tty --name "$NAME" --hostname s60-emu-comput
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e PLUG_MAC="$mac" \
     -e CLOUD="$cloud" -e PCAP="$pcap" -e FIREWALL="$firewall" -e WINDOWS="$windows" \
     -e STUB_CLOUD="$stub" -e STUB_PRODUCT_MODEL="$product" \
-    -e S60_EMULATOR_URL="http://localhost:$PORT" \
+    -e AUTOFLASH_EMULATOR_URL="http://localhost:$PORT" \
     "$IMAGE"

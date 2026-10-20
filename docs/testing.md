@@ -87,22 +87,22 @@ the run left no firewall rule or helper behind.
 ```sh
 tools/emulator/fault_suite.py --plug=MAC prep           # the starting plugs (eWeLink)
 tools/emulator/fault_suite.py list > all.txt            # every scenario, cloud or not
-S60_CLOUD_WORKERS=3 S60_ANY_WORKERS=3 \
+AUTOFLASH_CLOUD_WORKERS=3 AUTOFLASH_ANY_WORKERS=3 \
     tools/emulator/fault_suite.py --plug=MAC batch all.txt   # what has not passed yet
 tools/emulator/fault_suite.py report
 ```
 
 Add `--stub-cloud` to `prep` and `batch` to give each emulator its own local
 eWeLink stand-in instead of the shared real cloud: no cloud lock, so every
-scenario runs in parallel on `S60_STUB_WORKERS` emulators, and no eWeLink
+scenario runs in parallel on `AUTOFLASH_STUB_WORKERS` emulators, and no eWeLink
 account is needed. Its starting plugs (`stub-suite-*`) and results
 (`captures/emulation/suite-stub/`) are its own: a stub plug's flash is the
 other kind, and a stub run's passes are not the real cloud's. See
 [cloud-stub.md](cloud-stub.md).
 
 ```sh
-S60_STUB_WORKERS=3 tools/emulator/fault_suite.py --plug=MAC --stub-cloud prep
-S60_STUB_WORKERS=3 tools/emulator/fault_suite.py --plug=MAC --stub-cloud batch all.txt
+AUTOFLASH_STUB_WORKERS=3 tools/emulator/fault_suite.py --plug=MAC --stub-cloud prep
+AUTOFLASH_STUB_WORKERS=3 tools/emulator/fault_suite.py --plug=MAC --stub-cloud batch all.txt
 ```
 
 Results, a log per scenario and what each failure leaves (its run records and
@@ -111,7 +111,7 @@ the plug's serial output) are kept in `captures/emulation/suite/`.
 **Several machines.** The scenarios that do not need eWeLink (every step after
 D1) run on any machine with Docker: copy the repository and the saved plugs
 (`captures/emulation/saved/`), give each machine part of the list, and set
-`S60_NO_CLOUD=1` there - only one machine may let its plugs reach eWeLink.
+`AUTOFLASH_NO_CLOUD=1` there - only one machine may let its plugs reach eWeLink.
 
 **How many at once.** Each emulator converting takes about half a CPU core
 and 120 MB. Past one per core the plugs slow down enough for their timeouts to
@@ -133,7 +133,7 @@ starts before its run does. Between two plugs' turns there is a short pause
 (5 s) while eWeLink lets go of the last one. The suite can feel out how many
 at once the cloud allows - one more at a time while the cloud scenarios pass,
 or one fewer at each trouble - and lengthen the pause when eWeLink is the
-trouble (`S60_CLOUD_MOST`, `S60_CLOUD_BACK_OFF`, `S60_CLOUD_PAUSE_UP`).
+trouble (`AUTOFLASH_CLOUD_MOST`, `AUTOFLASH_CLOUD_BACK_OFF`, `AUTOFLASH_CLOUD_PAUSE_UP`).
 
 ### What it cannot show
 

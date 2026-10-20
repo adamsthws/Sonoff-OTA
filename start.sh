@@ -17,7 +17,7 @@
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
-PYTHON_HOME=${S60_PYTHON_HOME:-$here/.python}
+PYTHON_HOME=${AUTOFLASH_PYTHON_HOME:-$here/.python}
 # Left by a Python this script installed, so that only that one is ever removed.
 MARKER=$PYTHON_HOME/installed-by-s60
 

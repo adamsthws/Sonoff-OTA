@@ -246,17 +246,17 @@ class RecoverySafebootHeaderTests(unittest.TestCase):
         return render_header(persist).decode()
 
     def test_the_default_build_is_the_published_one(self):
-        self.assertNotIn("S60_RECOVERY_PERSIST_SETTINGS", self.header(False))
-        self.assertIn("S60_RECOVERY_WIFI_DEFAULTS", self.header(False))
+        self.assertNotIn("AUTOFLASH_RECOVERY_PERSIST_SETTINGS", self.header(False))
+        self.assertIn("AUTOFLASH_RECOVERY_WIFI_DEFAULTS", self.header(False))
 
     def test_settings_saving_is_asked_for_explicitly(self):
-        self.assertIn("S60_RECOVERY_PERSIST_SETTINGS", self.header(True))
+        self.assertIn("AUTOFLASH_RECOVERY_PERSIST_SETTINGS", self.header(True))
 
     def test_the_patch_guards_against_being_used_alone(self):
         patch = (Path(__file__).resolve().parents[1]
                  / "repartition/recovery-safeboot/persist-settings.patch").read_text()
         # It must refuse to build without the Wi-Fi defaults it saves, and must
         # never overwrite settings a configured device already has.
-        self.assertIn("#error S60_RECOVERY_PERSIST_SETTINGS requires", patch)
+        self.assertIn("#error AUTOFLASH_RECOVERY_PERSIST_SETTINGS requires", patch)
         self.assertIn("CFG_HOLDER == stored->cfg_holder", patch)
         self.assertIn("left alone", patch)

@@ -39,7 +39,7 @@ WS_DISPATCH = {
 }
 # A --stub-cloud run points the app-side dispatch at the local stub too, matching
 # the account-API override in get_device_key (see docs/cloud-stub.md).
-_STUB_API_BASE = os.environ.get("S60_EWELINK_API_BASE", "").rstrip("/")
+_STUB_API_BASE = os.environ.get("AUTOFLASH_EWELINK_API_BASE", "").rstrip("/")
 if _STUB_API_BASE:
     WS_DISPATCH = {region: _STUB_API_BASE + "/dispatch/app" for region in WS_DISPATCH}
 SAFETY_FLAG = "--i-understand-this-sends-an-upgrade-command"

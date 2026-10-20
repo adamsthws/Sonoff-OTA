@@ -728,7 +728,7 @@ class ReportTests(OutputTestCase):
     def test_python_says_where_it_came_from(self):
         import tools.s60_autoflash as af
         portable = Path(self.tmp.name) / ".python"
-        with mock.patch.dict(os.environ, {"S60_PYTHON_HOME": str(portable)}):
+        with mock.patch.dict(os.environ, {"AUTOFLASH_PYTHON_HOME": str(portable)}):
             with mock.patch.object(af.sys, "executable", str(portable / "linux-x86_64/python/bin/python3")):
                 self.assertIn("(portable)", af.python_description())
             with mock.patch.object(af.sys, "executable", "/usr/bin/python3"), \
@@ -795,10 +795,10 @@ class ReportTests(OutputTestCase):
     def test_the_plug_page_is_the_plug_or_the_emulators_forward(self):
         import tools.s60_autoflash as af
         with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("S60_EMULATOR_URL", None)
+            os.environ.pop("AUTOFLASH_EMULATOR_URL", None)
             self.assertEqual(af.plug_page_url("192.168.0.50"), "http://192.168.0.50/")
             self.assertIsNone(af.plug_page_url(None))
-        with mock.patch.dict(os.environ, {"S60_EMULATOR_URL": "http://localhost:8080"}):
+        with mock.patch.dict(os.environ, {"AUTOFLASH_EMULATOR_URL": "http://localhost:8080"}):
             self.assertEqual(af.plug_page_url("192.168.60.50"), "http://localhost:8080")
 
     def test_the_report_holds_nothing_private(self):

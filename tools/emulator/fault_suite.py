@@ -12,7 +12,7 @@ plug, every fault - on emulators side by side, on one machine or several
 
 Add --stub-cloud to prep/batch to run against a local eWeLink stub per emulator
 (emu.sh --stub-cloud): fully offline, no cloud lock, every scenario in parallel
-on S60_STUB_WORKERS emulators (from S60_FIRST_INSTANCE, default 1). Without it
+on AUTOFLASH_STUB_WORKERS emulators (from AUTOFLASH_FIRST_INSTANCE, default 1). Without it
 the real cloud is used and the cloud scenarios take turns, as below.
 
 Each scenario: a conversion from a saved plug; when the step under test has
@@ -24,18 +24,18 @@ landed while its step was under way (MISTIMED if not), and that the run left
 no firewall rule and no helper behind.
 
 How many at once, from the environment:
-    S60_CLOUD_WORKERS  emulators for the scenarios that need eWeLink (from
+    AUTOFLASH_CLOUD_WORKERS  emulators for the scenarios that need eWeLink (from
                        instance 1); they take turns at the cloud
-    S60_CLOUD_MOST     try up to this many, one more at a time while they pass
-    S60_CLOUD_BACK_OFF=1  start at S60_CLOUD_WORKERS and drop one at a time
+    AUTOFLASH_CLOUD_MOST     try up to this many, one more at a time while they pass
+    AUTOFLASH_CLOUD_BACK_OFF=1  start at AUTOFLASH_CLOUD_WORKERS and drop one at a time
                        whenever two of the last four fail
-    S60_CLOUD_PAUSE_UP=1  start at S60_CLOUD_COOL_DOWN and add 5 s whenever two
+    AUTOFLASH_CLOUD_PAUSE_UP=1  start at AUTOFLASH_CLOUD_COOL_DOWN and add 5 s whenever two
                        of the last four fail with the cloud to blame
-    S60_CLOUD_COOL_DOWN  seconds between two plugs' turns at the cloud (5)
-    S60_ANY_WORKERS    emulators for the rest, after those
-    S60_NO_CLOUD=1     a machine whose plugs never reach the internet: only
+    AUTOFLASH_CLOUD_COOL_DOWN  seconds between two plugs' turns at the cloud (5)
+    AUTOFLASH_ANY_WORKERS    emulators for the rest, after those
+    AUTOFLASH_NO_CLOUD=1     a machine whose plugs never reach the internet: only
                        the scenarios that do not need it
-    S60_SUITE_DIR      where results go (captures/emulation/suite; with
+    AUTOFLASH_SUITE_DIR      where results go (captures/emulation/suite; with
                        --stub-cloud, captures/emulation/suite-stub)
 
 Results: results.jsonl, a log per scenario, and what a failure leaves (its
@@ -55,15 +55,15 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 EMU = REPO / "captures/emulation"
-OUT = Path(os.environ.get("S60_SUITE_DIR", EMU / "suite"))
+OUT = Path(os.environ.get("AUTOFLASH_SUITE_DIR", EMU / "suite"))
 RESULTS = OUT / "results.jsonl"
 LOGS = OUT / "logs"
 # A machine whose plugs never get a turn at the cloud.
-NO_CLOUD = os.environ.get("S60_NO_CLOUD") == "1"
+NO_CLOUD = os.environ.get("AUTOFLASH_NO_CLOUD") == "1"
 # Each emulator serves its own local eWeLink stub (emu.sh --stub-cloud): the
 # plugs never share a cloud, so nothing is serialised and every scenario can run
 # in parallel. Set by --stub-cloud; see docs/cloud-stub.md.
-STUB_CLOUD = os.environ.get("S60_STUB_CLOUD") == "1"
+STUB_CLOUD = os.environ.get("AUTOFLASH_STUB_CLOUD") == "1"
 
 
 def saved(name):
@@ -199,7 +199,7 @@ class CloudQueue:
     # Every emulated plug is the same eWeLink device: the last one's connection,
     # cut on its side, stays open at eWeLink a while, and the next to connect
     # is not seen online. A pause between turns lets eWeLink let go of it.
-    COOL_DOWN = float(os.environ.get("S60_CLOUD_COOL_DOWN", "5"))
+    COOL_DOWN = float(os.environ.get("AUTOFLASH_CLOUD_COOL_DOWN", "5"))
 
     def __init__(self):
         self.cv = threading.Condition()
@@ -253,15 +253,15 @@ class Tuner:
                          r"turn given up after 2[34]\ds")
 
     def __init__(self):
-        self.workers = int(os.environ.get("S60_CLOUD_WORKERS", "0"))
-        self.most = int(os.environ.get("S60_CLOUD_MOST", str(self.workers)))
-        self.cool_down = float(os.environ.get("S60_CLOUD_COOL_DOWN", "5"))
+        self.workers = int(os.environ.get("AUTOFLASH_CLOUD_WORKERS", "0"))
+        self.most = int(os.environ.get("AUTOFLASH_CLOUD_MOST", str(self.workers)))
+        self.cool_down = float(os.environ.get("AUTOFLASH_CLOUD_COOL_DOWN", "5"))
         self.phase = "workers" if self.most > self.workers else "cool-down"
-        if os.environ.get("S60_CLOUD_PAUSE_UP") == "1":
+        if os.environ.get("AUTOFLASH_CLOUD_PAUSE_UP") == "1":
             # From a short pause up: 5 s longer at each trouble the cloud is to
             # blame for, never shorter; how many at once left as it is.
             self.phase = "pause-up"
-        elif os.environ.get("S60_CLOUD_BACK_OFF") == "1":
+        elif os.environ.get("AUTOFLASH_CLOUD_BACK_OFF") == "1":
             # From many at once down: one fewer at each trouble, any failure
             # counting (a machine short of memory fails all sorts of ways),
             # until WINDOW pass in a row.
@@ -528,7 +528,7 @@ class Scenario:
         args += ["--", "--firmware", target, *extra]
         env = dict(os.environ)
         if (self.sc["fault"], self.sc["arg"]) == ("ctrlc", "countdown"):
-            env["S60_EMULATOR_COUNTDOWN"] = "30"
+            env["AUTOFLASH_EMULATOR_COUNTDOWN"] = "30"
         with open(self.log, "a") as out:
             out.write(f"--- {' '.join(args[1:])}\n")
             out.flush()
@@ -675,8 +675,8 @@ class Scenario:
         elif fault == "second":
             # A second window, same command, while this one works.
             out = sh("docker", "exec", "-u", f"{os.getuid()}:{os.getgid()}", "-w", "/work",
-                     "-e", "HOME=/tmp", "-e", f"S60_EMULATOR_URL=http://localhost:{8080 + self.n}",
-                     "-e", "S60_EMULATOR_SUDO_PASSWORD=s60", name(self.n), "timeout", "150",
+                     "-e", "HOME=/tmp", "-e", f"AUTOFLASH_EMULATOR_URL=http://localhost:{8080 + self.n}",
+                     "-e", "AUTOFLASH_EMULATOR_SUDO_PASSWORD=s60", name(self.n), "timeout", "150",
                      "/opt/venv/bin/python", TOOL, "run", "--unattended", "--env-file", "/tmp/s60-unattended.env",
                      "--firmware", self.target, timeout=200)
             said = re.sub(r"\s+", " ", re.sub(r"\x1b\[[0-9;]*m", "", out.stdout + out.stderr))
@@ -1031,8 +1031,8 @@ def worker(n, todo, lock, cloud=False):
 
 def batch(ids_file=None):
     """The scenarios in ids_file (every one without) not yet passed here: the
-    cloud ones on S60_CLOUD_WORKERS emulators from instance 1, the rest on
-    S60_ANY_WORKERS after them."""
+    cloud ones on AUTOFLASH_CLOUD_WORKERS emulators from instance 1, the rest on
+    AUTOFLASH_ANY_WORKERS after them."""
     LOGS.mkdir(parents=True, exist_ok=True)
     known = {sc["id"]: sc for sc in scenarios()}
     done = {i for i, row in latest().items() if row["verdict"] in ("PASS", "EMULATOR-LIMIT", "NO-TRAFFIC")}
@@ -1050,12 +1050,12 @@ def batch(ids_file=None):
             (cloud if needs_cloud(known[i]) else anywhere).put(known[i])
     if STUB_CLOUD:
         nc = 0
-        na = int(os.environ.get("S60_STUB_WORKERS", os.environ.get("S60_ANY_WORKERS", "3")))
-        first = int(os.environ.get("S60_FIRST_INSTANCE", "1"))
+        na = int(os.environ.get("AUTOFLASH_STUB_WORKERS", os.environ.get("AUTOFLASH_ANY_WORKERS", "3")))
+        first = int(os.environ.get("AUTOFLASH_FIRST_INSTANCE", "1"))
     else:
-        nc = int(os.environ.get("S60_CLOUD_WORKERS", "0"))
-        na = int(os.environ.get("S60_ANY_WORKERS", "0"))
-        first = int(os.environ.get("S60_FIRST_INSTANCE", nc + 1))  # clear of another batch's emulators
+        nc = int(os.environ.get("AUTOFLASH_CLOUD_WORKERS", "0"))
+        na = int(os.environ.get("AUTOFLASH_ANY_WORKERS", "0"))
+        first = int(os.environ.get("AUTOFLASH_FIRST_INSTANCE", nc + 1))  # clear of another batch's emulators
     print(f"batch: {cloud.qsize()} cloud on {nc}, {anywhere.qsize()} others on {na}", flush=True)
     lock = threading.Lock()
     threads = [] if STUB_CLOUD else [threading.Thread(target=worker, args=(n, cloud, lock, True))
@@ -1074,7 +1074,7 @@ def prep():
     stopped just after C2 (the installer sent, before the backup) for each;
     and one of those carried on as far as D1 (on the interim Tasmota), so the
     steps after D1 need no cloud."""
-    n = int(os.environ.get("S60_PREP_INSTANCE", "1"))
+    n = int(os.environ.get("AUTOFLASH_PREP_INSTANCE", "1"))
     unattended = str(REPO / "tools/emulator/unattended-test.sh")
 
     def stopped_after(step, sc, since):
@@ -1138,7 +1138,7 @@ def main():
     parser.add_argument("file", nargs="?", help="batch: the scenario ids to run (else all)")
     args = parser.parse_args()
     STUB_CLOUD = STUB_CLOUD or args.stub_cloud
-    if STUB_CLOUD and "S60_SUITE_DIR" not in os.environ:
+    if STUB_CLOUD and "AUTOFLASH_SUITE_DIR" not in os.environ:
         # Apart from the real cloud's results, whose batch would otherwise
         # take a stub run's passes for its own.
         OUT = EMU / "suite-stub"

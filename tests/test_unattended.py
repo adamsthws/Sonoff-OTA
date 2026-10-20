@@ -19,10 +19,11 @@ ROOT = Path(__file__).resolve().parents[1]
 class CredentialsFileTests(unittest.TestCase):
     def setUp(self):
         self.addCleanup(credentials._values.clear)
+        self.addCleanup(credentials.renamed.clear)
         patcher = mock.patch.dict(os.environ)
         patcher.start()
         self.addCleanup(patcher.stop)
-        for key in credentials.KEYS:
+        for key in [*credentials.KEYS, *credentials.RENAMED]:
             os.environ.pop(key, None)
 
     def load(self, text):
@@ -36,16 +37,16 @@ class CredentialsFileTests(unittest.TestCase):
             # the account
             export EWELINK_EMAIL = me@example.com
             EWELINK_PASSWORD="pass word#1"
-            S60_SUDO_PASSWORD=
+            AUTOFLASH_SUDO_PASSWORD=
         """)
         self.assertEqual(given, ["EWELINK_EMAIL", "EWELINK_PASSWORD"])
         self.assertEqual(credentials.get("EWELINK_PASSWORD"), "pass word#1")
-        self.assertIsNone(credentials.get("S60_SUDO_PASSWORD"))  # empty is not given
+        self.assertIsNone(credentials.get("AUTOFLASH_SUDO_PASSWORD"))  # empty is not given
 
     def test_the_wifi_for_a_plug_on_esphome_can_be_given(self):
-        given = self.load("S60_WIFI_SSID=Home-2G\nS60_WIFI_PASSWORD=a pass\n")
-        self.assertEqual(given, ["S60_WIFI_PASSWORD", "S60_WIFI_SSID"])
-        self.assertEqual(credentials.get("S60_WIFI_PASSWORD"), "a pass")
+        given = self.load("AUTOFLASH_WIFI_SSID=Home-2G\nAUTOFLASH_WIFI_PASSWORD=a pass\n")
+        self.assertEqual(given, ["AUTOFLASH_WIFI_PASSWORD", "AUTOFLASH_WIFI_SSID"])
+        self.assertEqual(credentials.get("AUTOFLASH_WIFI_PASSWORD"), "a pass")
 
     def test_the_environment_wins_over_the_file(self):
         self.load("EWELINK_EMAIL=file@example.com\n")
@@ -66,9 +67,29 @@ class CredentialsFileTests(unittest.TestCase):
 
     def test_the_passwords_are_kept_out_of_the_log(self):
         self.addCleanup(output._private.clear)
-        self.load("EWELINK_PASSWORD=hunter2-secret\nS60_SUDO_PASSWORD=sudo-secret\n")
+        self.load("EWELINK_PASSWORD=hunter2-secret\nAUTOFLASH_SUDO_PASSWORD=sudo-secret\n")
         self.assertEqual(output.scrub("x hunter2-secret sudo-secret"),
                          "x <ewelink-password> <sudo-password>")
+
+    def test_a_dotenv_with_the_names_from_before_the_prefix_still_works(self):
+        # Written for a checkout from before AUTOFLASH_: read, and noted for renaming.
+        self.addCleanup(output._private.clear)
+        given = self.load("EWELINK_EMAIL=me@example.com\nS60_SUDO_PASSWORD=sudo-old-secret\n"
+                          "S60_WIFI_SSID=Home-2G\nS60_WIFI_PASSWORD=wifi-old-secret\n")
+        self.assertEqual(given, ["AUTOFLASH_SUDO_PASSWORD", "AUTOFLASH_WIFI_PASSWORD",
+                                 "AUTOFLASH_WIFI_SSID", "EWELINK_EMAIL"])
+        self.assertEqual(credentials.get("AUTOFLASH_SUDO_PASSWORD"), "sudo-old-secret")
+        self.assertEqual(credentials.renamed, ["S60_SUDO_PASSWORD", "S60_WIFI_PASSWORD", "S60_WIFI_SSID"])
+        self.assertEqual(output.scrub("sudo-old-secret wifi-old-secret"),
+                         "<sudo-password> <wifi-password>")  # as private as under the new names
+
+    def test_a_new_name_wins_over_its_old_one_and_the_environment_is_read_too(self):
+        self.load("S60_SUDO_PASSWORD=old\nAUTOFLASH_SUDO_PASSWORD=new\n")
+        self.assertEqual(credentials.get("AUTOFLASH_SUDO_PASSWORD"), "new")
+        os.environ["S60_WIFI_SSID"] = "From-Env"  # exported in the shell under the old name
+        self.load("")
+        self.assertEqual(credentials.get("AUTOFLASH_WIFI_SSID"), "From-Env")
+        self.assertEqual(credentials.renamed, ["S60_WIFI_SSID"])
 
 
 class UnattendedPromptTests(unittest.TestCase):
@@ -139,11 +160,11 @@ class SudoPasswordTests(unittest.TestCase):
         patcher = mock.patch.dict(os.environ)
         patcher.start()
         self.addCleanup(patcher.stop)
-        for key in ("S60_SUDO_PASSWORD", "S60_EMULATOR_SUDO_PASSWORD"):
+        for key in ("AUTOFLASH_SUDO_PASSWORD", "AUTOFLASH_EMULATOR_SUDO_PASSWORD"):
             os.environ.pop(key, None)
 
     def test_a_given_one_sudo_accepts_is_used(self):
-        os.environ["S60_SUDO_PASSWORD"] = "right"
+        os.environ["AUTOFLASH_SUDO_PASSWORD"] = "right"
         with mock.patch.object(self.autoflash.hostsys, "check_sudo_password", return_value=None), \
                 mock.patch.object(self.autoflash, "ask_admin_password") as asked:
             self.assertEqual(self.autoflash.admin_password(), "right")
@@ -151,7 +172,7 @@ class SudoPasswordTests(unittest.TestCase):
 
     def test_unattended_without_one_says_what_to_give(self):
         with mock.patch.object(prompts, "UNATTENDED", True), \
-                self.assertRaisesRegex(OSError, "S60_SUDO_PASSWORD"):
+                self.assertRaisesRegex(OSError, "AUTOFLASH_SUDO_PASSWORD"):
             self.autoflash.admin_password()
 
 

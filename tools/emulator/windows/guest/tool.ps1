@@ -1,7 +1,7 @@
 <#
 Layer 3, "tool": what the conversion tool's own first run leaves on a
 computer - its portable Python, fetched by tools\windows-python.ps1 just as
-start.ps1 fetches it. Kept in C:\S60\python (S60_PYTHON_HOME), as each run's
+start.ps1 fetches it. Kept in C:\S60\python (AUTOFLASH_PYTHON_HOME), as each run's
 checkout is new. Runs from start.ps1, then shuts Windows down.
 
 Progress is left on, as in a person's window, and the set-up runs in a
@@ -12,8 +12,8 @@ transcript, so the log alone would not show it.)
 $ErrorActionPreference = "Stop"
 Start-Transcript -Path C:\S60\tool.log | Out-Null
 try {
-    [Environment]::SetEnvironmentVariable("S60_PYTHON_HOME", "C:\S60\python", "Machine")
-    $env:S60_PYTHON_HOME = "C:\S60\python"
+    [Environment]::SetEnvironmentVariable("AUTOFLASH_PYTHON_HOME", "C:\S60\python", "Machine")
+    $env:AUTOFLASH_PYTHON_HOME = "C:\S60\python"
     # As start.ps1 does it.
     $setup = [powershell]::Create()
     [void]$setup.AddScript('$ErrorActionPreference = "Stop"; . C:\S60\repo\tools\windows-python.ps1; Get-ToolPython')

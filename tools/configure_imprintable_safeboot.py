@@ -58,9 +58,9 @@ def render_header(persist_settings: bool = False) -> bytes:
         " * values into the reserved space and repairs the image afterwards. */\n"
         "#ifndef _USER_CONFIG_OVERRIDE_H_\n"
         "#define _USER_CONFIG_OVERRIDE_H_\n\n"
-        "#define S60_RECOVERY_WIFI_DEFAULTS\n"
-        + ("#define S60_RECOVERY_PERSIST_SETTINGS\n" if persist_settings else "") +
-        "#define S60_IMPRINTABLE_BUILD\n"
+        "#define AUTOFLASH_RECOVERY_WIFI_DEFAULTS\n"
+        + ("#define AUTOFLASH_RECOVERY_PERSIST_SETTINGS\n" if persist_settings else "") +
+        "#define AUTOFLASH_IMPRINTABLE_BUILD\n"
         "#undef STA_SSID1\n"
         f"#define STA_SSID1 {c_literal(SSID_MARKER, SSID_FIELD_BYTES)}\n"
         "#undef STA_PASS1\n"

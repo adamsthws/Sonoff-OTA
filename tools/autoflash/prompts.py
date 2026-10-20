@@ -497,7 +497,7 @@ def countdown_choice(question: str, options: Sequence[str], *,
     if UNATTENDED or not (sys.stdin.isatty() and sys.stdout.isatty()):
         # The emulator's tests: the countdown's time, with nobody to answer,
         # so a Ctrl-C can be pressed during it (it stops at once there).
-        wait = float(os.environ.get("S60_EMULATOR_COUNTDOWN") or 0)
+        wait = float(os.environ.get("AUTOFLASH_EMULATOR_COUNTDOWN") or 0)
         if wait > 0:
             with interrupt.asking():
                 time.sleep(wait)

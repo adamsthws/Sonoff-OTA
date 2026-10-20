@@ -30,7 +30,7 @@ class DeviceError(RuntimeError):
 
 # Tasmota's web user: always this one; a web password is all that is set.
 TASMOTA_USER = "admin"
-PASSWORD_HINT = "give it with --web-password, or as S60_TASMOTA_PASSWORD in .env or the environment"
+PASSWORD_HINT = "give it with --web-password, or as AUTOFLASH_TASMOTA_PASSWORD in .env or the environment"
 
 
 class NeedsPassword(DeviceError):

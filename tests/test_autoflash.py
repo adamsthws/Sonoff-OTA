@@ -3542,7 +3542,7 @@ class TasmotaWebPasswordTests(unittest.TestCase):
         with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
                 mock.patch.object(self.af.detect, "identify", return_value="locked"), \
                 mock.patch.object(self.af, "ask_secret") as asked:
-            with self.assertRaisesRegex(self.af.Abort, "web password.*--web-password.*S60_TASMOTA_PASSWORD"):
+            with self.assertRaisesRegex(self.af.Abort, "web password.*--web-password.*AUTOFLASH_TASMOTA_PASSWORD"):
                 self.af.find_current_firmware(self.ctx(plug_ip="192.168.0.37"))
         asked.assert_not_called()
 
@@ -3692,7 +3692,7 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
         self.assertEqual(upload.call_args.kwargs["password"], "s3cret-71")
 
     def test_given_in_advance_it_is_not_asked(self):
-        ctx = self.ctx("s3cret-71")  # S60_ESPHOME_OTA_PASSWORD, in .env or the environment
+        ctx = self.ctx("s3cret-71")  # AUTOFLASH_ESPHOME_OTA_PASSWORD, in .env or the environment
         self.af.unlock_esphome(ctx)
         self.assertEqual(ctx.esphome_password, "s3cret-71")
         self.wanted = None
@@ -3700,7 +3700,7 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
 
     def test_unattended_without_it_the_run_stops_saying_what_to_give(self):
         with mock.patch.object(self.af.prompts, "UNATTENDED", True):
-            with self.assertRaisesRegex(self.af.Abort, "update password: give it as S60_ESPHOME_OTA_PASSWORD"):
+            with self.assertRaisesRegex(self.af.Abort, "update password: give it as AUTOFLASH_ESPHOME_OTA_PASSWORD"):
                 self.af.unlock_esphome(self.ctx())
             with self.assertRaisesRegex(self.af.Abort, "the one given is not it"):
                 self.af.unlock_esphome(self.ctx("not-it-9"))

@@ -181,14 +181,14 @@ EOF
 if [ "$STUB_CLOUD" = 1 ] && ! grep -q s60emu-stub "$home/.bashrc" 2>/dev/null; then
     cat >> "$home/.bashrc" <<'EOF'
 # s60emu-stub
-export S60_EWELINK_API_BASE=https://apia.s60-stub.test
+export AUTOFLASH_EWELINK_API_BASE=https://apia.s60-stub.test
 export SSL_CERT_FILE=/run/s60emu/stub-ca-bundle.pem
 EOF
 fi
 chown "$HOST_UID:$HOST_GID" "$home/.tmux.conf" "$home/.bashrc"
 
-as_you() { runuser -u "$user" -- env HOME="$home" PATH="$PATH" S60_EMULATOR_URL="${S60_EMULATOR_URL:-}" \
-    S60_EMULATOR_SUDO_PASSWORD="$SUDO_PASSWORD" "$@"; }
+as_you() { runuser -u "$user" -- env HOME="$home" PATH="$PATH" AUTOFLASH_EMULATOR_URL="${AUTOFLASH_EMULATOR_URL:-}" \
+    AUTOFLASH_EMULATOR_SUDO_PASSWORD="$SUDO_PASSWORD" "$@"; }
 as_you /opt/s60emu/bin/plug-supervisor >/dev/null 2>&1 &
 as_you /opt/s60emu/bin/browser-forward >"$RUN/browser-forward.log" 2>&1 &
 [ "$WINDOWS" = 1 ] && /opt/s60emu/bin/windows-link tap1 >"$RUN/windows-link.log" 2>&1 &
@@ -196,5 +196,5 @@ as_you /opt/s60emu/bin/browser-forward >"$RUN/browser-forward.log" 2>&1 &
 cd /work
 as_you tmux new-session -d -s s60 -n conversion -c /work
 as_you tmux new-window -d -t s60 -n plug "plug log"
-exec runuser -u "$user" -- env HOME="$home" PATH="$PATH" S60_EMULATOR_URL="${S60_EMULATOR_URL:-}" \
-    S60_EMULATOR_SUDO_PASSWORD="$SUDO_PASSWORD" tmux attach -t s60
+exec runuser -u "$user" -- env HOME="$home" PATH="$PATH" AUTOFLASH_EMULATOR_URL="${AUTOFLASH_EMULATOR_URL:-}" \
+    AUTOFLASH_EMULATOR_SUDO_PASSWORD="$SUDO_PASSWORD" tmux attach -t s60

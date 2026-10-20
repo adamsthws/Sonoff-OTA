@@ -5,9 +5,9 @@ diff --git a/tasmota/tasmota_support/settings.ino b/tasmota/tasmota_support/sett
    }
  #endif  // ESP32
  
-+#ifdef S60_RECOVERY_WIFI_DEFAULTS
++#ifdef AUTOFLASH_RECOVERY_WIFI_DEFAULTS
 +#ifndef FIRMWARE_SAFEBOOT
-+#error S60_RECOVERY_WIFI_DEFAULTS is restricted to FIRMWARE_SAFEBOOT
++#error AUTOFLASH_RECOVERY_WIFI_DEFAULTS is restricted to FIRMWARE_SAFEBOOT
 +#endif
 +  // Safeboot deliberately does not create or persist defaults when NVS is
 +  // absent or unreadable.  This recovery-only build instead recreates the

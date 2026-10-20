@@ -4,10 +4,10 @@
    CounterInterruptDisable(false);
  #endif
  }
-+#ifdef S60_RECOVERY_PERSIST_SETTINGS
++#ifdef AUTOFLASH_RECOVERY_PERSIST_SETTINGS
 +#include <nvs_flash.h>
-+#ifndef S60_RECOVERY_WIFI_DEFAULTS
-+#error S60_RECOVERY_PERSIST_SETTINGS requires S60_RECOVERY_WIFI_DEFAULTS
++#ifndef AUTOFLASH_RECOVERY_WIFI_DEFAULTS
++#error AUTOFLASH_RECOVERY_PERSIST_SETTINGS requires AUTOFLASH_RECOVERY_WIFI_DEFAULTS
 +#endif
 +// Save the compiled-in defaults - which carry this build's Wi-Fi - where
 +// Tasmota reads its settings, so the firmware installed next joins the network
@@ -62,7 +62,7 @@
 +    AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery: settings not saved, read-back failed (%d)"), result);
 +  }
 +}
-+#endif  // S60_RECOVERY_PERSIST_SETTINGS
++#endif  // AUTOFLASH_RECOVERY_PERSIST_SETTINGS
 +
  void SettingsLoad(void) {
  #ifdef ESP8266
@@ -71,7 +71,7 @@
    SettingsDefaultSet2();
    settings_location = 0;
    AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery Wi-Fi defaults active"));
-+#ifdef S60_RECOVERY_PERSIST_SETTINGS
++#ifdef AUTOFLASH_RECOVERY_PERSIST_SETTINGS
 +  S60PersistRecoverySettings();
 +#endif
  #endif

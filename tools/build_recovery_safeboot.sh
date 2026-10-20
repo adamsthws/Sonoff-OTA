@@ -74,7 +74,7 @@ source_touched=1
 git -C "$source_dir" apply --check "$patch_file"
 git -C "$source_dir" apply "$patch_file"
 patch_applied=1
-if grep -q "^#define S60_RECOVERY_PERSIST_SETTINGS" "$private_header"; then
+if grep -q "^#define AUTOFLASH_RECOVERY_PERSIST_SETTINGS" "$private_header"; then
   git -C "$source_dir" apply --check "$persist_patch"
   git -C "$source_dir" apply "$persist_patch"
   persist_applied=1

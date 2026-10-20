@@ -11,7 +11,7 @@ Start-Transcript -Path C:\S60\rig.log | Out-Null
 try {
     # The link's Python, apart from the tool's (layer 3, or a run's own with
     # --first-run): for this script only, so the tool never finds it.
-    $env:S60_PYTHON_HOME = "C:\S60\rig-python"
+    $env:AUTOFLASH_PYTHON_HOME = "C:\S60\rig-python"
     & C:\S60\repo\tools\emulator\windows-bootstrap.ps1 -Yes
     if ($LASTEXITCODE) { throw "windows-bootstrap.ps1 failed (exit $LASTEXITCODE)" }
 

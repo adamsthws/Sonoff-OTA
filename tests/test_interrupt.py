@@ -110,7 +110,7 @@ class StageEndTests(unittest.TestCase):
         seen = []
         with mock.patch.object(prompts, "UNATTENDED", True), \
              mock.patch.object(prompts, "answered_unattended"), \
-             mock.patch.dict("os.environ", {"S60_EMULATOR_COUNTDOWN": "30"}), \
+             mock.patch.dict("os.environ", {"AUTOFLASH_EMULATOR_COUNTDOWN": "30"}), \
              mock.patch.object(prompts.time, "sleep", side_effect=lambda s: seen.append((s, interrupt._state["asking"]))):
             self.assertEqual(prompts.countdown_choice("Stop the run here", ["Carry on", "Stop here"]), 0)
         self.assertEqual(seen, [(30.0, 1)])  # a Ctrl-C during it stops at once

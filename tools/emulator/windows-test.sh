@@ -19,17 +19,17 @@
 # again before the run, with those above it - a few minutes, or 5-10 for
 # installed; --rebuild-layer does it anyway. The first run lists what this
 # computer needs and gets it after one question. Windows gets 2 GB and 2 CPUs
-# (S60_WINDOWS_RAM=3G, S60_WINDOWS_CPUS=4). SSH reaches it on 127.0.0.1:2222
-# (S60_WINDOWS_SSH_PORT), with tools/emulator/windows-ssh.sh. See docs/emulator.md.
+# (AUTOFLASH_WINDOWS_RAM=3G, AUTOFLASH_WINDOWS_CPUS=4). SSH reaches it on 127.0.0.1:2222
+# (AUTOFLASH_WINDOWS_SSH_PORT), with tools/emulator/windows-ssh.sh. See docs/emulator.md.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-CACHE=${S60_WINDOWS_CACHE:-$HOME/.cache/s60-emu/windows}
+CACHE=${AUTOFLASH_WINDOWS_CACHE:-$HOME/.cache/s60-emu/windows}
 VM_IMAGE=s60-win
 # Microsoft's Windows Server 2025 evaluation ISO (en-US, build 26100.32230),
 # from the Evaluation Center. Pinned: a changed file is reported, never used unseen.
 ISO_URL="https://go.microsoft.com/fwlink/?linkid=2345730"
-ISO_SHA256=${S60_WINDOWS_ISO_SHA256:-7b052573ba7894c9924e3e87ba732ccd354d18cb75a883efa9b900ea125bfd51}
+ISO_SHA256=${AUTOFLASH_WINDOWS_ISO_SHA256:-7b052573ba7894c9924e3e87ba732ccd354d18cb75a883efa9b900ea125bfd51}
 # Windows Terminal's release, for its console, OpenConsole: Terminal itself
 # cannot start on Server Core, which has no XAML. Pinned like the ISO.
 TERMINAL_URL="https://github.com/microsoft/terminal/releases/download/v1.25.2733.0/Microsoft.WindowsTerminal_1.25.2733.0_x64.zip"
@@ -45,14 +45,14 @@ PASSWORD=S60-emulator
 # What Windows gets: Server Core with only the tool to run is content in 2 GB.
 # Its container is capped at that plus 1 GB for QEMU itself and the disk tools
 # between runs, without swap, so it can never take more of this computer.
-RAM=${S60_WINDOWS_RAM:-2G}
-CPUS=${S60_WINDOWS_CPUS:-2}
+RAM=${AUTOFLASH_WINDOWS_RAM:-2G}
+CPUS=${AUTOFLASH_WINDOWS_CPUS:-2}
 if [[ $RAM =~ ^([1-9][0-9]*)G$ ]]; then ram_mb=$(( BASH_REMATCH[1] * 1024 ))
 elif [[ $RAM =~ ^([1-9][0-9]*)M$ ]]; then ram_mb=${BASH_REMATCH[1]}
-else echo "S60_WINDOWS_RAM is a size such as 2G or 3072M, not $RAM"; exit 2
+else echo "AUTOFLASH_WINDOWS_RAM is a size such as 2G or 3072M, not $RAM"; exit 2
 fi
 cap_mb=$(( ram_mb + 1024 ))
-SSH_PORT=${S60_WINDOWS_SSH_PORT:-2222}
+SSH_PORT=${AUTOFLASH_WINDOWS_SSH_PORT:-2222}
 
 emu_flags=() rebuild=0 console=openconsole from=tool rebuild_layer="" fresh=0 plug=""
 for arg in "$@"; do
@@ -72,8 +72,8 @@ done
 # to start again. A lock held by this process alone (systemd-inhibit) - no
 # setting of the computer's is changed, and the lock goes when this exits,
 # however it exits. It cannot hold off a flat battery: that is warned of.
-if [ -z "${S60_AWAKE:-}" ] && systemd-inhibit --what=sleep:idle true 2>/dev/null; then
-    exec env S60_AWAKE=1 systemd-inhibit --what=sleep:idle --who="S60 emulator" \
+if [ -z "${AUTOFLASH_AWAKE:-}" ] && systemd-inhibit --what=sleep:idle true 2>/dev/null; then
+    exec env AUTOFLASH_AWAKE=1 systemd-inhibit --what=sleep:idle --who="S60 emulator" \
         --why="Windows set-up or a test run" --mode=block "$0" "$@"
 fi
 
@@ -214,7 +214,7 @@ if [ ${#plan[@]} -gt 0 ]; then
                 got=$(sha256sum "$CACHE/server2025-eval.iso.part" | cut -d' ' -f1)
                 if [ "$got" != "$ISO_SHA256" ]; then
                     say "Microsoft's ISO is not the one this was made for (SHA-256 $got)."
-                    say "If they have published a new one, try it with S60_WINDOWS_ISO_SHA256=$got"
+                    say "If they have published a new one, try it with AUTOFLASH_WINDOWS_ISO_SHA256=$got"
                     exit 1
                 fi
                 mv "$CACHE/server2025-eval.iso.part" "$CACHE/server2025-eval.iso"
@@ -266,7 +266,7 @@ vm() {  # vm DOCKER-RUN-OPTIONS... -- VM-RUN-COMMAND...: the Windows VM containe
 avail_mb=$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo)
 if [ "$avail_mb" -lt "$(( cap_mb + 256 ))" ]; then  # the emulator's container too
     say "Windows and the emulator may use up to $(( cap_mb + 256 )) MB; this computer has ${avail_mb} MB free."
-    say "Close what you can, or give Windows less (S60_WINDOWS_RAM=1536M), or it may be slow."
+    say "Close what you can, or give Windows less (AUTOFLASH_WINDOWS_RAM=1536M), or it may be slow."
 fi
 for name in "${stale[@]}"; do
     rm -f "$CACHE/$name.built-from"  # until it is set up again

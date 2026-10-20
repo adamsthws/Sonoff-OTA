@@ -30,7 +30,7 @@ $PortablePython = @{
     Sha256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"
 }
 # Where the portable Python, and the record of an installed one, are kept.
-$PythonHome = if ($env:S60_PYTHON_HOME) { $env:S60_PYTHON_HOME } else { Join-Path (Split-Path $PSScriptRoot) ".python" }
+$PythonHome = if ($env:AUTOFLASH_PYTHON_HOME) { $env:AUTOFLASH_PYTHON_HOME } else { Join-Path (Split-Path $PSScriptRoot) ".python" }
 $InstalledMarker = Join-Path $PythonHome "installed-by-s60.json"
 
 $PythonInstaller = @{

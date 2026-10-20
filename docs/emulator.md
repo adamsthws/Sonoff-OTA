@@ -161,10 +161,10 @@ Wi-Fi:
 | Your computer's password, when sudo asks | `s60` |
 | The plug's web page | http://localhost:8080 |
 
-The tool knows when it runs in the emulator (`S60_EMULATOR_URL`), and its
+The tool knows when it runs in the emulator (`AUTOFLASH_EMULATOR_URL`), and its
 final link points at http://localhost:8080 instead of the plug's own address.
 Where it warns that sudo may ask for a password, it gives the emulator's
-(`S60_EMULATOR_SUDO_PASSWORD`); on a real computer it never knows one.
+(`AUTOFLASH_EMULATOR_SUDO_PASSWORD`); on a real computer it never knows one.
 
 ### Unattended, for testing
 
@@ -195,8 +195,8 @@ the checkout has no `.env`. The run's sudo
 password is the emulator's, and everything else is answered as
 [unattended.md](unattended.md) describes. What `.env` holds of your real
 network and plugs - the Wi-Fi details, a plug's Tasmota or ESPHome password -
-is left out: the emulated plug's are its own. `S60_TASMOTA_PASSWORD` and
-`S60_ESPHOME_OTA_PASSWORD` set where the script runs go to the run instead,
+is left out: the emulated plug's are its own. `AUTOFLASH_TASMOTA_PASSWORD` and
+`AUTOFLASH_ESPHOME_OTA_PASSWORD` set where the script runs go to the run instead,
 for an emulated plug given a password to test with. On a terminal the run is shown live;
 otherwise, as in a CI log, the final screen is printed at the end, colours
 and all. The recording stays in
@@ -237,9 +237,9 @@ off in the firmware set-up: "SVM Mode" on AMD, "Intel Virtualization
 Technology" (VT-x) on Intel.
 
 Both containers are capped, so they cannot take over the computer. Windows
-gets 2 GB and 2 CPUs (`S60_WINDOWS_RAM=3G`, `S60_WINDOWS_CPUS=4` to change), and
+gets 2 GB and 2 CPUs (`AUTOFLASH_WINDOWS_RAM=3G`, `AUTOFLASH_WINDOWS_CPUS=4` to change), and
 its container at most 1 GB more, for QEMU itself, without swap. The emulator
-gets 256 MB and 2 CPUs (`S60_EMU_MEMORY=512m`, `S60_EMU_CPUS`).
+gets 256 MB and 2 CPUs (`AUTOFLASH_EMU_MEMORY=512m`, `AUTOFLASH_EMU_CPUS`).
 
 ```sh
 tools/emulator/windows-test.sh --cloud                    # a conversion, in OpenConsole, as on Windows 11
@@ -297,7 +297,7 @@ unfinished one can be resumed.
 #### SSH, to drive a run from a terminal
 
 Windows runs OpenSSH's server (set up in the `rig` layer) with PowerShell as
-its shell, on `127.0.0.1:2222` (`S60_WINDOWS_SSH_PORT` to change), logged on
+its shell, on `127.0.0.1:2222` (`AUTOFLASH_WINDOWS_SSH_PORT` to change), logged on
 to as `s60` with a key `windows-test.sh` makes once in
 `~/.cache/s60-emu/windows/ssh`. `tools/emulator/windows-ssh.sh` wraps it:
 
@@ -578,7 +578,7 @@ gives each request its own connection.
   `tools/emulator/redact.py`, which masks the dump's secrets and drops panic
   memory dumps (they show RAM as words the masking cannot see into). Put any
   other log through it before reading it.
-- **A QEMU of your own build**: `S60_EMU_QEMU=path/to/qemu-system-riscv32
+- **A QEMU of your own build**: `AUTOFLASH_EMU_QEMU=path/to/qemu-system-riscv32
   tools/emulator/emu.sh ...` runs it in place of the image's, without
   rebuilding the image (`qemu-build.Dockerfile` builds one from a fork
   checkout with the patches applied). Patches in `tools/emulator/fork/` apply

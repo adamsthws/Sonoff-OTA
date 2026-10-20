@@ -23,17 +23,28 @@ ENV_FILE = ROOT / ".env"
 KEYS = {
     "EWELINK_EMAIL": None,  # an email is scrubbed from the log anyway
     "EWELINK_PASSWORD": "ewelink-password",
-    "S60_SUDO_PASSWORD": "sudo-password",
+    "AUTOFLASH_SUDO_PASSWORD": "sudo-password",
     # Only for a plug on an ESPHome that cannot say its Wi-Fi password (one
     # older than this project's 1.1.0, or whose API has an encryption key):
     # no password given means an open network.
-    "S60_WIFI_SSID": "wifi-name",
-    "S60_WIFI_PASSWORD": "wifi-password",
+    "AUTOFLASH_WIFI_SSID": "wifi-name",
+    "AUTOFLASH_WIFI_PASSWORD": "wifi-password",
     # Only for a plug on Tasmota with a web password, or on ESPHome with an
     # update password.
-    "S60_TASMOTA_PASSWORD": "tasmota-password",
-    "S60_ESPHOME_OTA_PASSWORD": "esphome-password",
+    "AUTOFLASH_TASMOTA_PASSWORD": "tasmota-password",
+    "AUTOFLASH_ESPHOME_OTA_PASSWORD": "esphome-password",
 }
+
+# Names read before they took the AUTOFLASH_ prefix, still understood, so that
+# a .env written for an older checkout keeps working: each found is listed in
+# `renamed`, for the run to ask that it be given its new name.
+RENAMED = {
+    "S60_SUDO_PASSWORD": "AUTOFLASH_SUDO_PASSWORD",
+    "S60_WIFI_SSID": "AUTOFLASH_WIFI_SSID",
+    "S60_WIFI_PASSWORD": "AUTOFLASH_WIFI_PASSWORD",
+}
+_OLD_NAME = {new: old for old, new in RENAMED.items()}
+renamed: list[str] = []
 
 _values: dict[str, str] = {}
 
@@ -75,10 +86,16 @@ def load(path: Path | None = None) -> list[str]:
         values = parse(text)
     except ValueError as exc:
         raise ValueError(f"{path}: {exc}") from None
-    unknown = sorted(set(values) - set(KEYS))
+    unknown = sorted(set(values) - set(KEYS) - set(RENAMED))
     if unknown:
         raise ValueError(f"{path}: unknown name{'s' if len(unknown) > 1 else ''} "
                          f"{', '.join(unknown)} (known: {', '.join(KEYS)})")
+    renamed[:] = sorted(old for old in RENAMED if old in values or os.environ.get(old))
+    for old, new in RENAMED.items():
+        # Under its old name, unless given under its new one as well.
+        if old in values and new not in values:
+            values[new] = values[old]
+        values.pop(old, None)
     _values.clear()
     _values.update({key: value for key, value in values.items() if value})
     # Those set in the environment too: they are just as private.
@@ -89,5 +106,8 @@ def load(path: Path | None = None) -> list[str]:
 
 
 def get(key: str) -> str | None:
-    """The value given for `key`: the environment's, else the file's."""
-    return os.environ.get(key) or _values.get(key) or None
+    """The value given for `key`: the environment's, else the file's - under
+    its old name too, for one that was renamed (RENAMED)."""
+    old = _OLD_NAME.get(key)
+    return (os.environ.get(key) or (os.environ.get(old) if old else None)
+            or _values.get(key) or None)
