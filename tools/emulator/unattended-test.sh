@@ -129,9 +129,10 @@ if [ "$stub" = 1 ]; then
     printf 'EWELINK_EMAIL=%s\nEWELINK_PASSWORD=%s\n' stub@s60-stub.test stub \
         | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
 else
-    # Not the Wi-Fi in it, if any: that is your real network's, and the emulated
-    # plug's is its own (given below).
-    grep -v '^ *\(export \)\?S60_WIFI_' "$ROOT/.env" | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
+    # Not the Wi-Fi in it, if any, nor a plug's password: those are your real
+    # network's and plugs', and the emulated plug's are its own (given below).
+    grep -v '^ *\(export \)\?S60_\(WIFI_\|TASMOTA_PASSWORD\|ESPHOME_OTA_PASSWORD\)' "$ROOT/.env" \
+        | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
 fi
 [ "$keep" = 1 ] && trap 'docker exec "$NAME" rm -f "$answers" 2>/dev/null || true' EXIT
 
@@ -144,9 +145,11 @@ stub_env=()
 [ "$stub" = 1 ] && stub_env=(-e S60_EWELINK_API_BASE=https://apia.s60-stub.test
                              -e SSL_CERT_FILE=/run/s60emu/stub-ca-bundle.pem)
 # The emulator's Wi-Fi, for a run from an ESPHome that cannot say what it is
-# (one older than this project's 1.1.0).
+# (one older than this project's 1.1.0); and the emulated plug's passwords,
+# for one given one to test with, as this script's environment has them.
 "${as_you[@]}" -e S60_EMULATOR_URL="http://localhost:$PORT" -e S60_EMULATOR_SUDO_PASSWORD=s60 \
     "${stub_env[@]}" -e S60_WIFI_SSID=PICSimLabWifi -e S60_EMULATOR_COUNTDOWN="${S60_EMULATOR_COUNTDOWN:-}" \
+    -e S60_TASMOTA_PASSWORD="${S60_TASMOTA_PASSWORD:-}" -e S60_ESPHOME_OTA_PASSWORD="${S60_ESPHOME_OTA_PASSWORD:-}" \
     -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/unattended_run.py --size 100x40 \
     --save "captures/unattended/$stamp" -- --env-file "$answers" "${run_args[@]}" || status=$?
 
