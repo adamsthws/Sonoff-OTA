@@ -1,4 +1,4 @@
-# S60 plan: what this computer has planned for the plug to write, carried out
+# The plan: what this computer has planned for the plug to write, carried out
 # here and checked as it goes (tools/autoflash/plans.py says what each plan
 # is).  First the plug checks it is laid out as the plan expects and runs from
 # the slot it expects; then each step, in order:
@@ -52,10 +52,10 @@ def report_failure(exception, message)
       client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
       client.close()
     else
-      print("S60 report not sent: the plug's Wi-Fi is down")
+      print("AUTOFLASH report not sent: the plug's Wi-Fi is down")
     end
   except .. as report_exception, report_message
-    print("S60 failure report not sent:", report_exception, report_message)
+    print("AUTOFLASH failure report not sent:", report_exception, report_message)
   end
 end
 
@@ -225,7 +225,7 @@ def write_streamed(step)
     post_text(format("/capture/%s/%i", step["blob"], index), readback.tohex())
     offset += count
     index += 1
-    if index % 16 == 0 print(format("S60 PLAN: %s %i/%i bytes", step["blob"], offset, total)) end
+    if index % 16 == 0 print(format("AUTOFLASH PLAN: %s %i/%i bytes", step["blob"], offset, total)) end
     tasmota.yield()
   end
 end
@@ -268,9 +268,9 @@ def write_whole(step)
             step["blob"] + " did not write correctly and the old bytes could not be put back")
       guard(false, step["blob"] + " did not write correctly; the old bytes were put back")
     end
-    print("S60 PLAN: " + step["blob"] + " written and read back")
+    print("AUTOFLASH PLAN: " + step["blob"] + " written and read back")
   else
-    print("S60 PLAN: " + step["blob"] + " already in place")
+    print("AUTOFLASH PLAN: " + step["blob"] + " already in place")
   end
   var offset = 0
   index = step["first"]
@@ -305,7 +305,7 @@ def copy_region(step)
   end
   guard(sha_region(address, total) == wanted, format("the copy to 0x%X differs from its source", address))
   guard(sha_region(source, total) == wanted, format("0x%X changed while being copied", source))
-  print(format("S60 PLAN: 0x%X copied to 0x%X", source, address))
+  print(format("AUTOFLASH PLAN: 0x%X copied to 0x%X", source, address))
 end
 
 def run_plan()
@@ -354,10 +354,10 @@ def run_plan()
 
   post_text("/report/plan", report)
   if restart_after
-    print("S60 PLAN PASS; restarting")
+    print("AUTOFLASH PLAN PASS; restarting")
     tasmota.cmd("Restart 99")
   else
-    print("S60 PLAN PASS")
+    print("AUTOFLASH PLAN PASS")
   end
   return true
 end

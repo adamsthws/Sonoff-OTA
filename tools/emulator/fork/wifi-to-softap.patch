@@ -71,7 +71,7 @@ index dd73ca7..8a8c0c2 100644
 +static void esp32_softap_drop(const char *why)
 +{
 +    if (softap.state != SOFTAP_NONE) {
-+        printf("S60AP: guest SoftAP %s gone (%s)\n", softap.ssid, why);
++        printf("WIFIAP: guest SoftAP %s gone (%s)\n", softap.ssid, why);
 +        fflush(stdout);
 +    }
 +    softap.state = SOFTAP_NONE;
@@ -110,7 +110,7 @@ index dd73ca7..8a8c0c2 100644
 +            esp32_wifi_report_softap(ssid);
 +            esp32_wifi_report_station(softap_station);
 +            esp32_softap_report_state("authenticating");
-+            printf("S60AP: guest SoftAP %s up\n", ssid);
++            printf("WIFIAP: guest SoftAP %s up\n", ssid);
 +            fflush(stdout);
 +        }
 +        softap.last_beacon = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);

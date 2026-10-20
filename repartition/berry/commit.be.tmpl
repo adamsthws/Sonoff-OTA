@@ -1,4 +1,4 @@
-# S60 Safeboot migration: one-use, explicitly armed canonical-layout commit.
+# Safeboot migration: one-use, explicitly armed canonical-layout commit.
 # Loading this file performs no writes. It returns the commit closure.
 import flash
 import crypto
@@ -52,10 +52,10 @@ def report_failure(exception, message)
       client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
       client.close()
     else
-      print("S60 report not sent: the plug's Wi-Fi is down")
+      print("AUTOFLASH report not sent: the plug's Wi-Fi is down")
     end
   except .. as report_exception, report_message
-    print("S60 failure report not sent:", report_exception, report_message)
+    print("AUTOFLASH failure report not sent:", report_exception, report_message)
   end
 end
 
@@ -204,10 +204,10 @@ def keep_interim_layout(interim)
       flash.write(0x8000, interim)
     end
     guard(flash.read(0x8000, 0x1000) == interim, "interim table restore differs")
-    print("S60 ROLLBACK PASS: interim layout kept, with the settings moved aside; safe to restart")
+    print("AUTOFLASH ROLLBACK PASS: interim layout kept, with the settings moved aside; safe to restart")
     return true
   except .. as rollback_exception, rollback_message
-    print("S60 ROLLBACK FAILED; DO NOT REBOOT OR REMOVE POWER:",
+    print("AUTOFLASH ROLLBACK FAILED; DO NOT REBOOT OR REMOVE POWER:",
           rollback_exception, rollback_message)
     return false
   end
@@ -225,12 +225,12 @@ def best_effort_report(status, rollback)
       client.begin(base_url + "/report/commit")
       var code = client.POST(body)
       client.close()
-      print(format("S60 COMMIT report HTTP %i", code))
+      print(format("AUTOFLASH COMMIT report HTTP %i", code))
     else
-      print("S60 report not sent: the plug's Wi-Fi is down")
+      print("AUTOFLASH report not sent: the plug's Wi-Fi is down")
     end
   except .. as report_exception, report_message
-    print("S60 COMMIT report failed:", report_exception, report_message)
+    print("AUTOFLASH COMMIT report failed:", report_exception, report_message)
   end
 end
 
@@ -240,10 +240,10 @@ def restore_source_layout(old_table, old_otadata)
     guard(flash.read(0x1D000, 0x2000) == old_otadata, "old otadata restore differs")
     flash.write(0x8000, old_table)
     guard(flash.read(0x8000, 0x1000) == old_table, "source table restore differs")
-    print("S60 ROLLBACK PASS: source table and live old otadata restored; DO NOT REBOOT")
+    print("AUTOFLASH ROLLBACK PASS: source table and live old otadata restored; DO NOT REBOOT")
     return true
   except .. as rollback_exception, rollback_message
-    print("S60 ROLLBACK FAILED; DO NOT REBOOT OR REMOVE POWER:",
+    print("AUTOFLASH ROLLBACK FAILED; DO NOT REBOOT OR REMOVE POWER:",
           rollback_exception, rollback_message)
     return false
   end
@@ -273,12 +273,12 @@ def run_commit(provided_token)
     # The copy below writes over Sonoff's settings and boot selection, which
     # a power cut part way would leave the old Tasmota without: moved aside
     # first, with the interim table pointing at them.
-    print("S60 COMMIT: moving the settings aside")
+    print("AUTOFLASH COMMIT: moving the settings aside")
     move_low_regions()
     flash.write(0x8000, interim)
     guard(flash.read(0x8000, 0x1000) == interim, "interim partition-table read-back differs")
     interim_in_place = true
-    print("S60 COMMIT: settings moved aside; interim table in place")
+    print("AUTOFLASH COMMIT: settings moved aside; interim table in place")
 
     var offset = 0
     var sector = 0
@@ -290,7 +290,7 @@ def run_commit(provided_token)
             format("canonical Safeboot read-back differs at 0x%X", 0x10000 + offset))
       offset += 0x1000
       sector += 1
-      if sector % 16 == 0 print(format("S60 COMMIT: copied %i/%i bytes", offset, copy_length)) end
+      if sector % 16 == 0 print(format("AUTOFLASH COMMIT: copied %i/%i bytes", offset, copy_length)) end
       tasmota.yield()
     end
 
@@ -326,7 +326,7 @@ def run_commit(provided_token)
     raise commit_exception, commit_message
   end
 
-  print("S60 COMMIT PASS: exact official table installed; restarting without settings save")
+  print("AUTOFLASH COMMIT PASS: exact official table installed; restarting without settings save")
   best_effort_report("PASS", false)
   tasmota.cmd("Restart 99")
   return true

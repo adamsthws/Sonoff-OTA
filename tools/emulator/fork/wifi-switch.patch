@@ -41,7 +41,7 @@
 +    if (esp32_wifi_aps_off() && s->mode == Esp32_Mode_Station) {
 +        if (!was_off) {
 +            was_off = true;
-+            printf("S60AP: access points off (ap_state %u)\n", s->ap_state);
++            printf("WIFIAP: access points off (ap_state %u)\n", s->ap_state);
 +            fflush(stdout);
 +        }
 +        if (s->ap_state == Esp32_WLAN__STATE_ASSOCIATED ||
@@ -58,7 +58,7 @@
 +    }
 +    if (was_off) {
 +        was_off = false;
-+        printf("S60AP: access points on\n");
++        printf("WIFIAP: access points on\n");
 +        fflush(stdout);
 +    }
 +    deauths_left = 0;

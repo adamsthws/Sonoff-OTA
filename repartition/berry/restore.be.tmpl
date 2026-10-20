@@ -47,10 +47,10 @@ def report_failure(exception, message)
       client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
       client.close()
     else
-      print("S60 report not sent: the plug's Wi-Fi is down")
+      print("AUTOFLASH report not sent: the plug's Wi-Fi is down")
     end
   except .. as report_exception, report_message
-    print("S60 failure report not sent:", report_exception, report_message)
+    print("AUTOFLASH failure report not sent:", report_exception, report_message)
   end
 end
 
@@ -205,12 +205,12 @@ def best_effort_report(status)
       client.begin(base_url + "/report/restore")
       var code = client.POST(body)
       client.close()
-      print(format("S60 RESTORE report HTTP %i", code))
+      print(format("AUTOFLASH RESTORE report HTTP %i", code))
     else
-      print("S60 report not sent: the plug's Wi-Fi is down")
+      print("AUTOFLASH report not sent: the plug's Wi-Fi is down")
     end
   except .. as report_exception, report_message
-    print("S60 RESTORE report failed:", report_exception, report_message)
+    print("AUTOFLASH RESTORE report failed:", report_exception, report_message)
   end
 end
 
@@ -270,7 +270,7 @@ def run_restore(provided_token)
   guard(sha_region(0xE0000, app_length) == app_hash, "running app0 differs from pinned official image")
   armed = false
   var start = resume_point()
-  if start > 0 print(format("S60 RESTORE: carrying on after %i sectors already restored", start)) end
+  if start > 0 print(format("AUTOFLASH RESTORE: carrying on after %i sectors already restored", start)) end
 
   try
     var offset = 0
@@ -291,7 +291,7 @@ def run_restore(provided_token)
       post_text(format("/capture/restored/%i", index), readback.tohex())
       offset += count
       index += 1
-      if index % 16 == 0 print(format("S60 RESTORE: %i/%i bytes", offset, official_length)) end
+      if index % 16 == 0 print(format("AUTOFLASH RESTORE: %i/%i bytes", offset, official_length)) end
       tasmota.yield()
     end
     guard(sha_region(0x10000, official_length) == official_safeboot_hash,
@@ -311,7 +311,7 @@ def run_restore(provided_token)
   end
 
   best_effort_report("PASS")
-  print("S60 RESTORE PASS: factory partition now contains exact official Safeboot")
+  print("AUTOFLASH RESTORE PASS: factory partition now contains exact official Safeboot")
   return true
 end
 

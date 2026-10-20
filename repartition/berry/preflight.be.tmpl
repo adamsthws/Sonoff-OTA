@@ -1,4 +1,4 @@
-# S60 Safeboot migration: read-only live preflight.
+# Safeboot migration: read-only live preflight.
 # Rendered and served by tools/serve_safeboot_migration.py.
 import flash
 import crypto
@@ -33,10 +33,10 @@ def report_failure(exception, message)
       client.POST(format("session=%s\nreason=%s\n", session, reason.asstring()))
       client.close()
     else
-      print("S60 report not sent: the plug's Wi-Fi is down")
+      print("AUTOFLASH report not sent: the plug's Wi-Fi is down")
     end
   except .. as report_exception, report_message
-    print("S60 failure report not sent:", report_exception, report_message)
+    print("AUTOFLASH failure report not sent:", report_exception, report_message)
   end
 end
 
@@ -132,7 +132,7 @@ def run_preflight()
     session, flash.size(), flash.current_ota(), table_hash.tohex(),
     nvs_hash.tohex(), otadata_hash.tohex())
   post_text("/report/preflight", report)
-  print("S60 PREFLIGHT PASS; host independently validated uploaded bytes")
+  print("AUTOFLASH PREFLIGHT PASS; host independently validated uploaded bytes")
   return true
 end
 

@@ -47,7 +47,7 @@ SECTOR = 4096
 SHOWN_RE = re.compile(r"RESULT:|PLUG SAYS|REFUS|TIMEOUT|ERROR|Traceback|Stopped", re.IGNORECASE)
 # The plug's own console lines worth showing when a phase fails: its Berry
 # prints and errors, which say why when it could not tell this computer.
-PLUG_CONSOLE_RE = re.compile(r'S60 |migration_refused|BRY:|"Br":"\[')
+PLUG_CONSOLE_RE = re.compile(r'AUTOFLASH |migration_refused|BRY:|"Br":"\[')
 PLUG_SAYS_RE = re.compile(r"THE PLUG SAYS: (?P<reason>.+)")
 # A Berry error as Tasmota logs a console command's result:
 #   RSL: RESULT = {"Br":"[migration_refused] POST /capture/staged/22 returned HTTP -1 ..."}

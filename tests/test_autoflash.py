@@ -705,7 +705,7 @@ class PhaseFailureTests(unittest.TestCase):
         # As the emulated plug logged it, cut off from the computer mid-stage.
         said, shown = self.console([
             "13:56:01.000 WIF: Connected",
-            "13:56:03.251 S60 STAGE: 65536/811824 bytes",
+            "13:56:03.251 AUTOFLASH STAGE: 65536/811824 bytes",
             "13:57:11.702 HTP: Connection timeout after -1 ms",
             '13:57:11.702 RSL: RESULT = {"Br":"[migration_refused] POST /capture/staged/22 '
             'returned HTTP -1 after 21 attempts"}',
@@ -722,7 +722,7 @@ class PhaseFailureTests(unittest.TestCase):
         said, shown = self.console([
             '13:29:34.062 RSL: RESULT = {"Br":"[migration_refused] POST /capture/staged/2 '
             'returned HTTP -1 after 107 attempts"}',
-            "13:31:03.251 S60 STAGE: 65536/811824 bytes",
+            "13:31:03.251 AUTOFLASH STAGE: 65536/811824 bytes",
         ])
         self.assertIsNone(said)
         self.assertEqual(len(shown), 2)  # still shown, for whoever reads the log
@@ -1275,7 +1275,7 @@ class CommitEvidenceTests(unittest.TestCase):
         result, tries, _, _ = self.commit_tries([
             autoflash.CommitFailed("commit did not pass: the plug says: migration_refused: "
                                    "canonical Safeboot read-back differs at 0x31000",
-                                   "S60 ROLLBACK PASS: interim layout kept"),
+                                   "AUTOFLASH ROLLBACK PASS: interim layout kept"),
             autoflash.CommitFailed("commit refused before writing anything - the plug says: "
                                    "migration_refused: staged Safeboot SHA-256 differs", ""),
             {"exit": 0}])
@@ -1298,7 +1298,7 @@ class CommitEvidenceTests(unittest.TestCase):
         for failure in (
                 autoflash.CommitFailed("commit did not pass: the plug says: migration_refused: "
                                        "canonical Safeboot read-back differs at 0x31000",
-                                       "S60 ROLLBACK FAILED; DO NOT REBOOT OR REMOVE POWER"),
+                                       "AUTOFLASH ROLLBACK FAILED; DO NOT REBOOT OR REMOVE POWER"),
                 autoflash.CommitFailed("commit did not pass: the plug says: migration_refused: "
                                        "commit requires old ota_1 to be running", "")):
             result, tries, recoveries, _ = self.commit_tries([failure, {"exit": 0}])
