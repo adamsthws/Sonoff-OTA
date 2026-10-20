@@ -252,14 +252,17 @@ first half, checks them, and switches to them.
   to any of the three from where it is.
 
 A plug whose firmware has a password - a Tasmota web password, or an ESPHome
-update password, set in Home Assistant, say - is asked for it: Tasmota's when
-the run finds the plug, ESPHome's before the go-ahead to leave it. The
-question has a second choice, for once you have removed the password on the
-plug yourself: try again without one. Each try is checked on the plug, before
-anything is written. A password typed is held in memory for the run only, and
-sent only to a plug that has asked for one. `AUTOFLASH_TASMOTA_PASSWORD` and
-`AUTOFLASH_ESPHOME_OTA_PASSWORD`, in `.env` or the environment, give them in
-advance, as do `--web-password` and `--esphome-ota-password`. An ESPHome set to
+update password or web login, set in Home Assistant, say - is asked for it:
+a web password or login when the run finds the plug, ESPHome's update
+password before the go-ahead to leave it. The question has a second choice,
+for once you have removed the password on the plug yourself: try again
+without one. Each try is checked on the plug, before anything is written. A
+password typed is held in memory for the run only, and sent only to a plug
+that has asked for one. `AUTOFLASH_TASMOTA_PASSWORD`,
+`AUTOFLASH_ESPHOME_OTA_PASSWORD`, and `AUTOFLASH_ESPHOME_WEB_USER` with
+`AUTOFLASH_ESPHOME_WEB_PASSWORD`, in `.env` or the environment, give them in
+advance, as do `--web-password`, `--esphome-ota-password`, and
+`--esphome-web-user` with `--esphome-web-password`. An ESPHome set to
 take only encrypted
 updates (`encryption:` under `ota:`, keyed by its API key) is not one this
 tool can update: the run says so, and waits for it to be removed.

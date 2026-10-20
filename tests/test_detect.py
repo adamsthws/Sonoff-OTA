@@ -99,7 +99,7 @@ class TasmotaTests(unittest.TestCase):
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
                 mock.patch.object(detect, "_is_installer", return_value=False), \
-                mock.patch.object(detect.esphome, "is_esphome", return_value=False):
+                mock.patch.object(detect.esphome, "page", return_value="other"):
             self.assertEqual(detect.converted_s60s("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"}), [])
             self.assertIsNone(detect.identify("192.168.0.37"))
 
@@ -113,7 +113,7 @@ class TasmotaTests(unittest.TestCase):
                 mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
-                mock.patch.object(detect.esphome, "is_esphome", return_value=False), \
+                mock.patch.object(detect.esphome, "page", return_value="other"), \
                 mock.patch.object(detect, "_is_installer", return_value=False):  # nothing real asked
             found = detect.converted_s60s("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
         self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.37", "midway")])
@@ -127,7 +127,7 @@ class TasmotaTests(unittest.TestCase):
                 mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
-                mock.patch.object(detect.esphome, "is_esphome", return_value=False), \
+                mock.patch.object(detect.esphome, "page", return_value="other"), \
                 mock.patch.object(detect, "_is_installer", return_value=False):  # nothing real asked
             found = detect.converted_s60s("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
         self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.37", "midway")])
@@ -193,7 +193,7 @@ class WebPasswordTests(unittest.TestCase):
     def test_found_by_address_or_on_the_network_it_is_named_locked(self):
         neighbours = {"192.168.0.42": "12:34:56:ab:cd:ef"}
         with mock.patch.object(detect, "_tasmota", side_effect=detect.Locked("192.168.0.42")), \
-                mock.patch.object(detect.esphome, "is_esphome", return_value=False), \
+                mock.patch.object(detect.esphome, "page", return_value="other"), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
                 mock.patch.object(detect, "_is_installer", return_value=False), \
                 mock.patch.object(detect.hostsys, "sweep"), \
@@ -204,12 +204,130 @@ class WebPasswordTests(unittest.TestCase):
         self.assertIn("web password", found[0].describe())
 
 
+class LockedESPHome(http.server.ThreadingHTTPServer):
+    """ESPHome's page behind a web login (web_server's auth:), as
+    web_server_idf.cpp asks for one: Basic - or Digest, with `digest` -
+    realm "Login Required", the same words Tasmota's asks in.  Notes what
+    it was sent."""
+    daemon_threads = True
+    USER, PASSWORD = "admin", "w3b-pass"
+    PAGE = b'<!DOCTYPE html><html><body><esp-app></esp-app></body></html>'
+
+    def __init__(self, *, digest=False):
+        import base64
+        import hashlib
+        import secrets
+
+        def md5(text):
+            return hashlib.md5(text.encode()).hexdigest()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def allowed(self):
+                given = self.headers.get("Authorization") or ""
+                if not digest:
+                    expected = base64.b64encode(f"{LockedESPHome.USER}:{LockedESPHome.PASSWORD}".encode())
+                    return given == "Basic " + expected.decode()
+                if not given.startswith("Digest "):
+                    return False
+                fields = dict(part.strip().split("=", 1) for part in given[7:].split(","))
+                fields = {key: value.strip('"') for key, value in fields.items()}
+                ha1 = md5(f"{fields.get('username')}:Login Required:{LockedESPHome.PASSWORD}")
+                ha2 = md5(f"GET:{fields.get('uri')}")
+                expected = md5(f"{ha1}:{fields.get('nonce')}:{fields.get('nc')}:{fields.get('cnonce')}:"
+                               f"{fields.get('qop')}:{ha2}")
+                return fields.get("username") == LockedESPHome.USER and fields.get("response") == expected
+
+            def do_GET(self):
+                self.server.seen.append((self.path, self.headers.get("Authorization")))
+                if self.allowed():
+                    body = LockedESPHome.PAGE if self.path == "/" else b'{"id":"switch-relay","value":true}'
+                    self.send_response(200)
+                else:
+                    body = b"401 Unauthorized"
+                    self.send_response(401)
+                    self.send_header("WWW-Authenticate",
+                                     f'Digest realm="Login Required", qop="auth", nonce="{secrets.token_hex(16)}", '
+                                     f'opaque="{secrets.token_hex(16)}"' if digest
+                                     else 'Basic realm="Login Required"')
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        super().__init__(("127.0.0.1", 0), Handler)
+        self.seen: list[tuple[str, str | None]] = []
+        threading.Thread(target=self.serve_forever, daemon=True).start()
+        self.host = f"127.0.0.1:{self.server_address[1]}"
+
+    def stop(self):
+        self.shutdown()
+        self.server_close()
+
+
+class EsphomeLoginTests(unittest.TestCase):
+    """An ESPHome with a web login says whether it is an S60 only once given
+    it - and the login goes only to a page that asked for one, where ESPHome's
+    update service answers too: Tasmota's page asks in the same words."""
+
+    LOGIN = (LockedESPHome.USER, LockedESPHome.PASSWORD)
+
+    def started(self, server):
+        self.addCleanup(server.stop)
+        return server
+
+    def esphome(self, host, login, *, update_service=True):
+        offer = object() if update_service else None
+        with mock.patch.object(detect.esphome_ota, "probe", return_value=offer):
+            return detect._esphome(host, 2.0, login)
+
+    def test_without_its_login_it_says_it_has_one(self):
+        for digest in (False, True):
+            plug = self.started(LockedESPHome(digest=digest))
+            self.assertEqual(self.esphome(plug.host, None), "esphome-login")
+            self.assertEqual(self.esphome(plug.host, ("admin", "not-it-9")), "esphome-login")
+
+    def test_given_it_an_s60s_esphome_is_found_basic_or_digest(self):
+        for digest in (False, True):
+            plug = self.started(LockedESPHome(digest=digest))
+            self.assertEqual(self.esphome(plug.host, self.LOGIN), "esphome")
+            # Asked without it first: it went only once the page had asked for it.
+            self.assertIsNone(plug.seen[0][1])
+            self.assertTrue(any(authorization for _, authorization in plug.seen))
+
+    def test_a_page_asking_where_no_update_service_answers_is_not_sent_it(self):
+        # Tasmota with a web password, or a router: not ESPHome's.
+        router = self.started(LoginPage())
+        self.assertIsNone(self.esphome(router.host, self.LOGIN, update_service=False))
+        self.assertEqual([authorization for _, authorization in router.seen if authorization], [])
+
+    def test_found_by_address_or_on_the_network_it_is_named(self):
+        neighbours = {"192.168.0.42": "12:34:56:ab:cd:ef"}
+        with mock.patch.object(detect.esphome, "page", return_value="login"), \
+                mock.patch.object(detect.esphome_ota, "probe", return_value=object()), \
+                mock.patch.object(detect, "_port_open", return_value=True), \
+                mock.patch.object(detect.hostsys, "sweep"), \
+                mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours):
+            self.assertEqual(detect.identify("192.168.0.42"), "esphome-login")
+            found = detect.converted_s60s("192.168.0.1")
+        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.42", "esphome-login")])
+        self.assertIn("web login", found[0].describe())
+
+    def test_before_this_it_was_taken_for_the_mover(self):
+        # Its page shut, its update service open: what the mover looks like but
+        # for the page - which the mover has none of.
+        with mock.patch.object(detect.esphome, "page", return_value="login"), \
+                mock.patch.object(detect.esphome_ota, "probe", return_value=object()), \
+                mock.patch.object(detect, "_port_open", return_value=True):
+            self.assertNotEqual(detect.identify("192.168.0.42"), "mover")
+
+
 class InstallerTests(unittest.TestCase):
     """This tool's installer, left by a run part way from Sonoff's firmware,
     answers with its own page: a run carries on from it, not from eWeLink."""
 
     def test_its_page_names_it(self):
-        with mock.patch.object(detect.esphome, "is_esphome", return_value=False), \
+        with mock.patch.object(detect.esphome, "page", return_value="other"), \
              mock.patch.object(detect, "_port_open", return_value=True), \
              mock.patch.object(detect, "_is_installer", return_value=True):
             self.assertEqual(detect.identify("192.168.0.37"), "installer")
@@ -219,7 +337,7 @@ class InstallerTests(unittest.TestCase):
         with mock.patch.object(detect.hostsys, "sweep"), \
              mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
              mock.patch.object(detect, "_port_open", return_value=True), \
-             mock.patch.object(detect.esphome, "is_esphome", return_value=False), \
+             mock.patch.object(detect.esphome, "page", return_value="other"), \
              mock.patch.object(detect, "_is_installer", return_value=True):
             found = detect.converted_s60s("192.168.0.1")
         self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.37", "installer")])

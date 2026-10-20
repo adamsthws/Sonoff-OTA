@@ -129,9 +129,10 @@ if [ "$stub" = 1 ]; then
     printf 'EWELINK_EMAIL=%s\nEWELINK_PASSWORD=%s\n' stub@autoflash-stub.test stub \
         | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
 else
-    # Not the Wi-Fi in it, if any, nor a plug's password: those are your real
-    # network's and plugs', and the emulated plug's are its own (given below).
-    grep -v '^ *\(export \)\?\(AUTOFLASH\|S60\)_\(WIFI_\|TASMOTA_PASSWORD\|ESPHOME_OTA_PASSWORD\)' "$ROOT/.env" \
+    # Not the Wi-Fi in it, if any, nor a plug's password or web login: those
+    # are your real network's and plugs', and the emulated plug's are its own
+    # (given below).
+    grep -v '^ *\(export \)\?\(AUTOFLASH\|S60\)_\(WIFI_\|TASMOTA_PASSWORD\|ESPHOME_\)' "$ROOT/.env" \
         | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
 fi
 [ "$keep" = 1 ] && trap 'docker exec "$NAME" rm -f "$answers" 2>/dev/null || true' EXIT
@@ -150,6 +151,7 @@ stub_env=()
 "${as_you[@]}" -e AUTOFLASH_EMULATOR_URL="http://localhost:$PORT" -e AUTOFLASH_EMULATOR_SUDO_PASSWORD=autoflash \
     "${stub_env[@]}" -e AUTOFLASH_WIFI_SSID=PICSimLabWifi -e AUTOFLASH_EMULATOR_COUNTDOWN="${AUTOFLASH_EMULATOR_COUNTDOWN:-}" \
     -e AUTOFLASH_TASMOTA_PASSWORD="${AUTOFLASH_TASMOTA_PASSWORD:-}" -e AUTOFLASH_ESPHOME_OTA_PASSWORD="${AUTOFLASH_ESPHOME_OTA_PASSWORD:-}" \
+    -e AUTOFLASH_ESPHOME_WEB_USER="${AUTOFLASH_ESPHOME_WEB_USER:-}" -e AUTOFLASH_ESPHOME_WEB_PASSWORD="${AUTOFLASH_ESPHOME_WEB_PASSWORD:-}" \
     -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/unattended_run.py --size 100x40 \
     --save "captures/unattended/$stamp" -- --env-file "$answers" "${run_args[@]}" || status=$?
 

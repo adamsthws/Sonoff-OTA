@@ -143,20 +143,63 @@ def image_for(ssid: str, password: str, own: Path | None = None) -> bytes:
 # Its web page (web_server version 3) and REST paths, named after each entity's
 # name in ESPHome/sonoff_s60.yaml: /switch/Relay, /sensor/Voltage, /sensor/Power.
 
-# Straight to the plug: a proxy set for the internet has no route to it.
-_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+# Web logins (web_server's auth:), each for the plug it was given for
+# (use_login), answering only that plug's own request for one: Basic, or
+# Digest from ESPHome 2027.1 (and before it, with type: digest).
+_LOGINS = urllib.request.HTTPPasswordMgrWithDefaultRealm()
 
 
-def _request(host: str, path: str, *, post: bool = False, timeout: float = 4.0) -> str | None:
+def use_login(host: str, user: str, password: str) -> None:
+    """Answer ESPHome's web login at `host` with these, from now on."""
+    _LOGINS.add_password(None, f"http://{host}/", user, password)
+
+
+class _Quietly:
+    """urllib's own login handlers raise ValueError at a request for a login
+    they cannot answer - in a scheme they do not do, or Digest when given
+    none for it - which here ends as the 401 it is: on a network sweep, any
+    device's page may ask."""
+
+    def http_error_auth_reqed(self, *args):
+        try:
+            return super().http_error_auth_reqed(*args)  # type: ignore[misc]
+        except ValueError:
+            return None
+
+
+class _Basic(_Quietly, urllib.request.HTTPBasicAuthHandler):
+    pass
+
+
+class _Digest(_Quietly, urllib.request.HTTPDigestAuthHandler):
+    pass
+
+
+def _opener() -> urllib.request.OpenerDirector:
+    # Straight to the plug: a proxy set for the internet has no route to it.
+    # A new one each time: urllib's Digest handler stops answering for good
+    # once one login has failed.
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _Digest(_LOGINS), _Basic(_LOGINS))
+
+
+# What _fetch() says for a page that wants a web login it was not given.
+LOGIN = 401
+
+
+def _fetch(host: str, path: str, *, post: bool = False, timeout: float = 4.0) -> str | int | None:
+    """The page at `path`, LOGIN if it wants a web login it was not given (or
+    not the one given), None if it does not come."""
     request = urllib.request.Request(f"http://{host}{path}", data=b"" if post else None,
                                      method="POST" if post else "GET")
     try:
-        with _OPENER.open(request, timeout=timeout) as response:
+        with _opener().open(request, timeout=timeout) as response:
             body = response.read()
             # The page itself (web_server's local: true) comes gzipped, asked or not.
             if response.headers.get("Content-Encoding", "").lower() == "gzip":
                 body = gzip.decompress(body)
             return body.decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        return LOGIN if exc.code == 401 else None
     # zlib.error: a page damaged on its way (seen in the fault suite: one
     # changed byte), which is the network, as a connection dropped is.
     except (urllib.error.URLError, OSError, http.client.HTTPException, EOFError, gzip.BadGzipFile,
@@ -164,10 +207,28 @@ def _request(host: str, path: str, *, post: bool = False, timeout: float = 4.0) 
         return None
 
 
+def _request(host: str, path: str, *, post: bool = False, timeout: float = 4.0) -> str | None:
+    page = _fetch(host, path, post=post, timeout=timeout)
+    return page if isinstance(page, str) else None
+
+
+def page(host: str, timeout: float = 4.0) -> str | None:
+    """What the web page at `host` is: "esphome" for ESPHome's own (not
+    merely "not Tasmota"), "login" for one that wants a web login it was not
+    given (use_login) - Tasmota's asks the same way, so it is ESPHome's only
+    if the update service answers too - "other" for another, None if none
+    comes."""
+    found = _fetch(host, "/", timeout=timeout)
+    if found == LOGIN:
+        return "login"
+    if isinstance(found, str):
+        return "esphome" if "<esp-app" in found else "other"
+    return None
+
+
 def is_esphome(host: str, timeout: float = 4.0) -> bool:
     """Whether ESPHome's own web page answers at `host` (not merely "not Tasmota")."""
-    page = _request(host, "/", timeout=timeout)
-    return page is not None and "<esp-app" in page
+    return page(host, timeout) == "esphome"
 
 
 def _state(host: str, path: str) -> object:

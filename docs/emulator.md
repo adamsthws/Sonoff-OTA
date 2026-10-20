@@ -194,10 +194,12 @@ everything else, as a real one does. The same goes for Windows: its copy of
 the checkout has no `.env`. The run's sudo
 password is the emulator's, and everything else is answered as
 [unattended.md](unattended.md) describes. What `.env` holds of your real
-network and plugs - the Wi-Fi details, a plug's Tasmota or ESPHome password -
-is left out: the emulated plug's are its own. `AUTOFLASH_TASMOTA_PASSWORD` and
-`AUTOFLASH_ESPHOME_OTA_PASSWORD` set where the script runs go to the run instead,
-for an emulated plug given a password to test with. On a terminal the run is shown live;
+network and plugs - the Wi-Fi details, a plug's Tasmota or ESPHome password,
+or its web login - is left out: the emulated plug's are its own.
+`AUTOFLASH_TASMOTA_PASSWORD`, `AUTOFLASH_ESPHOME_OTA_PASSWORD`,
+`AUTOFLASH_ESPHOME_WEB_USER` and `AUTOFLASH_ESPHOME_WEB_PASSWORD` set where the
+script runs go to the run instead, for an emulated plug given them to test
+with. On a terminal the run is shown live;
 otherwise, as in a CI log, the final screen is printed at the end, colours
 and all. The recording stays in
 `captures/emulation/state/work/captures/unattended/<time>/`, beside the run's

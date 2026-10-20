@@ -3,7 +3,7 @@
 A plug still on Sonoff's firmware is found through eWeLink, as ever; one this
 tool converted is found here, by what answers: Tasmota's command interface
 naming the S60's template, or ESPHome's page with the relay its S60 config
-names.  Midway through a conversion a plug can also be running the mover (an
+names - each, behind its web login, once given that.  Midway through a conversion a plug can also be running the mover (an
 ESPHome with no page, only its update service) or the startup firmware (a
 Tasmota safeboot), which a run carrying on recognises.
 """
@@ -25,6 +25,7 @@ NAMES = {
     "midway": "a firmware part way through a conversion",
     "installer": "this tool's installer, part way from Sonoff's firmware",
     "locked": "Tasmota with a web password",
+    "esphome-login": "ESPHome with a web login",
 }
 BRIDGE_PAGE_MARKER = "S60 OTA Bridge"  # as setup_network has it
 
@@ -52,6 +53,8 @@ class Found:
         if self.firmware == "locked":
             # Whether it is an S60 at all, it says only once given its password.
             return f"the Tasmota at {self.host}, which has a web password (asked for next)"
+        if self.firmware == "esphome-login":
+            return f"the ESPHome at {self.host}, which has a web login (asked for next)"
         what = NAMES.get(self.firmware, self.firmware)
         return f"the S60 at {self.host}{f' ({self.name})' if self.name else ''}, running {what}"
 
@@ -136,6 +139,30 @@ def _template(device: Device) -> str | None:
     return None
 
 
+def _esphome(host: str, timeout: float, login: tuple[str, str] | None) -> str | None:
+    """"esphome" if an S60's ESPHome answers at `host`; "esphome-login" for an
+    ESPHome behind a web login that `login` (user name, password) is not;
+    "other" for an ESPHome that is not an S60's; None for no ESPHome page.
+
+    Its login goes only to a page that asked for one, and only once the
+    update service there has answered as ESPHome's - Tasmota's page asks the
+    same way, and the mover has no page at all - so it goes to nothing else.
+    """
+    found = esphome.page(host, timeout)
+    if found == "login":
+        if esphome_ota.probe(host, timeout=timeout) is None:
+            return None
+        if login is None:
+            return "esphome-login"
+        esphome.use_login(host, *login)
+        found = esphome.page(host, timeout)
+        if found == "login":
+            return "esphome-login"
+    if found != "esphome":
+        return None
+    return "esphome" if esphome.relay(host) is not None else "other"
+
+
 def _answers_as_tasmota(host: str, timeout: float) -> bool:
     try:
         status = Device(host, timeout=timeout).command("Status 0")
@@ -144,12 +171,15 @@ def _answers_as_tasmota(host: str, timeout: float) -> bool:
     return isinstance(status, dict) and "Status" in status
 
 
-def identify(host: str, *, timeout: float = 3.0, password: str | None = None) -> str | None:
+def identify(host: str, *, timeout: float = 3.0, password: str | None = None,
+             esphome_login: tuple[str, str] | None = None) -> str | None:
     """sonoff, tasmota, esphome; mover, startup or hub midway; locked, a
-    Tasmota whose web password `password` is not - or None if nothing known
+    Tasmota whose web password `password` is not; esphome-login, an ESPHome
+    whose web login `esphome_login` is not - or None if nothing known
     answers."""
-    if esphome.is_esphome(host, timeout=timeout):
-        return "esphome" if esphome.relay(host) is not None else None
+    found = _esphome(host, timeout, esphome_login)
+    if found:
+        return None if found == "other" else found
     if _port_open(host, 80, timeout):
         if _is_installer(host, timeout):
             return "installer"
@@ -169,13 +199,15 @@ def identify(host: str, *, timeout: float = 3.0, password: str | None = None) ->
 
 
 def converted_s60s(near: str, *, known_macs: set[str] = frozenset(), timeout: float = 2.0,
-                   password: str | None = None) -> list[Found]:
+                   password: str | None = None,
+                   esphome_login: tuple[str, str] | None = None) -> list[Found]:
     """The S60s on the network running Tasmota or ESPHome, found by asking every
     device on the subnet of `near` (an address on it) what it is.  A Tasmota
     safeboot counts only with one of `known_macs`: a plug this computer was
     converting, left on the startup firmware - any Tasmota mid-update looks
-    the same.  A Tasmota whose web password `password` is not is "locked":
-    whether it is an S60 it says only once given its own."""
+    the same.  A Tasmota whose web password `password` is not is "locked",
+    and an ESPHome whose web login `esphome_login` is not "esphome-login":
+    whether it is an S60 each says only once given its own."""
     hostsys.sweep(near)
     neighbours = hostsys.neighbour_table()
 
@@ -186,10 +218,9 @@ def converted_s60s(near: str, *, known_macs: set[str] = frozenset(), timeout: fl
             if esphome_ota.probe(host, timeout=timeout) is not None:
                 return Found(host, "midway", mac, "the mover")
             return None
-        if esphome.is_esphome(host, timeout=timeout):
-            if esphome.relay(host) is not None:
-                return Found(host, "esphome", mac)
-            return None
+        found = _esphome(host, timeout, esphome_login)
+        if found:
+            return None if found == "other" else Found(host, found, mac)
         if _is_installer(host, timeout):
             return Found(host, "installer", mac, "the installer")
         try:

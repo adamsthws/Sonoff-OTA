@@ -33,7 +33,7 @@ class RouteTestCase(unittest.TestCase):
             state.set_input(key, value)
         return SimpleNamespace(state=state, firmware_given=given, esphome_firmware=None,
                                dry_run=False, finder=SimpleNamespace(poll=lambda: None),
-                               esphome_password=None)
+                               esphome_password=None, web_password=None, esphome_login=None)
 
     def setUp_found(self, running="sonoff"):
         # What the plug runs now, as the network would show it.

@@ -2280,7 +2280,8 @@ class RunFilingTests(unittest.TestCase):
         self.assertTrue(name.startswith("plugs/unidentified/runs/"))
         ctx = self.autoflash.Context(SimpleNamespace(
             run=name, manifest=self.autoflash.DEFAULT_MANIFEST, dry_run=False, plug_ip=None,
-            email=None, web_user=None, web_password=None, esphome_ota_password=None))
+            email=None, web_user=None, web_password=None, esphome_ota_password=None,
+            esphome_web_user=None, esphome_web_password=None))
         ctx.state.set_input("plug_ip", "10.0.0.5")
         ctx.file_under_plug("58:CF:79:01:02:03")
         self.assertEqual(ctx.dir.parent, self.captures / "plugs/58-cf-79-01-02-03/runs")
@@ -2297,22 +2298,30 @@ class RunFilingTests(unittest.TestCase):
         def args(**over):
             base = dict(run=name, manifest=self.autoflash.DEFAULT_MANIFEST, dry_run=False,
                         plug_ip=None, email=None, web_user=None, web_password=None,
-                        esphome_ota_password=None)
+                        esphome_ota_password=None, esphome_web_user=None, esphome_web_password=None)
             base.update(over)
             return SimpleNamespace(**base)
         # The flags win, each kept out of the log under its label.
         private = mock.Mock()
         with mock.patch.object(self.autoflash.output, "private", private):
-            ctx = self.autoflash.Context(args(web_password="tas-pw", esphome_ota_password="esp-pw"))
+            ctx = self.autoflash.Context(args(web_password="tas-pw", esphome_ota_password="esp-pw",
+                                              esphome_web_user="admin", esphome_web_password="web-pw"))
         self.assertEqual((ctx.web_password, ctx.esphome_password), ("tas-pw", "esp-pw"))
+        self.assertEqual(ctx.esphome_login, ("admin", "web-pw"))
         private.assert_any_call("tas-pw", "tasmota-password")
         private.assert_any_call("esp-pw", "esphome-password")
+        private.assert_any_call("web-pw", "esphome-web-password")
         # With no flag, the environment (credentials) is the fallback.
         with mock.patch.object(self.autoflash.credentials, "get",
                                side_effect={"AUTOFLASH_TASMOTA_PASSWORD": "env-tas",
-                                            "AUTOFLASH_ESPHOME_OTA_PASSWORD": "env-esp"}.get):
+                                            "AUTOFLASH_ESPHOME_OTA_PASSWORD": "env-esp",
+                                            "AUTOFLASH_ESPHOME_WEB_USER": "env-admin",
+                                            "AUTOFLASH_ESPHOME_WEB_PASSWORD": "env-web"}.get):
             ctx = self.autoflash.Context(args())
         self.assertEqual((ctx.web_password, ctx.esphome_password), ("env-tas", "env-esp"))
+        self.assertEqual(ctx.esphome_login, ("env-admin", "env-web"))
+        # A web login is both, or none.
+        self.assertIsNone(self.autoflash.Context(args(esphome_web_password="web-pw")).esphome_login)
 
     def test_older_runs_with_a_mac_are_adopted(self):
         old = RunState.open(self.captures / "conversion-20261011-1431")
@@ -2882,7 +2891,8 @@ class BerryFromStartupTests(unittest.TestCase):
         from types import SimpleNamespace
         from unittest import mock
         import tools.autoflash_cli as autoflash
-        ctx = SimpleNamespace(dry_run=False, device=SimpleNamespace(host="192.168.60.50"))
+        ctx = SimpleNamespace(dry_run=False, device=SimpleNamespace(host="192.168.60.50"),
+                              web_password=None, esphome_login=None)
         answers = iter(versions)
         seen = []
 
@@ -3553,7 +3563,7 @@ class TasmotaWebPasswordTests(unittest.TestCase):
         from types import SimpleNamespace
         done = inputs.pop("done", ())
         state = SimpleNamespace(input=inputs.get, set_input=inputs.__setitem__, is_done=lambda step: step in done)
-        return SimpleNamespace(state=state, web_password=None)
+        return SimpleNamespace(state=state, web_password=None, esphome_login=None)
 
     def test_a_plug_given_by_address_is_asked_for_it_then_found(self):
         ctx = self.ctx(plug_ip="192.168.0.37")
@@ -3614,7 +3624,7 @@ class TasmotaWebPasswordTests(unittest.TestCase):
                 mock.patch.object(self.af, "ask_secret", return_value="s3cret-71"):
             self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
         self.assertIn("web password", menu.call_args_list[0].args[1][0])  # the plug, then its password
-        identify.assert_called_with("192.168.0.42", password="s3cret-71")
+        identify.assert_called_with("192.168.0.42", password="s3cret-71", esphome_login=None)
         chosen = self.af.adopt_plug.call_args.args[1]
         self.assertEqual((chosen.host, chosen.firmware), ("192.168.0.42", "tasmota"))
 
@@ -3660,6 +3670,111 @@ class TasmotaWebPasswordTests(unittest.TestCase):
             ctx.device = mock.Mock()
             self.af.unlock_tasmota(ctx)
             ctx.device.wants_password.assert_not_called()
+
+
+class EsphomeWebLoginTests(unittest.TestCase):
+    """A plug on ESPHome with a web login (web_server's auth:): asked for it,
+    user name and password, before anything needs it, where someone can type
+    it; stopped, saying what to give, where nobody can.  Each try is checked
+    on the plug's page."""
+
+    LOGIN = ("admin", "w3b-pass")
+
+    def setUp(self):
+        import tools.autoflash_cli as autoflash
+        self.af = autoflash
+        self.private = mock.Mock()
+        for patch in (mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"),
+                      mock.patch.object(autoflash, "section"),
+                      mock.patch.object(autoflash.output, "transient_begin"),
+                      mock.patch.object(autoflash.output, "transient_end"),
+                      mock.patch.object(autoflash.output, "private", self.private),
+                      mock.patch.object(autoflash.prompts, "UNATTENDED", False),
+                      mock.patch.object(autoflash.prompts, "answered_unattended"),
+                      mock.patch.object(autoflash, "adopt_plug"),
+                      mock.patch.object(autoflash, "converted_here", return_value=False),
+                      mock.patch.object(autoflash.plugs, "PLUGS", Path("/nonexistent/plugs")),
+                      mock.patch.object(autoflash.hostsys, "local_ip_towards", return_value="192.168.0.10"),
+                      mock.patch.object(autoflash.hostsys, "mac_of", return_value="12:34:56:ab:cd:ef"),
+                      # A question no test expects fails it, rather than waiting on a keyboard.
+                      mock.patch.object(autoflash, "ask_choice", side_effect=AssertionError("asked")),
+                      mock.patch.object(autoflash, "ask_text", side_effect=AssertionError("asked")),
+                      mock.patch.object(autoflash, "ask_secret", side_effect=AssertionError("asked"))):
+            patch.start()
+            self.addCleanup(patch.stop)
+        # The plug's page wants this login, and none other - until removed (None).
+        self.wanted, self.given = self.LOGIN, None
+        for patch in (mock.patch.object(autoflash.esphome, "use_login",
+                                        side_effect=lambda host, *login: setattr(self, "given", login)),
+                      mock.patch.object(autoflash.esphome, "page",
+                                        side_effect=lambda host, *_: "login" if self.wanted and
+                                        self.given != self.wanted else "esphome")):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def ctx(self, **inputs):
+        from types import SimpleNamespace
+        state = SimpleNamespace(input=inputs.get, set_input=inputs.__setitem__, is_done=lambda step: False)
+        return SimpleNamespace(state=state, web_password=None, esphome_login=None)
+
+    def identify(self, host, password=None, esphome_login=None, **_):
+        return "esphome" if not self.wanted or esphome_login == self.wanted else "esphome-login"
+
+    def test_a_plug_given_by_address_is_asked_for_it_then_found(self):
+        ctx = self.ctx(plug_ip="192.168.0.50")
+        with mock.patch.object(self.af.detect, "identify", side_effect=self.identify), \
+                mock.patch.object(self.af, "ask_choice", return_value=0) as menu, \
+                mock.patch.object(self.af, "ask_text", return_value="admin"), \
+                mock.patch.object(self.af, "ask_secret", side_effect=["not-it-9", "w3b-pass"]) as asked:
+            self.assertEqual(self.af.find_current_firmware(ctx), "esphome")
+        self.assertEqual(asked.call_count, 2)  # the wrong one refused on the plug
+        self.assertEqual(menu.call_args.args[1][0], "Type its web login")
+        self.assertEqual(ctx.esphome_login, self.LOGIN)
+        self.private.assert_any_call("w3b-pass", "esphome-web-password")  # kept out of the log
+
+    def test_unattended_it_stops_saying_what_to_give(self):
+        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
+                mock.patch.object(self.af.detect, "identify", side_effect=self.identify):
+            with self.assertRaisesRegex(self.af.Abort, "web login: give it with --esphome-web-user.*"
+                                        "AUTOFLASH_ESPHOME_WEB_PASSWORD"):
+                self.af.find_current_firmware(self.ctx(plug_ip="192.168.0.50"))
+
+    def test_trying_again_once_it_is_removed_goes_on_without_one(self):
+        ctx = self.ctx(plug_ip="192.168.0.50")
+        choices = []
+
+        def try_again(*_):
+            choices.append(1)
+            if len(choices) == 2:
+                self.wanted = None  # removed from its config, and that installed
+            return 1
+        with mock.patch.object(self.af.detect, "identify", side_effect=self.identify), \
+                mock.patch.object(self.af, "ask_choice", side_effect=try_again):
+            self.assertEqual(self.af.find_current_firmware(ctx), "esphome")
+        self.assertIsNone(ctx.esphome_login)
+        self.af.tell.assert_any_call("    ESPHome there still has a web login.")  # tried too soon
+
+    def test_found_on_the_network_it_is_offered_and_asked_for_once_chosen(self):
+        locked = self.af.detect.Found("192.168.0.42", "esphome-login", "12:34:56:ab:cd:ef")
+        with mock.patch.object(self.af.detect, "converted_s60s", return_value=[locked]), \
+                mock.patch.object(self.af.detect, "identify", side_effect=self.identify), \
+                mock.patch.object(self.af, "ask_choice", side_effect=[0, 0]) as menu, \
+                mock.patch.object(self.af, "ask_text", return_value="admin"), \
+                mock.patch.object(self.af, "ask_secret", return_value="w3b-pass"):
+            self.assertEqual(self.af.find_current_firmware(self.ctx()), "esphome")
+        self.assertIn("web login", menu.call_args_list[0].args[1][0])  # the plug, then its login
+        chosen = self.af.adopt_plug.call_args.args[1]
+        self.assertEqual((chosen.host, chosen.firmware), ("192.168.0.42", "esphome"))
+
+    def test_unattended_one_found_with_a_login_is_left_out_and_named(self):
+        found = [self.af.detect.Found("192.168.0.37", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF"),
+                 self.af.detect.Found("192.168.0.42", "esphome-login", "aa:bb:cc:dd:ee:ff")]
+        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
+                mock.patch.object(self.af.detect, "converted_s60s", return_value=found):
+            self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
+        told = " ".join(str(call.args[0]) for call in self.af.tell.call_args_list)
+        self.assertIn("the ESPHome at 192.168.0.42", told)
+        self.assertIn("--esphome-web-user", told)
 
 
 class EsphomeUpdatePasswordTests(unittest.TestCase):
