@@ -1,3 +1,4 @@
+import contextlib
 import sys
 import tempfile
 import unittest
@@ -6,6 +7,13 @@ from unittest import mock
 
 from tools.autoflash.phases import ARM_RE, LOADER_RE, PhaseRunner, PhaseError, short_loader
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED, RunState
+
+
+def no_lock_records(root, name):
+    """A lock lifted with nothing written where the runs that lift locks say
+    so: this checkout's captures - the main checkout's, through a worktree's
+    link - where a test's record would count as a real run's."""
+    return contextlib.nullcontext()
 
 
 class RunStateTests(unittest.TestCase):
@@ -1219,6 +1227,7 @@ class CommitEvidenceTests(unittest.TestCase):
              mock.patch.object(autoflash, "plug_back_on_wifi"), \
              mock.patch.object(autoflash, "sonoff_layout_back"), \
              mock.patch.object(autoflash.hostsys, "replace_file"), \
+             mock.patch.object(autoflash.safety_locks, "lifted", no_lock_records), \
              mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
             with self.assertRaises(autoflash.Abort) as caught:
                 autoflash.commit_once(ctx)
@@ -1699,6 +1708,17 @@ class ConsentTests(unittest.TestCase):
 class StartChoiceTests(unittest.TestCase):
     """The first steps ask only what matters: which Wi-Fi, and look again if no plug."""
 
+    @staticmethod
+    def locks_in_place():
+        """A5 finding both safety locks in place, as this checkout's are - without
+        looking in its captures, where the runs that lift them say so."""
+        import contextlib
+        import tools.s60_autoflash as autoflash
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(autoflash.safety_locks, "restore_left", return_value=[]))
+        stack.enter_context(mock.patch.object(autoflash.safety_locks, "in_place", return_value=True))
+        return stack
+
     def ctx(self):
         from types import SimpleNamespace
         import tools.s60_autoflash as autoflash
@@ -1717,7 +1737,7 @@ class StartChoiceTests(unittest.TestCase):
              mock.patch.object(autoflash.hostsys, "check_sha256sums", return_value=[]), \
              mock.patch.object(autoflash, "ask_choice") as menu, \
              mock.patch.object(autoflash, "make_bundle") as rebuild, \
-             mock.patch.object(autoflash, "say"):
+             self.locks_in_place(), mock.patch.object(autoflash, "say"):
             autoflash.step_check(self.ctx())
         menu.assert_not_called()
         rebuild.assert_not_called()
@@ -1732,6 +1752,7 @@ class StartChoiceTests(unittest.TestCase):
              mock.patch.object(autoflash.hostsys, "check_sha256sums", return_value=[]), \
              mock.patch.object(autoflash, "ask_credentials") as credentials, \
              mock.patch.object(autoflash, "ask_secret") as secret, \
+             self.locks_in_place(), \
              mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
             autoflash.step_check(self.ctx())
         build.assert_called_once()
