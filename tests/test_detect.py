@@ -107,7 +107,8 @@ class TasmotaTests(unittest.TestCase):
                 mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
-                mock.patch.object(detect.esphome, "is_esphome", return_value=False):
+                mock.patch.object(detect.esphome, "is_esphome", return_value=False), \
+                mock.patch.object(detect, "_is_installer", return_value=False):  # nothing real asked
             found = detect.converted_s60s("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
         self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.37", "midway")])
 
@@ -120,7 +121,8 @@ class TasmotaTests(unittest.TestCase):
                 mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
-                mock.patch.object(detect.esphome, "is_esphome", return_value=False):
+                mock.patch.object(detect.esphome, "is_esphome", return_value=False), \
+                mock.patch.object(detect, "_is_installer", return_value=False):  # nothing real asked
             found = detect.converted_s60s("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
         self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.37", "midway")])
 
