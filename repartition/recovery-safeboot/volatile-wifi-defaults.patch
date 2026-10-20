@@ -17,7 +17,7 @@ diff --git a/tasmota/tasmota_support/settings.ino b/tasmota/tasmota_support/sett
 +  SettingsDefaultSet1();
 +  SettingsDefaultSet2();
 +  settings_location = 0;
-+  AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery Wi-Fi defaults active"));
++  AddLog(LOG_LEVEL_INFO, PSTR("Autoflash recovery Wi-Fi defaults active"));
 +#endif
 +
  #ifndef FIRMWARE_MINIMAL

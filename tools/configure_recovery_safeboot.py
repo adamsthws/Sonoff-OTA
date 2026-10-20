@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create the private compile-time Wi-Fi header for S60 recovery Safeboot."""
+"""Create the private compile-time Wi-Fi header for the recovery Safeboot."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def render_header(ssid: str, password: str) -> bytes:
         "#undef WIFI_CONFIG_TOOL\n"
         "#define WIFI_CONFIG_TOOL WIFI_RETRY\n"
         "#undef WIFI_DEFAULT_HOSTNAME\n"
-        "#define WIFI_DEFAULT_HOSTNAME \"s60-recovery-%04d\"\n\n"
+        "#define WIFI_DEFAULT_HOSTNAME \"autoflash-recovery-%04d\"\n\n"
         "#endif  // _USER_CONFIG_OVERRIDE_H_\n"
     ).encode("ascii")
 

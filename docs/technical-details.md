@@ -28,7 +28,7 @@ part of the ordinary release download:
   is the Berry-capable ESP32-C3 build used while the old partition map is still
   active. It is pinned byte-for-byte and includes its upstream source revision
   in [the artifact notes](../artifacts/README.md).
-- [`artifacts/s60-recovery-safeboot-imprintable.bin`](../artifacts/s60-recovery-safeboot-imprintable.bin)
+- [`artifacts/autoflash-recovery-safeboot-imprintable.bin`](../artifacts/autoflash-recovery-safeboot-imprintable.bin)
   is the small temporary startup firmware. It contains placeholders, not a
   real network name or password, so the published copy is safe to share. It
   also saves the Wi-Fi where Tasmota reads it, so the official Tasmota

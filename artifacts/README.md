@@ -8,7 +8,7 @@ directory, never here.
 |---|---|---|
 | `s60-ota-bridge-4.4.3.ota` | Wrapped one-shot bridge the run installs; joins the home Wi-Fi stock was on, raising its own network only if that fails, lets the run back up the whole flash, gives Tasmota its settings, and starts even after an upload cut off part way | `0d179df29612d14a258f6926bd8f248cd46f3e78f0cf5c6cd0c427d6780b7f7f` |
 | `tasmota32c3-bluetooth.bin` | Berry-capable Tasmota used temporarily on the original partition layout | `a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708` |
-| `s60-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `aa32fafa4a9470152d5f8826fc6aedf94387575332353b50b8ce454ec1f9d364` |
+| `autoflash-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `627a639bc8f7796419faf69fcd0c22d238946d11856a87048caecf32bcd89e2b` |
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
 | `esphome-sonoff-s60-bootloader-1.1.0.bin` | ESPHome's bootloader, from the same build: it replaces Sonoff's when ESPHome is installed, so ESPHome can roll back an update that fails to start | `3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433` |
 | `esphome-sonoff-s60-imprintable-1.1.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `eb5c2f6922fb913c05c08324f48ce1e4bf519c7b5b4da7bc59797c72352cce0a` |
@@ -39,8 +39,20 @@ itself. It logs whether that worked, and the run records it at F2. It never
 touches settings that are already there. The
 saved record has only what a Safeboot sets, so F4 starts with `Reset 4`, which
 rebuilds every other setting from official Tasmota's defaults and keeps the
-Wi-Fi. A rebuild differs from the published file only in its build date, time
-and the hashes covering them.
+Wi-Fi. It names itself as the tool, not one device: its network name is
+`autoflash-recovery-NNNN`, and what it logs starts "Autoflash recovery" (until
+20 October 2026 they were `s60-recovery-NNNN` and "S60 recovery", and the file
+was `s60-recovery-safeboot-imprintable.bin`; the run still reads the older log
+lines, from a plug a run of an older checkout left on it).
+
+To publish a new one: `tools/configure_imprintable_safeboot.py` writes the
+header with the placeholders, `tools/build_recovery_safeboot.sh` builds it from
+the pinned Tasmota source, `tools/sanitise_safeboot.py` blanks the build
+machine's paths in place, and `tools/validate_imprintable_safeboot.py` must
+then say it is publishable. A rebuild holds the same text as the published file
+but its build date and time; one built in a directory whose path is not as
+long as this one's (38 characters) has everything after the first such path a
+few bytes along.
 
 The imprintable Safeboot contains reserved placeholder bytes instead of real
 Wi-Fi credentials. It **must not be flashed as published**: the private

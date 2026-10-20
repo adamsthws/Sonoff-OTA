@@ -136,11 +136,11 @@ RECOVERY_MODE = "private-volatile-wifi-safeboot-v1"
 # copy is that file with their own network details written in - no local build.
 IMPRINTED_MODE = "public-imprinted-safeboot-v1"
 PUBLISHED_RECOVERY_FILE = (
-    Path(__file__).resolve().parents[1] / "artifacts" / "s60-recovery-safeboot-imprintable.bin"
+    Path(__file__).resolve().parents[1] / "artifacts" / "autoflash-recovery-safeboot-imprintable.bin"
 )
-PUBLISHED_RECOVERY_SHA256 = "aa32fafa4a9470152d5f8826fc6aedf94387575332353b50b8ce454ec1f9d364"
+PUBLISHED_RECOVERY_SHA256 = "627a639bc8f7796419faf69fcd0c22d238946d11856a87048caecf32bcd89e2b"
 RECOVERY_ARTIFACT = "recovery_safeboot"
-RECOVERY_MARKER = b"S60 recovery Wi-Fi defaults active"
+RECOVERY_MARKER = b"Autoflash recovery Wi-Fi defaults active"
 RECOVERY_PATCH = (
     Path(__file__).resolve().parents[1]
     / "repartition"

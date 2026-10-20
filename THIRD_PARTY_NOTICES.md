@@ -13,7 +13,7 @@ the corresponding source is upstream commit
 Its build environment is `tasmota32c3-bluetooth` in
 [`platformio_tasmota_cenv_sample.ini`](https://github.com/arendst/Tasmota/blob/f5b34a26be51be2469737d2c43a62acb237c264f/platformio_tasmota_cenv_sample.ini).
 
-`artifacts/s60-recovery-safeboot-imprintable.bin` is a custom Safeboot derived
+`artifacts/autoflash-recovery-safeboot-imprintable.bin` is a custom Safeboot derived
 from upstream Tasmota commit
 [`db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892`](https://github.com/arendst/Tasmota/tree/db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892).
 The corresponding project changes and build tooling are

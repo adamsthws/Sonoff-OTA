@@ -3268,15 +3268,22 @@ class StartupSettingsReportTests(unittest.TestCase):
         return note, " ".join(str(c.args[0]) for c in said.call_args_list)
 
     def test_a_saved_record_is_reported(self):
-        note, text = self.report(["00:00:00.255 S60 recovery Wi-Fi defaults active",
-                                  "00:00:00.316 S60 recovery: Wi-Fi settings saved for the next firmware"])
-        self.assertEqual(note, "S60 recovery: Wi-Fi settings saved for the next firmware")
+        note, text = self.report(["00:00:00.255 Autoflash recovery Wi-Fi defaults active",
+                                  "00:00:00.316 Autoflash recovery: Wi-Fi settings saved for the next firmware"])
+        self.assertEqual(note, "Autoflash recovery: Wi-Fi settings saved for the next firmware")
         self.assertIn("should join your network by itself", text)
 
     def test_a_failure_is_explained_and_the_fallback_named(self):
-        note, text = self.report(["00:00:00.300 S60 recovery: settings not saved, read-back failed (4354)"])
+        note, text = self.report(["00:00:00.300 Autoflash recovery: settings not saved, read-back failed (4354)"])
         self.assertIn("read-back failed", note)
         self.assertIn("its own network instead", text)
+        self.assertIn("Tasmota: settings not saved, read-back failed (4354).", text)
+
+    def test_the_startup_firmware_from_before_its_rename_is_read_too(self):
+        # A plug a run from an older checkout left on the startup firmware.
+        note, text = self.report(["00:00:00.300 S60 recovery: settings not saved, NVS wipe failed (-1)"])
+        self.assertEqual(note, "S60 recovery: settings not saved, NVS wipe failed (-1)")
+        self.assertIn("Tasmota: settings not saved, NVS wipe failed (-1).", text)
 
     def test_an_unreadable_log_does_not_stop_the_run(self):
         from tools.autoflash.device import DeviceError

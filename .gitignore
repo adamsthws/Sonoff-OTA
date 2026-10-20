@@ -28,7 +28,7 @@ __pycache__/
 *.ota
 !artifacts/s60-ota-bridge-4.4.3.ota
 !artifacts/tasmota-settings-template-15.6.0.0.bin
-!artifacts/s60-recovery-safeboot-imprintable.bin
+!artifacts/autoflash-recovery-safeboot-imprintable.bin
 !artifacts/tasmota32c3-bluetooth.bin
 !artifacts/esphome-sonoff-s60-bootloader-1.1.0.bin
 !artifacts/esphome-sonoff-s60-imprintable-1.1.0.bin

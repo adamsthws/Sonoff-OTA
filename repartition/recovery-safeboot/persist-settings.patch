@@ -22,14 +22,14 @@
 +//
 +// Every failure is logged and otherwise silent: the next firmware then
 +// behaves exactly as it would have without this.
-+void S60PersistRecoverySettings(void) {
++void AutoflashPersistRecoverySettings(void) {
 +  TSettings *stored = (TSettings*)calloc(1, sizeof(TSettings));
 +  if (nullptr == stored) { return; }
 +  bool present = NvmLoad("main", "Settings", stored, sizeof(TSettings)) &&
 +                 ((uint16_t)CFG_HOLDER == stored->cfg_holder);
 +  if (present) {
 +    free(stored);
-+    AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery: settings already stored, left alone"));
++    AddLog(LOG_LEVEL_INFO, PSTR("Autoflash recovery: settings already stored, left alone"));
 +    return;
 +  }
 +  esp_err_t result = nvs_flash_erase();  // de-initialises it first
@@ -38,7 +38,7 @@
 +  }
 +  if (ESP_OK != result) {
 +    free(stored);
-+    AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery: settings not saved, NVS wipe failed (%d)"), result);
++    AddLog(LOG_LEVEL_INFO, PSTR("Autoflash recovery: settings not saved, NVS wipe failed (%d)"), result);
 +    return;
 +  }
 +  Settings->cfg_crc32 = GetSettingsCrc32();
@@ -57,9 +57,9 @@
 +              (0 == memcmp(stored, Settings, sizeof(TSettings)));
 +  free(stored);
 +  if (same) {
-+    AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery: Wi-Fi settings saved for the next firmware"));
++    AddLog(LOG_LEVEL_INFO, PSTR("Autoflash recovery: Wi-Fi settings saved for the next firmware"));
 +  } else {
-+    AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery: settings not saved, read-back failed (%d)"), result);
++    AddLog(LOG_LEVEL_INFO, PSTR("Autoflash recovery: settings not saved, read-back failed (%d)"), result);
 +  }
 +}
 +#endif  // AUTOFLASH_RECOVERY_PERSIST_SETTINGS
@@ -70,9 +70,9 @@
 @@ -862,6 +922,9 @@
    SettingsDefaultSet2();
    settings_location = 0;
-   AddLog(LOG_LEVEL_INFO, PSTR("S60 recovery Wi-Fi defaults active"));
+   AddLog(LOG_LEVEL_INFO, PSTR("Autoflash recovery Wi-Fi defaults active"));
 +#ifdef AUTOFLASH_RECOVERY_PERSIST_SETTINGS
-+  S60PersistRecoverySettings();
++  AutoflashPersistRecoverySettings();
 +#endif
  #endif
  

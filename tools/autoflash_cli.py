@@ -3101,7 +3101,9 @@ def wait_for_official(ctx: Context) -> str:
     )
 
 
-STARTUP_LOG_PREFIX = "S60 recovery:"
+# How the startup firmware begins what it logs of that; the second, before it
+# was renamed - on a plug a run from an older checkout left part way.
+STARTUP_LOG_PREFIXES = ("Autoflash recovery:", "S60 recovery:")
 
 
 def startup_settings_report(device: Device) -> str | None:
@@ -3115,18 +3117,19 @@ def startup_settings_report(device: Device) -> str | None:
     except (DeviceError, OSError, ValueError) as exc:
         say(f"    Could not read the recovery firmware's log ({exc}).")
         return None
-    notes = [line[line.index(STARTUP_LOG_PREFIX):] for line in lines if STARTUP_LOG_PREFIX in line]
+    notes = [(line[line.index(prefix):], prefix) for line in lines
+             for prefix in STARTUP_LOG_PREFIXES if prefix in line]
     if not notes:
         say("    The recovery firmware's log does not say whether it saved your Wi-Fi.")
         return None
-    note = notes[-1]
+    note, prefix = notes[-1]
     if "saved for the next firmware" in note:
         say("    It has saved your Wi-Fi where official Tasmota reads it, so Tasmota")
         say("    should join your network by itself.")
     elif "left alone" in note:
         say("    Tasmota settings from before were still there; it left them as they were.")
     else:
-        say(f"    It could not save your Wi-Fi for official Tasmota: {note[len(STARTUP_LOG_PREFIX):].strip()}.")
+        say(f"    It could not save your Wi-Fi for official Tasmota: {note[len(prefix):].strip()}.")
         say("    Tasmota will ask to be set up through its own network instead, as before.")
     return note
 

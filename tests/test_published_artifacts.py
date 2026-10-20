@@ -58,10 +58,14 @@ class PublishedArtifactTests(unittest.TestCase):
         from tools.safeboot_migration import PUBLISHED_RECOVERY_FILE, PUBLISHED_RECOVERY_SHA256
         image = PUBLISHED_RECOVERY_FILE.read_bytes()
         self.assertEqual(sha256_bytes(image), PUBLISHED_RECOVERY_SHA256)
-        self.assertIn(b"S60 recovery Wi-Fi defaults active", image)
-        self.assertIn(b"S60 recovery: Wi-Fi settings saved for the next firmware", image)
+        self.assertIn(b"Autoflash recovery Wi-Fi defaults active", image)
+        self.assertIn(b"Autoflash recovery: Wi-Fi settings saved for the next firmware", image)
         # The version that wipes NVS and reads the record back before saying so.
-        self.assertIn(b"S60 recovery: settings not saved, read-back failed", image)
+        self.assertIn(b"Autoflash recovery: settings not saved, read-back failed", image)
+        # Named as the tool, not one device, on the network and in its log.
+        self.assertIn(b"autoflash-recovery-%04d", image)
+        self.assertNotIn(b"S60 recovery", image)
+        self.assertNotIn(b"s60-recovery", image)
 
 
 if __name__ == "__main__":
