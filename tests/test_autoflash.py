@@ -3608,3 +3608,121 @@ class TasmotaWebPasswordTests(unittest.TestCase):
             ctx.device = mock.Mock()
             self.af.unlock_tasmota(ctx)
             ctx.device.wants_password.assert_not_called()
+
+
+class EsphomeUpdatePasswordTests(unittest.TestCase):
+    """A plug on ESPHome with an update password: asked for it before the
+    go-ahead where someone can type it - or tried again without one, once
+    its owner has removed it - and stopped, saying what to give, where nobody
+    can.  The password goes with the update."""
+
+    def setUp(self):
+        import tools.s60_autoflash as autoflash
+        self.af = autoflash
+        self.private = mock.Mock()
+        for patch in (mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"),
+                      mock.patch.object(autoflash, "section"),
+                      mock.patch.object(autoflash.output, "transient_begin"),
+                      mock.patch.object(autoflash.output, "transient_end"),
+                      mock.patch.object(autoflash.output, "progress"),
+                      mock.patch.object(autoflash.output, "progress_clear"),
+                      mock.patch.object(autoflash.output, "private", self.private),
+                      mock.patch.object(autoflash.prompts, "UNATTENDED", False),
+                      # A question no test expects fails it, rather than waiting on a keyboard.
+                      mock.patch.object(autoflash, "ask_choice", side_effect=AssertionError("asked")),
+                      mock.patch.object(autoflash, "ask_secret", side_effect=AssertionError("asked"))):
+            patch.start()
+            self.addCleanup(patch.stop)
+        # ESPHome on the plug wants this update password, until its owner
+        # removes it (None) - or takes only encrypted updates, while encrypted.
+        self.wanted, self.encrypted = "s3cret-71", False
+        ota = autoflash.esphome_ota
+
+        def wants_password(host, password=None, **_):
+            if self.encrypted:
+                raise ota.NeedsEncryption()
+            return self.wanted is not None and password != self.wanted
+
+        def probe(host, **_):
+            return ota.Offer(2, True, True, False, encrypted_only=self.encrypted)
+        for patch in (mock.patch.object(ota, "wants_password", side_effect=wants_password),
+                      mock.patch.object(ota, "probe", side_effect=probe)):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def ctx(self, password=None):
+        from types import SimpleNamespace
+        inputs = {"plug_ip": "192.168.0.50"}
+        state = SimpleNamespace(input=inputs.get, set_input=inputs.__setitem__, is_done=lambda step: False)
+        return SimpleNamespace(state=state, esphome_password=password)
+
+    def test_asked_for_before_the_go_ahead_and_sent_with_the_update(self):
+        ctx = self.ctx()
+        with mock.patch.object(self.af, "ask_choice", return_value=0) as menu, \
+                mock.patch.object(self.af, "ask_secret", side_effect=["not-it-9", "s3cret-71"]) as asked:
+            self.af.unlock_esphome(ctx)
+        self.assertEqual(asked.call_count, 2)  # the wrong one refused on the plug
+        self.assertEqual(ctx.esphome_password, "s3cret-71")
+        self.assertEqual(menu.call_args.args[1][0], "Type its update password")
+        self.assertIn("once you have removed it yourself", menu.call_args.args[1][1])
+        self.private.assert_any_call("s3cret-71", "esphome-password")  # kept out of the log
+        with mock.patch.object(self.af.esphome_ota, "upload") as upload:
+            self.af.send_as_esphome_update(ctx, b"image", "the startup firmware")
+        self.assertEqual(upload.call_args.kwargs["password"], "s3cret-71")
+
+    def test_given_in_advance_it_is_not_asked(self):
+        ctx = self.ctx("s3cret-71")  # S60_ESPHOME_OTA_PASSWORD, in .env or the environment
+        self.af.unlock_esphome(ctx)
+        self.assertEqual(ctx.esphome_password, "s3cret-71")
+        self.wanted = None
+        self.af.unlock_esphome(self.ctx())  # and a plug with none asks nothing
+
+    def test_unattended_without_it_the_run_stops_saying_what_to_give(self):
+        with mock.patch.object(self.af.prompts, "UNATTENDED", True):
+            with self.assertRaisesRegex(self.af.Abort, "update password: give it as S60_ESPHOME_OTA_PASSWORD"):
+                self.af.unlock_esphome(self.ctx())
+            with self.assertRaisesRegex(self.af.Abort, "the one given is not it"):
+                self.af.unlock_esphome(self.ctx("not-it-9"))
+
+    def test_trying_again_once_it_is_removed_goes_on_without_one(self):
+        ctx = self.ctx()
+        choices = []
+
+        def try_again(*_):
+            choices.append(1)
+            if len(choices) == 2:
+                self.wanted = None  # removed from its config, and that installed, before choosing again
+            return 1
+        with mock.patch.object(self.af, "ask_choice", side_effect=try_again):
+            self.af.unlock_esphome(ctx)
+        self.assertIsNone(ctx.esphome_password)
+        self.af.tell.assert_any_call("    ESPHome there still has an update password.")  # tried too soon
+
+    def test_an_update_refused_for_it_later_is_asked_for_and_sent_again(self):
+        ctx = self.ctx()  # none at the go-ahead: an X2 sending the startup firmware once more, say
+        refused = self.af.esphome_ota.NeedsPassword(given=False)
+        with mock.patch.object(self.af.esphome_ota, "upload", side_effect=[refused, None]) as upload, \
+                mock.patch.object(self.af, "ask_choice", return_value=0), \
+                mock.patch.object(self.af, "ask_secret", return_value="s3cret-71"):
+            self.af.send_as_esphome_update(ctx, b"image", "the startup firmware")
+        self.assertEqual([call.kwargs["password"] for call in upload.call_args_list], [None, "s3cret-71"])
+
+    def test_one_taking_only_encrypted_updates_is_waited_on_until_changed(self):
+        self.encrypted = True
+        ctx = self.ctx()
+        choices = []
+
+        def choose(*_):
+            choices.append(1)
+            if len(choices) == 2:
+                self.encrypted = False  # encryption: removed, an update password put instead
+            return 0
+        with mock.patch.object(self.af, "ask_choice", side_effect=choose), \
+                mock.patch.object(self.af, "ask_secret", return_value="s3cret-71"):
+            self.af.unlock_esphome(ctx)
+        self.assertEqual(ctx.esphome_password, "s3cret-71")  # then asked for that
+        self.af.tell.assert_any_call("    ESPHome there still takes only encrypted updates.")
+        self.encrypted = True
+        with mock.patch.object(self.af.prompts, "UNATTENDED", True):
+            with self.assertRaisesRegex(self.af.Abort, "only encrypted updates.*remove encryption:"):
+                self.af.unlock_esphome(self.ctx())

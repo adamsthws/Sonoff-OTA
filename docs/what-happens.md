@@ -246,15 +246,22 @@ first half, checks them, and switches to them.
   cleared, and Sonoff's layout table is written last - the one moment a power
   cut would leave a plug needing to be opened. The plug restarts into the
   mover, which takes ESPHome itself as an update, or the startup firmware
-  as on the way from ESPHome. A Tasmota with a web password is asked for it
-  when the run finds the plug - or, once you have cleared it on the plug
-  yourself, tries again without one. `--web-password`, or
-  `S60_TASMOTA_PASSWORD` in `.env` or the environment, gives it in advance.
-  It is held in memory for the run only, and sent only to a Tasmota that
-  has asked for it.
+  as on the way from ESPHome.
 - **A plug left part way** - running the mover, the startup firmware or the
   full Tasmota on Sonoff's layout - is recognised by a new run, and can go on
   to any of the three from where it is.
+
+A plug whose firmware has a password - a Tasmota web password, or an ESPHome
+update password, set in Home Assistant, say - is asked for it: Tasmota's when
+the run finds the plug, ESPHome's before the go-ahead to leave it. The
+question has a second choice, for once you have removed the password on the
+plug yourself: try again without one. Each try is checked on the plug, before
+anything is written. A password typed is held in memory for the run only, and
+sent only to a plug that has asked for one; `S60_TASMOTA_PASSWORD` and
+`S60_ESPHOME_OTA_PASSWORD`, in `.env` or the environment, give them in advance
+(for Tasmota, `--web-password` too). An ESPHome set to take only encrypted
+updates (`encryption:` under `ota:`, keyed by its API key) is not one this
+tool can update: the run says so, and waits for it to be removed.
 
 The Wi-Fi signal is read first from Tasmota, before anything is changed. From
 ESPHome it is read before anything is written too: from its Wi-Fi signal

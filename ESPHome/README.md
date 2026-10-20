@@ -43,6 +43,11 @@ as it could send the plug new firmware while OTA has no password. Giving the
 API a key closes it; the tool then takes the details from the plug's Sonoff
 backup, if this computer has it, or asks for them.
 
+An update password added later (`password:` under `ota:`) is asked for when
+the tool takes the plug off ESPHome, or given as `S60_ESPHOME_OTA_PASSWORD`.
+Updates made only with the API key (`encryption:` under `ota:`) are not ones
+the tool can make: it asks for that to be removed first.
+
 The last `on_boot` lambda also saves the Wi-Fi in use under the one fixed key
 ESPHome looks in when a build has no network of its own at start-up. A build
 that has one - this image, once the tool writes the Wi-Fi in - saves it under a

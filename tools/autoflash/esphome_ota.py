@@ -1,22 +1,25 @@
 """ESPHome's own update protocol (port 3232), as its espota2.py speaks it.
 
-Only what the run needs: an update to a plug with no update password, of an
-app (written by ESPHome into its other app slot, which it then starts) or,
-from a firmware built with allow_partition_access (the mover), a partition
-table - which ESPHome checks, moving the running app into a slot of the new
-table first when it has to.
+Only what the run needs: an update, with the plug's update password if it
+has one, of an app (written by ESPHome into its other app slot, which it then
+starts) or, from a firmware built with allow_partition_access (the mover), a
+partition table - which ESPHome checks, moving the running app into a slot of
+the new table first when it has to.
 
 The wire protocol: five magic bytes; the plug answers OK and its protocol
-version; feature flags both ways; its auth (none here); the update type; the
-size, the MD5 of what follows, then the data in 8 KiB blocks, each
-acknowledged; then "received" and "update ended", after which the plug starts
-what it was sent.
+version; feature flags both ways; its password challenge, if it has one (a
+nonce, answered with ours and the hash of the password with both); the
+update type; the size, the MD5 of what follows, then the data in 8 KiB
+blocks, each acknowledged; then "received" and "update ended", after which
+the plug starts what it was sent.  One set to take only encrypted updates
+(`ota: encryption:`, keyed by its API key) is not spoken to.
 """
 
 from __future__ import annotations
 
 import gzip
 import hashlib
+import secrets
 import socket
 from dataclasses import dataclass
 
@@ -39,11 +42,19 @@ SUPPORTS_COMPRESSION = 0x46
 CHUNK_OK = 0x47
 FEATURE_FLAGS = 0x48
 
+AUTH_INVALID = 0x82
+ENCRYPTION_REQUIRED = 0x94
+
 CLIENT_COMPRESSION = 0x01
 CLIENT_SHA256_AUTH = 0x02
 CLIENT_EXTENDED = 0x04
 SERVER_COMPRESSION = 0x01
 SERVER_PARTITION_ACCESS = 0x02
+
+# The plug's password challenge, by the answer that makes it: the hash, and
+# the length of its nonce in hex.  SHA256 in current ESPHome, which takes no
+# other; MD5 in older ones.
+CHALLENGES = {REQUEST_SHA256_AUTH: (hashlib.sha256, 64), REQUEST_AUTH: (hashlib.md5, 32)}
 
 BLOCK = 8192
 # Longer than the plug's own data timeout (105 s), as espota2 has it.
@@ -74,7 +85,22 @@ class OTAError(RuntimeError):
 
 
 class NeedsPassword(OTAError):
-    """ESPHome on the plug has an update password (set in Home Assistant, say)."""
+    """ESPHome on the plug has an update password (set in Home Assistant, say),
+    and none was given, or not the right one."""
+
+    def __init__(self, given: bool) -> None:
+        super().__init__("ESPHome on the plug has an update password"
+                         + (", and the one given is not it" if given else ""))
+        self.given = given
+
+
+class NeedsEncryption(OTAError):
+    """ESPHome on the plug takes only encrypted updates (`ota: encryption:`),
+    made with its API key."""
+
+    def __init__(self) -> None:
+        super().__init__("ESPHome on the plug takes only encrypted updates (its ota config has "
+                         "encryption:), which this tool cannot make")
 
 
 @dataclass
@@ -83,6 +109,7 @@ class Offer:
     extended: bool  # it takes an update type: the extended protocol
     compression: bool
     partition_access: bool
+    encrypted_only: bool = False  # it refused to go on unencrypted
 
 
 def _recv(sock: socket.socket, count: int, what: str) -> bytes:
@@ -110,8 +137,15 @@ def _handshake(sock: socket.socket) -> Offer:
     version = _recv(sock, 1, "version")[0]
     if version not in (1, 2):
         raise OTAError(f"unsupported ESPHome update protocol {version}")
-    sock.sendall(bytes([CLIENT_COMPRESSION | CLIENT_EXTENDED]))
+    # SHA256 offered for the password challenge: current ESPHome, if it has a
+    # password, refuses a client that does not offer it.
+    sock.sendall(bytes([CLIENT_COMPRESSION | CLIENT_SHA256_AUTH | CLIENT_EXTENDED]))
     answer = _recv(sock, 1, "features")[0]
+    if answer == ENCRYPTION_REQUIRED:
+        return Offer(version=version, extended=False, compression=False, partition_access=False,
+                     encrypted_only=True)
+    if answer in ERRORS:
+        raise OTAError(f"features: {ERRORS[answer]}")
     if answer == FEATURE_FLAGS:
         flags = _recv(sock, 1, "feature flags")[0]
     else:
@@ -119,6 +153,27 @@ def _handshake(sock: socket.socket) -> Offer:
     extended = answer == FEATURE_FLAGS
     return Offer(version=version, extended=extended, compression=bool(flags & SERVER_COMPRESSION),
                  partition_access=extended and bool(flags & SERVER_PARTITION_ACCESS))
+
+
+def _authenticate(sock: socket.socket, password: str | None) -> None:
+    """Through the plug's password challenge, if it makes one."""
+    asked = _recv(sock, 1, "authentication")[0]
+    if asked == AUTH_OK:
+        return
+    if asked == AUTH_INVALID or (asked in CHALLENGES and not password):
+        raise NeedsPassword(given=bool(password))
+    if asked not in CHALLENGES:
+        raise OTAError(f"authentication: {ERRORS.get(asked, f'unexpected answer 0x{asked:02X}')}")
+    hash_function, size = CHALLENGES[asked]
+    nonce = _recv(sock, size, "the password challenge")
+    ours = secrets.token_hex(size // 2).encode("ascii")
+    proof = hash_function(password.encode("utf-8") + nonce + ours).hexdigest().encode("ascii")
+    sock.sendall(ours + proof)
+    answer = _recv(sock, 1, "the password")[0]
+    if answer == AUTH_INVALID:
+        raise NeedsPassword(given=True)
+    if answer != AUTH_OK:
+        raise OTAError(f"the password: {ERRORS.get(answer, f'unexpected answer 0x{answer:02X}')}")
 
 
 def probe(host: str, *, port: int = PORT, timeout: float = 4.0) -> Offer | None:
@@ -134,19 +189,47 @@ def probe(host: str, *, port: int = PORT, timeout: float = 4.0) -> Offer | None:
         return None
 
 
+def wants_password(host: str, password: str | None = None, *, port: int = PORT,
+                   timeout: float = 5.0) -> bool | None:
+    """Whether ESPHome's update service at `host` wants a password that
+    `password` is not, none or another: True when it says so, False when it
+    takes it (or wants none), None when it does not answer.  Raises
+    NeedsEncryption for one that takes only encrypted updates.
+
+    Nothing is updated: the session ends at the password, before the plug
+    starts an update - which it does only once told its type and size, so
+    that a scan cannot start one.  The plug notes the session failed, as it
+    does for the one probe() leaves.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            if _handshake(sock).encrypted_only:
+                raise NeedsEncryption()
+            _authenticate(sock, password)
+            return False
+    except NeedsPassword:
+        return True
+    except NeedsEncryption:
+        raise
+    except (OSError, OTAError):
+        return None
+
+
 def upload(host: str, data: bytes, *, kind: int = APP, port: int = PORT,
-           timeout: float = 10.0, progress=None) -> None:
-    """Send `data` as an update of `kind`; returns once the plug has it all and
-    says the update ended (it then restarts into it by itself)."""
+           timeout: float = 10.0, progress=None, password: str | None = None) -> None:
+    """Send `data` as an update of `kind`, with the plug's update `password` if
+    it has one; returns once the plug has it all and says the update ended (it
+    then restarts into it by itself)."""
     with socket.create_connection((host, port), timeout=timeout) as sock:
         sock.settimeout(timeout)
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         offer = _handshake(sock)
+        if offer.encrypted_only:
+            raise NeedsEncryption()
         if kind != APP and not offer.partition_access:
             raise OTAError("this ESPHome was built without allow_partition_access")
-        auth = _expect(sock, (AUTH_OK, REQUEST_AUTH, REQUEST_SHA256_AUTH), "authentication")
-        if auth != AUTH_OK:
-            raise NeedsPassword("ESPHome on the plug has an update password")
+        _authenticate(sock, password)
         sock.settimeout(DATA_TIMEOUT)
         if offer.extended:
             sock.sendall(bytes([kind]))

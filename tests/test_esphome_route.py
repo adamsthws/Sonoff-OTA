@@ -18,9 +18,11 @@ class RouteTestCase(unittest.TestCase):
         self.quiet = contextlib.redirect_stdout(io.StringIO())
         self.quiet.__enter__()
         self.addCleanup(self.quiet.__exit__, None, None, None)
-        # No plug's own network to be seen, nor joined: nothing goes on the network.
-        for name, value in (("on_a_plug_network", False), ("find_ssid", None)):
-            patch = mock.patch.object(af, name, return_value=value)
+        # No plug's own network to be seen, nor joined, and an ESPHome with no
+        # update password: nothing goes on the network.
+        for owner, name, value in ((af, "on_a_plug_network", False), (af, "find_ssid", None),
+                                   (af.esphome_ota, "wants_password", False)):
+            patch = mock.patch.object(owner, name, return_value=value)
             patch.start()
             self.addCleanup(patch.stop)
 
@@ -30,7 +32,8 @@ class RouteTestCase(unittest.TestCase):
                            "plug_ip": "192.168.0.50", **inputs}.items():
             state.set_input(key, value)
         return SimpleNamespace(state=state, firmware_given=given, esphome_firmware=None,
-                               dry_run=False, finder=SimpleNamespace(poll=lambda: None))
+                               dry_run=False, finder=SimpleNamespace(poll=lambda: None),
+                               esphome_password=None)
 
     def setUp_found(self, running="sonoff"):
         # What the plug runs now, as the network would show it.
