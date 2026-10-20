@@ -1,3 +1,4 @@
+import base64
 import contextlib
 import sys
 import tempfile
@@ -2281,7 +2282,7 @@ class RunFilingTests(unittest.TestCase):
         ctx = self.autoflash.Context(SimpleNamespace(
             run=name, manifest=self.autoflash.DEFAULT_MANIFEST, dry_run=False, plug_ip=None,
             email=None, web_user=None, web_password=None, esphome_ota_password=None,
-            esphome_web_user=None, esphome_web_password=None))
+            esphome_web_user=None, esphome_web_password=None, esphome_api_key=None))
         ctx.state.set_input("plug_ip", "10.0.0.5")
         ctx.file_under_plug("58:CF:79:01:02:03")
         self.assertEqual(ctx.dir.parent, self.captures / "plugs/58-cf-79-01-02-03/runs")
@@ -2298,30 +2299,37 @@ class RunFilingTests(unittest.TestCase):
         def args(**over):
             base = dict(run=name, manifest=self.autoflash.DEFAULT_MANIFEST, dry_run=False,
                         plug_ip=None, email=None, web_user=None, web_password=None,
-                        esphome_ota_password=None, esphome_web_user=None, esphome_web_password=None)
+                        esphome_ota_password=None, esphome_web_user=None, esphome_web_password=None,
+                        esphome_api_key=None)
             base.update(over)
             return SimpleNamespace(**base)
+        key = base64.b64encode(bytes(range(32))).decode()
         # The flags win, each kept out of the log under its label.
         private = mock.Mock()
         with mock.patch.object(self.autoflash.output, "private", private):
             ctx = self.autoflash.Context(args(web_password="tas-pw", esphome_ota_password="esp-pw",
-                                              esphome_web_user="admin", esphome_web_password="web-pw"))
+                                              esphome_web_user="admin", esphome_web_password="web-pw",
+                                              esphome_api_key=key))
         self.assertEqual((ctx.web_password, ctx.esphome_password), ("tas-pw", "esp-pw"))
-        self.assertEqual(ctx.esphome_login, ("admin", "web-pw"))
+        self.assertEqual((ctx.esphome_login, ctx.esphome_key), (("admin", "web-pw"), bytes(range(32))))
         private.assert_any_call("tas-pw", "tasmota-password")
         private.assert_any_call("esp-pw", "esphome-password")
         private.assert_any_call("web-pw", "esphome-web-password")
+        private.assert_any_call(key, "esphome-api-key")
         # With no flag, the environment (credentials) is the fallback.
         with mock.patch.object(self.autoflash.credentials, "get",
                                side_effect={"AUTOFLASH_TASMOTA_PASSWORD": "env-tas",
                                             "AUTOFLASH_ESPHOME_OTA_PASSWORD": "env-esp",
                                             "AUTOFLASH_ESPHOME_WEB_USER": "env-admin",
-                                            "AUTOFLASH_ESPHOME_WEB_PASSWORD": "env-web"}.get):
+                                            "AUTOFLASH_ESPHOME_WEB_PASSWORD": "env-web",
+                                            "AUTOFLASH_ESPHOME_API_KEY": key}.get):
             ctx = self.autoflash.Context(args())
         self.assertEqual((ctx.web_password, ctx.esphome_password), ("env-tas", "env-esp"))
-        self.assertEqual(ctx.esphome_login, ("env-admin", "env-web"))
-        # A web login is both, or none.
+        self.assertEqual((ctx.esphome_login, ctx.esphome_key), (("env-admin", "env-web"), bytes(range(32))))
+        # A web login is both, or none; a key is one, or the run is refused at once.
         self.assertIsNone(self.autoflash.Context(args(esphome_web_password="web-pw")).esphome_login)
+        with self.assertRaisesRegex(self.autoflash.Abort, "API encryption key given.*is not one.*base64"):
+            self.autoflash.Context(args(esphome_api_key="not-a-key"))
 
     def test_older_runs_with_a_mac_are_adopted(self):
         old = RunState.open(self.captures / "conversion-20261011-1431")
@@ -2591,7 +2599,7 @@ class BackupWifiTests(unittest.TestCase):
         inputs = {"plug_mac": "12:34:56:ab:cd:ef", "plug_ip": "192.168.0.50", **inputs}
         state = SimpleNamespace(input=inputs.get, set_input=inputs.__setitem__, is_done=lambda step: False)
         return SimpleNamespace(state=state, manifest_path=Path("unused"), args=SimpleNamespace(wifi=False),
-                               _wifi=None, _recovery=None)
+                               _wifi=None, _recovery=None, esphome_key=None, esphome_api_locked=False)
 
     def found(self, *, pinned=None, rebuilds=True, joined=None):
         from unittest import mock
@@ -2646,6 +2654,38 @@ class BackupWifiTests(unittest.TestCase):
             self.assertEqual(self.af.Context.wifi(ctx), ("Home-5", "pw5"))
         backup.assert_not_called()
 
+    def test_an_encrypted_api_is_offered_its_key_before_the_wifi_is_asked(self):
+        from unittest import mock
+        key = bytes(range(32))
+
+        def details(host, key=None, **_):
+            if key is None:
+                raise self.af.esphome.ApiLocked()
+            return ("Home-5", "pw5")
+        for choice, typed in ((0, base64.b64encode(key).decode()), (1, None)):
+            ctx = self.ctx(source="esphome")
+            ctx.adopt_wifi = mock.Mock(side_effect=lambda ssid, password: setattr(ctx, "_wifi", (ssid, password)))
+            with mock.patch.object(self.af.esphome, "api_wifi_details", side_effect=details), \
+                    mock.patch.object(self.af, "wifi_from_backup", return_value=None), \
+                    mock.patch.object(self.af.esphome, "api_access",
+                                      side_effect=lambda host, given: "" if given == key else "key"), \
+                    mock.patch.object(self.af.prompts, "UNATTENDED", False), \
+                    mock.patch.object(self.af, "section"), mock.patch.object(self.af.output, "private"), \
+                    mock.patch.object(self.af.output, "transient_begin"), \
+                    mock.patch.object(self.af.output, "transient_end"), \
+                    mock.patch.object(self.af, "bundle_ssid", return_value=None), \
+                    mock.patch.object(self.af, "ask_credentials", return_value=("Typed", "pw")) as typed_wifi, \
+                    mock.patch.object(self.af, "ask_choice", return_value=choice) as menu, \
+                    mock.patch.object(self.af, "ask_secret", return_value=typed):
+                wifi = self.af.Context.wifi(ctx)
+            self.assertEqual(menu.call_args_list[0].args[1],
+                             ["Type its API encryption key", "Type the Wi-Fi details instead"])
+            if typed:  # ESPHome gives them, its API unlocked
+                self.assertEqual((wifi, ctx.esphome_key), (("Home-5", "pw5"), key))
+                typed_wifi.assert_not_called()
+            else:  # typed instead
+                self.assertEqual((wifi, ctx.esphome_key), (("Typed", "pw"), None))
+
 
 class SonoffBackupWifiTests(unittest.TestCase):
     """The Wi-Fi Sonoff's firmware was set up with, as its backup holds it."""
@@ -2679,7 +2719,7 @@ class WifiFallbackTests(unittest.TestCase):
         import tools.autoflash_cli as autoflash
         ctx = SimpleNamespace(args=SimpleNamespace(wifi=False), manifest_path=Path("unused"),
                               state=SimpleNamespace(set_input=lambda *_: None, input=lambda *_: None),
-                              _wifi=None, _recovery=None)
+                              _wifi=None, _recovery=None, esphome_api_locked=False)
         ctx.remember_wifi = lambda ssid, password, image: autoflash.Context.remember_wifi(
             ctx, ssid, password, image)
         ctx.adopt_wifi = lambda ssid, password: autoflash.Context.adopt_wifi(ctx, ssid, password)
@@ -3778,10 +3818,15 @@ class EsphomeWebLoginTests(unittest.TestCase):
 
 
 class EsphomeUpdatePasswordTests(unittest.TestCase):
-    """A plug on ESPHome with an update password: asked for it before the
-    go-ahead where someone can type it - or tried again without one, once
-    its owner has removed it - and stopped, saying what to give, where nobody
-    can.  The password goes with the update."""
+    """A plug on ESPHome with an update password, or taking only encrypted
+    updates, made with its API encryption key: asked for what it wants before
+    the go-ahead where someone can type it - or tried again without, once its
+    owner has removed that - and stopped, saying what to give, where nobody
+    can.  Its key does instead of its password where it takes encrypted
+    updates: ESPHome asks for none then."""
+
+    KEY = bytes(range(32))
+    KEY_TEXT = base64.b64encode(KEY).decode()
 
     def setUp(self):
         import tools.autoflash_cli as autoflash
@@ -3801,27 +3846,37 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
         # ESPHome on the plug wants this update password, until its owner
-        # removes it (None) - or takes only encrypted updates, while encrypted.
-        self.wanted, self.encrypted = "s3cret-71", False
-        ota = autoflash.esphome_ota
+        # removes it (None); has an API key (`key`), so takes encrypted
+        # updates too - only those, while `encrypted`.
+        self.wanted, self.encrypted, self.key = "s3cret-71", False, None
+        ota, esphome = autoflash.esphome_ota, autoflash.esphome
 
-        def wants_password(host, password=None, **_):
+        def wants(host, password=None, key=None, **_):
+            if self.key is not None and key is not None:
+                return ota.NOTHING if key == self.key else ota.KEY
             if self.encrypted:
-                raise ota.NeedsEncryption()
-            return self.wanted is not None and password != self.wanted
+                return ota.KEY
+            return ota.PASSWORD if self.wanted is not None and password != self.wanted else ota.NOTHING
 
         def probe(host, **_):
-            return ota.Offer(2, True, True, False, encrypted_only=self.encrypted)
-        for patch in (mock.patch.object(ota, "wants_password", side_effect=wants_password),
-                      mock.patch.object(ota, "probe", side_effect=probe)):
+            return ota.Offer(2, True, True, False, encrypted_only=self.encrypted,
+                             encryption=self.key is not None)
+
+        def api_access(host, key=None, **_):
+            if self.key is None:
+                return esphome.API_PLAIN
+            return esphome.API_OPEN if key == self.key else esphome.API_KEY
+        for patch in (mock.patch.object(ota, "wants", side_effect=wants),
+                      mock.patch.object(ota, "probe", side_effect=probe),
+                      mock.patch.object(esphome, "api_access", side_effect=api_access)):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def ctx(self, password=None):
+    def ctx(self, password=None, key=None):
         from types import SimpleNamespace
         inputs = {"plug_ip": "192.168.0.50"}
         state = SimpleNamespace(input=inputs.get, set_input=inputs.__setitem__, is_done=lambda step: False)
-        return SimpleNamespace(state=state, esphome_password=password)
+        return SimpleNamespace(state=state, esphome_password=password, esphome_key=key)
 
     def test_asked_for_before_the_go_ahead_and_sent_with_the_update(self):
         ctx = self.ctx()
@@ -3830,8 +3885,8 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
             self.af.unlock_esphome(ctx)
         self.assertEqual(asked.call_count, 2)  # the wrong one refused on the plug
         self.assertEqual(ctx.esphome_password, "s3cret-71")
-        self.assertEqual(menu.call_args.args[1][0], "Type its update password")
-        self.assertIn("once you have removed it yourself", menu.call_args.args[1][1])
+        self.assertEqual(menu.call_args.args[1], [  # no key to offer: it takes no encrypted updates
+            "Type its update password", "Try again without one - once you have removed it yourself"])
         self.private.assert_any_call("s3cret-71", "esphome-password")  # kept out of the log
         with mock.patch.object(self.af.esphome_ota, "upload") as upload:
             self.af.send_as_esphome_update(ctx, b"image", "the startup firmware")
@@ -3875,23 +3930,71 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
             self.af.send_as_esphome_update(ctx, b"image", "the startup firmware")
         self.assertEqual([call.kwargs["password"] for call in upload.call_args_list], [None, "s3cret-71"])
 
-    def test_one_taking_only_encrypted_updates_is_waited_on_until_changed(self):
-        self.encrypted = True
+    def test_with_its_key_given_no_password_is_asked_and_the_update_goes_encrypted(self):
+        self.key = self.KEY
+        ctx = self.ctx(key=self.KEY)  # AUTOFLASH_ESPHOME_API_KEY
+        self.af.unlock_esphome(ctx)  # nothing asked: its key unlocks the update too
+        self.assertIsNone(ctx.esphome_password)
+        with mock.patch.object(self.af.esphome_ota, "upload") as upload:
+            self.af.send_as_esphome_update(ctx, b"image", "the startup firmware")
+        self.assertEqual(upload.call_args.kwargs["key"], self.KEY)
+
+    def test_where_it_takes_encrypted_updates_its_key_is_offered_instead(self):
+        self.key = self.KEY
+        ctx = self.ctx()
+        with mock.patch.object(self.af, "ask_choice", return_value=1) as menu, \
+                mock.patch.object(self.af, "ask_secret", side_effect=["not base64!", self.KEY_TEXT]):
+            self.af.unlock_esphome(ctx)
+        self.assertEqual(menu.call_args.args[1][:2], ["Type its update password", "Type its API encryption key"])
+        self.assertEqual((ctx.esphome_key, ctx.esphome_password), (self.KEY, None))
+        told = " ".join(str(call.args[0]) for call in self.af.tell.call_args_list)
+        self.assertIn("That is not an API encryption key", told)  # said why, and asked again
+        self.private.assert_any_call(self.KEY_TEXT, "esphome-api-key")
+
+    def test_one_taking_only_encrypted_updates_is_asked_for_its_key(self):
+        self.key, self.encrypted = self.KEY, True
+        ctx = self.ctx()
+        with mock.patch.object(self.af, "ask_choice", return_value=0) as menu, \
+                mock.patch.object(self.af, "ask_secret", side_effect=[base64.b64encode(bytes(32)).decode(),
+                                                                       self.KEY_TEXT]):
+            self.af.unlock_esphome(ctx)
+        self.assertEqual(menu.call_args.args[1][0], "Type its API encryption key")
+        self.assertEqual(ctx.esphome_key, self.KEY)  # the first, another key, refused on the plug
+        self.af.tell.assert_any_call("    That is not its API encryption key.")
+        with mock.patch.object(self.af.prompts, "UNATTENDED", True):
+            with self.assertRaisesRegex(self.af.Abort,
+                                        "only encrypted updates.*ESPHome YAML.*--esphome-api-key"
+                                        ".*remove that encryption: line"):
+                self.af.unlock_esphome(self.ctx())
+
+    def test_one_taking_only_encrypted_updates_can_be_changed_instead(self):
+        self.key, self.encrypted = self.KEY, True
         ctx = self.ctx()
         choices = []
 
         def choose(*_):
-            choices.append(1)
+            choices.append(len(choices))
             if len(choices) == 2:
                 self.encrypted = False  # encryption: removed, an update password put instead
-            return 0
+            return 1 if len(choices) <= 2 else 0
         with mock.patch.object(self.af, "ask_choice", side_effect=choose), \
                 mock.patch.object(self.af, "ask_secret", return_value="s3cret-71"):
             self.af.unlock_esphome(ctx)
-        self.assertEqual(ctx.esphome_password, "s3cret-71")  # then asked for that
         self.af.tell.assert_any_call("    ESPHome there still takes only encrypted updates.")
-        self.encrypted = True
+        self.assertEqual((ctx.esphome_key, ctx.esphome_password), (None, "s3cret-71"))  # then asked for that
+
+    def test_a_key_given_that_is_not_its_own_is_asked_for_or_gone_on_without(self):
+        self.key, self.wanted = self.KEY, None
         with mock.patch.object(self.af.prompts, "UNATTENDED", True):
-            with self.assertRaisesRegex(self.af.Abort,
-                                        "only encrypted updates.*ESPHome YAML.*remove that encryption: line"):
-                self.af.unlock_esphome(self.ctx())
+            with self.assertRaisesRegex(self.af.Abort, "not the one ESPHome on the plug has.*--esphome-api-key"):
+                self.af.unlock_esphome(self.ctx(key=bytes(32)))
+        ctx = self.ctx(key=bytes(32))
+        with mock.patch.object(self.af, "ask_choice", return_value=1) as menu:
+            self.af.unlock_esphome(ctx)  # gone on without it: the update needs no key
+        self.assertEqual(menu.call_args.args[1], ["Type its API encryption key", "Go on without it"])
+        self.assertIsNone(ctx.esphome_key)
+        # One given for a plug whose API is not encrypted is not needed.
+        self.key = None
+        ctx = self.ctx(key=self.KEY)
+        self.af.unlock_esphome(ctx)
+        self.assertIsNone(ctx.esphome_key)

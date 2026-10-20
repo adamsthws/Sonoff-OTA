@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
 from tools.autoflash import __version__, esphome, imprint, plugs, tasmota_settings  # noqa: E402
-from tools.autoflash import awake, detect, esphome_ota, ewelink_lan, interrupt, plans, safety_locks  # noqa: E402
+from tools.autoflash import awake, detect, esphome_ota, ewelink_lan, interrupt, noise, plans, safety_locks  # noqa: E402
 from tools.autoflash.device import Device, DeviceError, NeedsPassword, PASSWORD_HINT, UploadRefused  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import (  # noqa: E402
@@ -512,14 +512,25 @@ class Context:
         # when it is found wanting one (ask_web_password). Held in memory only.
         self.web_password = args.web_password or credentials.get("AUTOFLASH_TASMOTA_PASSWORD")
         output.private(self.web_password, "tasmota-password")
-        # The same for ESPHome's update password (ask_esphome_password), and
-        # its web login (ask_esphome_login), user name and password.
+        # The same for ESPHome's update password (ask_esphome_password); its
+        # web login (ask_esphome_login), user name and password; and its API
+        # encryption key, for its encrypted API and updates (ask_esphome_key).
         self.esphome_password = args.esphome_ota_password or credentials.get("AUTOFLASH_ESPHOME_OTA_PASSWORD")
         output.private(self.esphome_password, "esphome-password")
         user = args.esphome_web_user or credentials.get("AUTOFLASH_ESPHOME_WEB_USER")
         password = args.esphome_web_password or credentials.get("AUTOFLASH_ESPHOME_WEB_PASSWORD")
         output.private(password, "esphome-web-password")
         self.esphome_login = (user, password) if user and password else None
+        key = args.esphome_api_key or credentials.get("AUTOFLASH_ESPHOME_API_KEY")
+        output.private(key, "esphome-api-key")
+        try:
+            self.esphome_key = noise.decode_key(key) if key else None
+        except ValueError as exc:
+            raise Abort(f"the ESPHome API encryption key given (--esphome-api-key, or "
+                        f"AUTOFLASH_ESPHOME_API_KEY) is not one ({exc}): one is 32 bytes in base64, "
+                        "as after key: under api: encryption: in the YAML config") from None
+        # Its API found encrypted, its key not given: offered before the Wi-Fi is asked for.
+        self.esphome_api_locked = False
         self._ewelink_password: str | None = None
         # From .env or the environment: tried once, then asked for if eWeLink refuses it.
         self._given_ewelink_password = credentials.get("EWELINK_PASSWORD")
@@ -573,6 +584,12 @@ class Context:
         if self._wifi is None and not forced and not readable:
             found = wifi_from_esphome(self) or wifi_from_backup(self)
             if found is not None:
+                self.adopt_wifi(*found)
+                self.state.set_input("wifi_typed", False)
+        if self._wifi is None and not forced and self.esphome_api_locked and not prompts.UNATTENDED:
+            # ESPHome gives them, its API unlocked: its key typed instead.
+            found = ask_esphome_key(self, self.state.input("plug_ip"), wifi=True) and wifi_from_esphome(self)
+            if found:
                 self.adopt_wifi(*found)
                 self.state.set_input("wifi_typed", False)
         given = credentials.get("AUTOFLASH_WIFI_SSID")
@@ -1394,10 +1411,15 @@ def sonoff_backup_wifi(flash: bytes) -> tuple[str, str] | None:
 
 def wifi_from_esphome(ctx: "Context") -> tuple[str, str] | None:
     """The Wi-Fi the plug is on, name and password, from ESPHome itself: our
-    ESPHome gives them from 1.1.0, through its native API, while that has no
-    encryption key.  None from one that does not."""
+    ESPHome gives them from 1.1.0, through its native API - encrypted with
+    its key, where it has one.  None from one that does not, or whose key is
+    not known (noted: it is offered before the Wi-Fi is asked for)."""
     host = ctx.state.input("plug_ip")
-    found = esphome.api_wifi_details(host) if host else None
+    try:
+        found = esphome.api_wifi_details(host, key=ctx.esphome_key) if host else None
+    except esphome.ApiLocked:
+        ctx.esphome_api_locked = True
+        return None
     if found is None:
         return None
     output.private(found[0], "wifi-name")
@@ -1440,7 +1462,7 @@ def wifi_from_backup(ctx: "Context") -> tuple[str, str] | None:
         say(f"    The Wi-Fi in the plug's Sonoff backup, '{ssid}', is the bundle's - none to type.")
         return found
     host = ctx.state.input("plug_ip")
-    wifi = esphome.api_wifi(host) if host else None
+    wifi = esphome.api_wifi(host, key=ctx.esphome_key) if host else None
     joined = wifi.get("ssid") if wifi else None
     if joined == ssid:
         say(f"    The plug is on '{ssid}', the Wi-Fi in its Sonoff backup on this computer - "
@@ -3683,14 +3705,15 @@ def send_as_esphome_update(ctx: Context, image: bytes, what: str) -> float:
     # that changed since, or a run sending it once more.
     while True:
         try:
-            esphome_ota.upload(host, image, progress=progress, password=ctx.esphome_password)
+            esphome_ota.upload(host, image, progress=progress, password=ctx.esphome_password,
+                               key=ctx.esphome_key)
             break
         except esphome_ota.NeedsPassword:
             output.progress_clear()
             ask_esphome_password(ctx, host)
-        except esphome_ota.NeedsEncryption:
+        except (esphome_ota.NeedsEncryption, esphome_ota.WrongKey):
             output.progress_clear()
-            unencrypted_esphome(ctx, host)
+            ask_esphome_key(ctx, host)
         except (esphome_ota.OTAError, OSError) as exc:
             raise Abort(f"sending {what} to the plug failed: {exc}") from exc
         finally:
@@ -3732,15 +3755,16 @@ def step_startup_from_esphome(ctx: Context, *, again: bool = False) -> dict[str,
     go-ahead given already."""
     host = ctx.state.input("plug_ip")
     if run_source(ctx.state) in ("esphome", "midway") and not again:
+        unlock_esphome(ctx)
         # The earliest reading of a run from ESPHome, before anything is
         # written: from its Wi-Fi signal sensor (ours from 1.1.0), else from
-        # its native API, where that is unencrypted (ours, 1.0.0 too). From
-        # an ESPHome that gives neither, the first is at D4.
-        ctx.state.capture("X1.signal_dbm", note_signal(ctx, esphome.signal(host) if host else None, [
-            "Nothing has been written yet. From here the plug restarts several",
-            "times, and each time it has to rejoin your Wi-Fi on its own; a weak",
-            "signal makes that less certain."]))
-        unlock_esphome(ctx)
+        # its native API - encrypted, given its key (ours, 1.0.0 too, has
+        # none). From an ESPHome that gives neither, the first is at D4.
+        ctx.state.capture("X1.signal_dbm", note_signal(
+            ctx, esphome.signal(host, ctx.esphome_key) if host else None, [
+                "Nothing has been written yet. From here the plug restarts several",
+                "times, and each time it has to rejoin your Wi-Fi on its own; a weak",
+                "signal makes that less certain."]))
         consent_to_leave(ctx, "ESPHome" if run_source(ctx.state) == "esphome" else "firmware")
     running = identify(ctx, host) if host else None
     if running in ("startup", "hub"):
@@ -4319,80 +4343,116 @@ def ask_web_password(ctx: Context, host: str) -> None:
 
 ESPHOME_PASSWORD_HINT = ("give it with --esphome-ota-password, or as "
                          "AUTOFLASH_ESPHOME_OTA_PASSWORD in .env or the environment")
+ESPHOME_KEY_HINT = ("give it with --esphome-api-key, or as "
+                    "AUTOFLASH_ESPHOME_API_KEY in .env or the environment")
 ESPHOME_LOGIN_HINT = ("give it with --esphome-web-user and --esphome-web-password, or as "
                       "AUTOFLASH_ESPHOME_WEB_USER and AUTOFLASH_ESPHOME_WEB_PASSWORD in .env "
                       "or the environment")
 
 
+def esphome_key_secret(check: Callable[[bytes], bool | None]) -> Secret:
+    """ESPHome's API encryption key, typed as its YAML config has it and
+    `check`ed once it is one."""
+    def checked(text: str) -> bool | None:
+        try:
+            key = noise.decode_key(text)
+        except ValueError as exc:
+            raise ValueError(f"That is not an API encryption key ({exc}): one is 32 bytes in base64, "
+                             "as after key: under api: encryption: in the YAML config") from None
+        return check(key)
+    return Secret("API encryption key", typed_secret("ESPHome API encryption key", "esphome-api-key"),
+                  checked)
+
+
+def api_key_check(host: str, key: bytes) -> bool | None:
+    """For secret_or_retry: whether ESPHome's API at `host` does not take `key`."""
+    access = esphome.api_access(host, key)
+    return None if access is None else access == esphome.API_KEY
+
+
+def esphome_update_check(host: str, password: str | None, key: bytes | None) -> bool | None:
+    """For secret_or_retry: whether ESPHome's updates at `host` still want
+    more than `password` and `key`."""
+    wants = esphome_ota.wants(host, password, key)
+    return None if wants is None else wants != esphome_ota.NOTHING
+
+
 def ask_esphome_password(ctx: Context, host: str) -> None:
     """The update password of ESPHome at `host`, which wants one this run does
     not have: typed, each try checked on the plug, or none once its owner has
-    removed it.  Held in memory for this run only."""
+    removed it - or, from an ESPHome that takes encrypted updates too, its
+    API encryption key, with which it asks for no password.  Held in memory
+    for this run only."""
     wrong = bool(ctx.esphome_password)
     if prompts.UNATTENDED:
         raise Abort(f"{esphome_ota.NeedsPassword(wrong)}: {ESPHOME_PASSWORD_HINT}")
-    ctx.esphome_password = password_or_retry("ESPHome's update password", [
+    offer = esphome_ota.probe(host)
+    keyed = bool(offer and offer.encryption)
+    secrets = [Secret("update password", typed_secret("ESPHome update password", "esphome-password"),
+                      lambda password: esphome_update_check(host, password, None))]
+    if keyed:
+        secrets.append(esphome_key_secret(lambda key: esphome_update_check(host, None, key)))
+    secret, value = secret_or_retry("ESPHome's update password", [
         f"ESPHome on the plug at {host} has an update password (set in Home",
         "Assistant, say). The next firmware goes on as an ESPHome update, which needs",
         "it. Type it to go on; or remove it from the plug's ESPHome YAML config (the",
         "'password:' line under 'ota:'), re-flash, then try again without one.",
+        *(["Its API encryption key does instead (key: under api: encryption: there):",
+           "with it, the update goes encrypted."] if keyed else []),
         *(["The one given is not it."] if wrong else []),
-        "A password typed is held in memory for this run only, never written to disk.",
-    ], lambda password: esphome_update_check(host, password),
-        still="ESPHome there still has an update password.",
-        kind="update password", prompt="ESPHome update password", label="esphome-password")
+        "What you type is held in memory for this run only, never written to disk.",
+    ], secrets, lambda: esphome_update_check(host, None, None),
+        still="ESPHome there still has an update password.")
+    if secret is not None and secret.kind == "API encryption key":
+        ctx.esphome_key = noise.decode_key(value)
+    else:
+        ctx.esphome_password = value
 
 
-def esphome_update_check(host: str, password: str | None) -> bool | None:
-    """esphome_ota.wants_password, for password_or_retry: a plug that turned
-    to taking only encrypted updates meanwhile stops the run."""
-    try:
-        return esphome_ota.wants_password(host, password)
-    except esphome_ota.NeedsEncryption as exc:
-        raise Abort(f"{exc}: remove that encryption: line, re-flash, then run this again") from exc
-
-
-def unencrypted_esphome(ctx: Context, host: str) -> None:
-    """ESPHome at `host` takes only encrypted updates (`ota: encryption:`,
-    keyed by its API key), which this tool cannot make: waited on until its
-    owner has removed that; then its update password, if it has one."""
+def ask_esphome_key(ctx: Context, host: str, *, wifi: bool = False) -> bool:
+    """The API encryption key of ESPHome at `host`, typed, each try checked
+    on the plug: for its updates, when it takes only encrypted ones - or none,
+    once its owner has removed that - or, `wifi`, to unlock its API, which then
+    gives its Wi-Fi details (they are typed otherwise).  Held in memory for
+    this run only.  Returns whether it was given."""
+    wrong = ctx.esphome_key is not None
     if prompts.UNATTENDED:
-        raise Abort(f"{esphome_ota.NeedsEncryption()}: remove that encryption: line, re-flash, "
-                    "then run this again")
-    password_or_retry("ESPHome's encrypted updates", [
-        f"ESPHome on the plug at {host} takes only encrypted updates:",
-        "the ota: section of its ESPHome YAML config has encryption:, made with its",
-        "API key, which this tool cannot use. Remove encryption: from it yourself (an",
-        "update password instead is fine: this asks for it), re-flash, and try again.",
-    ], lambda _: encrypted_only(host),
-        still="ESPHome there still takes only encrypted updates.")
-    if esphome_update_check(host, ctx.esphome_password) is True:
-        ask_esphome_password(ctx, host)
+        if wifi:
+            return False  # the Wi-Fi is asked for next, which stops the run
+        raise Abort(f"{esphome_ota.WrongKey() if wrong else esphome_ota.NeedsEncryption()}: "
+                    f"{ESPHOME_KEY_HINT}; or remove that encryption: line, re-flash, then run this again")
+    if wifi:
+        secret, value = secret_or_retry("ESPHome's API encryption key", [
+            f"ESPHome on the plug at {host} gives its Wi-Fi details through its API (ours",
+            "does from 1.1.0), but its API is encrypted (api: encryption: in its ESPHome",
+            "YAML config). Type its key - after key: there - and it gives them; or type",
+            "the Wi-Fi details yourself instead.",
+            "A key typed is held in memory for this run only, never written to disk.",
+        ], [esphome_key_secret(lambda key: api_key_check(host, key))],
+            lambda: False, still="", last="Type the Wi-Fi details instead")
+    else:
+        secret, value = secret_or_retry("ESPHome's encrypted updates", [
+            f"ESPHome on the plug at {host} takes only encrypted updates: the ota:",
+            "section of its ESPHome YAML config has encryption:, which makes them with its",
+            "API encryption key (after key: under api: encryption: there). Type that key",
+            "to go on; or remove encryption: from under ota:, re-flash, then try again.",
+            *(["The one given (--esphome-api-key, or AUTOFLASH_ESPHOME_API_KEY) is not it."]
+              if wrong else []),
+            "A key typed is held in memory for this run only, never written to disk.",
+        ], [esphome_key_secret(lambda key: esphome_update_check(host, ctx.esphome_password, key))],
+            lambda: wants_key(host, ctx.esphome_password),
+            still="ESPHome there still takes only encrypted updates.")
+    ctx.esphome_key = noise.decode_key(value) if secret is not None else None
+    if not wifi and secret is None and esphome_update_check(host, ctx.esphome_password, None) is True:
+        ask_esphome_password(ctx, host)  # encryption: gone, an update password put instead
+    return ctx.esphome_key is not None
 
 
-def encrypted_only(host: str) -> bool | None:
-    """Whether ESPHome at `host` takes only encrypted updates; None when its
-    update service does not answer."""
-    offer = esphome_ota.probe(host)
-    return None if offer is None else offer.encrypted_only
-
-
-def unlock_esphome(ctx: Context) -> None:
-    """ESPHome's update password, when the plug's has one, known before the
-    go-ahead - so that nothing is asked once the plug is being changed: given
-    (--esphome-ota-password, or AUTOFLASH_ESPHOME_OTA_PASSWORD), or asked for.
-    The same for one that takes only encrypted updates, which has to be changed
-    first."""
-    host = ctx.state.input("plug_ip")
-    if not host:
-        return
-    try:
-        wants = esphome_ota.wants_password(host, ctx.esphome_password)
-    except esphome_ota.NeedsEncryption:
-        unencrypted_esphome(ctx, host)
-        return
-    if wants is True:
-        ask_esphome_password(ctx, host)
+def wants_key(host: str, password: str | None) -> bool | None:
+    """Whether ESPHome's updates at `host` still want a key (they take only
+    encrypted ones); None when it does not answer."""
+    wants = esphome_ota.wants(host, password, None)
+    return None if wants is None else wants == esphome_ota.KEY
 
 
 def ask_esphome_login(ctx: Context, host: str) -> None:
@@ -4425,6 +4485,49 @@ def ask_esphome_login(ctx: Context, host: str) -> None:
         "A password typed is held in memory for this run only, never written to disk.",
     ], [Secret("web login", ask, check)], lambda: check(None),
         still="ESPHome there still has a web login.")
+
+
+def check_esphome_key(ctx: Context, host: str) -> None:
+    """An API encryption key given in advance, checked on the plug's API:
+    asked for again, or gone on without, when it is not the plug's.  One
+    given for a plug whose API is plain is not needed, and left unused."""
+    if ctx.esphome_key is None:
+        return
+    access = esphome.api_access(host, ctx.esphome_key)
+    if access == esphome.API_PLAIN:
+        say("    ESPHome's API on the plug is not encrypted: the API encryption key given is not needed.")
+        ctx.esphome_key = None
+    elif access == esphome.API_KEY:
+        if prompts.UNATTENDED:
+            raise Abort(f"{esphome_ota.WrongKey()}: {ESPHOME_KEY_HINT}")
+        secret, value = secret_or_retry("ESPHome's API encryption key", [
+            f"The API encryption key given (--esphome-api-key, or AUTOFLASH_ESPHOME_API_KEY)",
+            f"is not the one ESPHome on the plug at {host} has: its YAML config has it, after",
+            "key: under api: encryption:. Type that one; or go on without it, when the",
+            "plug's Wi-Fi details and its update can be had another way.",
+            "A key typed is held in memory for this run only, never written to disk.",
+        ], [esphome_key_secret(lambda key: api_key_check(host, key))],
+            lambda: False, still="", last="Go on without it")
+        ctx.esphome_key = noise.decode_key(value) if secret is not None else None
+
+
+def unlock_esphome(ctx: Context) -> None:
+    """What ESPHome on the plug wants, known before the go-ahead - so that
+    nothing is asked once the plug is being changed: an API encryption key
+    given, checked; then for its updates, its update password, when it has
+    one (or its key, which does instead where it takes encrypted updates
+    too), or its key, when it takes only encrypted updates.  Each given
+    (--esphome-ota-password, --esphome-api-key, or their AUTOFLASH_ names), or
+    asked for."""
+    host = ctx.state.input("plug_ip")
+    if not host:
+        return
+    check_esphome_key(ctx, host)
+    wants = esphome_ota.wants(host, ctx.esphome_password, ctx.esphome_key)
+    if wants == esphome_ota.KEY:
+        ask_esphome_key(ctx, host)
+    elif wants == esphome_ota.PASSWORD:
+        ask_esphome_password(ctx, host)
 
 
 def unlocked(ctx: Context, plug: detect.Found) -> detect.Found:
@@ -5673,6 +5776,9 @@ def _main() -> int:
                         help="the user name of the plug's ESPHome web login, if it has one (with --esphome-web-password)")
     parser.add_argument("--esphome-web-password",
                         help="the password of the plug's ESPHome web login (asked for otherwise; never stored)")
+    parser.add_argument("--esphome-api-key",
+                        help="the plug's ESPHome API encryption key, if it has one: for its Wi-Fi details, "
+                        "and its updates where they are encrypted (asked for otherwise; never stored)")
     parser.add_argument("--wifi", action="store_true",
                         help="type the Wi-Fi details instead of reading them from the plug")
     parser.add_argument("--no-backup", action="store_true",

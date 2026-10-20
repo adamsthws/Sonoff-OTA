@@ -461,6 +461,7 @@ class FallbackScreenTests(OutputTestCase):
         class Ctx:
             args = mock.Mock(wifi=False)
             _wifi = None
+            esphome_api_locked = False
             manifest_path = Path("m.json")
             state = mock.Mock()
 

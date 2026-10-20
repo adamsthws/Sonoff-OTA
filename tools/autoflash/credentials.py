@@ -30,11 +30,12 @@ KEYS = {
     "AUTOFLASH_WIFI_SSID": "wifi-name",
     "AUTOFLASH_WIFI_PASSWORD": "wifi-password",
     # Only for a plug on Tasmota with a web password, or on ESPHome with an
-    # update password or a web login.
+    # update password, a web login or an API encryption key.
     "AUTOFLASH_TASMOTA_PASSWORD": "tasmota-password",
     "AUTOFLASH_ESPHOME_OTA_PASSWORD": "esphome-password",
     "AUTOFLASH_ESPHOME_WEB_USER": None,  # a user name, not a secret
     "AUTOFLASH_ESPHOME_WEB_PASSWORD": "esphome-web-password",
+    "AUTOFLASH_ESPHOME_API_KEY": "esphome-api-key",
 }
 
 # Names read before they took the AUTOFLASH_ prefix, still understood, so that

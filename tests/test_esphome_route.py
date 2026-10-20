@@ -18,10 +18,10 @@ class RouteTestCase(unittest.TestCase):
         self.quiet = contextlib.redirect_stdout(io.StringIO())
         self.quiet.__enter__()
         self.addCleanup(self.quiet.__exit__, None, None, None)
-        # No plug's own network to be seen, nor joined, and an ESPHome with no
-        # update password: nothing goes on the network.
+        # No plug's own network to be seen, nor joined, and an ESPHome that
+        # wants nothing for an update: nothing goes on the network.
         for owner, name, value in ((af, "on_a_plug_network", False), (af, "find_ssid", None),
-                                   (af.esphome_ota, "wants_password", False)):
+                                   (af.esphome_ota, "wants", af.esphome_ota.NOTHING)):
             patch = mock.patch.object(owner, name, return_value=value)
             patch.start()
             self.addCleanup(patch.stop)
@@ -33,7 +33,8 @@ class RouteTestCase(unittest.TestCase):
             state.set_input(key, value)
         return SimpleNamespace(state=state, firmware_given=given, esphome_firmware=None,
                                dry_run=False, finder=SimpleNamespace(poll=lambda: None),
-                               esphome_password=None, web_password=None, esphome_login=None)
+                               esphome_password=None, esphome_key=None, web_password=None,
+                               esphome_login=None)
 
     def setUp_found(self, running="sonoff"):
         # What the plug runs now, as the network would show it.
@@ -289,7 +290,7 @@ class SignalSensorTests(unittest.TestCase):
         with mock.patch.object(af.esphome, "sensor_signal", return_value=None), \
                 mock.patch.object(af.esphome, "api_signal", return_value=-66) as api:
             self.assertEqual(af.esphome.signal("192.168.0.50"), -66)
-        api.assert_called_once_with("192.168.0.50")
+        api.assert_called_once_with("192.168.0.50", key=None)
         with mock.patch.object(af.esphome, "sensor_signal", return_value=-58), \
                 mock.patch.object(af.esphome, "api_signal") as api:
             self.assertEqual(af.esphome.signal("192.168.0.50"), -58)
@@ -430,9 +431,139 @@ class WifiActionTests(unittest.TestCase):
                           (self.call(1), _frame(131, b"\x08\x01\x10\x01\x20\x07")))  # its data a number
         self.assertIsNone(af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
 
-    def test_an_encrypted_api_gives_nothing(self):
+    def test_an_encrypted_api_says_so(self):
         port = self.serve((b"", b"\x01\x00\x08Bad indicator"))
-        self.assertIsNone(af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
+        with self.assertRaises(af.esphome.ApiLocked) as locked:
+            af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0)
+        self.assertFalse(locked.exception.wrong)  # no key given: none to be wrong
+
+
+class EncryptedApiTests(unittest.TestCase):
+    """An ESPHome whose API has an encryption key, spoken to as ESPHome's
+    api_frame_helper_noise.cpp answers: the hello, the handshake, then each
+    message sealed in a frame of its own.  Without its key, or with another,
+    it says so; given a key, an ESPHome whose API is plain is spoken to
+    plainly."""
+
+    KEY = bytes(range(32))
+    WIFI = b'{"ssid":"Home-2G","password":"pw"}'
+    DUMP = "[C][wifi:1297]:   SSID: 'Home-2G'\n  Signal strength: -61 dB".encode()
+
+    def serve(self, *, plain_first=False):
+        """The fake, for two connections at most: encrypted with KEY - or, with
+        `plain_first`, a plain API, which answers the encrypted hello "Bad
+        indicator byte" and closes, and then speaks plainly."""
+        import socket
+        import threading
+        from tools.autoflash import noise
+        from tools.autoflash.esphome import _frame, _read_varint, _varint
+        import struct
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(2)
+        self.addCleanup(server.close)
+        listed = (b"\x0a" + _varint(8) + b"s60_wifi" + b"\x15" + struct.pack("<I", 0xCAFEF00D))
+        answered = b"\x08\x01\x10\x01\x22" + _varint(len(self.WIFI)) + self.WIFI
+        log = b"\x08\x04\x1a" + _varint(len(self.DUMP)) + self.DUMP
+        # What each request is answered with: its kind, then (kind, payload)s.
+        answers = {1: [(2, b"\x08\x01\x10\x10")], 11: [(41, listed), (19, b"")],
+                   42: [(131, answered)], 28: [(29, log)]}
+
+        def exactly(connection, size):
+            data = b""
+            while len(data) < size:
+                piece = connection.recv(size - len(data))
+                if not piece:
+                    raise ConnectionError
+                data += piece
+            return data
+
+        def plainly(connection):
+            read = lambda size: exactly(connection, size)  # noqa: E731
+            while True:
+                assert read(1) == b"\x00"
+                size, kind = _read_varint(read), _read_varint(read)
+                read(size)
+                for answer, payload in answers.get(kind, []):
+                    connection.sendall(_frame(answer, payload))
+
+        def sealed(connection):
+            read = lambda size: exactly(connection, size)  # noqa: E731
+            try:
+                hello = noise.read_frame(read)
+            except noise.NoiseError:  # a plain client
+                connection.sendall(noise.frame(b"\x01Bad indicator byte"))
+                return
+            assert hello == b""
+            first = noise.read_frame(read)
+            connection.sendall(noise.frame(b"\x01sonoff-s60\x0012:34:56:AB:CD:EF\x00"))
+            plug = noise.Handshake(self.KEY, b"NoiseAPIInit\x00\x00", initiator=False)
+            try:
+                plug.read_message(first[1:])
+            except noise.NoiseError:
+                connection.sendall(noise.frame(b"\x01" + noise.WRONG_KEY_REASON.encode()))
+                return
+            connection.sendall(noise.frame(b"\x00" + plug.write_message()))
+            sending, receiving = plug.split()
+            while True:
+                message = receiving.decrypt(noise.read_frame(read))
+                for answer, payload in answers.get(int.from_bytes(message[:2], "big"), []):
+                    connection.sendall(noise.frame(sending.encrypt(
+                        answer.to_bytes(2, "big") + len(payload).to_bytes(2, "big") + payload)))
+
+        def run():
+            for turn in range(2):
+                try:
+                    connection, _ = server.accept()
+                except OSError:
+                    return
+                with connection:
+                    try:
+                        if plain_first and turn == 0:
+                            connection.recv(4096)
+                            connection.sendall(b"\x00Bad indicator byte")
+                        elif plain_first:
+                            plainly(connection)
+                        else:
+                            sealed(connection)
+                    except (ConnectionError, OSError, AssertionError):
+                        pass
+
+        threading.Thread(target=run, daemon=True).start()
+        return server.getsockname()[1]
+
+    def test_with_its_key_the_action_gives_the_details(self):
+        port = self.serve()
+        self.assertEqual(af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0, key=self.KEY),
+                         ("Home-2G", "pw"))
+
+    def test_with_its_key_the_dump_gives_the_signal_and_network(self):
+        port = self.serve()
+        self.assertEqual(af.esphome.api_wifi("127.0.0.1", port, timeout=3.0, key=self.KEY),
+                         {"signal": -61, "ssid": "Home-2G"})
+
+    def test_without_its_key_or_with_another_it_says_so(self):
+        port = self.serve()
+        with self.assertRaises(af.esphome.ApiLocked) as locked:
+            af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0)
+        self.assertFalse(locked.exception.wrong)
+        port = self.serve()
+        with self.assertRaises(af.esphome.ApiLocked) as locked:
+            af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0, key=bytes(32))
+        self.assertTrue(locked.exception.wrong)
+        self.assertIsNone(af.esphome.api_signal("127.0.0.1", self.serve(), timeout=3.0))  # just none
+
+    def test_a_key_given_for_a_plain_api_is_not_used(self):
+        port = self.serve(plain_first=True)
+        self.assertEqual(af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0, key=self.KEY),
+                         ("Home-2G", "pw"))
+
+    def test_access_says_what_it_takes(self):
+        self.assertEqual(af.esphome.api_access("127.0.0.1", self.KEY, self.serve()), af.esphome.API_OPEN)
+        self.assertEqual(af.esphome.api_access("127.0.0.1", None, self.serve()), af.esphome.API_KEY)
+        self.assertEqual(af.esphome.api_access("127.0.0.1", bytes(32), self.serve()), af.esphome.API_KEY)
+        self.assertEqual(af.esphome.api_access("127.0.0.1", self.KEY, self.serve(plain_first=True)),
+                         af.esphome.API_PLAIN)
 
 
 class SignalBeforeLeavingESPHomeTests(RouteTestCase):

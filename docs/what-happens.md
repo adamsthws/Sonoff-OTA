@@ -233,13 +233,15 @@ first half, checks them, and switches to them.
 
 - **From ESPHome**, the startup firmware is sent to ESPHome as an ordinary
   ESPHome update, with your Wi-Fi written in. This project's ESPHome gives
-  its Wi-Fi name and password from 1.1.0, through its native API, while the
-  API has no encryption key. From an ESPHome that does not, they come from
-  the plug's Sonoff backup on this computer - the Wi-Fi it was set up with -
-  when that is shown to be the plug's network still: the firmware bundle on
-  this computer was set up for exactly those details, or ESPHome says it is
-  on that network. Otherwise they are asked for. The startup firmware joins
-  your Wi-Fi, saves it for Tasmota, and is sent the full Tasmota.
+  its Wi-Fi name and password from 1.1.0, through its native API - encrypted,
+  where the API has an encryption key, with that key. From an ESPHome that
+  does not, they come from the plug's Sonoff backup on this computer - the
+  Wi-Fi it was set up with - when that is shown to be the plug's network
+  still: the firmware bundle on this computer was set up for exactly those
+  details, or ESPHome says it is on that network. Otherwise they are asked
+  for - or, from an ESPHome whose API is encrypted, its key, and then it
+  gives them. The startup firmware joins your Wi-Fi, saves it for Tasmota,
+  and is sent the full Tasmota.
 - **From Tasmota**, the plug is on Tasmota's own layout, where Tasmota sits
   across both halves of Sonoff's. A small ESPHome, the *mover*, fits in front
   of it: it is written there, the area Sonoff's layout keeps settings in is
@@ -258,22 +260,30 @@ password before the go-ahead to leave it. The question has a second choice,
 for once you have removed the password on the plug yourself: try again
 without one. Each try is checked on the plug, before anything is written. A
 password typed is held in memory for the run only, and sent only to a plug
-that has asked for one. `AUTOFLASH_TASMOTA_PASSWORD`,
-`AUTOFLASH_ESPHOME_OTA_PASSWORD`, and `AUTOFLASH_ESPHOME_WEB_USER` with
-`AUTOFLASH_ESPHOME_WEB_PASSWORD`, in `.env` or the environment, give them in
-advance, as do `--web-password`, `--esphome-ota-password`, and
-`--esphome-web-user` with `--esphome-web-password`. An ESPHome set to
-take only encrypted
-updates (`encryption:` under `ota:`, keyed by its API key) is not one this
-tool can update: the run says so, and waits for it to be removed.
+that has asked for one.
+
+An ESPHome with an API encryption key (`key:` under `api: encryption:` in its
+YAML config) encrypts its native API, and from ESPHome 2026.9 takes its
+updates encrypted too - only those, with `encryption:` under `ota:`. Given
+the key, the run speaks to it encrypted: it gives its Wi-Fi details again,
+and its update goes encrypted, for which ESPHome asks no update password.
+Where it is needed, the key is asked for as a password is: before the
+go-ahead, from an ESPHome that takes only encrypted updates - or, from one
+that takes them too, instead of its update password - and before the Wi-Fi
+details would be asked for, to read them off the plug instead.
+
+`AUTOFLASH_TASMOTA_PASSWORD`, `AUTOFLASH_ESPHOME_OTA_PASSWORD`,
+`AUTOFLASH_ESPHOME_WEB_USER` with `AUTOFLASH_ESPHOME_WEB_PASSWORD`, and
+`AUTOFLASH_ESPHOME_API_KEY`, in `.env` or the environment, give them in
+advance, as do `--web-password`, `--esphome-ota-password`, `--esphome-web-user`
+with `--esphome-web-password`, and `--esphome-api-key`.
 
 The Wi-Fi signal is read first from Tasmota, before anything is changed. From
 ESPHome it is read before anything is written too: from its Wi-Fi signal
 sensor, which this project's ESPHome has from 1.1.0, or else from what ESPHome
-prints of its configuration when asked through its native API - which an
-ESPHome with an API encryption key will not answer. From one that gives
-neither, it is read once the full Tasmota is running, as the startup firmware
-cannot say either.
+prints of its configuration when asked through its native API - encrypted,
+with its key, where it has one. From one that gives neither, it is read once
+the full Tasmota is running, as the startup firmware cannot say either.
 
 ## Safety, and why you can believe the checks
 

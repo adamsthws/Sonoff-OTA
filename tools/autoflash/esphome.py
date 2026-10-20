@@ -26,7 +26,7 @@ import zlib
 from collections.abc import Callable
 from pathlib import Path
 
-from . import imprint
+from . import imprint, noise
 
 ROOT = Path(__file__).resolve().parents[2]
 # The published image, pinned: a changed file is refused, never used unseen.
@@ -254,11 +254,12 @@ def switch_relay(host: str, on: bool) -> bool:
 SIGNAL_SENSOR = "WiFi Signal"
 
 
-def signal(host: str) -> int | None:
+def signal(host: str, key: bytes | None = None) -> int | None:
     """The plug's Wi-Fi signal in dBm: from its Wi-Fi signal sensor, else from
-    its native API; None when neither gives it."""
+    its native API (encrypted with `key`, where it is); None when neither
+    gives it."""
     reading = sensor_signal(host)
-    return reading if reading is not None else api_signal(host)
+    return reading if reading is not None else api_signal(host, key=key)
 
 
 def sensor_signal(host: str) -> int | None:
@@ -271,11 +272,16 @@ def sensor_signal(host: str) -> int | None:
     return None
 
 
-# ESPHome's native API, spoken plainly as an ESPHome without an API encryption
-# key speaks it (ours), and only far enough for it to print its configuration,
-# which gives the Wi-Fi signal: for an ESPHome without the signal sensor. One
-# with an encryption key answers in its own framing, and gives nothing.
+# ESPHome's native API, only as far as the run needs it: its configuration as
+# it prints it, which gives the Wi-Fi signal, for an ESPHome without the signal
+# sensor; and our s60_wifi action.  Spoken plainly, as an ESPHome without an
+# API encryption key speaks it (ours), or encrypted with the key
+# (tools/autoflash/noise.py): each message then in a frame of its own, its
+# type and length sealed with it.
 API_PORT = 6053
+# The handshake's prologue: ESPHome's, then the length and contents of the
+# client's hello frame, which is empty.
+API_PROLOGUE = b"NoiseAPIInit" + b"\x00\x00"
 _HELLO, _CONNECT, _DISCONNECT, _PING, _PONG, _SUBSCRIBE_LOGS, _LOG = 1, 3, 5, 7, 8, 28, 29
 _SIGNAL_LINE = re.compile(rb"Signal strength: (-?\d+) dB")
 # The network it is joined to, printed with the signal in the same message.
@@ -332,24 +338,71 @@ def _fields(payload: bytes) -> dict[int, int | bytes]:
     return fields
 
 
-class _Api:
-    """A plain connection to ESPHome's native API, hello said."""
+class ApiLocked(Exception):
+    """ESPHome's API on the plug is encrypted, and no key was given - or
+    (`wrong`) the key given is not its own."""
 
-    def __init__(self, host: str, port: int, timeout: float) -> None:
+    def __init__(self, wrong: bool = False) -> None:
+        super().__init__("the API encryption key given is not the plug's" if wrong
+                         else "the plug's API is encrypted")
+        self.wrong = wrong
+
+
+class _Api:
+    """A connection to ESPHome's native API, hello said: encrypted with `key`
+    (32 bytes) where the plug's API is encrypted - one that is not is spoken
+    to plainly, key or none.  ApiLocked when its API is encrypted and no key
+    was given (once the first message comes), or not its own."""
+
+    def __init__(self, host: str, port: int, timeout: float, key: bytes | None = None) -> None:
         self.deadline = time.monotonic() + timeout
-        self.sock = socket.create_connection((host, port), timeout=timeout)
-        self.reader = self.sock.makefile("rb")
-        client = b"autoflash"
-        hello = b"\x0a" + _varint(len(client)) + client + b"\x10\x01\x18\x0a"  # API 1.10
-        # Hello; and Connect, which older servers want and newer ones let pass.
+        self.ciphers: tuple[noise.CipherState, noise.CipherState] | None = None
+        self._connect(host, port, timeout)
         try:
-            self.sock.sendall(_frame(_HELLO, hello) + _frame(_CONNECT))
-        except OSError:
+            if key is not None and not self._encrypt(key):
+                self.sock.close()  # a plain API, which this connection has upset
+                self._connect(host, port, timeout)
+            client = b"autoflash"
+            hello = b"\x0a" + _varint(len(client)) + client + b"\x10\x01\x18\x0a"  # API 1.10
+            # Hello; and Connect, which older servers want and newer ones let pass.
+            self.send((_HELLO, hello), (_CONNECT, b""))
+        except BaseException:
             self.sock.close()
             raise
 
-    def send(self, kind: int, payload: bytes = b"") -> None:
-        self.sock.sendall(_frame(kind, payload))
+    def _connect(self, host: str, port: int, timeout: float) -> None:
+        self.sock = socket.create_connection((host, port), timeout=timeout)
+        self.reader = self.sock.makefile("rb")
+
+    def _encrypt(self, key: bytes) -> bool:
+        """The encryption handshake: True once through it, False from a plain
+        API, which answers in its own framing ("Bad indicator byte")."""
+        handshake = noise.Handshake(key, API_PROLOGUE)
+        self.sock.sendall(noise.frame(b"") + noise.frame(bytes([noise.HANDSHAKE_OK])
+                                                         + handshake.write_message()))
+        try:
+            chosen = noise.read_frame(self._read)
+        except noise.NoiseError:
+            return False
+        if chosen[:1] != b"\x01":  # Noise_NNpsk0_25519_ChaChaPoly_SHA256, the one there is
+            raise ConnectionError("the plug's API offers an encryption this tool does not know")
+        try:
+            noise.handshake_reply(handshake, noise.read_frame(self._read))
+        except noise.NoiseError as exc:
+            if str(exc) == noise.WRONG_KEY_REASON:
+                raise ApiLocked(wrong=True) from None
+            raise ConnectionError(f"the API's encryption handshake: {exc}") from None
+        self.ciphers = handshake.split()
+        return True
+
+    def send(self, *messages: tuple[int, bytes]) -> None:
+        """Each (kind, payload) as a message of its own, in one write."""
+        if self.ciphers is None:
+            self.sock.sendall(b"".join(_frame(kind, payload) for kind, payload in messages))
+        else:
+            self.sock.sendall(b"".join(noise.frame(self.ciphers[0].encrypt(
+                kind.to_bytes(2, "big") + len(payload).to_bytes(2, "big") + payload))
+                for kind, payload in messages))
 
     def _read(self, size: int) -> bytes:
         self.sock.settimeout(max(0.1, self.deadline - time.monotonic()))
@@ -358,45 +411,89 @@ class _Api:
             raise ConnectionError("the API connection closed")
         return data
 
+    def _message(self) -> tuple[int, bytes]:
+        if self.ciphers is None:
+            if self._read(1) != b"\x00":
+                raise ApiLocked()  # its answer in the encrypted framing
+            size, kind = _read_varint(self._read), _read_varint(self._read)
+            return kind, self._read(size)
+        try:
+            message = self.ciphers[1].decrypt(noise.read_frame(self._read))
+        except noise.NoiseError as exc:
+            raise ConnectionError(f"an API message did not check out: {exc}") from None
+        if len(message) < 4:
+            raise ConnectionError("an API message too short to say what it is")
+        return int.from_bytes(message[:2], "big"), message[4:]
+
     def messages(self):
         """Each message the plug sends, (kind, payload), until the time is up,
-        pings answered; none from an encrypted API, whose framing differs."""
+        pings answered."""
         while time.monotonic() < self.deadline:
-            if self._read(1) != b"\x00":
-                return
-            size, kind = _read_varint(self._read), _read_varint(self._read)
-            payload = self._read(size)
+            kind, payload = self._message()
             if kind == _PING:
-                self.send(_PONG)
+                self.send((_PONG, b""))
             else:
                 yield kind, payload
 
     def close(self) -> None:
         try:
-            self.send(_DISCONNECT)
+            self.send((_DISCONNECT, b""))
         except OSError:
             pass
         self.sock.close()
 
 
-def api_signal(host: str, port: int = API_PORT, timeout: float = 8.0) -> int | None:
-    """The plug's Wi-Fi signal in dBm from ESPHome's native API: asked for its
-    logs with its configuration, ESPHome prints it ("Signal strength: -50 dB").
-    None from an ESPHome whose API is encrypted, or that does not say."""
-    wifi = api_wifi(host, port, timeout)
-    return wifi["signal"] if wifi else None
+# What api_access() says of the API.
+API_PLAIN, API_OPEN, API_KEY = "plain", "", "key"
+_HELLO_ANSWER = 2
 
 
-def api_wifi(host: str, port: int = API_PORT, timeout: float = 8.0) -> dict[str, object] | None:
-    """What ESPHome's configuration dump says of its Wi-Fi: its signal in dBm,
-    and the network it is joined to (None if not printed with it). None from
-    an ESPHome whose API is encrypted, or that does not say."""
+def api_access(host: str, key: bytes | None = None, port: int = API_PORT,
+               timeout: float = 5.0) -> str | None:
+    """Whether ESPHome's native API at `host` takes what it was given:
+    API_PLAIN when it is not encrypted, API_OPEN when it is and `key` is its
+    key, API_KEY when it is and no key was given, or not its own; None when
+    no API answers."""
     try:
-        api = _Api(host, port, timeout)
+        api = _Api(host, port, timeout, key)
+    except ApiLocked:
+        return API_KEY
     except OSError:
         return None
     try:
-        api.send(_SUBSCRIBE_LOGS, b"\x08\x05\x10\x01")  # at DEBUG, with the dump
+        for kind, _ in api.messages():
+            if kind == _HELLO_ANSWER:
+                return API_PLAIN if api.ciphers is None else API_OPEN
+    except ApiLocked:
+        return API_KEY
+    except (OSError, ValueError, IndexError):
+        return None
+    finally:
+        api.close()
+    return None
+
+
+def api_signal(host: str, port: int = API_PORT, timeout: float = 8.0, key: bytes | None = None) -> int | None:
+    """The plug's Wi-Fi signal in dBm from ESPHome's native API: asked for its
+    logs with its configuration, ESPHome prints it ("Signal strength: -50 dB").
+    None from an ESPHome whose API is encrypted and `key` is not its key, or
+    that does not say."""
+    wifi = api_wifi(host, port, timeout, key)
+    return wifi["signal"] if wifi else None
+
+
+def api_wifi(host: str, port: int = API_PORT, timeout: float = 8.0,
+             key: bytes | None = None) -> dict[str, object] | None:
+    """What ESPHome's configuration dump says of its Wi-Fi: its signal in dBm,
+    and the network it is joined to (None if not printed with it). None from
+    an ESPHome whose API is encrypted and `key` is not its key, or that does
+    not say."""
+    try:
+        api = _Api(host, port, timeout, key)
+    except (OSError, ApiLocked):
+        return None
+    try:
+        api.send((_SUBSCRIBE_LOGS, b"\x08\x05\x10\x01"))  # at DEBUG, with the dump
         for kind, payload in api.messages():
             if kind == _LOG:
                 text = _fields(payload).get(3, b"")
@@ -405,7 +502,7 @@ def api_wifi(host: str, port: int = API_PORT, timeout: float = 8.0) -> dict[str,
                     ssid = _SSID_LINE.search(text)
                     return {"signal": int(found.group(1)),
                             "ssid": ssid.group(1).decode("utf-8", "replace") if ssid else None}
-    except (OSError, ValueError, IndexError):
+    except (OSError, ValueError, IndexError, ApiLocked):
         return None
     finally:
         api.close()
@@ -418,16 +515,17 @@ WIFI_ACTION = "s60_wifi"
 _LIST, _LISTED, _ACTION, _CALL, _ANSWER = 11, 19, 41, 42, 131
 
 
-def api_wifi_details(host: str, port: int = API_PORT, timeout: float = 8.0) -> tuple[str, str] | None:
+def api_wifi_details(host: str, port: int = API_PORT, timeout: float = 8.0,
+                     key: bytes | None = None) -> tuple[str, str] | None:
     """The Wi-Fi the plug is on, name and password, from ESPHome itself - its
     s60_wifi action, which ours has from 1.1.0. None from an ESPHome without
-    it, or whose API is encrypted."""
+    it; ApiLocked from one whose API is encrypted and `key` is not its key."""
     try:
-        api = _Api(host, port, timeout)
+        api = _Api(host, port, timeout, key)
     except OSError:
         return None
     try:
-        api.send(_LIST)
+        api.send((_LIST, b""))
         key = None
         for kind, payload in api.messages():
             if kind == _ACTION:
@@ -438,7 +536,7 @@ def api_wifi_details(host: str, port: int = API_PORT, timeout: float = 8.0) -> t
                 if key is None:
                     return None
                 # Called with no arguments, as call 1, its answer wanted.
-                api.send(_CALL, b"\x0d" + struct.pack("<I", key) + b"\x18\x01\x20\x01")
+                api.send((_CALL, b"\x0d" + struct.pack("<I", key) + b"\x18\x01\x20\x01"))
             elif kind == _ANSWER:
                 answer = _fields(payload)
                 if answer.get(1) != 1:

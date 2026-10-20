@@ -11,8 +11,15 @@ version; feature flags both ways; its password challenge, if it has one (a
 nonce, answered with ours and the hash of the password with both); the
 update type; the size, the MD5 of what follows, then the data in 8 KiB
 blocks, each acknowledged; then "received" and "update ended", after which
-the plug starts what it was sent.  One set to take only encrypted updates
-(`ota: encryption:`, keyed by its API key) is not spoken to.
+the plug starts what it was sent.
+
+From ESPHome 2026.9, one with an API encryption key also takes the update
+encrypted (tools/autoflash/noise.py), keyed by it - and with `ota:
+encryption:`, only that way.  Given the key, the client says so in its
+feature flags; once the plug has said it can too, a Noise handshake follows,
+sealed to every byte both ends sent before it, and the rest of the session is
+the same, in encrypted frames.  ESPHome asks for no password then: the key is
+its proof.
 """
 
 from __future__ import annotations
@@ -22,6 +29,8 @@ import hashlib
 import secrets
 import socket
 from dataclasses import dataclass
+
+from . import noise
 
 PORT = 3232
 
@@ -48,8 +57,15 @@ ENCRYPTION_REQUIRED = 0x94
 CLIENT_COMPRESSION = 0x01
 CLIENT_SHA256_AUTH = 0x02
 CLIENT_EXTENDED = 0x04
+CLIENT_NOISE = 0x08
 SERVER_COMPRESSION = 0x01
 SERVER_PARTITION_ACCESS = 0x02
+SERVER_NOISE = 0x04
+
+# What starts the handshake's prologue, ahead of every byte of the session so
+# far; and the most an encrypted frame holds, less its tag (espota2's).
+NOISE_PROLOGUE = b"NoiseOTAInit"
+NOISE_MAX_PLAINTEXT = 1024
 
 # The plug's password challenge, by the answer that makes it: the hash, and
 # the length of its nonce in hex.  SHA256 in current ESPHome, which takes no
@@ -96,11 +112,18 @@ class NeedsPassword(OTAError):
 
 class NeedsEncryption(OTAError):
     """ESPHome on the plug takes only encrypted updates (`ota: encryption:`),
-    made with its API key."""
+    made with its API encryption key, and none was given."""
 
     def __init__(self) -> None:
         super().__init__("ESPHome on the plug takes only encrypted updates (encryption: under ota: "
-                         "in its ESPHome YAML config), which this tool cannot make")
+                         "in its ESPHome YAML config), made with its API encryption key")
+
+
+class WrongKey(OTAError):
+    """The API encryption key given is not the one ESPHome on the plug has."""
+
+    def __init__(self) -> None:
+        super().__init__("the API encryption key given is not the one ESPHome on the plug has")
 
 
 @dataclass
@@ -110,6 +133,9 @@ class Offer:
     compression: bool
     partition_access: bool
     encrypted_only: bool = False  # it refused to go on unencrypted
+    encryption: bool = False  # it takes encrypted updates: it has an API encryption key
+    sent: int = 0  # the feature flags the client sent, and the plug's: both go
+    flags: int = 0  # into an encrypted session's prologue
 
 
 def _recv(sock: socket.socket, count: int, what: str) -> bytes:
@@ -131,19 +157,21 @@ def _expect(sock: socket.socket, wanted: tuple[int, ...], what: str) -> int:
     return code
 
 
-def _handshake(sock: socket.socket) -> Offer:
+def _handshake(sock: socket.socket, key: bytes | None = None) -> Offer:
     sock.sendall(MAGIC)
     _expect(sock, (OK,), "greeting")
     version = _recv(sock, 1, "version")[0]
     if version not in (1, 2):
         raise OTAError(f"unsupported ESPHome update protocol {version}")
     # SHA256 offered for the password challenge: current ESPHome, if it has a
-    # password, refuses a client that does not offer it.
-    sock.sendall(bytes([CLIENT_COMPRESSION | CLIENT_SHA256_AUTH | CLIENT_EXTENDED]))
+    # password, refuses a client that does not offer it.  Encryption, only
+    # with a key to make it.
+    sent = CLIENT_COMPRESSION | CLIENT_SHA256_AUTH | CLIENT_EXTENDED | (CLIENT_NOISE if key else 0)
+    sock.sendall(bytes([sent]))
     answer = _recv(sock, 1, "features")[0]
     if answer == ENCRYPTION_REQUIRED:
         return Offer(version=version, extended=False, compression=False, partition_access=False,
-                     encrypted_only=True)
+                     encrypted_only=True, sent=sent)
     if answer in ERRORS:
         raise OTAError(f"features: {ERRORS[answer]}")
     if answer == FEATURE_FLAGS:
@@ -152,7 +180,69 @@ def _handshake(sock: socket.socket) -> Offer:
         flags = SERVER_COMPRESSION if answer == SUPPORTS_COMPRESSION else 0
     extended = answer == FEATURE_FLAGS
     return Offer(version=version, extended=extended, compression=bool(flags & SERVER_COMPRESSION),
-                 partition_access=extended and bool(flags & SERVER_PARTITION_ACCESS))
+                 partition_access=extended and bool(flags & SERVER_PARTITION_ACCESS),
+                 encryption=extended and bool(flags & SERVER_NOISE), sent=sent, flags=flags)
+
+
+class _Encrypted:
+    """The rest of a session, sealed.  Each sendall() goes in frames of its
+    own - the plug reads each answer, the size and the checksum as one frame -
+    with data split at NOISE_MAX_PLAINTEXT; recv() hands out what each frame
+    decrypts to."""
+
+    def __init__(self, sock: socket.socket, ciphers: tuple[noise.CipherState, noise.CipherState]) -> None:
+        self.sock = sock
+        self.sending, self.receiving = ciphers
+        self.pending = b""
+
+    def settimeout(self, timeout: float) -> None:
+        self.sock.settimeout(timeout)
+
+    def sendall(self, data: bytes) -> None:
+        self.sock.sendall(b"".join(
+            noise.frame(self.sending.encrypt(data[at:at + NOISE_MAX_PLAINTEXT]))
+            for at in range(0, len(data), NOISE_MAX_PLAINTEXT)))
+
+    def recv(self, count: int) -> bytes:
+        if not self.pending:
+            try:
+                sealed = noise.read_frame(lambda size: _recv(self.sock, size, "an encrypted answer"))
+                self.pending = self.receiving.decrypt(sealed)
+            except noise.NoiseError as exc:
+                raise OTAError(f"an encrypted answer: {exc}") from None
+            if not self.pending:
+                raise OTAError("the plug sent an empty encrypted answer")
+        data, self.pending = self.pending[:count], self.pending[count:]
+        return data
+
+
+def _encrypt(sock: socket.socket, offer: Offer, key: bytes) -> _Encrypted:
+    """The session encrypted from here, after the handshake, which binds the
+    greeting and both ends' feature flags (any of them changed on the way,
+    and it fails).  WrongKey when the plug has another key."""
+    prologue = NOISE_PROLOGUE + MAGIC + bytes([OK, offer.version, offer.sent, FEATURE_FLAGS, offer.flags])
+    handshake = noise.Handshake(key, prologue)
+    sock.sendall(noise.frame(bytes([noise.HANDSHAKE_OK]) + handshake.write_message()))
+    try:
+        noise.handshake_reply(handshake, noise.read_frame(
+            lambda size: _recv(sock, size, "the encryption handshake")))
+    except noise.NoiseError as exc:
+        if str(exc) == noise.WRONG_KEY_REASON:
+            raise WrongKey() from None
+        raise OTAError(f"the encryption handshake: {exc}") from None
+    return _Encrypted(sock, handshake.split())
+
+
+def _open(sock: socket.socket, password: str | None, key: bytes | None) -> tuple[Offer, socket.socket]:
+    """The session through to where the plug is ready for an update: the
+    greeting, encrypted from there if both ends can, and its password."""
+    offer = _handshake(sock, key)
+    if offer.encrypted_only:
+        raise NeedsEncryption()
+    if key and offer.encryption:
+        sock = _encrypt(sock, offer, key)  # type: ignore[assignment]
+    _authenticate(sock, password)
+    return offer, sock
 
 
 def _authenticate(sock: socket.socket, password: str | None) -> None:
@@ -189,46 +279,52 @@ def probe(host: str, *, port: int = PORT, timeout: float = 4.0) -> Offer | None:
         return None
 
 
-def wants_password(host: str, password: str | None = None, *, port: int = PORT,
-                   timeout: float = 5.0) -> bool | None:
-    """Whether ESPHome's update service at `host` wants a password that
-    `password` is not, none or another: True when it says so, False when it
-    takes it (or wants none), None when it does not answer.  Raises
-    NeedsEncryption for one that takes only encrypted updates.
+# What wants() says the plug wants, besides what it was given.
+NOTHING, PASSWORD, KEY = "", "password", "key"
 
-    Nothing is updated: the session ends at the password, before the plug
-    starts an update - which it does only once told its type and size, so
-    that a scan cannot start one.  The plug notes the session failed, as it
-    does for the one probe() leaves.
+
+def wants(host: str, password: str | None = None, key: bytes | None = None, *, port: int = PORT,
+          timeout: float = 5.0) -> str | None:
+    """What ESPHome's update service at `host` wants for an update that
+    `password` and `key` (its API encryption key, 32 bytes) are not: NOTHING,
+    PASSWORD (it has an update password: none was given, or not it), or KEY
+    (it takes only encrypted updates and no key was given, or the key given
+    is not its own); None when it does not answer.
+
+    Nothing is updated: the session ends where the plug is ready for one,
+    before it starts an update - which it does only once told its type and
+    size, so that a scan cannot start one.  The plug notes the session
+    failed, as it does for the one probe() leaves.
     """
     try:
         with socket.create_connection((host, port), timeout=timeout) as sock:
             sock.settimeout(timeout)
-            if _handshake(sock).encrypted_only:
-                raise NeedsEncryption()
-            _authenticate(sock, password)
-            return False
+            _open(sock, password, key)
+            return NOTHING
     except NeedsPassword:
-        return True
-    except NeedsEncryption:
-        raise
+        return PASSWORD
+    except (NeedsEncryption, WrongKey):
+        return KEY
     except (OSError, OTAError):
         return None
 
 
 def upload(host: str, data: bytes, *, kind: int = APP, port: int = PORT,
-           timeout: float = 10.0, progress=None, password: str | None = None) -> None:
-    """Send `data` as an update of `kind`, with the plug's update `password` if
-    it has one; returns once the plug has it all and says the update ended (it
-    then restarts into it by itself)."""
-    with socket.create_connection((host, port), timeout=timeout) as sock:
-        sock.settimeout(timeout)
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        offer = _handshake(sock)
+           timeout: float = 10.0, progress=None, password: str | None = None,
+           key: bytes | None = None) -> None:
+    """Send `data` as an update of `kind` - encrypted with `key`, the plug's
+    API encryption key, where it takes that; else with its update `password`
+    if it has one.  Returns once the plug has it all and says the update ended
+    (it then restarts into it by itself)."""
+    with socket.create_connection((host, port), timeout=timeout) as raw:
+        raw.settimeout(timeout)
+        raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        offer = _handshake(raw, key)
         if offer.encrypted_only:
             raise NeedsEncryption()
         if kind != APP and not offer.partition_access:
             raise OTAError("this ESPHome was built without allow_partition_access")
+        sock = _encrypt(raw, offer, key) if key and offer.encryption else raw
         _authenticate(sock, password)
         sock.settimeout(DATA_TIMEOUT)
         if offer.extended:
