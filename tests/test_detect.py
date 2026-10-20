@@ -1,7 +1,10 @@
 """What an S60 on the network is running, from what it answers."""
+import http.server
+import threading
 import unittest
 from unittest import mock
 
+from tests.test_device_requests import LockedTasmota
 from tools.autoflash import detect
 
 TASMOTA_TABLE = "1" * 64
@@ -12,8 +15,11 @@ class FakeTasmota:
         self.version, self.table, self.module = version, table, module
         self.safeboot, self.hostname = safeboot, hostname
 
-    def __call__(self, host, timeout=None):
+    def __call__(self, host, timeout=None, password=None):
         return self
+
+    def wants_password(self, timeout=None):
+        return False
 
     def is_safeboot(self):
         return self.safeboot
@@ -125,6 +131,77 @@ class TasmotaTests(unittest.TestCase):
                 mock.patch.object(detect, "_is_installer", return_value=False):  # nothing real asked
             found = detect.converted_s60s("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
         self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.37", "midway")])
+
+
+class LoginPage(http.server.ThreadingHTTPServer):
+    """Something else on the network with a login - a router's page, say:
+    it wants a password for everything, and notes what it was sent."""
+    daemon_threads = True
+
+    def __init__(self):
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                self.server.seen.append((self.path, self.headers.get("Authorization")))
+                body = b"<html>Log in</html>"
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="Router"')
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        super().__init__(("127.0.0.1", 0), Handler)
+        self.seen: list[tuple[str, str | None]] = []
+        threading.Thread(target=self.serve_forever, daemon=True).start()
+        self.host = f"127.0.0.1:{self.server_address[1]}"
+
+    def stop(self):
+        self.shutdown()
+        self.server_close()
+
+
+class WebPasswordTests(unittest.TestCase):
+    """A Tasmota with a web password says whether it is an S60 only once given
+    it - and the password goes to nothing that has not asked for it."""
+
+    def started(self, server):
+        self.addCleanup(server.stop)
+        return server
+
+    def test_without_its_password_it_is_locked(self):
+        plug = self.started(LockedTasmota())
+        for password in (None, "not-it-9"):
+            with self.assertRaises(detect.Locked):
+                detect._tasmota(plug.host, 2.0, password)
+
+    def test_given_it_an_s60s_tasmota_is_found(self):
+        plug = self.started(LockedTasmota())
+        self.assertEqual(detect._tasmota(plug.host, 2.0, LockedTasmota.PASSWORD),
+                         ("tasmota", "tasmota-ABCDEF-1234"))
+        # Asked without it first: it went only once the plug had said it wanted one.
+        self.assertIsNone(plug.seen[0][1])
+        self.assertNotIn(LockedTasmota.PASSWORD, plug.seen[0][0])
+
+    def test_nothing_else_on_the_network_is_sent_it(self):
+        router = self.started(LoginPage())
+        self.assertIsNone(detect._tasmota(router.host, 2.0, LockedTasmota.PASSWORD))
+        self.assertTrue(router.seen)
+        self.assertEqual([(path, authorization) for path, authorization in router.seen
+                          if authorization or LockedTasmota.PASSWORD in path], [])
+
+    def test_found_by_address_or_on_the_network_it_is_named_locked(self):
+        neighbours = {"192.168.0.42": "12:34:56:ab:cd:ef"}
+        with mock.patch.object(detect, "_tasmota", side_effect=detect.Locked("192.168.0.42")), \
+                mock.patch.object(detect.esphome, "is_esphome", return_value=False), \
+                mock.patch.object(detect, "_port_open", return_value=True), \
+                mock.patch.object(detect, "_is_installer", return_value=False), \
+                mock.patch.object(detect.hostsys, "sweep"), \
+                mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours):
+            self.assertEqual(detect.identify("192.168.0.42"), "locked")
+            found = detect.converted_s60s("192.168.0.1")
+        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.42", "locked")])
+        self.assertIn("web password", found[0].describe())
 
 
 class InstallerTests(unittest.TestCase):

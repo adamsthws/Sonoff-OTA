@@ -29,6 +29,8 @@ KEYS = {
     # no password given means an open network.
     "S60_WIFI_SSID": "wifi-name",
     "S60_WIFI_PASSWORD": "wifi-password",
+    # Only for a plug on Tasmota with a web password.
+    "S60_TASMOTA_PASSWORD": "tasmota-password",
 }
 
 _values: dict[str, str] = {}

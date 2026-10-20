@@ -18,6 +18,7 @@ chmod 600 .env
 | `EWELINK_PASSWORD` | its password |
 | `S60_SUDO_PASSWORD` | Linux and macOS: this computer's password, only if sudo asks for one (for the temporary firewall rule) |
 | `S60_WIFI_SSID`, `S60_WIFI_PASSWORD` | only for a plug on an ESPHome that cannot say its Wi-Fi password (one older than this project's 1.1.0, or whose API has an encryption key), when this computer has no Sonoff backup of the plug to take it from: the network it is on, and its password (none for an open network) |
+| `S60_TASMOTA_PASSWORD` | only for a plug on Tasmota with a web password: that password. Without it, the run stops when it finds the plug |
 
 The same names set in the environment win over the file, and
 `--env-file PATH` reads another file instead. A misspelt name is refused,

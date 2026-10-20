@@ -24,6 +24,7 @@ NAMES = {
     "esphome": "ESPHome",
     "midway": "a firmware part way through a conversion",
     "installer": "this tool's installer, part way from Sonoff's firmware",
+    "locked": "Tasmota with a web password",
 }
 BRIDGE_PAGE_MARKER = "S60 OTA Bridge"  # as setup_network has it
 
@@ -48,6 +49,9 @@ class Found:
     name: str | None = None
 
     def describe(self) -> str:
+        if self.firmware == "locked":
+            # Whether it is an S60 at all, it says only once given its password.
+            return f"the Tasmota at {self.host}, which has a web password (asked for next)"
         what = NAMES.get(self.firmware, self.firmware)
         return f"the S60 at {self.host}{f' ({self.name})' if self.name else ''}, running {what}"
 
@@ -60,7 +64,7 @@ def _port_open(host: str, port: int, timeout: float) -> bool:
         return False
 
 
-def _tasmota(host: str, timeout: float) -> tuple[str, str | None] | None:
+def _tasmota(host: str, timeout: float, password: str | None = None) -> tuple[str, str | None] | None:
     """("tasmota", "startup" or "hub", its name) if an S60's Tasmota answers.
 
     A safeboot is the startup firmware: it answers no commands, so says
@@ -68,8 +72,16 @@ def _tasmota(host: str, timeout: float) -> tuple[str, str | None] | None:
     knows).  A Tasmota on Sonoff's partition table is one part way through a
     conversion (the Berry Tasmota the routes pass through), whatever its
     template; official Tasmota on its own layout counts only with the S60's.
+
+    A Tasmota with a web password is given `password` - only once it has
+    said it is a Tasmota that wants one, so the password goes to nothing else
+    on the network - and raises Locked without it, or when it is not its own.
     """
     device = Device(host, timeout=timeout)
+    if device.wants_password(timeout):
+        device = Device(host, timeout=timeout, password=password)
+        if not password or device.wants_password(timeout):
+            raise Locked(host)
     try:
         if device.is_safeboot():
             return "startup", None
@@ -108,6 +120,10 @@ class Unreadable(RuntimeError):
     """A Tasmota that answered, but not what its template is."""
 
 
+class Locked(RuntimeError):
+    """A Tasmota that wants a web password: none was given, or not its own."""
+
+
 def _template(device: Device) -> str | None:
     """The template Tasmota runs, or None if it would not say.  Asked again,
     then as its module, which names the template too: a plug just started, or
@@ -128,18 +144,21 @@ def _answers_as_tasmota(host: str, timeout: float) -> bool:
     return isinstance(status, dict) and "Status" in status
 
 
-def identify(host: str, *, timeout: float = 3.0) -> str | None:
-    """sonoff, tasmota, esphome; mover, startup or hub midway - or None if
-    nothing known answers."""
+def identify(host: str, *, timeout: float = 3.0, password: str | None = None) -> str | None:
+    """sonoff, tasmota, esphome; mover, startup or hub midway; locked, a
+    Tasmota whose web password `password` is not - or None if nothing known
+    answers."""
     if esphome.is_esphome(host, timeout=timeout):
         return "esphome" if esphome.relay(host) is not None else None
     if _port_open(host, 80, timeout):
         if _is_installer(host, timeout):
             return "installer"
         try:
-            found = _tasmota(host, timeout)
+            found = _tasmota(host, timeout, password)
         except Unreadable:
             return None  # asked again later, not taken for something else
+        except Locked:
+            return "locked"
         if found:
             return found[0]
     if esphome_ota.probe(host, timeout=timeout) is not None:
@@ -149,12 +168,14 @@ def identify(host: str, *, timeout: float = 3.0) -> str | None:
     return None
 
 
-def converted_s60s(near: str, *, known_macs: set[str] = frozenset(), timeout: float = 2.0) -> list[Found]:
+def converted_s60s(near: str, *, known_macs: set[str] = frozenset(), timeout: float = 2.0,
+                   password: str | None = None) -> list[Found]:
     """The S60s on the network running Tasmota or ESPHome, found by asking every
     device on the subnet of `near` (an address on it) what it is.  A Tasmota
     safeboot counts only with one of `known_macs`: a plug this computer was
     converting, left on the startup firmware - any Tasmota mid-update looks
-    the same."""
+    the same.  A Tasmota whose web password `password` is not is "locked":
+    whether it is an S60 it says only once given its own."""
     hostsys.sweep(near)
     neighbours = hostsys.neighbour_table()
 
@@ -172,11 +193,13 @@ def converted_s60s(near: str, *, known_macs: set[str] = frozenset(), timeout: fl
         if _is_installer(host, timeout):
             return Found(host, "installer", mac, "the installer")
         try:
-            found = _tasmota(host, timeout)
+            found = _tasmota(host, timeout, password)
         except Unreadable:
             # Left out this time - it is looked for again - rather than taken
             # for a Tasmota not set up as an S60, and sent the wrong way.
             return None
+        except Locked:
+            return Found(host, "locked", mac)
         known = hostsys.normalise_mac(mac) in known_macs
         if not found:
             # Official Tasmota put on by a run stopped before it gave it the

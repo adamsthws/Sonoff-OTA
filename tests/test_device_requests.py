@@ -1,10 +1,13 @@
+import base64
 import http.server
+import json
 import select
 import socket
 import threading
 import time
 import unittest
 import urllib.error
+import urllib.parse
 
 from tools.autoflash import device
 from tools.autoflash.device import Device, DeviceError
@@ -194,3 +197,90 @@ class UploadRefusalTests(unittest.TestCase):
         with mock.patch.object(plug, "_get"), \
              mock.patch.object(plug, "_request", return_value=TAKEN_PAGE.encode()):
             self.assertIn("Successful", plug._upload("/up", "tasmota32c3.bin", b"\xe9" * 16, 10))
+
+
+class LockedTasmota(http.server.ThreadingHTTPServer):
+    """Answers as Tasmota with a web password does (Tasmota 15.6.0's
+    xdrv_01_9_webserver.ino): its command interface takes the password as
+    HTTP Basic or in the query, and refuses without it in its own words;
+    every other page takes it as HTTP Basic only.  Notes each request, and
+    the Authorization it came with."""
+    daemon_threads = True
+    PASSWORD = "s3cret-71"
+    STATUS = {"Status": {"Module": "Sonoff S60TPG"}, "StatusNET": {"Hostname": "tasmota-ABCDEF-1234"},
+              "StatusFWR": {"Version": "15.6.0(release-tasmota32)"}}
+
+    def __init__(self):
+        super().__init__(("127.0.0.1", 0), LockedTasmotaHandler)
+        self.seen: list[tuple[str, str | None]] = []
+        threading.Thread(target=self.serve_forever, daemon=True).start()
+
+    @property
+    def host(self) -> str:
+        return f"127.0.0.1:{self.server_address[1]}"
+
+    def stop(self) -> None:
+        self.shutdown()
+        self.server_close()
+
+
+class LockedTasmotaHandler(BusyTasmotaHandler):
+    def do_GET(self):
+        server: LockedTasmota = self.server
+        authorization = self.headers.get("Authorization")
+        server.seen.append((self.path, authorization))
+        path, _, query = self.path.partition("?")
+        params = urllib.parse.parse_qs(query)
+        basic = authorization == "Basic " + base64.b64encode(f"admin:{server.PASSWORD}".encode()).decode()
+        if path == "/cm":
+            commands = {"Status 0": server.STATUS, "Status 2": {"StatusFWR": server.STATUS["StatusFWR"]},
+                        "Template": {"NAME": "Sonoff S60TPG"}}
+            if not (basic or (params.get("user") == ["admin"] and params.get("password") == [server.PASSWORD])):
+                self.reply(401, b'{"WARNING":"Need user=<username>&password=<password>"}')
+            elif "cmnd" not in params:
+                self.reply(200, b'{"WARNING":"Enter command cmnd="}')
+            else:
+                self.reply(200, json.dumps(commands.get(params["cmnd"][0], {"Command": "Unknown"})).encode())
+        elif basic:
+            self.reply(200, b"<title>Tasmota</title>")
+        else:
+            self.reply(401, b"401 Unauthorized", {"WWW-Authenticate": 'Basic realm="Login Required"'})
+
+
+class WebPasswordTests(unittest.TestCase):
+    """A plug on Tasmota with a web password: given it, every page is
+    reached; without it, the plug says so, in words saying what to do."""
+
+    def setUp(self):
+        self.plug = LockedTasmota()
+        self.addCleanup(self.plug.stop)
+
+    def test_it_says_when_it_wants_one_and_runs_nothing_to_say_it(self):
+        self.assertTrue(Device(self.plug.host).wants_password())
+        self.assertTrue(Device(self.plug.host, password="not-it-9").wants_password())
+        self.assertFalse(Device(self.plug.host, password=LockedTasmota.PASSWORD).wants_password())
+        self.assertEqual({path.partition("?")[0] for path, _ in self.plug.seen}, {"/cm"})
+        self.assertFalse([path for path, _ in self.plug.seen if "cmnd=" in path])
+
+    def test_nobody_answering_is_neither(self):
+        with socket.socket() as spare:
+            spare.bind(("127.0.0.1", 0))
+            port = spare.getsockname()[1]
+        self.assertIsNone(Device(f"127.0.0.1:{port}").wants_password(timeout=2))
+
+    def test_a_command_refused_for_it_says_how_to_give_it(self):
+        with self.assertRaisesRegex(device.NeedsPassword, "not given: give it with --web-password"):
+            Device(self.plug.host).command("Status 0")
+        with self.assertRaisesRegex(device.NeedsPassword, "the one given is not it"):
+            Device(self.plug.host, password="not-it-9").command("Status 0")
+
+    def test_given_it_every_page_is_reached_its_query_holding_it_only_for_commands(self):
+        plug = Device(self.plug.host, password=LockedTasmota.PASSWORD)  # no user: Tasmota's admin
+        self.assertEqual(plug.command("Status 0"), LockedTasmota.STATUS)
+        self.assertIn("Tasmota", plug._get("/", {}, 5))
+        basic = "Basic " + base64.b64encode(f"admin:{LockedTasmota.PASSWORD}".encode()).decode()
+        self.assertEqual({authorization for _, authorization in self.plug.seen}, {basic})
+        commands = [path for path, _ in self.plug.seen if path.startswith("/cm?")]
+        pages = [path for path, _ in self.plug.seen if not path.startswith("/cm?")]
+        self.assertTrue(commands and all(f"password={LockedTasmota.PASSWORD}" in path for path in commands))
+        self.assertTrue(pages and all(LockedTasmota.PASSWORD not in path for path in pages))

@@ -35,7 +35,7 @@ sys.path.insert(0, str(ROOT))
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
 from tools.autoflash import __version__, esphome, imprint, plugs, tasmota_settings  # noqa: E402
 from tools.autoflash import awake, detect, esphome_ota, ewelink_lan, interrupt, plans, safety_locks  # noqa: E402
-from tools.autoflash.device import Device, DeviceError, UploadRefused  # noqa: E402
+from tools.autoflash.device import Device, DeviceError, NeedsPassword, PASSWORD_HINT, UploadRefused  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import (  # noqa: E402
     PhaseError,
@@ -508,7 +508,10 @@ class Context:
             self.remember_email(args.email)
         if args.web_user:
             self.state.set_input("web_user", args.web_user)
-        self.web_password = args.web_password
+        # The plug's Tasmota web password, if it has one: given, or asked for
+        # when it is found wanting one (ask_web_password). Held in memory only.
+        self.web_password = args.web_password or credentials.get("S60_TASMOTA_PASSWORD")
+        output.private(self.web_password, "tasmota-password")
         self._ewelink_password: str | None = None
         # From .env or the environment: tried once, then asked for if eWeLink refuses it.
         self._given_ewelink_password = credentials.get("EWELINK_PASSWORD")
@@ -4121,7 +4124,10 @@ def find_current_firmware(ctx: Context) -> str:
     through eWeLink).  With --plug-ip, the plug at that address."""
     given = ctx.state.input("plug_ip")
     if given:
-        running = detect.identify(given)
+        running = detect.identify(given, password=ctx.web_password)
+        if running == "locked":
+            ask_web_password(ctx, given)
+            running = detect.identify(given, password=ctx.web_password)
         if running in ("mover", "startup", "hub"):
             running = "midway"
         if running in ("tasmota", "esphome", "midway", "installer"):
@@ -4136,37 +4142,127 @@ def find_current_firmware(ctx: Context) -> str:
 
     def search() -> list[detect.Found]:
         try:
-            return detect.converted_s60s(hostsys.local_ip_towards("192.0.2.1"), known_macs=known)
+            return detect.converted_s60s(hostsys.local_ip_towards("192.0.2.1"), known_macs=known,
+                                         password=ctx.web_password)
         except OSError:
             return []
 
+    def open_ones(found: list[detect.Found]) -> list[detect.Found]:
+        return [plug for plug in found if plug.firmware != "locked"]
+
     found = search()
-    if not found and converted_here(ctx):
+    if not open_ones(found) and converted_here(ctx):
         # A plug this computer converted, or left part way, may be restarting -
         # a run stopped and started again at once finds it mid-restart.
         say("    None answered. One this computer converted may be restarting: looking "
             f"again for up to {RESTART_GRACE:.0f} seconds...")
         started = time.monotonic()
-        while not found and time.monotonic() - started < RESTART_GRACE:
+        while not open_ones(found) and time.monotonic() - started < RESTART_GRACE:
             time.sleep(5)
             found = search()
-    if not found:
+    # A Tasmota with a web password says whether it is an S60 only once given
+    # it: offered, its password asked for if chosen, when someone can type it.
+    locked = [plug for plug in found if plug.firmware == "locked"]
+    found = open_ones(found)
+    if locked and prompts.UNATTENDED:
+        ours = [plug for plug in locked if plug.mac and hostsys.normalise_mac(plug.mac) in known]
+        if ours and not found:
+            # A plug this computer converted: the one the run is for, surely.
+            raise Abort(str(NeedsPassword(ours[0].host, bool(ctx.web_password))))
+        tell(f"    Left out, for its web password{' (not the one given)' if ctx.web_password else ''}: "
+             f"the Tasmota at {', '.join(plug.host for plug in locked)}. If it is the plug, "
+             f"{PASSWORD_HINT}.")
+        locked = []
+    if not found and not locked:
         return "sonoff"
     stock = "A plug still on Sonoff's firmware (it is set up in the eWeLink app)"
     if prompts.UNATTENDED and len(found) == 1:
         chosen = found[0]
         prompts.answered_unattended("Which plug is this run for", chosen.describe())
     else:
+        offered = found + locked
         output.transient_begin()
         choice = ask_choice("Which plug is this run for",
                             [found_plug.describe()[0].upper() + found_plug.describe()[1:]
-                             for found_plug in found] + [stock])
+                             for found_plug in offered] + [stock])
         output.transient_end()
-        if choice == len(found):
+        if choice == len(offered):
             return "sonoff"
-        chosen = found[choice]
+        chosen = offered[choice]
+        if chosen.firmware == "locked":
+            chosen = unlocked(ctx, chosen)
     adopt_plug(ctx, chosen)
     return past_the_commit(ctx, chosen.firmware)
+
+
+def password_or_retry(title: str, lines: list[str], check: Callable[[str | None], bool | None], *,
+                      still: str, kind: str | None = None, prompt: str = "", label: str = "") -> str | None:
+    """What the plug takes now: its `kind` of password, typed (asked as
+    `prompt`, kept out of the log as `label`), or none, once its owner has
+    removed it on the plug - the second choice, for after that.  With no
+    `kind` there is nothing to type, only trying again.  `check(password)`:
+    True while the plug wants something else (`still` says so), False once
+    it takes it, None when it does not answer.  Asked until it takes one, or
+    the run is stopped."""
+    output.transient_begin()
+    section(title, lines)
+    options = [f"Type its {kind}"] if kind else []
+    options.append(f"Try again without {'one' if kind else 'it'} - once you have removed it yourself")
+    while True:
+        typed = ask_choice("What now", options) == 0 and bool(kind)
+        password = None
+        if typed:
+            password = ask_secret(f"{prompt}: ")
+            output.private(password, label)
+        answer = check(password) if password or not typed else True
+        if answer is False:
+            output.transient_end()
+            return password
+        tell("    The plug did not answer; choose again to try once more." if answer is None
+             else f"    That is not its {kind}." if typed else f"    {still}")
+
+
+def ask_web_password(ctx: Context, host: str) -> None:
+    """The web password of the Tasmota at `host`, which wants one this run
+    does not have: typed, each try checked on the plug, or none once it has
+    been cleared on the plug.  Held in memory for this run only, as the Wi-Fi
+    password is."""
+    wrong = bool(ctx.web_password)
+    if prompts.UNATTENDED:
+        raise Abort(str(NeedsPassword(host, wrong)))
+    ctx.web_password = password_or_retry("Tasmota's web password", [
+        f"Tasmota on the plug at {host} has a web password.",
+        *(["The one given (--web-password, or S60_TASMOTA_PASSWORD) is not it."] if wrong else []),
+        "Type it to go on (Tasmota's one user name, admin, is filled in); or clear it",
+        "in Tasmota yourself - Configuration > Other > Web Admin Password, emptied",
+        "and saved, or the console command WebPassword 0 - and try again without one.",
+        "A password typed is held in memory for this run only, never written to disk.",
+    ], lambda password: Device(host, password=password).wants_password(),
+        still="Tasmota there still has a web password.",
+        kind="web password", prompt="Tasmota web password", label="tasmota-password")
+
+
+def unlocked(ctx: Context, plug: detect.Found) -> detect.Found:
+    """`plug`, a Tasmota with a web password, as what it is once given it."""
+    ask_web_password(ctx, plug.host)
+    running = detect.identify(plug.host, password=ctx.web_password)
+    if running in ("mover", "startup", "hub"):
+        running = "midway"
+    if running not in ("tasmota", "midway"):
+        raise Abort(f"the Tasmota at {plug.host} did not answer as an S60")
+    return detect.Found(plug.host, running, plug.mac)
+
+
+def unlock_tasmota(ctx: Context) -> None:
+    """The plug's own Tasmota web password, when it has one, known before any
+    step asks the plug for anything: on a run from Tasmota, until the plug
+    leaves it (L1) - every firmware after that is one this tool put on.  A
+    run carried on was not asked yet, nor one given the wrong password."""
+    if run_source(ctx.state) != "tasmota" or ctx.state.is_done("L1"):
+        return
+    host = ctx.state.input("plug_ip")
+    if host and ctx.device.wants_password() is True:
+        ask_web_password(ctx, host)
 
 
 def past_the_commit(ctx: Context, running: str) -> str:
@@ -4668,10 +4764,10 @@ def evidence_by_what_answers(finished: set[str], not_yet: set[str]):
     finished once it runs one of `finished`, not yet while one of `not_yet`."""
     def evidence(ctx: "Context") -> tuple[bool | None, str]:
         host = ctx.state.input("plug_ip") or ""
-        running = detect.identify(host) if host else None
+        running = detect.identify(host, password=ctx.web_password) if host else None
         if running is None:
             moved = ctx.finder.poll()
-            running = detect.identify(moved) if moved else None
+            running = detect.identify(moved, password=ctx.web_password) if moved else None
         name = {"mover": "the mover", "startup": "the startup firmware",
                 "hub": "the interim Tasmota"}.get(
             running, detect.NAMES.get(running, "nothing this tool knows"))
@@ -4810,6 +4906,7 @@ def run_steps(ctx: Context) -> int:
         if ctx.state.input("plug_mac"):
             hold_plug(ctx, ctx.state.input("plug_mac"))  # a run carried on: its plug is known
         firmware, source = settle_route(ctx)
+        unlock_tasmota(ctx)
     except NothingToDo as nothing:
         tell(str(nothing))
         return 0
@@ -5376,8 +5473,9 @@ def _main() -> int:
         "address when omitted",
     )
     parser.add_argument("--email")
-    parser.add_argument("--web-user", help="Tasmota web username when the UI has a password")
-    parser.add_argument("--web-password", help="Tasmota web password (not stored in run state)")
+    parser.add_argument("--web-user", help="Tasmota web username, for a Tasmota built with another than admin")
+    parser.add_argument("--web-password",
+                        help="the plug's Tasmota web password, if it has one (asked for otherwise; never stored)")
     parser.add_argument("--wifi", action="store_true",
                         help="type the Wi-Fi details instead of reading them from the plug")
     parser.add_argument("--no-backup", action="store_true",

@@ -3458,3 +3458,153 @@ class ComputerDescriptionTests(unittest.TestCase):
     def test_a_server_is_not_called_11(self):
         self.assertEqual(self.describe("10", "10.0.26100", product_type=3),
                          "Windows 10 (build 10.0.26100)")
+
+
+class TasmotaWebPasswordTests(unittest.TestCase):
+    """A plug on Tasmota with a web password: asked for it, before anything
+    needs it, where someone can type it; stopped, saying what to give, where
+    nobody can.  Each try is checked on the plug."""
+
+    def setUp(self):
+        import tools.s60_autoflash as autoflash
+        self.af = autoflash
+        self.private = mock.Mock()
+        for patch in (mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"),
+                      mock.patch.object(autoflash, "section"),
+                      mock.patch.object(autoflash.output, "transient_begin"),
+                      mock.patch.object(autoflash.output, "transient_end"),
+                      mock.patch.object(autoflash.output, "private", self.private),
+                      mock.patch.object(autoflash.prompts, "UNATTENDED", False),
+                      mock.patch.object(autoflash.prompts, "answered_unattended"),
+                      mock.patch.object(autoflash, "adopt_plug"),
+                      mock.patch.object(autoflash, "converted_here", return_value=False),
+                      mock.patch.object(autoflash.plugs, "PLUGS", Path("/nonexistent/plugs")),
+                      mock.patch.object(autoflash.hostsys, "local_ip_towards", return_value="192.168.0.10"),
+                      mock.patch.object(autoflash.hostsys, "mac_of", return_value="12:34:56:ab:cd:ef"),
+                      # A question no test expects fails it, rather than waiting on a keyboard.
+                      mock.patch.object(autoflash, "ask_choice", side_effect=AssertionError("asked")),
+                      mock.patch.object(autoflash, "ask_secret", side_effect=AssertionError("asked"))):
+            patch.start()
+            self.addCleanup(patch.stop)
+        # The plug's Tasmota wants this password, and none other - until it is
+        # cleared on the plug (None).
+        self.wanted = "s3cret-71"
+
+        def plug(host, user=None, password=None, timeout=10.0):
+            return mock.Mock(host=host, wants_password=mock.Mock(
+                side_effect=lambda *_: self.wanted is not None and password != self.wanted))
+        patch = mock.patch.object(autoflash, "Device", side_effect=plug)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def ctx(self, **inputs):
+        from types import SimpleNamespace
+        done = inputs.pop("done", ())
+        state = SimpleNamespace(input=inputs.get, set_input=inputs.__setitem__, is_done=lambda step: step in done)
+        return SimpleNamespace(state=state, web_password=None)
+
+    def test_a_plug_given_by_address_is_asked_for_it_then_found(self):
+        ctx = self.ctx(plug_ip="192.168.0.37")
+        answers = {None: "locked", "s3cret-71": "tasmota"}
+        with mock.patch.object(self.af.detect, "identify",
+                               side_effect=lambda host, password=None, **_: answers[password]), \
+                mock.patch.object(self.af, "ask_choice", return_value=0) as menu, \
+                mock.patch.object(self.af, "ask_secret", side_effect=["not-it-9", "s3cret-71"]) as asked:
+            self.assertEqual(self.af.find_current_firmware(ctx), "tasmota")
+        self.assertEqual(asked.call_count, 2)  # the wrong one refused on the plug
+        self.assertEqual(menu.call_args.args[1][0], "Type its web password")
+        self.assertIn("once you have removed it yourself", menu.call_args.args[1][1])
+        self.assertEqual(ctx.web_password, "s3cret-71")
+        self.private.assert_any_call("s3cret-71", "tasmota-password")  # kept out of the log
+
+    def test_unattended_it_stops_saying_what_to_give(self):
+        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
+                mock.patch.object(self.af.detect, "identify", return_value="locked"), \
+                mock.patch.object(self.af, "ask_secret") as asked:
+            with self.assertRaisesRegex(self.af.Abort, "web password.*--web-password.*S60_TASMOTA_PASSWORD"):
+                self.af.find_current_firmware(self.ctx(plug_ip="192.168.0.37"))
+        asked.assert_not_called()
+
+    def test_asked_again_until_it_takes_one_or_the_run_is_stopped(self):
+        with mock.patch.object(self.af.detect, "identify", return_value="locked"), \
+                mock.patch.object(self.af, "ask_choice", side_effect=[0, 0, self.af.QuitRun("quit")]), \
+                mock.patch.object(self.af, "ask_secret", return_value="not-it-9") as asked:
+            with self.assertRaises(self.af.QuitRun):
+                self.af.find_current_firmware(self.ctx(plug_ip="192.168.0.37"))
+        self.assertEqual(asked.call_count, 2)
+
+    def test_trying_again_once_it_is_cleared_goes_on_without_one(self):
+        ctx = self.ctx(plug_ip="192.168.0.37")
+
+        choices = []
+
+        def try_again(*_):
+            choices.append(1)
+            if len(choices) == 2:
+                self.wanted = None  # cleared on the plug before choosing again
+            return 1
+        answers = {None: "locked", "s3cret-71": "tasmota"}
+        with mock.patch.object(self.af.detect, "identify",
+                               side_effect=lambda host, password=None, **_: answers[password]
+                               if self.wanted else "tasmota"), \
+                mock.patch.object(self.af, "ask_choice", side_effect=try_again), \
+                mock.patch.object(self.af, "ask_secret") as asked:
+            self.assertEqual(self.af.find_current_firmware(ctx), "tasmota")
+        asked.assert_not_called()
+        self.assertIsNone(ctx.web_password)
+        self.af.tell.assert_any_call("    Tasmota there still has a web password.")  # tried too soon
+
+    def test_found_on_the_network_it_is_offered_and_asked_for_once_chosen(self):
+        locked = self.af.detect.Found("192.168.0.42", "locked", "12:34:56:ab:cd:ef")
+        with mock.patch.object(self.af.detect, "converted_s60s", return_value=[locked]), \
+                mock.patch.object(self.af.detect, "identify", return_value="tasmota") as identify, \
+                mock.patch.object(self.af, "ask_choice", side_effect=[0, 0]) as menu, \
+                mock.patch.object(self.af, "ask_secret", return_value="s3cret-71"):
+            self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
+        self.assertIn("web password", menu.call_args_list[0].args[1][0])  # the plug, then its password
+        identify.assert_called_with("192.168.0.42", password="s3cret-71")
+        chosen = self.af.adopt_plug.call_args.args[1]
+        self.assertEqual((chosen.host, chosen.firmware), ("192.168.0.42", "tasmota"))
+
+    def test_unattended_one_found_locked_is_left_out_and_named(self):
+        found = [self.af.detect.Found("192.168.0.37", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF"),
+                 self.af.detect.Found("192.168.0.42", "locked", "aa:bb:cc:dd:ee:ff")]
+        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
+                mock.patch.object(self.af.detect, "converted_s60s", return_value=found), \
+                mock.patch.object(self.af, "ask_choice") as menu:
+            self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
+        menu.assert_not_called()  # the one S60 that answered is the plug, as before
+        self.assertEqual(self.af.adopt_plug.call_args.args[1].host, "192.168.0.37")
+        told = " ".join(str(call.args[0]) for call in self.af.tell.call_args_list)
+        self.assertIn("192.168.0.42", told)
+        self.assertIn("--web-password", told)
+
+    def test_unattended_a_plug_this_computer_converted_found_locked_stops_the_run(self):
+        # Gone on to Sonoff's route instead, the run would fail later, and less clearly.
+        locked = [self.af.detect.Found("192.168.0.42", "locked", "12:34:56:ab:cd:ef")]
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "12-34-56-ab-cd-ef").mkdir()
+            with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
+                    mock.patch.object(self.af.plugs, "PLUGS", Path(directory)), \
+                    mock.patch.object(self.af.detect, "converted_s60s", return_value=locked):
+                with self.assertRaisesRegex(self.af.Abort, "192.168.0.42 has a web password.*--web-password"):
+                    self.af.find_current_firmware(self.ctx())
+            # One it does not know is only named: the plug may be on Sonoff's firmware still.
+            with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
+                    mock.patch.object(self.af.plugs, "PLUGS", Path(directory) / "none"), \
+                    mock.patch.object(self.af.detect, "converted_s60s", return_value=locked):
+                self.assertEqual(self.af.find_current_firmware(self.ctx()), "sonoff")
+
+    def test_a_run_carried_on_from_tasmota_is_asked_before_any_step(self):
+        ctx = self.ctx(plug_ip="192.168.0.37", source="tasmota")
+        ctx.device = mock.Mock(wants_password=mock.Mock(return_value=True))
+        with mock.patch.object(self.af, "ask_choice", return_value=0), \
+                mock.patch.object(self.af, "ask_secret", return_value="s3cret-71"):
+            self.af.unlock_tasmota(ctx)
+        self.assertEqual(ctx.web_password, "s3cret-71")
+        # Past L1 the plug runs only firmware this tool put on; from ESPHome, none of the plug's Tasmota.
+        for inputs in ({"source": "tasmota", "done": ("L1",)}, {"source": "esphome"}, {}):
+            ctx = self.ctx(plug_ip="192.168.0.37", **inputs)
+            ctx.device = mock.Mock()
+            self.af.unlock_tasmota(ctx)
+            ctx.device.wants_password.assert_not_called()

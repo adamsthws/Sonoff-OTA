@@ -246,7 +246,12 @@ first half, checks them, and switches to them.
   cleared, and Sonoff's layout table is written last - the one moment a power
   cut would leave a plug needing to be opened. The plug restarts into the
   mover, which takes ESPHome itself as an update, or the startup firmware
-  as on the way from ESPHome.
+  as on the way from ESPHome. A Tasmota with a web password is asked for it
+  when the run finds the plug - or, once you have cleared it on the plug
+  yourself, tries again without one. `--web-password`, or
+  `S60_TASMOTA_PASSWORD` in `.env` or the environment, gives it in advance.
+  It is held in memory for the run only, and sent only to a Tasmota that
+  has asked for it.
 - **A plug left part way** - running the mover, the startup firmware or the
   full Tasmota on Sonoff's layout - is recognised by a new run, and can go on
   to any of the three from where it is.

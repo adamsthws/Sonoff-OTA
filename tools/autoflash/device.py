@@ -8,6 +8,7 @@ closed, though: see HOLD_SECONDS.
 
 from __future__ import annotations
 
+import base64
 import http.client
 import io
 import json
@@ -25,6 +26,34 @@ from typing import Any
 
 class DeviceError(RuntimeError):
     pass
+
+
+# Tasmota's web user: always this one; a web password is all that is set.
+TASMOTA_USER = "admin"
+PASSWORD_HINT = "give it with --web-password, or as S60_TASMOTA_PASSWORD in .env or the environment"
+
+
+class NeedsPassword(DeviceError):
+    """Tasmota refused a command for want of its web password: none was
+    given, or not the right one."""
+
+    def __init__(self, host: str, given: bool) -> None:
+        super().__init__(f"Tasmota at {host} has a web password, "
+                         + ("and the one given is not it" if given else "which this run was not given")
+                         + f": {PASSWORD_HINT}")
+
+
+def _wants_password(exc: urllib.error.HTTPError) -> bool:
+    """Whether `exc` is Tasmota's own refusal of a command for want of its web
+    password: a 401 naming the user and password it wants, in the language
+    it was built in, under the same key in every one."""
+    if exc.code != 401:
+        return False
+    try:
+        body = json.loads(exc.read() or b"null")
+    except ValueError:
+        return False
+    return isinstance(body, dict) and "WARNING" in body
 
 
 class UploadRefused(DeviceError):
@@ -162,15 +191,19 @@ class Device:
         return f"http://{self.host}"
 
     def _auth_params(self) -> dict[str, str]:
-        if self.user and self.password:
-            return {"user": self.user, "password": self.password}
+        if self.password:
+            return {"user": self.user or TASMOTA_USER, "password": self.password}
         return {}
 
     def _request(self, method: str, path: str, params: dict[str, str], timeout: float,
                  body: bytes | None = None, headers: dict[str, str] | None = None) -> bytes:
         """The reply's body; an error status raises HTTPError, and a redirect
         is followed, as urllib does."""
-        query = urllib.parse.urlencode({**self._auth_params(), **params})
+        # A web password goes as every Tasmota page wants it, HTTP Basic; the
+        # command interface takes it in the query as well, as older Tasmota
+        # wanted it, and is the only page that reads it there.
+        auth = self._auth_params()
+        query = urllib.parse.urlencode({**(auth if path == "/cm" else {}), **params})
         target = f"{path}?{query}" if query else path
         # Tasmota refuses /cm requests with no Referer as CSRF protection and
         # answers by closing the connection, which looks exactly like the device
@@ -178,6 +211,9 @@ class Device:
         # without asking the operator to set SetOption128.
         sent = {"User-Agent": "S60Autoflash/1", "Referer": f"{self.base_url}/",
                 "Connection": "close", **(headers or {})}
+        if auth:
+            token = base64.b64encode(f"{auth['user']}:{auth['password']}".encode()).decode("ascii")
+            sent["Authorization"] = f"Basic {token}"
         deadline = time.monotonic() + timeout
         for _ in range(4):
             status, reason, replied, data = _exchange(
@@ -200,12 +236,30 @@ class Device:
         try:
             return self._request("GET", path, params, timeout).decode("utf-8", errors="replace")
         except urllib.error.HTTPError as exc:
+            if path == "/cm" and _wants_password(exc):
+                raise NeedsPassword(self.host, bool(self.password)) from exc
             if exc.code in (401, 403):
                 raise DeviceError(
                     f"{self.host} refused the request (HTTP {exc.code}); "
-                    "the web UI has a password - pass --web-user/--web-password"
+                    f"the web UI has a password - {PASSWORD_HINT}"
                 ) from exc
             raise
+
+    def wants_password(self, timeout: float = 5.0) -> bool | None:
+        """Whether this is a Tasmota that wants a web password this Device
+        does not have, none or another: True when it says so, False when it
+        answers otherwise, None when it does not answer.  Its command
+        interface is asked nothing, so it runs nothing, and nothing goes into
+        the plug's console log."""
+        try:
+            self._get("/cm", {}, timeout)
+        except NeedsPassword:
+            return True
+        except (DeviceError, urllib.error.HTTPError):
+            return False  # an answer, and not that one
+        except (urllib.error.URLError, OSError, http.client.HTTPException):
+            return None
+        return False
 
     # -- commands -----------------------------------------------------------
 
