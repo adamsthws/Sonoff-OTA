@@ -28,12 +28,6 @@ join)
         nmcli -t -f SSID device wifi list | sed 's/^/    /' >&2
         exit 1
     fi
-    case "$name" in
-    S60-OTA-Bridge-*)
-        echo "Note: the bridge's network uses WPA2, which the emulator cannot join" >&2
-        echo "(its emulated Wi-Fi is open networks only). Trying anyway..." >&2
-        ;;
-    esac
     echo "Joining $name..."
     if sudo /opt/autoflash-emu/bin/wifi-root join "$name"; then
         echo "Joined $name; the plug is at $(cat "$RUN/gateway"). Back home: wifi home"

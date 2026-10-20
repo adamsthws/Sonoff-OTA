@@ -23,6 +23,9 @@ CONFIG_FILE_XOR = 0x5A           # backups are XORed with this + offset
 TEXT_POOL = 0x017                # char text_pool[...]
 TEXT_POOL_SIZE = 699             # settings_text_size
 SET_STASSID1, SET_STASSID2, SET_STAPWD1, SET_STAPWD2 = 4, 5, 6, 7
+# Its name on the network, and its setup network's.  The template has
+# Tasmota's own default, WIFI_HOSTNAME "%s-%04d" (tasmota-ABCDEF-1234).
+SET_HOSTNAME = 8
 IPV4_ADDRESS = 0x544             # ip, gateway, mask, dns1, dns2; ip 0.0.0.0 = DHCP
 # my_user_config.h defaults.  With DHCP Tasmota records the gateway and DNS it
 # was given here, so a template gets these back rather than the source network's.
@@ -33,6 +36,7 @@ CONFIG_VERSION = 0xF36           # chip family; Tasmota refuses a restore otherw
 ESP32C3 = 4
 CRC32 = 0xFFC                    # over everything before it
 SSID_MAX, PASSWORD_MAX = 32, 64
+HOSTNAME_MAX = 32                # TasmotaGlobal.hostname[33]
 
 # A template is only used with the firmware its layout was checked against.
 #
@@ -174,6 +178,17 @@ def fill(template: bytes, ssid: str, password: str) -> bytes:
     record = with_text(template, SET_STASSID1, ssid)
     record = with_text(record, SET_STAPWD1, password)
     return with_crc(record)
+
+
+def named(template: bytes, hostname: str) -> bytes:
+    """The template with `hostname` for Tasmota's name.
+
+    Only a name written out: Tasmota takes one with a format in it (a %) for
+    its own default instead, at every start (tasmota.ino, setup()).
+    """
+    if not 0 < len(hostname.encode()) <= HOSTNAME_MAX or "%" in hostname:
+        raise SettingsError(f"a Tasmota name is 1 to {HOSTNAME_MAX} bytes, with no %")
+    return with_crc(with_text(template, SET_HOSTNAME, hostname))
 
 
 def _require_size(settings: bytes) -> None:

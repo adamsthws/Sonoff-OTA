@@ -566,7 +566,7 @@ class AlreadyConvertingTests(unittest.TestCase):
     def test_the_bridge_is_named(self):
         import tools.autoflash_cli as autoflash
         with self.assertRaisesRegex(autoflash.Abort, "already running our installer firmware"):
-            self.silent_discover("<title>S60 OTA Bridge</title>")
+            self.silent_discover("<title>Autoflash bridge</title>")
 
     def test_tasmota_is_named(self):
         import tools.autoflash_cli as autoflash
@@ -1862,7 +1862,7 @@ class BridgeOnHomeNetworkTests(unittest.TestCase):
             return autoflash_cli.bridge_on_home_network(ctx, timeout=timeout)
 
     def test_the_bridge_is_found_where_the_plug_was(self):
-        bridge = "<title>S60 OTA Bridge</title>"
+        bridge = "<title>Autoflash bridge</title>"
         self.assertEqual(self.find([None, "192.168.1.51"], {"192.168.1.51": bridge}), "192.168.1.51")
 
     def test_stock_firmware_at_that_address_is_not_the_bridge(self):
@@ -2055,18 +2055,18 @@ class WaitForBridgeTests(unittest.TestCase):
              mock.patch.object(autoflash_cli.hostsys, "ping_ok", return_value=answering), \
              mock.patch.object(autoflash_cli, "tell", side_effect=lambda line: (told if told is not None else []).append(line)), \
              mock.patch.object(autoflash_cli, "say"):
-            return autoflash_cli.wait_for_bridge(ctx, "S60-OTA-Bridge-A04D", timeout=timeout,
+            return autoflash_cli.wait_for_bridge(ctx, "autoflash-recovery-CDEF", timeout=timeout,
                                                  gone_back=gone_back)
 
     def test_a_late_join_of_the_home_network_is_taken(self):
-        bridge = "<title>S60 OTA Bridge</title>"
+        bridge = "<title>Autoflash bridge</title>"
         self.assertEqual(
             self.wait([None, None, "192.168.1.51"], {"192.168.1.51": bridge}), "192.168.1.51"
         )
 
     def test_joining_the_bridge_network_still_works(self):
         from tools.autoflash import setup_network
-        bridge = "<title>S60 OTA Bridge</title>"
+        bridge = "<title>Autoflash bridge</title>"
         self.assertIsNone(self.wait([None] * 50, {setup_network.SETUP_HOST: bridge}))
 
     def test_a_plug_gone_back_to_sonoffs_firmware_ends_the_wait(self):
@@ -2092,6 +2092,33 @@ class WaitForBridgeTests(unittest.TestCase):
             self.wait([None] * 50, {}, timeout=20.0)
 
 
+class TasmotaAtHomeTests(unittest.TestCase):
+    """Tasmota found on the home network, and the name it goes by kept - one
+    it keeps, not the run's for it part way through."""
+
+    def found(self, hostname):
+        from types import SimpleNamespace
+        from tools import autoflash_cli
+        from tools.autoflash import setup_network
+        inputs = {}
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"),
+                              state=SimpleNamespace(set_input=inputs.__setitem__, input=inputs.get),
+                              set_plug_ip=lambda ip: inputs.__setitem__("plug_ip", ip))
+        device = mock.Mock()
+        device.command.return_value = {"StatusNET": {"Hostname": hostname}}
+        with mock.patch.object(setup_network, "page", return_value="<title>Tasmota</title>"), \
+             mock.patch.object(autoflash_cli, "Device", return_value=device), \
+             mock.patch.object(autoflash_cli, "say"):
+            self.assertEqual(autoflash_cli.tasmota_at_home(ctx), "192.168.1.51")
+        return inputs.get("device_name")
+
+    def test_tasmotas_own_name_is_kept(self):
+        self.assertEqual(self.found("tasmota-ABCDEF-1234"), "tasmota-ABCDEF-1234")
+
+    def test_the_runs_name_for_it_part_way_is_not(self):
+        self.assertIsNone(self.found("autoflash-recovery-CDEF"))
+
+
 class TasmotaWifiPresetTests(unittest.TestCase):
     """D1 gives Tasmota the Wi-Fi through the bridge when it safely can."""
 
@@ -2105,7 +2132,12 @@ class TasmotaWifiPresetTests(unittest.TestCase):
         self.ctx = SimpleNamespace(state=SimpleNamespace(set_input=self.inputs.__setitem__,
                                                          input=self.inputs.get))
 
-    def run_preset(self, template, send_error=None):
+    # The bridge's answers (archive/bridge/main/main.c), joined to the home
+    # network and on its own.
+    JOINED = "Tasmota settings saved with the home network.\n"
+    ALONE = "Tasmota settings saved without Wi-Fi details: the bridge has not joined a network.\n"
+
+    def run_preset(self, template, send_error=None, address="192.168.1.51", answer=JOINED):
         from unittest import mock
         from tools import autoflash_cli
         from tools.autoflash import setup_network
@@ -2115,17 +2147,133 @@ class TasmotaWifiPresetTests(unittest.TestCase):
             if send_error:
                 raise setup_network.SetupError(send_error)
             sent.append(data)
-            return "saved"
+            return answer
 
         with mock.patch.object(self.ts, "load_template",
                                return_value=(template, "" if template else "none captured")), \
              mock.patch.object(setup_network, "send_tasmota_settings", side_effect=send), \
-             mock.patch.object(autoflash_cli, "say"):
-            return autoflash_cli.give_tasmota_the_wifi(self.ctx, "192.168.1.51"), sent
+             mock.patch.object(autoflash_cli, "say") as said:
+            given = autoflash_cli.give_tasmota_the_wifi(self.ctx, address)
+        self.said = " ".join(call.args[0] for call in said.call_args_list)
+        return given, sent
 
     def test_with_a_template_the_bridge_gets_it(self):
         self.assertEqual(self.run_preset(b"T" * 4096), (True, [b"T" * 4096]))
         self.assertTrue(self.inputs.get("tasmota_wifi_preset"))  # outlasts a cut-off upload
+
+    def test_the_tasmota_is_named_as_every_firmware_part_way_through(self):
+        # Until F4's reset gives it Tasmota's own name; and its setup network,
+        # should it raise one, by the same.
+        template = self.ts.template_path(Path(__file__).resolve().parents[1]).read_bytes()
+        self.inputs["plug_mac"] = "12:34:56:ab:cd:ef"
+        given, sent = self.run_preset(template)
+        self.assertTrue(given)
+        self.assertEqual(self.ts.text(sent[0], self.ts.SET_HOSTNAME), "autoflash-recovery-CDEF")
+        self.assertEqual(self.ts.problems(sent[0]), [])  # the bridge checks the checksum first
+
+    def test_on_the_installers_network_tasmota_is_named_without_the_wifi(self):
+        # 4.4.4 has joined no network there, so it saves the settings with no
+        # Wi-Fi: Tasmota makes its own network named as the installer's was,
+        # not tasmota-ABCDEF-1234 (seen in the fault suite, C3 with the home
+        # Wi-Fi gone).
+        from tools.autoflash import setup_network
+        template = self.ts.template_path(Path(__file__).resolve().parents[1]).read_bytes()
+        self.inputs["plug_mac"] = "12:34:56:ab:cd:ef"
+        given, sent = self.run_preset(template, address=setup_network.SETUP_HOST, answer=self.ALONE)
+        self.assertFalse(given)
+        self.assertEqual(self.ts.text(sent[0], self.ts.SET_HOSTNAME), "autoflash-recovery-CDEF")
+        self.assertTrue(self.inputs.get("tasmota_named_alone"))
+        self.assertIsNone(self.inputs.get("tasmota_wifi_preset"))
+        self.assertIn("make its own network by that name", self.said)
+
+    def test_an_installer_before_4_4_4_leaves_tasmota_its_own_name_quietly(self):
+        from tools.autoflash import setup_network
+        self.inputs["plug_mac"] = "12:34:56:ab:cd:ef"
+        template = self.ts.template_path(Path(__file__).resolve().parents[1]).read_bytes()
+        given, _ = self.run_preset(template, send_error="The bridge has not joined a network",
+                                   address=setup_network.SETUP_HOST)
+        self.assertFalse(given)
+        self.assertIsNone(self.inputs.get("tasmota_named_alone"))
+        self.assertEqual(self.said, "")  # the Wi-Fi is given on its network, as it always was
+
+    def test_without_the_mac_nothing_is_sent_on_the_installers_network(self):
+        from tools.autoflash import setup_network
+        self.assertEqual(self.run_preset(b"T" * 4096, address=setup_network.SETUP_HOST), (False, []))
+
+    def test_named_alone_tasmotas_network_is_looked_for_once_the_installer_has_gone(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from tools import autoflash_cli
+        self.inputs.update(plug_mac="12:34:56:ab:cd:ef", tasmota_named_alone=True)
+        ctx = SimpleNamespace(state=self.ctx.state)
+        order = []
+        with mock.patch.object(autoflash_cli, "installer_gone",
+                               side_effect=lambda **k: order.append("gone")), \
+             mock.patch.object(autoflash_cli, "tasmota_or_its_network",
+                               side_effect=lambda ctx, **k: order.append(k["networks"])
+                               or ("network", "autoflash-recovery-CDEF")), \
+             mock.patch.object(autoflash_cli, "configure_plug_wifi", return_value="192.168.1.52") as by_hand, \
+             mock.patch.object(autoflash_cli, "say"):
+            result = autoflash_cli.finish_tasmota_setup(ctx, route="bridge network")
+        self.assertEqual(order[0], "gone")
+        self.assertEqual(order[1][0], "autoflash-recovery-CDEF")
+        self.assertEqual(order[1][1:], autoflash_cli.setup_networks(ctx))  # and Tasmota's own, after a reset
+        by_hand.assert_called_once_with(ctx, "autoflash-recovery-CDEF")
+        self.assertEqual(result["plug_ip"], "192.168.1.52")
+        self.assertIsNone(result["device_name"])  # the run's name for it is not its own
+
+    def test_the_interim_name_is_not_looked_for_otherwise(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from tools import autoflash_cli
+        self.inputs["plug_mac"] = "12:34:56:ab:cd:ef"
+        ctx = SimpleNamespace(state=self.ctx.state)
+        with mock.patch.object(autoflash_cli, "installer_gone") as waited, \
+             mock.patch.object(autoflash_cli, "tasmota_or_its_network",
+                               return_value=("network", "tasmota-ABCDEF-1234")) as looked, \
+             mock.patch.object(autoflash_cli, "configure_plug_wifi", return_value="192.168.1.52"), \
+             mock.patch.object(autoflash_cli, "say"):
+            autoflash_cli.finish_tasmota_setup(ctx, route="bridge network")
+        waited.assert_not_called()
+        self.assertNotIn("autoflash-recovery-CDEF", looked.call_args.kwargs["networks"])
+
+    def test_tasmota_on_the_installers_network_when_run_again_is_set_up(self):
+        # Cut off after the upload: the network the installer had is Tasmota's
+        # now, by the same name - not waited on as the installer's for ever.
+        from types import SimpleNamespace
+        from unittest import mock
+        from tools import autoflash_cli
+        from tools.autoflash import setup_network
+        self.inputs.update(plug_mac="12:34:56:ab:cd:ef", tasmota_named_alone=True)
+        ctx = SimpleNamespace(state=self.ctx.state)
+        # On its setup network Tasmota's page waits on a Wi-Fi scan, longer
+        # than the look allows: only its status answers at once.
+        pages = {(setup_network.SETUP_HOST, "/cm?cmnd=Status%202"):
+                 '{"StatusFWR":{"Version":"15.6.0.1(f5b34a2-bluetooth)"}}'}
+        with mock.patch.object(autoflash_cli, "find_ssid",
+                               side_effect=lambda names, **k: "autoflash-recovery-CDEF"
+                               if "autoflash-recovery-CDEF" in names else None), \
+             mock.patch.object(setup_network, "page",
+                               side_effect=lambda host, path="/", **k: pages.get((host, path))), \
+             mock.patch.object(autoflash_cli, "upload_tasmota") as uploaded, \
+             mock.patch.object(autoflash_cli, "configure_plug_wifi", return_value="192.168.1.52") as by_hand, \
+             mock.patch.object(autoflash_cli, "say"):
+            result = autoflash_cli.step_berry_tasmota(ctx)
+        uploaded.assert_not_called()
+        by_hand.assert_called_once_with(ctx, "autoflash-recovery-CDEF")
+        self.assertEqual(result["plug_ip"], "192.168.1.52")
+
+    def test_the_installer_is_waited_for_until_it_has_restarted(self):
+        from unittest import mock
+        from tools import autoflash_cli
+        answers = iter([True, True, False])
+        clock = iter(range(0, 1000, 2))
+        with mock.patch.object(autoflash_cli, "bridge_answers", side_effect=lambda host: next(answers)) as asked, \
+             mock.patch.object(autoflash_cli.time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(autoflash_cli.time, "sleep"), \
+             mock.patch.object(autoflash_cli.output, "progress"):
+            autoflash_cli.installer_gone(timeout=60.0)
+        self.assertEqual(asked.call_count, 3)
 
     def through_the_bridges_network(self, *, preset, at_home):
         """D1 sent through the bridge's own network: what follows."""
@@ -2137,7 +2285,7 @@ class TasmotaWifiPresetTests(unittest.TestCase):
         ctx = SimpleNamespace(state=self.ctx.state)
         clock = iter(range(0, 10_000, 5))
         with mock.patch.object(autoflash_cli, "find_ssid", return_value=None), \
-             mock.patch.object(autoflash_cli, "our_setup_networks", return_value=("Sonoff-Setup-",)), \
+             mock.patch.object(autoflash_cli, "bridge_networks", return_value=("autoflash-recovery-",)), \
              mock.patch.object(autoflash_cli, "setup_networks", return_value=("tasmota-",)), \
              mock.patch.object(autoflash_cli, "reach_bridge", return_value=setup_network.SETUP_HOST), \
              mock.patch.object(autoflash_cli, "upload_tasmota"), \
@@ -2151,6 +2299,25 @@ class TasmotaWifiPresetTests(unittest.TestCase):
              mock.patch.object(autoflash_cli, "say"):
             result = autoflash_cli.step_berry_tasmota(ctx)
         return result, by_hand.called, [call.args[0] for call in shown.call_args_list]
+
+    def test_the_installers_network_still_listed_is_not_taken_for_tasmotas(self):
+        # Seen in the fault suite (D1, the home Wi-Fi gone for a while): sent
+        # through the installer's own network, Tasmota joined the home Wi-Fi
+        # with the details it was given, while the installer's network - named
+        # as the run names Tasmota - was still listed for a moment.
+        from types import SimpleNamespace
+        from unittest import mock
+        from tools import autoflash_cli
+        self.inputs["plug_mac"] = "12:34:56:ab:cd:ef"
+        ctx = SimpleNamespace(state=self.ctx.state)
+        clock = iter(range(0, 10_000, 5))
+        with mock.patch.object(autoflash_cli.prompts, "scan_wifi_ssids",
+                               return_value=["Home", "autoflash-recovery-CDEF"]), \
+             mock.patch.object(autoflash_cli, "tasmota_at_home", side_effect=[None, "192.168.1.51"]), \
+             mock.patch.object(autoflash_cli.time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(autoflash_cli.time, "sleep"), \
+             mock.patch.object(autoflash_cli.output, "progress"):
+            self.assertEqual(autoflash_cli.tasmota_or_its_network(ctx, timeout=60.0), ("home", "192.168.1.51"))
 
     def test_tasmota_given_the_wifi_before_a_cut_off_joins_by_itself(self):
         # Seen in the fault suite: the bridge saved Tasmota's settings, the
@@ -2189,7 +2356,7 @@ class TasmotaWifiPresetTests(unittest.TestCase):
         from unittest import mock
         from tools import autoflash_cli
         from tools.autoflash import setup_network
-        pages = iter(["<title>S60 OTA Bridge</title>", None, "<title>Tasmota</title> tasmota"])
+        pages = iter(["<title>Autoflash bridge</title>", None, "<title>Tasmota</title> tasmota"])
         state = SimpleNamespace(set_input=lambda *a: None, input=lambda *a: None)
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"),
                               set_plug_ip=lambda ip: None, state=state)
@@ -3257,31 +3424,31 @@ class MoverOwnNetworkTests(unittest.TestCase):
         sent.assert_not_called()
 
     def test_after_a_router_outage_the_runs_own_details_do(self):
-        result, sent, adopted = self.wait([False, True], network="Sonoff-Setup-CDEF")
+        result, sent, adopted = self.wait([False, True], network="autoflash-recovery-CDEF")
         self.assertIs(result, False)  # the same details: ESPHome has them already
         sent.assert_called_once_with("Home", "pw0")
         self.assertEqual(adopted, [])
 
     def test_new_details_when_those_fail_which_esphome_gets_too(self):
-        result, sent, adopted = self.wait([False, False, True], network="Sonoff-Setup-CDEF")
+        result, sent, adopted = self.wait([False, False, True], network="autoflash-recovery-CDEF")
         self.assertIs(result, True)
         self.assertEqual([c.args for c in sent.call_args_list], [("Home", "pw0"), ("NewHome", "pw")])
         self.assertEqual(adopted, [("NewHome", "pw")])
 
     def test_unattended_it_stops_rather_than_asking(self):
-        result, _, _ = self.wait([False, False], network="Sonoff-Setup-CDEF", unattended=True)
+        result, _, _ = self.wait([False, False], network="autoflash-recovery-CDEF", unattended=True)
         from tools import autoflash_cli
         self.assertIsInstance(result, autoflash_cli.Abort)
         self.assertIn("did not join 'Home'", str(result))
 
     def test_a_send_that_gets_no_answer_is_tried_again(self):
-        result, sent, _ = self.wait([False, True], network="Sonoff-Setup-CDEF",
+        result, sent, _ = self.wait([False, True], network="autoflash-recovery-CDEF",
                                     sends=("no answer", "no answer", None))
         self.assertIs(result, False)
         self.assertEqual(sent.call_count, 3)
 
     def test_joined_already_it_carries_on_through_that(self):
-        result, sent, _ = self.wait([True], network="Sonoff-Setup-CDEF", joined_already=True)
+        result, sent, _ = self.wait([True], network="autoflash-recovery-CDEF", joined_already=True)
         self.assertIs(result, False)
         sent.assert_called_once()
         self.assertEqual(self.home_waits, 1)  # only after sending: no wait first
@@ -3291,7 +3458,7 @@ class MoverOwnNetworkTests(unittest.TestCase):
         from tools import autoflash_cli
         self.assertIsInstance(result, autoflash_cli.Abort)
         self.assertIn("switch the plug off and on", str(result))
-        self.assertIn("Sonoff-Setup-CDEF", str(result))
+        self.assertIn("autoflash-recovery-CDEF", str(result))
 
     def test_the_details_go_to_esphomes_own_page(self):
         from unittest import mock
@@ -3477,7 +3644,7 @@ class BridgeEvidenceTests(unittest.TestCase):
         from unittest import mock
         from tools import autoflash_cli
         with mock.patch.object(autoflash_cli, "bridge_on_home_network", return_value=None), \
-             mock.patch.object(autoflash_cli, "find_ssid", return_value="Sonoff-Setup-CDEF"):
+             mock.patch.object(autoflash_cli, "find_ssid", return_value="autoflash-recovery-CDEF"):
             installed, _ = autoflash_cli.evidence_bridge_installed(self.ctx())
         self.assertTrue(installed)
 
@@ -3507,10 +3674,12 @@ class JoinBridgeTests(unittest.TestCase):
         return " ".join(section.call_args.args[1]), copied.called
 
     def test_open_no_password(self):
-        text, copied = self.shown("Sonoff-Setup-CDEF")
-        self.assertIn("Sonoff-Setup-CDEF      (open - no password)", text)
-        self.assertNotIn("password  ", text)
-        self.assertFalse(copied)
+        # 4.4.4's, and 4.4.3's before it.
+        for network in ("autoflash-recovery-CDEF", "Sonoff-Setup-CDEF"):
+            text, copied = self.shown(network)
+            self.assertIn(f"{network}      (open - no password)", text)
+            self.assertNotIn("password  ", text)
+            self.assertFalse(copied)
 
     def test_an_earlier_installers_network_has_its_password(self):
         text, copied = self.shown("S60-OTA-Bridge-A04D")

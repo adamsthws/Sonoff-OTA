@@ -21,7 +21,9 @@ from pathlib import Path
 from typing import Callable
 
 SETUP_HOST = "192.168.4.1"
-BRIDGE_PAGE_MARKER = "S60 OTA Bridge"
+# How the installer's page names it: the tool's name from 4.4.4, the S60's
+# before - which a plug a run of an older checkout left on it still shows.
+BRIDGE_PAGE_MARKERS = ("Autoflash bridge", "S60 OTA Bridge")
 BRIDGE_SUCCESS = "Upload verified"
 # Tasmota's own wording (language/en_GB.h at the pinned release).
 TASMOTA_REJECTED = "check your credentials"
@@ -37,6 +39,25 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 class SetupError(RuntimeError):
     pass
+
+
+
+def is_bridge_page(body: str | None) -> bool:
+    """Whether `body` is the installer's page."""
+    return body is not None and any(marker.lower() in body.lower() for marker in BRIDGE_PAGE_MARKERS)
+
+
+def is_tasmota_page(body: str | None) -> bool:
+    """Whether `body` is Tasmota's page - the installer's mentions Tasmota too."""
+    return body is not None and "tasmota" in body.lower() and not is_bridge_page(body)
+
+
+def tasmota_answers(host: str = SETUP_HOST, timeout: float = 3.0) -> bool:
+    """Whether Tasmota answers at `host`: asked its firmware's status, not
+    for a page - on its setup network a page waits on a Wi-Fi scan (about
+    4 s in the emulator), and runs another each time."""
+    body = page(host, "/cm?cmnd=Status%202", timeout=timeout)
+    return body is not None and '"StatusFWR"' in body
 
 
 def page(host: str = SETUP_HOST, path: str = "/", timeout: float = 3.0) -> str | None:
@@ -109,9 +130,15 @@ def upload_to_bridge(image: Path, *, host: str = SETUP_HOST, timeout: float = UP
     return body
 
 
+# How the bridge says it saved them with the Wi-Fi it joined: on its own
+# network, 4.4.4 saves them without any (4.4.3 refused them).
+SETTINGS_WITH_WIFI = "with the home network"
+
+
 def send_tasmota_settings(template: bytes, *, host: str, layout: dict[str, str],
                           timeout: float = 30.0) -> str:
-    """Give bridge v5 a Tasmota settings template to fill with its Wi-Fi and save."""
+    """Give bridge v5 a Tasmota settings template to fill with its Wi-Fi and
+    save: its answer, which has SETTINGS_WITH_WIFI when it had Wi-Fi to give."""
     hostname, _, port = host.partition(":")
     connection = http.client.HTTPConnection(hostname, int(port or 80), timeout=timeout)
     try:

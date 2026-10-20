@@ -174,16 +174,24 @@ internet connection first.
 
 **The plug's own network**
 
-Wherever the tool asks you to join the plug's own network, it names it. The
-installer, the mover and ESPHome all call theirs `Sonoff-Setup-` and the last
-four characters of the plug's hardware address, such as `Sonoff-Setup-CDEF`.
-Official Tasmota names its own after the plug, `tasmota-` and six characters,
-such as `tasmota-ABCDEF-1234`; sometimes it shows up instead as `ESP_` and six
-characters one higher, such as `ESP_ABCDF0` - the same network, and the tool
-looks for both. All of them are open, with no password, and the plug's page on
-them is at `http://192.168.4.1`. (An installer from an earlier release calls
-its network `S60-OTA-Bridge-XXXX`, with the password `s60-ota-bridge`; the
-tool says so when it sees one.)
+Wherever the tool asks you to join the plug's own network, it names it. Part
+way through a conversion - on the installer, the mover, the startup firmware,
+or Tasmota not yet set up - the plug goes by `autoflash-recovery-` and the
+last four characters of its hardware address, such as
+`autoflash-recovery-CDEF`, in your router's list, and the installer's and the
+mover's own networks are called that too - as is Tasmota's, when it was
+installed through the installer's own network. ESPHome, once installed, calls its
+own `Sonoff-Setup-` and the same four characters, such as `Sonoff-Setup-CDEF`.
+Tasmota names its own after the plug, `tasmota-` and six characters, such as
+`tasmota-ABCDEF-1234`;
+sometimes it shows up instead as `ESP_` and six characters one higher, such as
+`ESP_ABCDF0` - the same network, and the tool looks for both. All of them are
+open, with no password, and the plug's page on them is at
+`http://192.168.4.1`. (A plug an earlier release left part way may show the
+name it gave: `Sonoff-Setup-XXXX` for its installer or mover, or
+`S60-OTA-Bridge-XXXX` for an older installer, with the password
+`s60-ota-bridge`. The tool looks for those too, and gives the password when it
+sees one.)
 
 ## The first install
 
@@ -191,7 +199,7 @@ tool says so when it sees one.)
 
 That means it worked. The installer firmware does not talk to eWeLink, so the
 cloud reports the plug offline, and the tool refuses to send the update twice.
-The tool checks for the installer's `Sonoff-Setup-XXXX` network and, when it
+The tool checks for the installer's `autoflash-recovery-XXXX` network and, when it
 can see it, carries on by itself. If this computer's Wi-Fi is off it cannot
 look; turn it on and run again.
 

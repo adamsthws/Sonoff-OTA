@@ -14,7 +14,7 @@ def stock_flash(stock_slot=0, app_size=0x163874):
     flash[0x8000:0x9000] = esphome.sonoff_table()
     flash[0x9000:0x1D000] = bytes(range(256)) * (0x14000 // 256)
     flash[0x1F000:0x20000] = b"\x07" * SECTOR
-    for slot, project in ((stock_slot, b"esp32_fw"), (1 - stock_slot, b"s60_ota_bridge")):
+    for slot, project in ((stock_slot, b"esp32_fw"), (1 - stock_slot, b"autoflash_bridge")):
         at = plans.SONOFF_OTA[slot]
         flash[at:at + 4] = b"\xe9\x01\x02\x2f"
         flash[at + 80:at + 112] = project.ljust(32, b"\0")  # as an app description pads it

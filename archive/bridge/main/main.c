@@ -1,8 +1,9 @@
 /*
- * S60 one-shot OTA bridge.
+ * One-shot OTA bridge.
  *
- * The bridge is an ESP32-C3 application image intended for an existing S60
- * OTA slot. It does not contain or replace a bootloader or partition table.
+ * The bridge is an ESP32-C3 application image intended for an OTA slot of a
+ * plug on its stock firmware. It does not contain or replace a bootloader or
+ * partition table.
  *
  * Recovery invariant:
  *   1. At startup, confirm this bridge so bootloader rollback cannot discard it.
@@ -43,9 +44,16 @@
  * 4.4.3: starts even when the peer slot holds no bootable Sonoff firmware (an
  * upload into it cut off part way), so it can be uploaded again; on its own
  * network with nobody joined, tries the home one again every three minutes;
- * and its own network is open and named Sonoff-Setup-XXXX (the last two bytes
- * of the plug's Wi-Fi MAC), as every setup network the conversion makes is -
- * no password to type, where it was S60-OTA-Bridge-XXXX with a fixed one.
+ * and its own network is open, where it was S60-OTA-Bridge-XXXX with a fixed
+ * password.
+ *
+ * 4.4.4: named as the tool's every firmware a plug runs part way through a
+ * conversion is, on the home network and as its own: autoflash-recovery-XXXX,
+ * the last two bytes of the plug's Wi-Fi MAC (4.4.3's own network was
+ * Sonoff-Setup-XXXX, and it joined the home one as s60-ota-bridge).  On its
+ * own network, POST /tasmota-settings saves the template with no Wi-Fi in it
+ * where 4.4.3 refused it: Tasmota then starts with the name the run gave it,
+ * and makes its own network under that name, not Tasmota's default.
  *
  * BRIDGE_FLASH_READOUT (research build, never shipped): the same reads without
  * /update or /tasmota-settings, so a stock plug can be imaged without being
@@ -84,7 +92,9 @@
  * the Wi-Fi - otherwise holds the one server task for good, and the bridge
  * answers nothing more until it is switched off and on. */
 #define UPLOAD_QUIET_TIMEOUTS 3
-#define BRIDGE_HOSTNAME "s60-ota-bridge"
+/* Its name on the home network and its own network's: the last two bytes of
+ * the plug's Wi-Fi MAC after it. */
+#define BRIDGE_NAME_FORMAT "autoflash-recovery-%02X%02X"
 /* On its own network, how often to try the home network again - only while
  * nobody is joined to it - and for how long each time. */
 #define HOME_RETRY_EVERY_MS 180000
@@ -93,14 +103,14 @@
 #define STA_WINDOW_MS 45000
 /* The one version: the wrapper the updater is given and the app description
  * (PROJECT_VER in ../CMakeLists.txt) carry the same; a test keeps them equal. */
-#define BRIDGE_VERSION "4.4.3"
+#define BRIDGE_VERSION "4.4.4"
 #ifdef BRIDGE_FLASH_READOUT
 #define BRIDGE_NAME "bridge " BRIDGE_VERSION " flash readout"
 #else
 #define BRIDGE_NAME "bridge " BRIDGE_VERSION
 #endif
 
-static const char *TAG = "s60_bridge";
+static const char *TAG = "autoflash_bridge";
 static const esp_partition_t *s_running;
 static const esp_partition_t *s_peer;
 /* The peer was not bootable at start-up: an upload into it was cut off. */
@@ -121,10 +131,10 @@ static char s_upload_buffer[UPLOAD_BUFFER_SIZE];
 
 static const char INDEX_HTML[] =
     "<!doctype html><meta name=viewport content='width=device-width'>"
-    "<title>S60 OTA Bridge</title>"
+    "<title>Autoflash bridge</title>"
     "<style>body{font:16px system-ui;max-width:42rem;margin:3rem auto;padding:0 1rem}"
     "button{padding:.7rem 1rem}code{background:#eee;padding:.1rem .3rem}</style>"
-    "<h1>S60 OTA Bridge</h1>"
+    "<h1>Autoflash bridge</h1>"
     "<p>The untouched stock slot is selected for the next power cycle.</p>"
     "<p>Choose a native ESP32-C3 application image no larger than 0x1f0000 "
     "bytes. The peer slot is erased only after you press Upload.</p>"
@@ -305,14 +315,12 @@ static bool query_number(const char *query, const char *key, size_t *value)
 
 /* Fill a Tasmota settings template with the network the bridge joined and
  * save it where Tasmota reads it at boot.  The layout comes in the query, so
- * the bridge needs no knowledge of Tasmota's release. */
+ * the bridge needs no knowledge of Tasmota's release.  On its own network it
+ * has joined none, so no details are proven: the template is saved with no
+ * Wi-Fi, for what else it sets (its name), and Tasmota makes its own network
+ * as it would without settings - under that name. */
 static esp_err_t tasmota_settings_handler(httpd_req_t *req)
 {
-    if (s_sta_ip == 0) {
-        return settings_reply(req, "409 Conflict",
-                              "The bridge has not joined a network, so there are no proven "
-                              "Wi-Fi details to give Tasmota. Nothing was saved.\n");
-    }
     char query[96];
     size_t pool, pool_size, ssid_index, password_index, crc;
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
@@ -340,8 +348,10 @@ static esp_err_t tasmota_settings_handler(httpd_req_t *req)
         received += (size_t)got;
     }
 
+    /* Read once: the home network can come or go while this runs. */
+    const bool proven = s_sta_ip != 0;
     wifi_config_t joined = {0};
-    if (esp_wifi_get_config(WIFI_IF_STA, &joined) != ESP_OK) {
+    if (proven && esp_wifi_get_config(WIFI_IF_STA, &joined) != ESP_OK) {
         return settings_reply(req, "500 Internal Server Error", "No Wi-Fi details. Nothing was saved.\n");
     }
     const tasmota_layout_t layout = {
@@ -386,8 +396,10 @@ static esp_err_t tasmota_settings_handler(httpd_req_t *req)
         return settings_reply(req, "500 Internal Server Error", message);
     }
     s_tasmota_settings_saved = true;
-    ESP_LOGI(TAG, "Tasmota settings saved");
-    return settings_reply(req, "200 OK", "Tasmota settings saved with the home network.\n");
+    ESP_LOGI(TAG, "Tasmota settings saved%s", proven ? "" : " without Wi-Fi");
+    return settings_reply(req, "200 OK", proven ? "Tasmota settings saved with the home network.\n"
+                                                : "Tasmota settings saved without Wi-Fi details: the "
+                                                  "bridge has not joined a network.\n");
 }
 
 static esp_err_t upload_error(httpd_req_t *req, const char *message)
@@ -578,11 +590,18 @@ static esp_err_t start_access_point(void)
         return ESP_FAIL;
     }
 
+    /* Named after the plug's own Wi-Fi MAC, on the home network and as its
+     * own, as each firmware of the conversion is - and its own is open. */
+    uint8_t mac[6];
+    ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
+    char name[24];
+    snprintf(name, sizeof(name), BRIDGE_NAME_FORMAT, mac[4], mac[5]);
+
     wifi_config_t station = {0};
     bool have_station = read_stock_wifi(&station);
     esp_netif_t *sta_netif = have_station ? esp_netif_create_default_wifi_sta() : NULL;
     if (sta_netif != NULL) {
-        esp_netif_set_hostname(sta_netif, BRIDGE_HOSTNAME);
+        esp_netif_set_hostname(sta_netif, name);
     }
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
@@ -591,13 +610,8 @@ static esp_err_t start_access_point(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi_event, NULL));
 
-    /* Named after the plug's own Wi-Fi MAC, as the conversion's other setup
-     * networks are, and open like them. */
-    uint8_t mac[6];
-    ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
     wifi_config_t *config = &s_ap_config;
-    snprintf((char *)config->ap.ssid, sizeof(config->ap.ssid),
-             "Sonoff-Setup-%02X%02X", mac[4], mac[5]);
+    snprintf((char *)config->ap.ssid, sizeof(config->ap.ssid), "%s", name);
     config->ap.ssid_len = strlen((char *)config->ap.ssid);
     config->ap.channel = 1;
     config->ap.max_connection = 2;

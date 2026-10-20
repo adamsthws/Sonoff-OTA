@@ -6,13 +6,13 @@ directory, never here.
 
 | File | Purpose | SHA-256 |
 |---|---|---|
-| `s60-ota-bridge-4.4.3.ota` | Wrapped one-shot bridge the run installs; joins the home Wi-Fi stock was on, raising its own network only if that fails, lets the run back up the whole flash, gives Tasmota its settings, and starts even after an upload cut off part way | `0d179df29612d14a258f6926bd8f248cd46f3e78f0cf5c6cd0c427d6780b7f7f` |
+| `autoflash-bridge-sonoff-s60-4.4.4.ota` | Wrapped one-shot bridge the run installs; joins the home Wi-Fi stock was on, raising its own network only if that fails, lets the run back up the whole flash, gives Tasmota its settings, and starts even after an upload cut off part way | `4424af5d59258f5c1998269c65bffc5d1341f519352fdc1bfd9c76e37b34f5bb` |
 | `tasmota32c3-bluetooth.bin` | Berry-capable Tasmota used temporarily on the original partition layout | `a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708` |
-| `autoflash-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `627a639bc8f7796419faf69fcd0c22d238946d11856a87048caecf32bcd89e2b` |
+| `autoflash-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `ece36fd964c1443ef9fb74af87a0a257501c9e5ecfb1fb7a1c3aff1744bc29fd` |
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
 | `esphome-sonoff-s60-bootloader-1.1.0.bin` | ESPHome's bootloader, from the same build: it replaces Sonoff's when ESPHome is installed, so ESPHome can roll back an update that fails to start | `3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433` |
 | `esphome-sonoff-s60-imprintable-1.1.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `eb5c2f6922fb913c05c08324f48ce1e4bf519c7b5b4da7bc59797c72352cce0a` |
-| `esphome-sonoff-s60-mover-1.0.0.bin` | A small ESPHome the run uses for a minute or two when leaving Tasmota: it fits in front of Tasmota in Sonoff's layout, and takes the next firmware as an ordinary ESPHome update; two minutes away from the home Wi-Fi, it raises its own network, whose page takes new Wi-Fi details. Wi-Fi placeholders, like the image above | `ee0c38278d48d0112515e2e61d7bede9575771042381acf5c8eb6086449c36fb` |
+| `autoflash-mover-1.1.0.bin` | A small ESPHome the run uses for a minute or two when leaving Tasmota: it fits in front of Tasmota in Sonoff's layout, and takes the next firmware as an ordinary ESPHome update; two minutes away from the home Wi-Fi, it raises its own network, whose page takes new Wi-Fi details. Wi-Fi placeholders, like the image above | `f6e131e1599c886d742c151c3ba3f84a285bba462b438c36b611d577e01ad243` |
 | `sonoff-s60-partition-table.bin` | Sonoff's partition table, read from a stock plug: the one every conversion starts from, which the Tasmota route's preflight requires byte for byte. Written back when a plug leaves Tasmota's layout. Holds no secrets | `f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf` |
 
 The Bluetooth image is the exact file used by the successful migrations. It
@@ -39,11 +39,15 @@ itself. It logs whether that worked, and the run records it at F2. It never
 touches settings that are already there. The
 saved record has only what a Safeboot sets, so F4 starts with `Reset 4`, which
 rebuilds every other setting from official Tasmota's defaults and keeps the
-Wi-Fi. It names itself as the tool, not one device: its network name is
-`autoflash-recovery-NNNN`, and what it logs starts "Autoflash recovery" (until
-20 October 2026 they were `s60-recovery-NNNN` and "S60 recovery", and the file
-was `s60-recovery-safeboot-imprintable.bin`; the run still reads the older log
-lines, from a plug a run of an older checkout left on it).
+Wi-Fi. It names itself as the tool, not one device, as every firmware a plug
+runs part way through a conversion does: `autoflash-recovery-XXXX`, the last
+two bytes of the plug's Wi-Fi MAC. It saves that name, written out, with the
+Wi-Fi, so the Tasmota after it goes by it too until F4's `Reset 4` gives it
+Tasmota's own (a name with a format in it Tasmota would take for its own
+default). What it logs starts "Autoflash recovery". Until 20 October 2026 it
+was `s60-recovery-NNNN` (four decimal digits) and "S60 recovery", saving no
+name, and the file was `s60-recovery-safeboot-imprintable.bin`; the run still
+reads the older log lines, from a plug a run of an older checkout left on it.
 
 To publish a new one: `tools/configure_imprintable_safeboot.py` writes the
 header with the placeholders, `tools/build_recovery_safeboot.sh` builds it from
@@ -60,8 +64,8 @@ bundle-preparation path must imprint and validate a per-device copy first.
 
 From 4.4.1 on, a bridge is named by one version: the one the stock updater is
 given, the one in its app description, and the one its status page reports
-(`bridge 4.4.3`). `tools/build_vendor_ota.py` takes it from the image and
-refuses any other. The next bridge is 4.4.4. 4.4.1 has the Wi-Fi behaviour tried on a
+(`bridge 4.4.4`). `tools/build_vendor_ota.py` takes it from the image and
+refuses any other. The next bridge is 4.4.5. 4.4.1 has the Wi-Fi behaviour tried on a
 stock plug as "v6" on 8 October 2026; beyond that only its version, its name
 and a larger buffer for the status reply differ. 4.4.2 is 4.4.1 with the
 read-only `GET /flash` and `GET /efuse` of the research readout build, and
@@ -73,9 +77,16 @@ way - where 4.4.2 refused to start, leaving a plug with no network at all; it
 reports `fallback: none` on its status page then. On its own network it also
 tries the home network again every three minutes while nobody is joined to it,
 and that network is open and called `Sonoff-Setup-XXXX` (the last two bytes of
-the plug's Wi-Fi MAC), the name every setup network of this project's firmware
-has - it was `S60-OTA-Bridge-XXXX`, with a fixed password. Tried on the
-emulator; on hardware by the next run.
+the plug's Wi-Fi MAC) - it was `S60-OTA-Bridge-XXXX`, with a fixed password.
+4.4.4 is 4.4.3 named as the tool's, as every firmware a plug runs part way
+through a conversion is: `autoflash-recovery-XXXX`, on the home network (4.4.3
+joined as `s60-ota-bridge`) and as its own (`Sonoff-Setup-XXXX`), with its page
+titled "Autoflash bridge" (it was "S60 OTA Bridge"). On its own network it
+saves Tasmota's settings without Wi-Fi details, where 4.4.3 refused them, so
+Tasmota starts under the run's name for it and makes its own network by that
+name, not its default `tasmota-XXXXXX-NNNN`. Its code is the same for
+any plug; the wrapper names the S60's model, which is why the file names the
+S60. Tried on the emulator; on hardware by the next run.
 
 The version is well above any Sonoff release so far (1.2.0). The stock 1.2.0
 updater does not compare versions - the upgrade command decides what is
@@ -91,7 +102,11 @@ The ESPHome image is built from [`../ESPHome/sonoff_s60.yaml`](../ESPHome/sonoff
 (its `project` version is the one in the file name) with ESPHome 2026.9.1 and
 ESP-IDF 5.5.5, as `esphome compile sonoff_s60.yaml`; `firmware.ota.bin` is the file
 published, and `bootloader/bootloader.bin` from the same build is the bootloader. The mover is
-[`../ESPHome/sonoff_s60_mover.yaml`](../ESPHome/sonoff_s60_mover.yaml), built the same way. Like the imprintable Safeboot it holds placeholders instead of a
+[`../ESPHome/autoflash_mover.yaml`](../ESPHome/autoflash_mover.yaml), built the same way: it drives no pins, so it
+is the same for any plug with an ESP32-C3 and 4 MB of flash, and from 1.1.0 it
+goes by `autoflash-recovery-XXXX` as the bridge does (1.0.0 was
+`sonoff-s60-mover-xxxxxx` on the home network, and raised `Sonoff-Setup-XXXX`).
+Like the imprintable Safeboot they hold placeholders instead of a
 network name and password, and the run writes the plug's Wi-Fi into them in
 memory (`tools/autoflash/imprint.py`). It has no OTA password, web login or API
 encryption key, as ESPHome's own ready-made images have none: the plug is open

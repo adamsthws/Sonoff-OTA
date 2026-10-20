@@ -26,7 +26,7 @@ class PublishedArtifactTests(unittest.TestCase):
 
     def test_the_run_installs_the_pinned_bridge(self):
         from tools.autoflash_cli import BRIDGE_OTA, ROOT
-        self.assertEqual(BRIDGE_OTA.name, "s60-ota-bridge-4.4.3.ota")
+        self.assertEqual(BRIDGE_OTA.name, "autoflash-bridge-sonoff-s60-4.4.4.ota")
         line = f"{sha256_bytes((ROOT / BRIDGE_OTA).read_bytes())}  {BRIDGE_OTA.as_posix()}"
         self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
 
@@ -63,7 +63,7 @@ class PublishedArtifactTests(unittest.TestCase):
         # The version that wipes NVS and reads the record back before saying so.
         self.assertIn(b"Autoflash recovery: settings not saved, read-back failed", image)
         # Named as the tool, not one device, on the network and in its log.
-        self.assertIn(b"autoflash-recovery-%04d", image)
+        self.assertIn(b"autoflash-recovery-%4X", image)
         self.assertNotIn(b"S60 recovery", image)
         self.assertNotIn(b"s60-recovery", image)
 

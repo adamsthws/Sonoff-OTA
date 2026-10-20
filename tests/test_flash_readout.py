@@ -140,7 +140,7 @@ class ControlTests(unittest.TestCase):
 
     def test_the_default_control_is_what_the_conversion_sends(self):
         from tools import autoflash_cli
-        self.assertEqual(flash_readout.CONTROL_FILES["4.4.3"][0], autoflash_cli.BRIDGE_OTA)
+        self.assertEqual(flash_readout.CONTROL_FILES["4.4.4"][0], autoflash_cli.BRIDGE_OTA)
 
     def test_a_changed_file_is_refused(self):
         with tempfile.NamedTemporaryFile() as handle:

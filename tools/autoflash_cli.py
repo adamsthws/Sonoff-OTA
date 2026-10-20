@@ -104,24 +104,32 @@ CONSENT_WORD = "proceed"
 POINT_OF_NO_RETURN = "C2"
 # Below this the startup firmware may struggle to rejoin on its own after E3.
 WEAK_SIGNAL_DBM = -75
-# Every setup network this project's firmware raises - the installer's, the
-# mover's, ESPHome's - is open and called this, with the last two bytes of the
-# plug's Wi-Fi MAC (Sonoff-Setup-CDEF). Official Tasmota's are its own.
-SETUP_SSID_PREFIX = "Sonoff-Setup-"
-# The installer's network before 4.4.3, with a fixed password: a plug an earlier
-# release left on its installer still raises it.
+# Every firmware a plug runs part way through a conversion - the installer,
+# the mover, the startup firmware, a Tasmota not yet set up - goes by this and
+# the last two bytes of the plug's Wi-Fi MAC (autoflash-recovery-CDEF): on the
+# home network, and for the open network the installer and the mover raise
+# when they cannot join that (the others, given the Wi-Fi, only retry it).
+SETUP_SSID_PREFIX = "autoflash-recovery-"
+# The networks of the same firmware before 4.4.4 (the installer) and 1.1.0
+# (the mover), for a plug a run of an older checkout left on one; and the
+# installer's before 4.4.3, with a fixed password.
+LEGACY_SETUP_PREFIX = "Sonoff-Setup-"
 LEGACY_BRIDGE_PREFIX = "S60-OTA-Bridge"
 LEGACY_BRIDGE_PASSWORD = "s60-ota-bridge"
-# ESPHome's own network before it took the shared name (an ESPHome built from
-# an earlier sonoff_s60.yaml).
+LEGACY_MOVER_PREFIX = "sonoff-s60-mover-"
+# ESPHome for the S60's own network, which it keeps after the conversion
+# (ESPHome/sonoff_s60.yaml); and its name before that (an ESPHome built from an
+# earlier sonoff_s60.yaml).
+ESPHOME_SETUP_PREFIX = "Sonoff-Setup-"
 LEGACY_ESPHOME_PREFIX = "sonoff-s60-"
-# 4.4.3: joins the home network the stock firmware was on, raising its own
+# 4.4.4: joins the home network the stock firmware was on, raising its own
 # only if that fails, gives Tasmota its Wi-Fi at D1, and lets the plug's whole
 # flash be read first, for the backup - and starts even once an upload into
-# Sonoff's slot was cut off, where 4.4.2 would not, leaving a plug only a
-# serial cable could recover.  Named, like every bridge from 4.4.1 on, by the
-# version the stock updater is given.
-BRIDGE_OTA = Path("artifacts/s60-ota-bridge-4.4.3.ota")
+# Sonoff's slot was cut off (from 4.4.3), where 4.4.2 would not, leaving a plug
+# only a serial cable could recover; named, from 4.4.4, as the tool's.  Named,
+# like every bridge from 4.4.1 on, by the version the stock updater is given;
+# the file by the plug its wrapper is for.
+BRIDGE_OTA = Path("artifacts/autoflash-bridge-sonoff-s60-4.4.4.ota")
 # Ports the migration phase servers (serve_safeboot_migration.py) may listen
 # on, in order of preference.  Nothing on the plug keeps the port: each phase
 # starts its own server and sends the plug a loader URL that names it.
@@ -146,13 +154,18 @@ def _mac_tail(mac: str, add: int = 0) -> str:
 
 
 def setup_networks(ctx: "Context") -> tuple[str, ...]:
-    """What this plug's own setup network can be called, to look for.
+    """What a Tasmota's own setup network on this plug can be called, to look for.
 
-    Tasmota names it after itself (tasmota-ABCDEF-1234, from the plug's MAC),
-    but has been seen broadcasting ESP-IDF's default name instead: ESP_ and the
-    MAC of its hotspot, one more than the plug's (ESP_ABCDF0).  Knowing the
-    MAC, only this plug's are matched, never a neighbour's Tasmota; without
-    it, any Tasmota's.
+    Tasmota raises one only without Wi-Fi details: started from its defaults,
+    so named as it names itself, from the plug's MAC (tasmota-ABCDEF-1234).
+    One the run named (autoflash-recovery-CDEF) has the details, and only
+    retries them - and that name is the installer's network's, not looked for
+    here: still up for a moment as the installer restarts into Tasmota, it
+    was taken for Tasmota's (seen in the fault suite).  Tasmota has also been
+    seen broadcasting ESP-IDF's default name instead: ESP_ and the MAC of its
+    hotspot, one more than the plug's (ESP_ABCDF0).  Knowing the MAC, only
+    this plug's are matched, never a neighbour's Tasmota; without it, any
+    Tasmota's.
     """
     mac = ctx.state.input("plug_mac")
     if not mac:
@@ -175,18 +188,45 @@ def note_setup_network(ctx: "Context", network: str) -> None:
         ctx.state.set_input("device_name", network)
 
 
+def named(ctx: "Context", prefix: str) -> str:
+    """`prefix` and the last two bytes of the plug's Wi-Fi MAC, as this
+    project's firmware names itself (XXXX when the MAC is not known)."""
+    mac = ctx.state.input("plug_mac")
+    return f"{prefix}{_mac_tail(mac)[-4:]}" if mac else f"{prefix}XXXX"
+
+
 def our_setup_network(ctx: "Context") -> str:
-    """The name of the setup network this project's firmware raises for this
-    plug: the installer's, the mover's and ESPHome's alike."""
-    mac = ctx.state.input("plug_mac")
-    return f"{SETUP_SSID_PREFIX}{_mac_tail(mac)[-4:]}" if mac else f"{SETUP_SSID_PREFIX}XXXX"
+    """This plug's name, and its network's, while it runs firmware of this
+    project part way through a conversion (autoflash-recovery-CDEF)."""
+    return named(ctx, SETUP_SSID_PREFIX)
 
 
-def our_setup_networks(ctx: "Context", legacy: str) -> tuple[str, ...]:
-    """To look for: this plug's shared setup network, or `legacy`'s, the name
-    the same firmware had before."""
+def our_setup_networks(ctx: "Context", *legacy: str) -> tuple[str, ...]:
+    """To look for: this plug's network (any plug's, its MAC not known), or
+    those of `legacy`, what the same firmware raised before."""
     mac = ctx.state.input("plug_mac")
-    return (our_setup_network(ctx) if mac else SETUP_SSID_PREFIX, legacy)
+    return (our_setup_network(ctx) if mac else SETUP_SSID_PREFIX, *legacy)
+
+
+def legacy_setup_network(ctx: "Context") -> str:
+    """What the installer and the mover raised before 4.4.4 and 1.1.0."""
+    return named(ctx, LEGACY_SETUP_PREFIX) if ctx.state.input("plug_mac") else LEGACY_SETUP_PREFIX
+
+
+def bridge_networks(ctx: "Context") -> tuple[str, ...]:
+    """The installer's own network, by every name it has had."""
+    return our_setup_networks(ctx, legacy_setup_network(ctx), LEGACY_BRIDGE_PREFIX)
+
+
+def mover_networks(ctx: "Context") -> tuple[str, ...]:
+    """The mover's own network, by every name it has had."""
+    return our_setup_networks(ctx, legacy_setup_network(ctx), LEGACY_MOVER_PREFIX)
+
+
+def esphome_networks(ctx: "Context") -> tuple[str, ...]:
+    """ESPHome's own network, once installed: the S60's, and its name before."""
+    mac = ctx.state.input("plug_mac")
+    return (named(ctx, ESPHOME_SETUP_PREFIX) if mac else ESPHOME_SETUP_PREFIX, LEGACY_ESPHOME_PREFIX)
 
 
 def mover_network_hint(ctx: "Context") -> str:
@@ -196,7 +236,7 @@ def mover_network_hint(ctx: "Context") -> str:
 
 def esphome_network_hint(ctx: "Context") -> str:
     """ESPHome's own network."""
-    return our_setup_network(ctx)
+    return named(ctx, ESPHOME_SETUP_PREFIX)
 
 
 class Abort(RuntimeError):
@@ -1996,7 +2036,7 @@ def already_converting(plug_ip: str) -> None:
     body = setup_network.page(plug_ip, timeout=3.0)
     if body is None:
         return
-    if setup_network.BRIDGE_PAGE_MARKER.lower() in body.lower():
+    if setup_network.is_bridge_page(body):
         raise Abort(
             f"the plug at {plug_ip} is already running our installer firmware, from "
             "an earlier conversion. Run this again and choose to continue that "
@@ -2175,7 +2215,7 @@ def bridge_on_home_network(ctx: Context, *, timeout: float = 60.0) -> str | None
         address = ctx.finder.poll()
         if address:
             body = setup_network.page(address, timeout=3.0)
-            if body is not None and setup_network.BRIDGE_PAGE_MARKER.lower() in body.lower():
+            if setup_network.is_bridge_page(body):
                 output.progress_clear()
                 return address
         output.progress(f"looking for the installer on your network... {time.monotonic() - started:.0f}s")
@@ -2197,15 +2237,21 @@ def back_on_sonoff(ctx: Context) -> bool:
 
 def bridge_answers(host: str) -> bool:
     body = setup_network.page(host, timeout=2.0)
-    return body is not None and setup_network.BRIDGE_PAGE_MARKER.lower() in body.lower()
+    return setup_network.is_bridge_page(body)
 
 
-def reach_bridge(ctx: Context) -> str:
+def reach_bridge(ctx: Context, *, tasmota: bool = False) -> str:
     """The bridge's address: setup_network.SETUP_HOST when this computer is on
     the bridge's own network, else where it joined the home network.  Asks the
-    person to join the bridge's network only when it raised one."""
+    person to join the bridge's network only when it raised one.
+
+    With `tasmota` - Tasmota named as the installer was, so its network has
+    the installer's name - TASMOTA_THERE once Tasmota answers on it instead:
+    installed already, by a run cut off after the upload."""
     if bridge_answers(setup_network.SETUP_HOST):
         return setup_network.SETUP_HOST  # joined at C3, or by hand
+    if tasmota and setup_network.tasmota_answers():
+        return TASMOTA_THERE
     address = bridge_on_home_network(ctx)
     if address:
         say(f"    The installer joined your network at {address}.")
@@ -2219,15 +2265,15 @@ def reach_bridge(ctx: Context) -> str:
         address = resend_if_back_on_sonoff(ctx)
         if address:
             return address
-        bridge = find_ssid(our_setup_networks(ctx, LEGACY_BRIDGE_PREFIX)) or our_setup_network(ctx)
+        bridge = find_ssid(bridge_networks(ctx)) or our_setup_network(ctx)
         if not asked:
-            ask_to_join_bridge(bridge)
+            ask_to_join_bridge(bridge, tasmota=tasmota)
             asked = True
 
         def gone_back() -> bool:
             return getattr(ctx, "bridge_sends", 0) < BRIDGE_SENDS and back_on_sonoff(ctx)
 
-        found = wait_for_bridge(ctx, bridge.split()[0], gone_back=gone_back)
+        found = wait_for_bridge(ctx, bridge.split()[0], gone_back=gone_back, tasmota=tasmota)
         if found != BACK_ON_SONOFF:
             return found or setup_network.SETUP_HOST
         tell("    While waiting, the plug went back to Sonoff's own firmware (switched off")
@@ -2271,7 +2317,7 @@ def resend_if_back_on_sonoff(ctx: Context) -> str | None:
     return None
 
 
-def ask_to_join_bridge(bridge: str) -> None:
+def ask_to_join_bridge(bridge: str, *, tasmota: bool = False) -> None:
     if bridge.startswith(LEGACY_BRIDGE_PREFIX):
         # An earlier release's installer: its network has a password.
         copied = hostsys.copy_to_clipboard(LEGACY_BRIDGE_PASSWORD)
@@ -2281,8 +2327,11 @@ def ask_to_join_bridge(bridge: str) -> None:
     else:
         joining = [f"    {bridge}      (open - no password)"]
     section("Join the bridge's Wi-Fi network", [
-        "The plug is running our small installer, which has made its own Wi-Fi",
-        f"network. In {hostsys.wifi_menu_hint()}, join:",
+        *(["The plug is running our small installer - or Tasmota, if the installer",
+           "had sent it before the run stopped: either has made its own Wi-Fi network,",
+           f"by the same name. In {hostsys.wifi_menu_hint()}, join:"] if tasmota else
+          ["The plug is running our small installer, which has made its own Wi-Fi",
+           f"network. In {hostsys.wifi_menu_hint()}, join:"]),
         *joining,
         "",
         "Your Wi-Fi internet drops while joined - expected. A wired connection,",
@@ -2322,7 +2371,7 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
     """D1/D2 - Berry-capable Tasmota through the bridge."""
     image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
     say("Looking for the plug's Wi-Fi network...")
-    bridge = find_ssid(our_setup_networks(ctx, LEGACY_BRIDGE_PREFIX))
+    bridge = find_ssid(bridge_networks(ctx))
     setup = None if bridge else find_ssid(setup_networks(ctx))
     if setup:
         # Resuming after the upload: Tasmota is already installed and waiting.
@@ -2331,8 +2380,16 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
         ip = configure_plug_wifi(ctx, setup)
         return {"plug_ip": ip, "device_name": setup, "resumed": True}
 
-    address = reach_bridge(ctx)
+    address = reach_bridge(ctx, tasmota=bool(ctx.state.input("tasmota_named_alone")))
+    if address == TASMOTA_THERE:
+        # Run again after the upload: the network the installer had is
+        # Tasmota's now, by the same name, and it is waiting on it.
+        say(f"    Tasmota is already installed and waiting on {our_setup_network(ctx)}.")
+        ip = configure_plug_wifi(ctx, our_setup_network(ctx))
+        return {"plug_ip": ip, "device_name": ctx.state.input("device_name"), "resumed": True}
     if address == setup_network.SETUP_HOST:
+        if not ctx.state.input("tasmota_wifi_preset"):
+            give_tasmota_the_wifi(ctx, address)  # its name, and the Wi-Fi if proven
         upload_tasmota(image)
         if ctx.state.input("tasmota_wifi_preset"):
             # An earlier try, cut off, had the bridge save Tasmota's settings
@@ -2475,6 +2532,8 @@ def back_up_stock(ctx: Context, host: str) -> str:
 
 # What wait_for_bridge says when the plug went back to Sonoff's firmware meanwhile.
 BACK_ON_SONOFF = "back on Sonoff's firmware"
+# What reach_bridge says when Tasmota answers on the installer's network instead.
+TASMOTA_THERE = "Tasmota on the installer's network"
 GONE_BACK_EVERY = 30.0
 # Nothing at all at the plug's address this long, and the person is told to
 # switch it off and on: Sonoff's firmware, its Wi-Fi gone while it started, does
@@ -2484,16 +2543,17 @@ NOTHING_THERE_HINT_AFTER = 120.0
 
 
 def wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None,
-                    gone_back: Callable[[], bool] | None = None) -> str | None:
+                    gone_back: Callable[[], bool] | None = None, tasmota: bool = False) -> str | None:
     with interrupt.asking():  # waiting on the person: Ctrl-C stops at once
-        return _wait_for_bridge(ctx, network, timeout=timeout, gone_back=gone_back)
+        return _wait_for_bridge(ctx, network, timeout=timeout, gone_back=gone_back, tasmota=tasmota)
 
 
 def _wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None,
-                     gone_back: Callable[[], bool] | None = None) -> str | None:
+                     gone_back: Callable[[], bool] | None = None, tasmota: bool = False) -> str | None:
     """Wait for this computer to join the bridge's network, or for the bridge to
     turn up on the home network instead.  The bridge's address on the home
-    network, or None once this computer has joined the bridge's own.
+    network, or None once this computer has joined the bridge's own - or,
+    with `tasmota`, TASMOTA_THERE once Tasmota answers on it (reach_bridge).
 
     A bridge on a weak signal can take longer to join the home network than
     the first look allows; it then never raises its own network, so waiting
@@ -2501,7 +2561,6 @@ def _wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None
     """
     if timeout is None:
         timeout = user_action_limit()
-    marker = setup_network.BRIDGE_PAGE_MARKER.lower()
     started = time.monotonic()
     looked = started
     heard = started  # the last time anything answered at the plug's address
@@ -2521,15 +2580,18 @@ def _wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None
             if gone_back():
                 output.progress_clear()
                 return BACK_ON_SONOFF
+        if tasmota and setup_network.tasmota_answers():
+            output.progress_clear()
+            return TASMOTA_THERE
         body = setup_network.page(setup_network.SETUP_HOST, timeout=2.0)
-        if body is not None and marker in body.lower():
+        if setup_network.is_bridge_page(body):
             output.progress_clear()
             say(f"    Connected to {network}.")
             return None
         address = ctx.finder.poll()
         if address:
             body = setup_network.page(address, timeout=3.0)
-            if body is not None and marker in body.lower():
+            if setup_network.is_bridge_page(body):
                 output.progress_clear()
                 return address
         output.progress(f"waiting for this computer to join {network}, or the installer "
@@ -2558,19 +2620,36 @@ def quick_power_cycle_hint(ctx: Context) -> list[str]:
 
 
 def give_tasmota_the_wifi(ctx: Context, address: str) -> bool:
-    """Have bridge v5 save Tasmota's settings with the Wi-Fi it joined with."""
+    """Have bridge v5 save Tasmota's settings with the Wi-Fi it joined with -
+    and named as every firmware part way through is (autoflash-recovery-CDEF),
+    until F4's reset gives it Tasmota's own name.  True when they have the
+    Wi-Fi: on its own network the bridge has joined none, and 4.4.4 saves them
+    without (tasmota_named_alone) - Tasmota then makes its own network under
+    that name, not its default (tasmota-ABCDEF-1234)."""
     template, reason = tasmota_settings.load_template(ROOT, PINNED_ARTIFACTS["bluetooth"]["sha256"])
+    alone = address == setup_network.SETUP_HOST
     if template is None:
-        say(f"    Tasmota will need its Wi-Fi given by hand: {reason}.")
+        if not alone:
+            say(f"    Tasmota will need its Wi-Fi given by hand: {reason}.")
         return False
+    if ctx.state.input("plug_mac"):
+        template = tasmota_settings.named(template, our_setup_network(ctx))
+    elif alone:
+        return False  # nothing to give it: the Wi-Fi is given on its network, as ever
     try:
-        setup_network.send_tasmota_settings(template, host=address,
-                                            layout=tasmota_settings.layout_query())
+        answer = setup_network.send_tasmota_settings(template, host=address,
+                                                     layout=tasmota_settings.layout_query())
     except setup_network.SetupError as exc:
-        say(f"    Tasmota will need its Wi-Fi given by hand: {exc}")
+        if not alone:  # an installer before 4.4.4 refuses them there: Tasmota's own name
+            say(f"    Tasmota will need its Wi-Fi given by hand: {exc}")
+        return False
+    if setup_network.SETTINGS_WITH_WIFI not in answer:
+        ctx.state.set_input("tasmota_named_alone", True)
+        say(f"    Tasmota will start as {our_setup_network(ctx)}, and make its own network by that name.")
         return False
     # Kept for the run: saved in the bridge, they outlast an upload cut off.
     ctx.state.set_input("tasmota_wifi_preset", True)
+    ctx.state.set_input("tasmota_named_alone", False)
     say("    Tasmota will start with your Wi-Fi details, so it joins by itself.")
     return True
 
@@ -2594,8 +2673,7 @@ def tasmota_at_home(ctx: Context) -> str | None:
     own MAC - the bridge's page, there before it, is not Tasmota's."""
     address = ctx.finder.poll()
     body = setup_network.page(address, timeout=3.0) if address else None
-    if not (body and "tasmota" in body.lower() and
-            setup_network.BRIDGE_PAGE_MARKER.lower() not in body.lower()):
+    if not setup_network.is_tasmota_page(body):
         return None
     output.progress_clear()
     ctx.set_plug_ip(address)
@@ -2604,7 +2682,7 @@ def tasmota_at_home(ctx: Context) -> str | None:
         name = status.get("StatusNET", {}).get("Hostname") if isinstance(status, dict) else None
     except (DeviceError, OSError):
         name = None
-    if name:
+    if name and not name.startswith(SETUP_SSID_PREFIX):  # a name it keeps
         ctx.state.set_input("device_name", name)
     say(f"    Tasmota is on your network at {address}" + (f" as {name}." if name else "."))
     return address
@@ -2620,13 +2698,15 @@ def upload_tasmota(image: Path, host: str = setup_network.SETUP_HOST) -> None:
     say(f"    Upload verified in {time.monotonic() - started:.0f}s; the plug is restarting into Tasmota.")
 
 
-def tasmota_or_its_network(ctx: Context, *, timeout: float) -> tuple[str, str] | None:
-    """("network", its name) once Tasmota's setup network shows, or ("home",
-    its address) if Tasmota is on the home network instead: with settings
-    the bridge saved earlier, it joins by itself and raises none."""
+def tasmota_or_its_network(ctx: Context, *, timeout: float,
+                           networks: tuple[str, ...] | None = None) -> tuple[str, str] | None:
+    """("network", its name) once Tasmota's setup network shows - one of
+    `networks`, setup_networks' without - or ("home", its address) if Tasmota
+    is on the home network instead: with settings the bridge saved earlier, it
+    joins by itself and raises none."""
     started = time.monotonic()
     while time.monotonic() - started < timeout:
-        name = find_ssid(setup_networks(ctx), timeout=8.0)
+        name = find_ssid(networks or setup_networks(ctx), timeout=8.0)
         if name:
             output.progress_clear()
             return "network", name
@@ -2642,16 +2722,35 @@ def tasmota_or_its_network(ctx: Context, *, timeout: float) -> tuple[str, str] |
 def finish_tasmota_setup(ctx: Context, *, route: str, wait: float = 120.0) -> dict[str, Any]:
     say("")
     say("Waiting for Tasmota to start and make its setup network...")
-    found = tasmota_or_its_network(ctx, timeout=wait)
+    networks = setup_networks(ctx)
+    if ctx.state.input("tasmota_named_alone"):
+        # Named as the installer was, Tasmota's network has the installer's
+        # name: looked for once the installer has gone, so that its network,
+        # still listed for a moment, is not taken for Tasmota's.
+        installer_gone(timeout=60.0)
+        networks = (our_setup_network(ctx), *networks)
+    found = tasmota_or_its_network(ctx, timeout=wait, networks=networks)
     if found and found[0] == "home":
         return {"plug_ip": found[1], "upload_route": route, "wifi": "preset",
                 "device_name": ctx.state.input("device_name")}
-    device_name = found[1] if found else None
-    if device_name and device_name.startswith(TASMOTA_AP_PREFIX):
-        note_setup_network(ctx, device_name)
-        say(f"    This plug is {device_name} - the same name shows in your router.")
-    ip = configure_plug_wifi(ctx, device_name)
-    return {"plug_ip": ip, "device_name": device_name, "upload_route": route}
+    network = found[1] if found else None
+    if network and network.startswith(TASMOTA_AP_PREFIX):
+        note_setup_network(ctx, network)
+        say(f"    This plug is {network} - the same name shows in your router.")
+    ip = configure_plug_wifi(ctx, network)
+    named = network if network != our_setup_network(ctx) else ctx.state.input("device_name")
+    return {"plug_ip": ip, "device_name": named, "upload_route": route}
+
+
+def installer_gone(*, timeout: float) -> None:
+    """Wait, up to `timeout`, until the installer no longer answers on its own
+    network: restarting into Tasmota once the upload is verified."""
+    started = time.monotonic()
+    while time.monotonic() - started < timeout and bridge_answers(setup_network.SETUP_HOST):
+        output.progress(f"waiting for the installer to restart into Tasmota... "
+                        f"{time.monotonic() - started:.0f}s")
+        time.sleep(2.0)
+    output.progress_clear()
 
 
 
@@ -3616,16 +3715,17 @@ def send_through_own_network(network: str, ssid: str, password: str) -> None:
 
 
 def set_up_through_own_network(ctx: Context, what: str, check: Callable[[str], Any],
-                               legacy: str) -> tuple[str, str] | None:
+                               networks: tuple[str, ...]) -> tuple[str, str] | None:
     """A plug on ESPHome (or the mover) that cannot join the home network, set
     up through its own: it raises one after a while away from the home one,
     whose page takes Wi-Fi details. The details this run has go first - right
     after a router outage, say - and new ones are asked for only if the plug
-    does not join with them. The details it joined with, or None when its
-    network is not to be seen."""
-    network = find_ssid(our_setup_networks(ctx, legacy), timeout=30)
+    does not join with them. `networks`: what its network can be called, its
+    name now first. The details it joined with, or None when its network is
+    not to be seen."""
+    network = find_ssid(networks, timeout=30)
     if not network and on_a_plug_network():
-        network = our_setup_network(ctx)  # joined already: carried on through it
+        network = networks[0]  # joined already: carried on through it
     if not network:
         return None
     tell(f"    {what} cannot join your Wi-Fi, so it has raised its own network, {network}.")
@@ -3672,7 +3772,7 @@ def wait_for_mover(ctx: Context, what: str) -> bool:
         except Abort:
             pass
     before = ctx._wifi
-    joined = set_up_through_own_network(ctx, what, mover, "sonoff-s60-mover-")
+    joined = set_up_through_own_network(ctx, what, mover, mover_networks(ctx))
     if joined is None:
         raise Abort(
             f"{what} did not answer on your Wi-Fi, and its own network "
@@ -3933,7 +4033,7 @@ def step_esphome_check(ctx: Context, wait: float = 180.0) -> dict[str, Any]:
         output.progress(f"waiting for ESPHome... {time.monotonic() - started:.0f}s")
         time.sleep(3)
     output.progress_clear()
-    if set_up_through_own_network(ctx, "ESPHome", esphome.is_esphome, LEGACY_ESPHOME_PREFIX):
+    if set_up_through_own_network(ctx, "ESPHome", esphome.is_esphome, esphome_networks(ctx)):
         return {"seconds": round(time.monotonic() - started, 1), "resent": resent,
                 "set_up_through": "its own network"}
     raise Abort(
@@ -4944,7 +5044,7 @@ def evidence_bridge_installed(ctx: "Context") -> tuple[bool | None, str]:
             f"The installer firmware is answering on your network at {address},\n"
             "  so this step did finish."
         )
-    bridge = find_ssid(our_setup_networks(ctx, LEGACY_BRIDGE_PREFIX))
+    bridge = find_ssid(bridge_networks(ctx))
     if bridge:
         return True, (
             f"The plug is broadcasting a Wi-Fi network called '{bridge}'.\n"

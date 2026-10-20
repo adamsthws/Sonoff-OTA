@@ -591,7 +591,7 @@ gives each request its own connection.
   pseudo-terminal (run it under `script -qfc`), and hardware breakpoints
   (`hbreak`): the bootloader overwrites software breakpoints in IRAM when it
   loads the app. For the bridge's symbols, build its ELF with
-  `pio run -e s60-ota-bridge` in `archive/bridge`.
+  `pio run -e autoflash-bridge` in `archive/bridge`.
 - **Without a NIC** (`-nic none`) the fork does not map its Wi-Fi device, and
   firmware hangs in Wi-Fi initialisation. That is a test set-up problem, not
   a firmware one.

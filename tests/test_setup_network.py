@@ -43,7 +43,7 @@ class FakePlugHandler(http.server.BaseHTTPRequestHandler):
         plug: FakePlug = self.server
         url = urllib.parse.urlsplit(self.path)
         if url.path == "/":
-            self.reply("<title>S60 OTA Bridge</title>" if plug.behaviour == "bridge"
+            self.reply("<title>Autoflash bridge</title>" if plug.behaviour == "bridge"
                        else "<title>Tasmota</title>")
             return
         if url.path == "/wi":
@@ -96,9 +96,17 @@ class SetupNetworkTests(unittest.TestCase):
     def test_joining_is_noticed_by_the_page_marker(self):
         plug = self.start("bridge")
         self.assertTrue(setup_network.wait_for_page(
-            setup_network.BRIDGE_PAGE_MARKER, host=plug.host, timeout=5, poll=0.1))
+            setup_network.BRIDGE_PAGE_MARKERS[0], host=plug.host, timeout=5, poll=0.1))
         self.assertFalse(setup_network.wait_for_page(
-            setup_network.BRIDGE_PAGE_MARKER, host="127.0.0.1:9", timeout=0.3, poll=0.1))
+            setup_network.BRIDGE_PAGE_MARKERS[0], host="127.0.0.1:9", timeout=0.3, poll=0.1))
+
+    def test_the_bridge_is_known_by_its_page_under_either_title(self):
+        # 4.4.4's, and 4.4.3's before it: a plug a run of an older checkout left
+        # on its installer still shows the old one.
+        for title in ("Autoflash bridge", "S60 OTA Bridge"):
+            self.assertTrue(setup_network.is_bridge_page(f"<title>{title}</title><h1>{title}</h1>"))
+        self.assertFalse(setup_network.is_bridge_page("<title>Tasmota</title>"))
+        self.assertFalse(setup_network.is_bridge_page(None))
 
     def test_the_bridge_receives_the_exact_image(self):
         plug = self.start("bridge")

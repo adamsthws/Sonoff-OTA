@@ -244,7 +244,7 @@ From `report.json` beside the dump:
 | otadata   | `0x01d000` | `0x002000` | selects `ota_0`                         |
 | phy_init  | `0x01f000` | `0x001000` |                                         |
 | ota_0     | `0x020000` | `0x1f0000` | stock app `esp32_fw`, v1.0.0-21-g28df76c, Feb 12 2025, IDF v4.4.2 |
-| ota_1     | `0x210000` | `0x1f0000` | holds the conversion's `s60_ota_bridge` installer after a run |
+| ota_1     | `0x210000` | `0x1f0000` | holds the conversion's `autoflash_bridge` installer after a run |
 
 ### Dispatch / cloud connection (device side)
 

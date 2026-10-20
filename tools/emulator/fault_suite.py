@@ -335,7 +335,7 @@ class Tuner:
 
 
 TUNER = Tuner()
-BOOTS = re.compile(r"(?P<sonoff>\[BUILD TIME\]|colinkTcp|tmp ip = )|(?P<bridge>s60_bridge)|"
+BOOTS = re.compile(r"(?P<sonoff>\[BUILD TIME\]|colinkTcp|tmp ip = )|(?P<bridge>autoflash_bridge)|"
                    r"(?P<tasmota>Project tasmota)|(?P<esphome>\[I\]\[app)")
 INTENT = re.compile(r"\] (?:A1|A2|C2)  |Sending the installer again")
 HOLD_AT_MOST = 240.0
@@ -752,10 +752,8 @@ class Scenario:
                     continue
                 done_joins, done_backs = seen[log]
                 if len(joins) > done_joins:
-                    name = joins[-1].rstrip(",")
-                    if not name.startswith("S60-OTA-Bridge"):
-                        wanted = (log, name)
-                        stop.wait(8)  # a person takes a moment
+                    wanted = (log, joins[-1].rstrip(","))
+                    stop.wait(8)  # a person takes a moment
                 if backs > done_backs:
                     wanted = None
                     if joined:

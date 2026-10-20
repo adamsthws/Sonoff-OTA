@@ -9,41 +9,47 @@
 # layout last, and the plug starts it. The tool then sends what comes next as
 # an ordinary update.
 #
-# Like sonoff_s60.yaml it is published pre-built with Wi-Fi placeholders the
-# tool writes the plug's Wi-Fi into; it saves nothing, as it never stays.
+# Like the ESPHome images the tool installs, it is published pre-built with
+# Wi-Fi placeholders the tool writes the plug's Wi-Fi into; it saves nothing,
+# as it never stays. It is the same for any plug with an ESP32-C3 and 4 MB of
+# flash: it drives no pins.
 
 esphome:
-  name: sonoff-s60-mover
+  # Sixteen characters: with ESPHome's suffix of the MAC (a dash and six) it is
+  # as long as the name the mover goes by, which on_boot writes over it.
+  name: autoflash-moving
   name_add_mac_suffix: true
   project:
-    name: adamsthws.sonoff-s60-mover
-    version: "1.0.0"
+    name: adamsthws.autoflash-mover
+    version: "1.1.0"
   on_boot:
-    # Before Wi-Fi starts (its priority is 250): the network to join, and its
-    # own network's name. Joined from that for as long as it takes - a router
+    # Before Wi-Fi starts (its priority is 250): the network to join, and the
+    # mover's name. Joined from that for as long as it takes - a router
     # restarting meanwhile, say - and nothing saved, as the mover never stays.
     - priority: 1000
       then:
         - lambda: |-
-            static const char ssid[] = "S60-IMPRINT-SSID>.................................";
-            static const char password[] = "S60-IMPRINT-PASS>................................................................";
+            static const char ssid[] = "AUTOFLASH-IMPRINT-SSID>.................................";
+            static const char password[] = "AUTOFLASH-IMPRINT-PASS>................................................................";
             const char *volatile at_ssid = ssid;
             const char *volatile at_password = password;
             id(imprinted_ssid) = at_ssid;
             id(imprinted_password) = at_password;
-            if (!id(imprinted_ssid).empty() && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0) {
+            if (!id(imprinted_ssid).empty() && id(imprinted_ssid).rfind("AUTOFLASH-IMPRINT-", 0) != 0) {
               wifi::WiFiAP sta;
               sta.set_ssid(id(imprinted_ssid));
               sta.set_password(id(imprinted_password));
               wifi::global_wifi_component->set_sta(sta);
             }
-            // Every setup network of the conversion has one name: Sonoff-Setup-
-            // and the last two bytes of the plug's Wi-Fi MAC (Sonoff-Setup-CDEF),
-            // open.
+            // The name every firmware of the conversion goes by, on the home
+            // network and as its own network (open): autoflash-recovery- and
+            // the last two bytes of the plug's Wi-Fi MAC. Written over
+            // ESPHome's own name, which is as long, so Wi-Fi gives it as the
+            // hostname too.
             uint8_t mac[6];
             get_mac_address_raw(mac);
-            char name[20];
-            snprintf(name, sizeof(name), "Sonoff-Setup-%02X%02X", mac[4], mac[5]);
+            char *name = const_cast<char *>(App.get_name().c_str());
+            snprintf(name, App.get_name().size() + 1, "autoflash-recovery-%02X%02X", mac[4], mac[5]);
             wifi::WiFiAP ap;
             ap.set_ssid(name);
             wifi::global_wifi_component->set_ap(ap);

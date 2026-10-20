@@ -2,7 +2,7 @@
 """Find where the stock S60 firmware keeps its Wi-Fi details (research only).
 
 Reads the whole stock NVS partition from the research bridge's read-only
-`GET /nvs` (build env `s60-ota-bridge-nvs-probe`) into memory, then lists each
+`GET /nvs` (build env `autoflash-bridge-nvs-probe`) into memory, then lists each
 namespace's keys - names, types and sizes, never values - and says which
 entries contain the Wi-Fi name and password you type. The dump is never
 written to disk and the password is never printed.

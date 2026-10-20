@@ -2,7 +2,7 @@
 """Image a stock S60's whole flash through the readout bridge (research only).
 
 Reads the flash chip from the research bridge's read-only `GET /flash` (build
-env `s60-ota-bridge-flash-readout`) and its eFuse read registers from
+env `autoflash-bridge-flash-readout`) and its eFuse read registers from
 `GET /efuse`, checks the dump is complete and well formed, and reports what
 each application slot holds and which one otadata selects.
 

@@ -1,6 +1,6 @@
 --- a/tasmota/tasmota_support/settings.ino
 +++ b/tasmota/tasmota_support/settings.ino
-@@ -793,6 +793,66 @@
+@@ -793,6 +793,71 @@ void SettingsSave(uint8_t rotate) {
    CounterInterruptDisable(false);
  #endif
  }
@@ -41,6 +41,11 @@
 +    AddLog(LOG_LEVEL_INFO, PSTR("Autoflash recovery: settings not saved, NVS wipe failed (%d)"), result);
 +    return;
 +  }
++  // Its name, written out: the firmware after it takes a name with a format in
++  // it (WIFI_DEFAULT_HOSTNAME's %4X) for its own default instead.
++  char hostname[33];
++  Format(hostname, PSTR(WIFI_HOSTNAME), sizeof(hostname));
++  SettingsUpdateText(SET_HOSTNAME, hostname);
 +  Settings->cfg_crc32 = GetSettingsCrc32();
 +  NvmSave("main", "Settings", Settings, sizeof(TSettings));
 +
@@ -67,7 +72,7 @@
  void SettingsLoad(void) {
  #ifdef ESP8266
    // Load configuration from optional file and flash (eeprom and 7 additonal slots) if first valid load does not stop_flash_rotate
-@@ -862,6 +922,9 @@
+@@ -862,6 +927,9 @@ void SettingsLoad(void) {
    SettingsDefaultSet2();
    settings_location = 0;
    AddLog(LOG_LEVEL_INFO, PSTR("Autoflash recovery Wi-Fi defaults active"));

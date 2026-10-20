@@ -36,15 +36,28 @@ class ImprintError(RuntimeError):
 #
 # The marker is the start of the C string the firmware reads, not a label in
 # front of it, so a value must be written from the marker onwards. Writing it
-# after the marker leaves the firmware with "S60-IMPRINT-SSID>YourNetwork" as
-# its network name - which is what the first hardware run found.
-SSID_MARKER = b"S60-IMPRINT-SSID>"
-PASSWORD_MARKER = b"S60-IMPRINT-PASS>"
+# after the marker leaves the firmware with "AUTOFLASH-IMPRINT-SSID>YourNetwork"
+# as its network name - which is what the first hardware run found.
+SSID_MARKER = b"AUTOFLASH-IMPRINT-SSID>"
+PASSWORD_MARKER = b"AUTOFLASH-IMPRINT-PASS>"
+# The pair images built before the markers were the tool's own carry: ESPHome
+# 1.1.0 for the S60, and that config as Home Assistant builds it. Found and
+# filled just the same.
+LEGACY_MARKERS = (b"S60-IMPRINT-SSID>", b"S60-IMPRINT-PASS>")
 SSID_FIELD_BYTES = 33  # 32 characters plus a terminator
 PASSWORD_FIELD_BYTES = 64  # 63 characters plus a terminator
 # The reserved space is filled with this at build time. It must not be NUL, or
 # the compiler would end the string literal early and allocate too little.
 FILLER = b"."
+
+
+def markers_of(image: bytes) -> tuple[bytes, bytes]:
+    """The pair of markers `image` was built with: the tool's, or the earlier
+    pair.  The tool's when it has neither, so that is the pair errors name."""
+    for pair in ((SSID_MARKER, PASSWORD_MARKER), LEGACY_MARKERS):
+        if pair[0] in image or pair[1] in image:
+            return pair
+    return SSID_MARKER, PASSWORD_MARKER
 
 
 def field_span(marker: bytes, field_bytes: int) -> int:
@@ -117,8 +130,9 @@ def imprint(image: bytes, ssid: str, password: str) -> bytes:
     """
     if not ssid:
         raise ImprintError("a network name is required")
-    ssid_at = find_field(image, SSID_MARKER, SSID_FIELD_BYTES)
-    password_at = find_field(image, PASSWORD_MARKER, PASSWORD_FIELD_BYTES)
+    ssid_marker, password_marker = markers_of(image)
+    ssid_at = find_field(image, ssid_marker, SSID_FIELD_BYTES)
+    password_at = find_field(image, password_marker, PASSWORD_FIELD_BYTES)
     if not has_placeholders(image):
         raise ImprintError(
             "this image's credential placeholders have already been written to, "
@@ -127,8 +141,8 @@ def imprint(image: bytes, ssid: str, password: str) -> bytes:
         )
 
     patched = bytearray(image)
-    write_field(patched, ssid_at, ssid, SSID_MARKER, SSID_FIELD_BYTES)
-    write_field(patched, password_at, password, PASSWORD_MARKER, PASSWORD_FIELD_BYTES)
+    write_field(patched, ssid_at, ssid, ssid_marker, SSID_FIELD_BYTES)
+    write_field(patched, password_at, password, password_marker, PASSWORD_FIELD_BYTES)
     result = repair_image(bytes(patched))
 
     # Read back exactly what the firmware will read, from where it reads it.
@@ -180,7 +194,8 @@ def redact_build_paths(image: bytes, replacement: bytes = b"/build") -> bytes:
 
 def has_placeholders(image: bytes) -> bool:
     """True when both placeholder strings are present and untouched."""
-    for marker, field in ((SSID_MARKER, SSID_FIELD_BYTES), (PASSWORD_MARKER, PASSWORD_FIELD_BYTES)):
+    ssid_marker, password_marker = markers_of(image)
+    for marker, field in ((ssid_marker, SSID_FIELD_BYTES), (password_marker, PASSWORD_FIELD_BYTES)):
         try:
             at = find_field(image, marker, field)
         except ImprintError:
@@ -205,7 +220,7 @@ def require_imprinted(image: bytes) -> None:
             "a network name and password written into it, and installing it "
             "would leave the plug unable to reach any network"
         )
-    for marker in (SSID_MARKER, PASSWORD_MARKER):
+    for marker in (SSID_MARKER, PASSWORD_MARKER, *LEGACY_MARKERS):
         if marker in image:
             raise ImprintError(
                 f"{marker.decode()} is still in this image, so the firmware would "
@@ -219,9 +234,10 @@ def credential_regions(published: bytes) -> list[tuple[int, int]]:
 
     Located in the template because imprinting overwrites the markers.
     """
+    ssid_marker, password_marker = markers_of(published)
     return [
         (find_field(published, marker, field), field_span(marker, field))
-        for marker, field in ((SSID_MARKER, SSID_FIELD_BYTES), (PASSWORD_MARKER, PASSWORD_FIELD_BYTES))
+        for marker, field in ((ssid_marker, SSID_FIELD_BYTES), (password_marker, PASSWORD_FIELD_BYTES))
     ]
 
 

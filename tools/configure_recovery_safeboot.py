@@ -55,7 +55,7 @@ def render_header(ssid: str, password: str) -> bytes:
         "#undef WIFI_CONFIG_TOOL\n"
         "#define WIFI_CONFIG_TOOL WIFI_RETRY\n"
         "#undef WIFI_DEFAULT_HOSTNAME\n"
-        "#define WIFI_DEFAULT_HOSTNAME \"autoflash-recovery-%04d\"\n\n"
+        "#define WIFI_DEFAULT_HOSTNAME \"autoflash-recovery-%4X\"\n\n"
         "#endif  // _USER_CONFIG_OVERRIDE_H_\n"
     ).encode("ascii")
 

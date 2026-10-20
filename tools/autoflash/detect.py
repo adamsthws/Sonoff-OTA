@@ -14,7 +14,7 @@ import concurrent.futures
 import socket
 from dataclasses import dataclass
 
-from . import esphome, esphome_ota, hostsys
+from . import esphome, esphome_ota, hostsys, setup_network
 from .plans import INTERIM_TABLE_SHA256
 from .device import Device
 
@@ -27,7 +27,6 @@ NAMES = {
     "locked": "Tasmota with a web password",
     "esphome-login": "ESPHome with a web login",
 }
-BRIDGE_PAGE_MARKER = "S60 OTA Bridge"  # as setup_network has it
 
 
 def _is_installer(host: str, timeout: float) -> bool:
@@ -35,7 +34,7 @@ def _is_installer(host: str, timeout: float) -> bool:
     import urllib.request
     try:
         with urllib.request.urlopen(f"http://{host}/", timeout=timeout) as reply:
-            return BRIDGE_PAGE_MARKER.lower() in reply.read(4096).decode("utf-8", "replace").lower()
+            return setup_network.is_bridge_page(reply.read(4096).decode("utf-8", "replace"))
     except Exception:  # noqa: BLE001 - anything but the installer answering
         return False
 SONOFF_TABLE_SHA256 = "f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf"

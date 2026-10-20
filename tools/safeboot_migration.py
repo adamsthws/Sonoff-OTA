@@ -138,7 +138,7 @@ IMPRINTED_MODE = "public-imprinted-safeboot-v1"
 PUBLISHED_RECOVERY_FILE = (
     Path(__file__).resolve().parents[1] / "artifacts" / "autoflash-recovery-safeboot-imprintable.bin"
 )
-PUBLISHED_RECOVERY_SHA256 = "627a639bc8f7796419faf69fcd0c22d238946d11856a87048caecf32bcd89e2b"
+PUBLISHED_RECOVERY_SHA256 = "ece36fd964c1443ef9fb74af87a0a257501c9e5ecfb1fb7a1c3aff1744bc29fd"
 RECOVERY_ARTIFACT = "recovery_safeboot"
 RECOVERY_MARKER = b"Autoflash recovery Wi-Fi defaults active"
 RECOVERY_PATCH = (

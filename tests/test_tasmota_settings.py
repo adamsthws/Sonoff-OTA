@@ -63,6 +63,22 @@ class SettingsRecordTests(unittest.TestCase):
         self.assertEqual(record[ts.TEXT_POOL + ts.TEXT_POOL_SIZE :ts.CRC32],
                          template[ts.TEXT_POOL + ts.TEXT_POOL_SIZE :ts.CRC32])
 
+    def test_a_name_is_written_out_and_the_rest_kept(self):
+        template = ts.make_template(default_record())
+        named = ts.named(template, "autoflash-recovery-CDEF")
+        self.assertEqual(ts.text(named, ts.SET_HOSTNAME), "autoflash-recovery-CDEF")
+        self.assertEqual(ts.text(named, 13), "DVES_%06X")
+        self.assertEqual(ts.problems(named), [])  # the bridge checks the checksum first
+        record = ts.fill(named, "Home", "pw")
+        self.assertEqual(ts.text(record, ts.SET_HOSTNAME), "autoflash-recovery-CDEF")
+
+    def test_a_name_with_a_format_in_it_is_refused(self):
+        # Tasmota would take it for its own default instead.
+        template = ts.make_template(default_record())
+        for name in ("autoflash-recovery-%4X", "", "x" * 33):
+            with self.assertRaises(ts.SettingsError, msg=name):
+                ts.named(template, name)
+
     def test_a_full_pool_is_refused_not_truncated(self):
         crowded = default_record(DEFAULT_TEXTS + [b"x" * 560])
         with self.assertRaises(ts.SettingsError):
@@ -142,6 +158,23 @@ class BridgeCodeMatchesTests(unittest.TestCase):
             code, record = self.c_fill(template, ssid, password)
             self.assertEqual(code, 0)
             self.assertEqual(record, ts.fill(template, ssid, password), ssid)
+
+    def test_a_named_template_is_filled_the_same(self):
+        template = ts.named(ts.make_template(default_record()), "autoflash-recovery-CDEF")
+        code, record = self.c_fill(template, "Home & Garden", "p@ss word")
+        self.assertEqual(code, 0)
+        self.assertEqual(record, ts.fill(template, "Home & Garden", "p@ss word"))
+
+    def test_on_its_own_network_the_named_template_is_saved_without_wifi(self):
+        # Joined to no network, the bridge fills in none: the template as sent,
+        # its name kept, its checksum still Tasmota's.
+        template = ts.named(ts.make_template(default_record()), "autoflash-recovery-CDEF")
+        code, record = self.c_fill(template, "", "")
+        self.assertEqual(code, 0)
+        self.assertEqual(record, template)
+        self.assertEqual(ts.text(record, ts.SET_HOSTNAME), "autoflash-recovery-CDEF")
+        self.assertEqual(ts.text(record, ts.SET_STASSID1), "")
+        self.assertEqual(ts.problems(record), [])
 
     def test_a_damaged_template_is_refused(self):
         template = bytearray(ts.make_template(default_record()))

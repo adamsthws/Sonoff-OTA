@@ -186,11 +186,16 @@ it after the S60 have gone:
   upload sent into a plug still starting, which failed as "something
   unexpected". The run now waits until the plug reports which slot it runs
   from.
-- Every setup network the conversion makes - the installer's, the mover's
-  and ESPHome's - is now open and has one name, `Sonoff-Setup-` and the last
-  four characters of the plug's hardware address (`Sonoff-Setup-CDEF`). The
-  installer's had a password to type (`S60-OTA-Bridge-XXXX`); the others were
-  `sonoff-s60-…` names. Official Tasmota's own keep Tasmota's names.
+- Every firmware the plug runs part way through a conversion - the
+  installer, the mover, the startup firmware, and Tasmota until it is set up
+  - now goes by one name, `autoflash-recovery-` and the last four characters
+  of the plug's hardware address (`autoflash-recovery-CDEF`): in your router's
+  list, and for the installer's and the mover's own networks - and for
+  Tasmota's, installed through the installer's own network, where it was
+  Tasmota's default (`tasmota-ABCDEF-1234`). Every such network is open: the
+  installer's had a password to type (`S60-OTA-Bridge-XXXX`). ESPHome's own,
+  once installed, is
+  `Sonoff-Setup-CDEF`; official Tasmota keeps Tasmota's names.
 - ESPHome that cannot join your Wi-Fi at the end (I2) is set up through its
   own network by the run, as the mover already was, where before the run
   stopped and left it to you - and both carry on by themselves when you have

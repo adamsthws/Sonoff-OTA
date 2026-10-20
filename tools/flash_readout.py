@@ -48,6 +48,7 @@ from tools.autoflash_cli import (  # noqa: E402
     DELIVERY_PORTS,
     LEGACY_BRIDGE_PASSWORD,
     LEGACY_BRIDGE_PREFIX,
+    LEGACY_SETUP_PREFIX,
     SETTINGS_PATH,
     SETUP_SSID_PREFIX,
     find_ewelink_plugs,
@@ -55,12 +56,12 @@ from tools.autoflash_cli import (  # noqa: E402
 from tools.serve_tasmota_ota import S60_DEVICE_MODEL  # noqa: E402
 
 # The readout build of the conversion bridge, at the same version.
-READOUT_OTA = Path("captures/flash-readout/s60-ota-bridge-flash-readout-4.4.3.ota")
+READOUT_OTA = Path("captures/flash-readout/autoflash-bridge-sonoff-s60-flash-readout-4.4.4.ota")
 # --control: a conversion bridge, only to see whether it starts on this plug.
-# 4.4.3 is the one the conversion sends.  Pinned as in SHA256SUMS.
+# 4.4.4 is the one the conversion sends.  Pinned as in SHA256SUMS.
 CONTROL_FILES = {
-    "4.4.3": (Path("artifacts/s60-ota-bridge-4.4.3.ota"),
-              "0d179df29612d14a258f6926bd8f248cd46f3e78f0cf5c6cd0c427d6780b7f7f"),
+    "4.4.4": (Path("artifacts/autoflash-bridge-sonoff-s60-4.4.4.ota"),
+              "4424af5d59258f5c1998269c65bffc5d1341f519352fdc1bfd9c76e37b34f5bb"),
 }
 CONFIRM_WORD = "readout"
 # How a bridge names itself: "bridge v5" up to v5, "bridge 4.4.1" from then on.
@@ -380,7 +381,9 @@ def run(args: argparse.Namespace) -> int:
         print(f"Waiting for {name} to start and join your Wi-Fi...")
         host = find_bridge(plug_ip, mac, probe=probe)
         while host is None:
-            network = find_ssid((SETUP_SSID_PREFIX, LEGACY_BRIDGE_PREFIX))
+            # Any plug's: its MAC is not known for certain here.  Also by the
+            # names of a readout build from before 4.4.4 (--firmware).
+            network = find_ssid((SETUP_SSID_PREFIX, LEGACY_SETUP_PREFIX, LEGACY_BRIDGE_PREFIX))
             if network is None and stock_answers(plug_ip):
                 raise Stop(
                     f"the plug restarted on its Sonoff firmware, so {name} is not running"
@@ -438,9 +441,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--listen-ip", help="this computer's address as the plug sees it")
     parser.add_argument("--label", help="name for the saved dump (default: stock-<version>)")
     parser.add_argument("--firmware", default=str(READOUT_OTA), help=argparse.SUPPRESS)
-    parser.add_argument("--control", nargs="?", const="4.4.3", choices=sorted(CONTROL_FILES),
+    parser.add_argument("--control", nargs="?", const="4.4.4", choices=sorted(CONTROL_FILES),
                         help="send a conversion bridge instead, only to see whether it starts "
-                             "(nothing is read): 4.4.3, the one the conversion sends")
+                             "(nothing is read): 4.4.4, the one the conversion sends")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="also show the cloud's messages while the firmware is delivered")
     args = parser.parse_args(argv)

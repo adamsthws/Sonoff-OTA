@@ -27,22 +27,30 @@ class NamesTests(SetupNetworkTestCase):
         # Tasmota's own name, and ESP-IDF's default - the hotspot's MAC, one more.
         self.assertEqual(af.setup_networks(self.ctx()), ("tasmota-ABCDEF-", "ESP_ABCDF0"))
         self.assertEqual(af.setup_network_hint(self.ctx()), "tasmota-ABCDEF-NNNN, or ESP_ABCDF0")
-        # Every setup network of this project's firmware: one name, from the
-        # last two bytes of the plug's own MAC.
+        # Every firmware of this project's part way through: one name, from
+        # the last two bytes of the plug's own MAC.
+        self.assertEqual(af.our_setup_network(self.ctx()), "autoflash-recovery-CDEF")
+        self.assertEqual(af.mover_network_hint(self.ctx()), "autoflash-recovery-CDEF")
+        # And by the names they had before: the installer before 4.4.4 and
+        # 4.4.3, the mover before 1.1.0.
+        self.assertEqual(af.bridge_networks(self.ctx()),
+                         ("autoflash-recovery-CDEF", "Sonoff-Setup-CDEF", "S60-OTA-Bridge"))
+        self.assertEqual(af.mover_networks(self.ctx()),
+                         ("autoflash-recovery-CDEF", "Sonoff-Setup-CDEF", "sonoff-s60-mover-"))
+        # ESPHome keeps its own, the plug's, once installed.
         self.assertEqual(af.esphome_network_hint(self.ctx()), "Sonoff-Setup-CDEF")
-        self.assertEqual(af.mover_network_hint(self.ctx()), "Sonoff-Setup-CDEF")
-        self.assertEqual(af.our_setup_networks(self.ctx(), af.LEGACY_BRIDGE_PREFIX),
-                         ("Sonoff-Setup-CDEF", "S60-OTA-Bridge"))
+        self.assertEqual(af.esphome_networks(self.ctx()), ("Sonoff-Setup-CDEF", "sonoff-s60-"))
 
     def test_one_more_carries_into_the_next_byte(self):
         self.assertEqual(af.setup_networks(self.ctx("12-34-56-AB-FF-FF"))[1], "ESP_AC0000")
 
-    def test_without_the_mac_any_tasmota_will_do(self):
+    def test_without_the_mac_any_plugs_will_do(self):
         self.assertEqual(af.setup_networks(self.ctx(mac=None)), ("tasmota-",))
         self.assertEqual(af.setup_network_hint(self.ctx(mac=None)), "tasmota-XXXXXX-NNNN")
         self.assertEqual(af.esphome_network_hint(self.ctx(mac=None)), "Sonoff-Setup-XXXX")
-        self.assertEqual(af.our_setup_networks(self.ctx(mac=None), af.LEGACY_BRIDGE_PREFIX),
-                         ("Sonoff-Setup-", "S60-OTA-Bridge"))
+        self.assertEqual(af.bridge_networks(self.ctx(mac=None)),
+                         ("autoflash-recovery-", "Sonoff-Setup-", "S60-OTA-Bridge"))
+        self.assertEqual(af.esphome_networks(self.ctx(mac=None)), ("Sonoff-Setup-", "sonoff-s60-"))
 
 
 class SearchTests(SetupNetworkTestCase):
@@ -57,9 +65,20 @@ class SearchTests(SetupNetworkTestCase):
     def test_a_neighbours_tasmota_or_esp_is_not(self):
         self.assertIsNone(self.find(["tasmota-112233-0001", "ESP_112234", "ESP_ABCDEF"], self.ctx()))
 
+    def test_the_installers_network_is_not_taken_for_tasmotas(self):
+        # Seen in the fault suite: sent through the installer's own network,
+        # Tasmota went on, and the installer's network - still listed for a
+        # moment as it restarted - was taken for Tasmota's, never to be joined.
+        # A Tasmota the run named has the Wi-Fi, and raises no network by itself.
+        self.assertIsNone(self.find(["Home", "autoflash-recovery-CDEF"], self.ctx()))
+        # It is the installer's, and found as that.
+        with mock.patch.object(prompts, "scan_wifi_ssids", return_value=["Home", "autoflash-recovery-CDEF"]):
+            self.assertEqual(prompts.find_ssid(af.bridge_networks(self.ctx())), "autoflash-recovery-CDEF")
+
     def test_only_tasmotas_own_name_is_kept_as_the_plugs(self):
         ctx = self.ctx()
         af.note_setup_network(ctx, "ESP_ABCDF0")  # not what its router shows
+        af.note_setup_network(ctx, "autoflash-recovery-CDEF")  # only until it is set up
         self.assertIsNone(ctx.state.input("device_name"))
         af.note_setup_network(ctx, "tasmota-ABCDEF-1234")
         self.assertEqual(ctx.state.input("device_name"), "tasmota-ABCDEF-1234")
