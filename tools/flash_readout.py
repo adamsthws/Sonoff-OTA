@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read a stock Sonoff S60's whole flash over Wi-Fi, then put it back to stock.
+"""Read a stock plug's whole flash over Wi-Fi, then put it back to stock.
 
 This is not the conversion. It installs a small read-only firmware into the
 plug's spare app slot, reads the plug's whole memory through it, and saves
@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tools.analyze_vendor_ota import analyze  # noqa: E402
-from tools.autoflash import hostsys, output  # noqa: E402
+from tools.autoflash import hostsys, kinds, output  # noqa: E402
 from tools.autoflash.output import PROBLEM_RE  # noqa: E402
 from tools.autoflash.prompts import (  # noqa: E402
     QuitRun,
@@ -53,7 +53,6 @@ from tools.autoflash_cli import (  # noqa: E402
     SETUP_SSID_PREFIX,
     find_ewelink_plugs,
 )
-from tools.serve_tasmota_ota import S60_DEVICE_MODEL  # noqa: E402
 
 # The readout build of the conversion bridge, at the same version.
 READOUT_OTA = Path("captures/flash-readout/autoflash-bridge-sonoff-s60-flash-readout-4.4.4.ota")
@@ -147,8 +146,9 @@ def account_email(given: str | None) -> str:
     return ask_text("eWeLink account email", default=last)
 
 
-def query_plug(plug_ip: str, email: str, env: dict[str, str], work: Path) -> str:
-    """The plug's stock version, after making sure it is an S60."""
+def query_plug(plug_ip: str, email: str, env: dict[str, str], work: Path) -> tuple[str, kinds.Kind]:
+    """The plug's stock version and its kind, after making sure it is one
+    this tool converts."""
     report = discover(8.0, None, plug_ip)
     if not report["packets"]:
         raise Stop(f"the plug at {plug_ip} did not answer; check LAN Control is on in eWeLink")
@@ -169,9 +169,11 @@ def query_plug(plug_ip: str, email: str, env: dict[str, str], work: Path) -> str
         # Its download links may work as access tokens.
         meta.unlink(missing_ok=True)
     model, version = str(query.get("model", "")), str(query["version"])
-    if model != S60_DEVICE_MODEL:
-        raise Stop(f"{plug_ip} is a {model or 'device of unknown model'}, not a Sonoff S60")
-    return version
+    kind = kinds.for_stock_model(model)
+    if kind is None:
+        raise Stop(f"{plug_ip} is a {model or 'device of unknown model'}, not one this tool "
+                   f"converts ({kinds.stock_models()})")
+    return version, kind
 
 
 def confirmed(version: str, control: bool = False) -> bool:
@@ -349,8 +351,8 @@ def run(args: argparse.Namespace) -> int:
     env = {**os.environ, "EWELINK_PASSWORD": ask_secret(f"eWeLink password for {email}: ")}
     work = ROOT / "captures" / "flash-readout" / f"run-{time.strftime('%Y%m%d-%H%M%S')}"
     work.mkdir(parents=True, exist_ok=True)
-    version = query_plug(plug_ip, email, env, work)
-    print(f"Sonoff S60 at {plug_ip}{f' ({mac})' if mac else ''}, running Sonoff {version}.")
+    version, kind = query_plug(plug_ip, email, env, work)
+    print(f"{kind.name} at {plug_ip}{f' ({mac})' if mac else ''}, running Sonoff {version}.")
     if not confirmed(version, args.control):
         print("Stopped. Nothing was sent to the plug.")
         return 1

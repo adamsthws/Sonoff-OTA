@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Find where the stock S60 firmware keeps its Wi-Fi details (research only).
+"""Find where a plug's stock firmware keeps its Wi-Fi details (research only).
 
 Reads the whole stock NVS partition from the research bridge's read-only
 `GET /nvs` (build env `autoflash-bridge-nvs-probe`) into memory, then lists each

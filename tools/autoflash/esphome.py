@@ -29,7 +29,8 @@ from pathlib import Path
 from . import imprint, noise
 
 ROOT = Path(__file__).resolve().parents[2]
-# The published image, pinned: a changed file is refused, never used unseen.
+# The published image, the ESPHome made for the Sonoff S60 (kinds.SONOFF_S60),
+# pinned: a changed file is refused, never used unseen.
 IMAGE = ROOT / "artifacts" / "esphome-sonoff-s60-imprintable-1.1.0.bin"
 IMAGE_SHA256 = "eb5c2f6922fb913c05c08324f48ce1e4bf519c7b5b4da7bc59797c72352cce0a"
 IMAGE_SIZE = 955_408
@@ -61,7 +62,7 @@ def check_app(image: bytes, label: str) -> None:
     if len(image) < 64 or image[0] != 0xE9:
         raise ImageError(f"{label} is not an ESP32 firmware image")
     if struct.unpack_from("<H", image, 12)[0] != ESP32_C3_CHIP_ID:
-        raise ImageError(f"{label} is not built for the ESP32-C3 in the S60")
+        raise ImageError(f"{label} is not built for the plug's ESP32-C3")
     if struct.unpack_from("<I", image, 32)[0] != APP_DESC_MAGIC:
         raise ImageError(
             f"{label} is not an app image: use firmware.ota.bin, not firmware.factory.bin"
@@ -94,7 +95,7 @@ def published_bootloader() -> bytes:
     if len(bootloader) > BOOTLOADER_ROOM or bootloader[0] != 0xE9:
         raise ImageError(f"{BOOTLOADER.name} is not an ESP32 bootloader that fits before 0x8000")
     if struct.unpack_from("<H", bootloader, 12)[0] != ESP32_C3_CHIP_ID:
-        raise ImageError(f"{BOOTLOADER.name} is not built for the ESP32-C3 in the S60")
+        raise ImageError(f"{BOOTLOADER.name} is not built for the plug's ESP32-C3")
     report = imprint.parse_esp_image(bootloader)
     if not report["checksum_valid"] or report["sha256_valid"] is not True:
         raise ImageError(f"{BOOTLOADER.name} fails its own integrity check")
@@ -106,7 +107,8 @@ def published_bootloader() -> bytes:
 MOVER = ROOT / "artifacts" / "autoflash-mover-1.1.0.bin"
 MOVER_SHA256 = "f6e131e1599c886d742c151c3ba3f84a285bba462b438c36b611d577e01ad243"
 MOVER_SIZE = 756_960
-# Sonoff's partition table, written back when a plug leaves Tasmota's layout.
+# Sonoff's partition table, as a stock S60 has it: written back when a plug
+# leaves Tasmota's layout.
 SONOFF_TABLE = ROOT / "artifacts" / "sonoff-s60-partition-table.bin"
 
 

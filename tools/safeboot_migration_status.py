@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate local S60 migration state and print the next resumable stage."""
+"""Validate local migration state and print the next resumable stage."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Shared validation helpers for the guarded S60 Safeboot migration.
+"""Shared validation helpers for the guarded Safeboot migration.
 
 This module is intentionally side-effect free.  Device-writing tools import
 the constants and validators here so that every phase agrees on exact byte

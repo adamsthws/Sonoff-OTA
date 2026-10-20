@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Take a stock eWeLink Sonoff S60 to the canonical Tasmota layout.
+"""Convert a plug over the air: from its stock eWeLink firmware to Tasmota or
+ESPHome, from either of those to the other, or back to its stock firmware.
 
 This orchestrates the reviewed tools in tools/.  It reimplements no validator,
 no Berry phase and no safety gate: every destructive action still runs the same
@@ -34,7 +35,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
 from tools.autoflash import __version__, esphome, imprint, plugs, tasmota_settings  # noqa: E402
-from tools.autoflash import awake, detect, esphome_ota, ewelink_lan, interrupt, noise, plans, safety_locks  # noqa: E402
+from tools.autoflash import awake, detect, esphome_ota, ewelink_lan, interrupt, kinds, noise, plans, safety_locks  # noqa: E402
 from tools.autoflash.device import Device, DeviceError, NeedsPassword, PASSWORD_HINT, UploadRefused  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import (  # noqa: E402
@@ -76,7 +77,6 @@ from tools.prepare_imprinted_bundle import (  # noqa: E402
     validate_bundle,
 )
 from tools.query_ota import ota_endpoints  # noqa: E402
-from tools.serve_tasmota_ota import S60_DEVICE_MODEL  # noqa: E402
 from tools.safeboot_migration import (  # noqa: E402
     APP0_OFFSET,
     PINNED_ARTIFACTS,
@@ -93,11 +93,6 @@ DEFAULT_MANIFEST = Path("captures/safeboot-recovery-migration/manifest.json")
 # 8088 matches the vendor OTA port, but the research probe was served on
 # 8765.  The phase servers have their own ports, so the two never share one.
 DELIVERY_PORTS = (8088, *range(8090, 8100))
-# The S60's wiring: relay GPIO4, status LED GPIO5, power meter GPIO7, button
-# GPIO9.  The UK S60TPG and the European S60TPF publish the same pins.
-S60_GPIO = [1, 1, 1, 1, 224, 544, 1, 3104, 1, 32, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1]
-# eWeLink's product model for a Wi-Fi S60: S60TP and the plug-type letter.
-S60_PRODUCT = re.compile(r"S60TP[A-Z]")
 # Typed once, before the first write that cannot be undone, for the whole conversion.
 CONSENT_WORD = "proceed"
 # After this step the plug no longer runs its Sonoff firmware.
@@ -117,18 +112,13 @@ LEGACY_SETUP_PREFIX = "Sonoff-Setup-"
 LEGACY_BRIDGE_PREFIX = "S60-OTA-Bridge"
 LEGACY_BRIDGE_PASSWORD = "s60-ota-bridge"
 LEGACY_MOVER_PREFIX = "sonoff-s60-mover-"
-# ESPHome for the S60's own network, which it keeps after the conversion
-# (ESPHome/sonoff_s60.yaml); and its name before that (an ESPHome built from an
-# earlier sonoff_s60.yaml).
-ESPHOME_SETUP_PREFIX = "Sonoff-Setup-"
-LEGACY_ESPHOME_PREFIX = "sonoff-s60-"
 # 4.4.4: joins the home network the stock firmware was on, raising its own
 # only if that fails, gives Tasmota its Wi-Fi at D1, and lets the plug's whole
 # flash be read first, for the backup - and starts even once an upload into
 # Sonoff's slot was cut off (from 4.4.3), where 4.4.2 would not, leaving a plug
 # only a serial cable could recover; named, from 4.4.4, as the tool's.  Named,
 # like every bridge from 4.4.1 on, by the version the stock updater is given;
-# the file by the plug its wrapper is for.
+# the file by the kind of plug its wrapper is for (kinds.SONOFF_S60's).
 BRIDGE_OTA = Path("artifacts/autoflash-bridge-sonoff-s60-4.4.4.ota")
 # Ports the migration phase servers (serve_safeboot_migration.py) may listen
 # on, in order of preference.  Nothing on the plug keeps the port: each phase
@@ -224,9 +214,12 @@ def mover_networks(ctx: "Context") -> tuple[str, ...]:
 
 
 def esphome_networks(ctx: "Context") -> tuple[str, ...]:
-    """ESPHome's own network, once installed: the S60's, and its name before."""
+    """ESPHome's own network, once installed: the one the ESPHome made for this
+    kind of plug raises, and its name in an earlier build."""
+    kind = kinds.of_run(ctx.state)
     mac = ctx.state.input("plug_mac")
-    return (named(ctx, ESPHOME_SETUP_PREFIX) if mac else ESPHOME_SETUP_PREFIX, LEGACY_ESPHOME_PREFIX)
+    return (named(ctx, kind.esphome_setup_prefix) if mac else kind.esphome_setup_prefix,
+            kind.esphome_legacy_prefix)
 
 
 def mover_network_hint(ctx: "Context") -> str:
@@ -236,7 +229,7 @@ def mover_network_hint(ctx: "Context") -> str:
 
 def esphome_network_hint(ctx: "Context") -> str:
     """ESPHome's own network."""
-    return named(ctx, ESPHOME_SETUP_PREFIX)
+    return named(ctx, kinds.of_run(ctx.state).esphome_setup_prefix)
 
 
 class Abort(RuntimeError):
@@ -893,18 +886,6 @@ def save_settings(settings: dict[str, Any]) -> None:
 # ----------------------------------------------------------------- firewall
 
 
-def s60_template(product_model: str | None) -> str:
-    """The Tasmota template, named after the plug's own model where eWeLink gave it.
-
-    S60TPG or S60TPF when the model is one of those; otherwise, or for a run
-    begun before the model was recorded, the series name.  Nothing but a
-    model matching S60_PRODUCT ever reaches the Tasmota command.
-    """
-    product = (product_model or "").strip().upper()
-    name = f"Sonoff {product}" if S60_PRODUCT.fullmatch(product) else "Sonoff S60"
-    return json.dumps({"NAME": name, "GPIO": S60_GPIO, "FLAG": 0, "BASE": 1}, separators=(",", ":"))
-
-
 # A phase server's line that says why it stopped, rather than how it is getting on.
 # The commit's own checks, made before its first write, that the plug is still
 # as E1 and E2 left it (repartition/berry/commit.be.tmpl).
@@ -1364,7 +1345,7 @@ def step_prerequisites(ctx: Context) -> dict[str, Any]:
         needed = [
             "- The eWeLink app on your phone, signed in to an eWeLink account",
             "  (free - a throwaway account is fine).",
-            "- The S60 set up in the app on the 2.4 GHz Wi-Fi it should stay on:",
+            "- The plug set up in the app on the 2.4 GHz Wi-Fi it should stay on:",
             "  it keeps that network after the conversion, and cannot use 5 GHz.",
             "- LAN Control turned on in the plug's settings in the app.",
         ]
@@ -1656,15 +1637,18 @@ def warn_if_weak_signal(ctx: Context, signal: Any, then: list[str]) -> None:
 
 
 def step_pair(ctx: Context) -> dict[str, Any]:
-    """A1 - find the plug: an S60 in the owner's eWeLink account, answering
-    on this network, asking only when there is a choice to make."""
+    """A1 - find the plug: one of a kind this tool converts in the owner's
+    eWeLink account, answering on this network, asking only when there is a
+    choice to make."""
     ip = ctx.state.input("plug_ip")
     if not ip:
-        say("Signing in to eWeLink to see which S60 plugs are in the account...")
+        say(f"Signing in to eWeLink to see which {kinds.names('short')} plugs are in the account...")
         devices = ctx.account_devices()
         ip = find_any_plug() if devices is None else find_account_plug(ctx, devices)
     ctx.state.set_input("plug_ip", ip)
     account = getattr(ctx, "account_plug", None)
+    if account:
+        ctx.state.set_input("plug_kind", account.kind)
     mac = hostsys.mac_of(ip) or (account.mac if account else None)
     if mac and plugs.MAC_RE.match(mac):
         ctx.state.set_input("plug_mac", mac)
@@ -1702,18 +1686,20 @@ def file_plug(ctx: Context, mac: str, account: AccountPlug | None) -> None:
 
 @dataclass(frozen=True)
 class AccountPlug:
-    """An S60 in the owner's eWeLink account: what the account says about it."""
+    """A plug in the owner's eWeLink account of a kind this tool converts:
+    what the account says about it.  `kind`: its kinds.Kind's key."""
     device_id: str
     name: str
     model: str
     online: bool | None
     mac: str | None
     ssid: str | None
+    kind: str
 
 
 @dataclass(frozen=True)
 class Sighting:
-    """Where an account's S60 was seen: answering eWeLink's local discovery
+    """Where an account's plug was seen: answering eWeLink's local discovery
     at `ip`, or only by its hardware address there (LAN Control off)."""
     plug: AccountPlug
     ip: str | None
@@ -1727,7 +1713,7 @@ def keep_account_private(devices: list[dict[str, Any]]) -> None:
         params = device.get("params") or {}
         output.private(device.get("deviceid"), "device-id")
         name = str(device.get("name") or "")
-        generic = {"sonoff", "s60", "plug", "smart", "socket",
+        generic = {"plug", "smart", "socket", *kinds.name_words(),
                    str(device.get("productModel") or "").lower()}
         if not set(name.lower().split()) <= generic:  # "Sonoff S60" names nobody
             output.private(name, "plug-name")
@@ -1736,21 +1722,24 @@ def keep_account_private(devices: list[dict[str, Any]]) -> None:
 
 
 def account_plug(device: dict[str, Any]) -> AccountPlug | None:
-    """The account's record of a device, if it is an S60; its LAN key is left out."""
+    """The account's record of a device, if it is of a kind this tool
+    converts; its LAN key is left out."""
     product = str(device.get("productModel") or "").strip().upper()
     family = str((device.get("extra") or {}).get("model") or "")
-    if not (S60_PRODUCT.fullmatch(product) or family == S60_DEVICE_MODEL):
+    kind = kinds.for_account(product, family)
+    if kind is None:
         return None
     params = device.get("params") or {}
     mac = params.get("staMac")
     online = device.get("online")
     return AccountPlug(
         device_id=str(device.get("deviceid") or ""),
-        name=str(device.get("name") or "").strip() or "Sonoff S60",
-        model=product or "S60",
+        name=str(device.get("name") or "").strip() or kind.name,
+        model=product or kind.short,
         online=online if isinstance(online, bool) else None,
         mac=hostsys.normalise_mac(str(mac)) if mac else None,
         ssid=str(params.get("ssid") or "") or None,
+        kind=kind.key,
     )
 
 
@@ -1817,7 +1806,7 @@ def why_not_found(sighting: Sighting) -> str:
 
 
 def sight_plugs(plugs: list[AccountPlug]) -> list[Sighting]:
-    """Look for the account's S60s on this network."""
+    """Look for the account's plugs on this network."""
     macs = {plug.mac for plug in plugs if plug.mac}
     # Where this computer has already seen them: asked straight away.
     hints = [address for address, mac in hostsys.neighbour_table().items() if mac in macs]
@@ -1843,7 +1832,7 @@ CLOUD_CATCH_UP = 60.0
 
 
 def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
-    """The address of the S60 to convert, from the account's S60s that answer here."""
+    """The address of the plug to convert, from the account's that answer here."""
     started = time.monotonic()
     while True:
         plugs = [plug for plug in map(account_plug, devices) if plug is not None]
@@ -1851,10 +1840,10 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
             output.transient_begin()
             others = [f"- '{str(d.get('name') or '').strip() or d.get('deviceid')}' "
                       f"({d.get('productModel') or 'unknown model'})" for d in devices]
-            section(f"No Sonoff S60 in the eWeLink account {ctx.email()}", [
+            section(f"No {kinds.names()} in the eWeLink account {ctx.email()}", [
                 *(["It has:", *others] if others else ["It has no devices."]),
                 "",
-                "Add the S60 in the eWeLink app, or use the account it is in.",
+                "Add the plug in the eWeLink app, or use the account it is in.",
             ])
             choice = ask_choice("What now", [
                 "Look again",
@@ -1875,7 +1864,7 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
             if ready:
                 output.transient_begin()
                 choice = ask_choice(
-                    "More than one S60 in the account answered. Which one is this run for",
+                    "More than one plug in the account answered. Which one is this run for",
                     [f"{describe_plug(sighting.plug)} at {sighting.ip}" for sighting in ready],
                 )
                 output.transient_end()
@@ -1901,9 +1890,9 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
             output.transient_begin()
             if all(map(cut_off, sightings)):
                 # Found here: only its own internet access is in the way.
-                title, note = "Your S60 is on this network but cannot reach the internet", []
+                title, note = "Your plug is on this network but cannot reach the internet", []
             else:
-                title, note = ("Your S60 did not answer on this network",
+                title, note = ("Your plug did not answer on this network",
                                hostsys.security_software_note())
             section(title, [
                 *(f"- {why_not_found(sighting)}" for sighting in sightings),
@@ -1957,7 +1946,7 @@ def find_any_plug() -> str:
             note = hostsys.security_software_note()
             section("No Sonoff plug answered on this network", [
                 "Check, in the eWeLink app:",
-                "- the S60 is added, on the same 2.4 GHz Wi-Fi network as this",
+                "- the plug is added, on the same 2.4 GHz Wi-Fi network as this",
                 "  computer - the plug cannot use 5 GHz",
                 "- LAN Control is turned on in the plug's settings",
                 "- the plug is switched on at the wall",
@@ -1978,12 +1967,12 @@ def find_any_plug() -> str:
 
 
 def plug_at(wanted: set[str] | None) -> Callable[[str], list[str]]:
-    """For a typed address: what is wrong with it, unless an S60 in the
+    """For a typed address: what is wrong with it, unless a plug in the
     account (`wanted`'s ids; None: any eWeLink device) answers eWeLink's
     discovery there.  The next stage asks it there, and needs the answer to
     go on: an address that only answers a ping - the router, say - would
     stop the run then, with nothing to show what was wrong."""
-    what = "a Sonoff plug" if wanted is None else "your S60"
+    what = "a Sonoff plug" if wanted is None else "your plug"
 
     def check(address: str) -> list[str]:
         tell(f"    Checking that {address} is {what}...")
@@ -1994,7 +1983,8 @@ def plug_at(wanted: set[str] | None) -> Callable[[str], list[str]]:
         if found and (wanted is None or found & wanted):
             return []
         if found:
-            return [f"{address} is a different eWeLink device, not an S60 in this account."]
+            return [f"{address} is a different eWeLink device, not one of this account's "
+                    f"{kinds.names()} plugs."]
         return [
             f"{address} answered, but not as an eWeLink device - it is probably something",
             "else, such as your router. If it is the plug, turn on LAN Control in its",
@@ -2087,11 +2077,13 @@ def step_discover(ctx: Context) -> dict[str, Any]:
     finally:
         # Its download links may work as access tokens; what is needed is now read.
         meta.unlink(missing_ok=True)
-    if model != S60_DEVICE_MODEL:
+    kind = kinds.for_stock_model(model)
+    if kind is None:
         raise Abort(
-            f"{plug_ip} is a {model or 'device of unknown model'}, not a Sonoff S60 "
-            f"({S60_DEVICE_MODEL}). This tool only converts the S60; nothing was written"
+            f"{plug_ip} is a {model or 'device of unknown model'}, which this tool does not "
+            f"convert - it converts the {kinds.stock_models()}. Nothing was written"
         )
+    ctx.state.set_input("plug_kind", kind.key)
 
     # Our upgrade command names this computer as the download address and
     # carries our firmware's hash, so the plug fetches our image directly
@@ -2518,7 +2510,8 @@ def back_up_stock(ctx: Context, host: str) -> str:
         say(f"    The network reported {known} for the plug; its chip says {mac}, which is used.")
     if hasattr(ctx, "file_under_plug"):
         ctx.file_under_plug(mac)  # if A1 could not tell its MAC
-    out, _ = plugs.save_backup(flash, efuse, report, ctx.state.input("stock_version"))
+    out, _ = plugs.save_backup(flash, efuse, report, ctx.state.input("stock_version"),
+                               kind=kinds.of_run(ctx.state).name)
     ctx.state.set_input("stock_backup", display_path(out))
     for line in summary(report):
         say(f"    {line}")
@@ -3263,7 +3256,7 @@ def startup_settings_report(device: Device) -> str | None:
 
 
 def step_configure(ctx: Context) -> dict[str, Any]:
-    """F3/F4 - Wi-Fi, settings persistence and the S60 template."""
+    """F3/F4 - Wi-Fi, settings persistence and the plug's template."""
     if ctx.finder.poll():
         route = "joined by itself"
         say("Official Tasmota joined your Wi-Fi by itself, with the details the")
@@ -3287,11 +3280,11 @@ def step_configure(ctx: Context) -> dict[str, Any]:
         install_official(ctx, ROOT / "captures/safeboot-recovery-migration/tasmota32c3.bin")
         device = ctx.device
         device.wait_reachable(timeout=300)
-    template = s60_template(ctx.state.input("product_model"))
-    if s60_settings_in_place(device, template):
+    template = kinds.of_run(ctx.state).tasmota_template(ctx.state.input("product_model"))
+    if template_in_place(device, template):
         # Tried again after the plug took the template but its answer was slow
         # (a busy plug): resetting again would only restart it again.
-        say("The S60 settings are in place already.")
+        say("The plug's template and settings are in place already.")
         return {"template": "applied", "wifi_route": route}
     # Tasmota may be running on the record the startup firmware saved, which
     # holds the Wi-Fi but only what a Safeboot sets (it skips most defaults,
@@ -3345,8 +3338,8 @@ def back_after_reset(ctx: Context, booted: str | None, uptime: int | None) -> No
 SLOW_COMMAND = 30.0
 
 
-def s60_settings_in_place(device: Device, template: str) -> bool:
-    """Whether F4 has done its work already: the S60's template in use, and
+def template_in_place(device: Device, template: str) -> bool:
+    """Whether F4 has done its work already: the plug's template in use, and
     settings saved."""
     try:
         current = device.command("Template", timeout=SLOW_COMMAND)
@@ -4078,7 +4071,7 @@ TASMOTA_FINAL_STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] 
     ("E2", "Stage Safeboot into the spare slot", step_stage),
     ("E3", "Commit the new layout", step_commit),
     ("F2", "Canonical boot and official app", step_canonical),
-    ("F4", "Wi-Fi, SaveData and S60 template", step_configure),
+    ("F4", "Wi-Fi, SaveData and the plug's template", step_configure),
     ("G1", "Restore official Safeboot", step_restore),
     ("H1", "Verify the four regions", step_verify),
 ]
@@ -4279,7 +4272,7 @@ def find_current_firmware(ctx: Context) -> str:
             adopt_plug(ctx, detect.Found(given, running, hostsys.mac_of(given)))
             return past_the_commit(ctx, running)
         return "sonoff"
-    say("Looking for S60s already running Tasmota or ESPHome on your network...")
+    say("Looking for plugs already running Tasmota or ESPHome on your network...")
 
     # Plugs this computer has records of: their backups and their runs.
     known = {name.replace("-", ":") for name in
@@ -4287,8 +4280,8 @@ def find_current_firmware(ctx: Context) -> str:
 
     def search() -> list[detect.Found]:
         try:
-            return detect.converted_s60s(hostsys.local_ip_towards("192.0.2.1"), known_macs=known,
-                                         password=ctx.web_password, esphome_login=ctx.esphome_login)
+            return detect.converted_plugs(hostsys.local_ip_towards("192.0.2.1"), known_macs=known,
+                                          password=ctx.web_password, esphome_login=ctx.esphome_login)
         except OSError:
             return []
 
@@ -4306,8 +4299,8 @@ def find_current_firmware(ctx: Context) -> str:
             time.sleep(5)
             found = search()
     # A Tasmota with a web password, or an ESPHome with a web login, says
-    # whether it is an S60 only once given it: offered, and it asked for if
-    # chosen, when someone can type it.
+    # whether it is a plug this tool converts only once given it: offered,
+    # and it asked for if chosen, when someone can type it.
     locked = [plug for plug in found if plug.firmware in LOCKED]
     found = open_ones(found)
     if locked and prompts.UNATTENDED:
@@ -4345,8 +4338,8 @@ def find_current_firmware(ctx: Context) -> str:
     return past_the_commit(ctx, chosen.firmware)
 
 
-# Found on the network, but saying whether it is an S60 only once given its
-# web password (Tasmota) or web login (ESPHome).
+# Found on the network, but saying whether it is a plug this tool converts
+# only once given its web password (Tasmota) or web login (ESPHome).
 LOCKED = ("locked", "esphome-login")
 
 
@@ -4636,14 +4629,14 @@ def unlocked(ctx: Context, plug: detect.Found) -> detect.Found:
     if plug.firmware == "esphome-login":
         ask_esphome_login(ctx, plug.host)
         if identify(ctx, plug.host) != "esphome":
-            raise Abort(f"the ESPHome at {plug.host} did not answer as an S60")
+            raise Abort(f"the ESPHome at {plug.host} did not answer as a plug this tool converts")
         return detect.Found(plug.host, "esphome", plug.mac)
     ask_web_password(ctx, plug.host)
     running = identify(ctx, plug.host)
     if running in ("mover", "startup", "hub"):
         running = "midway"
     if running not in ("tasmota", "midway"):
-        raise Abort(f"the Tasmota at {plug.host} did not answer as an S60")
+        raise Abort(f"the Tasmota at {plug.host} did not answer as a plug this tool converts")
     return detect.Found(plug.host, running, plug.mac)
 
 
@@ -4728,6 +4721,8 @@ def adopt_plug(ctx: Context, found: "detect.Found") -> None:
         mac = hostsys.normalise_mac(mac)
         ctx.state.set_input("plug_mac", mac)
         file_plug(ctx, mac, None)
+    if found.kind:
+        ctx.state.set_input("plug_kind", found.kind)
     say(f"    This run is for {found.describe()}.")
 
 
@@ -5017,7 +5012,7 @@ PLAIN_DESCRIPTION = {
     "E2": "copies the new startup firmware into the unused half of the memory",
     "E3": "rewrites the plug's memory map - the one step that cannot be undone",
     "F2": "installs the full Tasmota now that the new layout is in place",
-    "F4": "sets up Wi-Fi, saves settings and applies the S60 plug template",
+    "F4": "sets up Wi-Fi, saves settings and applies the plug's template",
     "G1": "replaces the temporary startup firmware with the official one",
     "H1": "checks the finished plug against the official files",
     "I1": "writes ESPHome into the plug, checks every block, and switches to it",
@@ -5447,10 +5442,6 @@ def python_description() -> str:
     return f"{platform.python_version()} ({source})"
 
 
-# The plug type and region each S60 model letter stands for.
-REGIONS = {"G": "UK (Type G)", "F": "Europe (Type E/F)"}
-
-
 def public_text(text: str, limit: int = 240) -> str:
     """`text` fit for a public post: on one line, with nothing that identifies
     the plug, the network or the person - not even a private address."""
@@ -5499,8 +5490,9 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     check_hardware() measured.  "__" marks what the run could not tell.
     """
     hardware = hardware or {}
-    product = str(ctx.state.input("product_model") or "").strip().upper()
-    model = product if S60_PRODUCT.fullmatch(product) else ""
+    kind = kinds.of_run(ctx.state)
+    product = str(ctx.state.input("product_model") or "")
+    model = kind.product_of(product)
     captures = ctx.state.data.get("captures", {})
     joined = (captures.get("D1.upload_route") == "bridge network"
               or captures.get("D1.resumed") is True
@@ -5516,10 +5508,6 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     readings = [value for key, value in captures.items() if key.endswith(".signal_dbm")
                 and isinstance(value, int) and not isinstance(value, bool)]
     signal = min(readings) if readings else None
-    try:
-        name = json.loads(s60_template(product))["NAME"]
-    except (ValueError, KeyError, TypeError):
-        name = "__"
     fields = [
         ("Result", result),
         ("Firmware", FIRMWARES[run_firmware(ctx.state)]),
@@ -5529,7 +5517,7 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
                             "installer": "unfinished conversion"}[run_source(ctx.state)]),
         ("Tool version", __version__),
         ("Plug model", model or "__"),
-        ("Plug type / region", REGIONS.get(model[-1:], "__") if model else "__"),
+        ("Plug type / region", kind.region(model) or "__"),
         ("Stock firmware", ctx.state.input("stock_version") or "__"),
         # How it went, never where it is or which plug: the path holds the MAC.
         ("Sonoff backup", BACKUP_OUTCOMES.get(ctx.state.input("backup_outcome") or "not taken")[1]),
@@ -5544,8 +5532,9 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Plug Wi-Fi signal", f"{signal} dBm" if isinstance(signal, int) else "not recorded"),
         ("Typed the Wi-Fi", "yes" if ctx.state.input("wifi_typed") else "no"),
         ("Joined setup network", "yes" if joined else "no"),
-        *([("Name in ESPHome", "Sonoff S60")] if run_firmware(ctx.state) == "esphome"
-          else [("Name in Tasmota", name)] if run_firmware(ctx.state) == "tasmota" else []),
+        *([("Name in ESPHome", kind.esphome_name)] if run_firmware(ctx.state) == "esphome"
+          else [("Name in Tasmota", kind.template_name(product))]
+          if run_firmware(ctx.state) == "tasmota" else []),
         ("Relay", hardware.get("Relay", "not checked")),
         ("Power meter", hardware.get("Power meter", "not checked")),
     ]

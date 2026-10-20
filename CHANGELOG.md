@@ -201,6 +201,12 @@ it after the S60 have gone:
   than one kind of plug. Its firewall rule is called `Autoflash` (it was
   `S60 autoflash`); one a run of an earlier version left is still found and
   removed.
+- What is the S60's own - its names in eWeLink and its stock firmware, its
+  wiring for Tasmota, what its ESPHome calls itself - is kept in one place
+  (`tools/autoflash/kinds.py`), and a run keeps which kind of plug it
+  converts, ready for more kinds. Official Tasmota is still named after the
+  plug's own model (Sonoff S60TPG), and the messages that only meant "the
+  plug" now say so.
 - ESPHome that cannot join your Wi-Fi at the end (I2) is set up through its
   own network by the run, as the mover already was, where before the run
   stopped and left it to you - and both carry on by themselves when you have

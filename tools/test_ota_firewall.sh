@@ -6,7 +6,7 @@ usage() {
 Usage: sudo ./tools/test_ota_firewall.sh INTERFACE PLUG_IP WORKSTATION_IP VENDOR_OTA_IP [PORT]
 
 Run only after creating the source-specific DNAT and MASQUERADE rules.
-The S60 must be unplugged and the local OTA server must not be running.
+The plug must be switched off and the local OTA server must not be running.
 
 Example:
   sudo ./tools/test_ota_firewall.sh wlo1 192.168.1.50 192.168.1.20 203.0.113.10 8088
@@ -48,7 +48,7 @@ if ip -4 address show dev "$interface" | grep -Fq " $test_source/"; then
     exit 2
 fi
 if ping -c 1 -W 1 "$test_source" >/dev/null 2>&1; then
-    echo "$test_source replied. Unplug the S60 and check for an IP conflict." >&2
+    echo "$test_source replied. Switch the plug off and check for an IP conflict." >&2
     exit 2
 fi
 
@@ -83,4 +83,4 @@ echo "Test 3/3: remove the temporary plug address"
 cleanup
 echo "PASS: the temporary test address was removed."
 echo "OVERALL INTERCEPTION PREFLIGHT: PASS"
-echo "Reconnect the S60 when ready."
+echo "Switch the plug back on when ready."

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import oslock
+from . import kinds, oslock
 
 ROOT = Path(__file__).resolve().parents[2]
 CAPTURES = ROOT / "captures"
@@ -164,7 +164,8 @@ class Backup:
     def describe(self) -> str:
         """For a menu: the MAC first, since that is what tells plugs apart."""
         extra = [f"Sonoff {self.version}"] + ([f"backed up {self.taken}"] if self.taken else [])
-        named = f'"{self.name}", ' if self.name and self.name != "Sonoff S60" else ""
+        # The name eWeLink gave it, which tells nothing apart, is left out.
+        named = f'"{self.name}", ' if self.name and self.name not in {k.name for k in kinds.ALL} else ""
         return f"{self.mac}  ({named}{', '.join(extra)})"
 
 
@@ -188,7 +189,7 @@ def backups() -> list[Backup]:
 
 
 README = """\
-The Sonoff firmware of the Sonoff S60 with MAC address {mac}, backed up on
+The Sonoff firmware of the {kind} with MAC address {mac}, backed up on
 {date}, just before Tasmota was written over it. It was running Sonoff
 {version}.
 
@@ -226,8 +227,10 @@ def _write_read_only(path: Path, data: bytes) -> None:
 
 
 def save_backup(flash: bytes, efuse: bytes, report: dict[str, Any],
-                version: str | None, date: str | None = None) -> tuple[Path, bool]:
-    """Keep a plug's Sonoff firmware as its original backup.
+                version: str | None, date: str | None = None, *,
+                kind: str = "plug") -> tuple[Path, bool]:
+    """Keep a plug's Sonoff firmware as its original backup; `kind`, what the
+    plug is called in the README beside it (its kinds.Kind's name).
 
     Returns where it is, and whether it was saved now: a plug that has one
     already keeps it, whatever was read this time.  The MAC comes from the
@@ -243,7 +246,7 @@ def save_backup(flash: bytes, efuse: bytes, report: dict[str, Any],
     _write_read_only(staging / "efuse.bin", efuse)
     _write_read_only(staging / "report.json", (json.dumps(report, indent=2) + "\n").encode())
     date = date or time.strftime("%Y-%m-%d")
-    readme = README.format(mac=mac, date=date, version=version or "(unknown version)")
+    readme = README.format(kind=kind, mac=mac, date=date, version=version or "(unknown version)")
     _write_read_only(staging / "README.txt", readme.encode())
     # Whole or not at all: a backup is only ever seen complete.
     staging.rename(directory)

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build the decoded 100-byte Sonoff S60 OTA wrapper around an ESP app.
+"""Build the decoded 100-byte Sonoff OTA wrapper around an ESP app.
 
 This tool only reads and writes local files. It cannot contact or update a
 device. Its output still requires separate compatibility and rollback review
-before it is safe to serve to an S60.
+before it is safe to serve to a plug.
 """
 
 from __future__ import annotations
@@ -17,11 +17,15 @@ from pathlib import Path
 
 try:
     from tools.analyze_vendor_ota import ESP32_C3_CHIP_ID, WRAPPER_SIZE, parse_esp_image
+    from tools.autoflash import kinds
 except ModuleNotFoundError:
     from analyze_vendor_ota import ESP32_C3_CHIP_ID, WRAPPER_SIZE, parse_esp_image
+    from autoflash import kinds
 
 
-DEFAULT_MODEL = "FWSW-E32S60-S60-ESP32C3FN4"
+# The model the wrapper names, which the stock updater checks: the Sonoff
+# S60's, the one plug the bridge is wrapped for so far (--model for another).
+DEFAULT_MODEL = kinds.SONOFF_S60.wrapper_model
 APP_DESC_MAGIC = 0xABCD5432
 # esp_app_desc_t follows the image header (24) and first segment header (8).
 APP_DESC_OFFSET = 32
@@ -46,7 +50,7 @@ def build_wrapper(
     model: str = DEFAULT_MODEL,
     max_payload_size: int = DEFAULT_MAX_PAYLOAD_SIZE,
 ) -> bytes:
-    """Return one complete S60 OTA file (100-byte wrapper plus payload)."""
+    """Return one complete Sonoff OTA file (100-byte wrapper plus payload)."""
     if len(payload) > max_payload_size:
         raise ValueError(
             f"payload is {len(payload):,} bytes; stock slot limit is "

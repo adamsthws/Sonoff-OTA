@@ -113,7 +113,7 @@ Every plug converted so far is a UK S60TPG. The European S60TPF is expected to
 work the same way (see [Regional variants](../README.md#regional-variants-of-the-s60-plugs)), and the
 tool checks the plug at two points rather than assuming:
 
-- **"... is a ..., not a Sonoff S60 (SN-ESP32C3-S60-01)"** - the plug reports a
+- **"... is a ..., which this tool does not convert"** - the plug reports a
   different firmware family. The run stops here and nothing has been written;
   the plug is still on its Sonoff firmware.
 - **The read-only check before the rewrite (step E1) stops the run** - the
@@ -128,13 +128,14 @@ include. Reports from other regions are very welcome.
 
 ## The plug can't be found
 
-**"Your S60 did not answer on this network"**
+**"Your plug did not answer on this network"**
 
-The tool lists each S60 in your eWeLink account with what it found:
+The tool lists each plug in your eWeLink account that it converts, with what
+it found:
 
 - **"eWeLink shows it offline"** - the plug is switched off at the wall, or
   not on Wi-Fi. Switch it on and wait for the app to show it online.
-- **"answers at ..., but eWeLink shows it offline"** (under *"Your S60 is
+- **"answers at ..., but eWeLink shows it offline"** (under *"Your plug is
   on this network but cannot reach the internet"* when it is the only
   problem) - the plug is on your network but cannot reach the internet,
   usually because the router keeps it LAN-only. The conversion is sent to
@@ -158,8 +159,8 @@ account does have; choose *Use a different eWeLink account*.
 
 The tool could not sign in to see your account, so it lists every Sonoff plug
 that answers on the network instead. The next stage needs eWeLink too, and
-checks there that the plug you chose is an S60, so check this computer's
-internet connection first.
+checks there that the plug you chose is one it converts, so check this
+computer's internet connection first.
 
 **"did not answer within 180s"**
 
@@ -203,7 +204,7 @@ The tool checks for the installer's `autoflash-recovery-XXXX` network and, when 
 can see it, carries on by itself. If this computer's Wi-Fi is off it cannot
 look; turn it on and run again.
 
-**"Device model is ..., not the S60's"**
+**"Device model is ..., not one this tool converts"**
 
 Another Sonoff on the same account answered. The tool converts only the S60
 and stops before sending anything. Run again and choose the S60 from the list.

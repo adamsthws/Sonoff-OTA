@@ -1,9 +1,10 @@
-"""What an S60 on the network is running, and finding the converted ones.
+"""What a plug on the network is running, and finding the converted ones.
 
 A plug still on Sonoff's firmware is found through eWeLink, as ever; one this
 tool converted is found here, by what answers: Tasmota's command interface
-naming the S60's template, or ESPHome's page with the relay its S60 config
-names - each, behind its web login, once given that.  Midway through a conversion a plug can also be running the mover (an
+naming the template of a kind of plug this tool converts (kinds), or
+ESPHome's page with the relay the ESPHome made for it names - each, behind
+its web login, once given that.  Midway through a conversion a plug can also be running the mover (an
 ESPHome with no page, only its update service) or the startup firmware (a
 Tasmota safeboot), which a run carrying on recognises.
 """
@@ -14,7 +15,7 @@ import concurrent.futures
 import socket
 from dataclasses import dataclass
 
-from . import esphome, esphome_ota, hostsys, setup_network
+from . import esphome, esphome_ota, hostsys, kinds, setup_network
 from .plans import INTERIM_TABLE_SHA256
 from .device import Device
 
@@ -47,15 +48,16 @@ class Found:
     firmware: str          # sonoff, tasmota, esphome; mover, startup midway
     mac: str | None = None
     name: str | None = None
+    kind: str | None = None  # its kinds.Kind's key, where what it runs says
 
     def describe(self) -> str:
         if self.firmware == "locked":
-            # Whether it is an S60 at all, it says only once given its password.
+            # Which plug it is at all, it says only once given its password.
             return f"the Tasmota at {self.host}, which has a web password (asked for next)"
         if self.firmware == "esphome-login":
             return f"the ESPHome at {self.host}, which has a web login (asked for next)"
         what = NAMES.get(self.firmware, self.firmware)
-        return f"the S60 at {self.host}{f' ({self.name})' if self.name else ''}, running {what}"
+        return f"the plug at {self.host}{f' ({self.name})' if self.name else ''}, running {what}"
 
 
 def _port_open(host: str, port: int, timeout: float) -> bool:
@@ -66,14 +68,17 @@ def _port_open(host: str, port: int, timeout: float) -> bool:
         return False
 
 
-def _tasmota(host: str, timeout: float, password: str | None = None) -> tuple[str, str | None] | None:
-    """("tasmota", "startup" or "hub", its name) if an S60's Tasmota answers.
+def _tasmota(host: str, timeout: float,
+             password: str | None = None) -> tuple[str, str | None, str | None] | None:
+    """("tasmota", "startup" or "hub", its name, its kind's key) if a Tasmota
+    of this tool's answers.
 
     A safeboot is the startup firmware: it answers no commands, so says
-    nothing more (converted_s60s takes only one with a MAC this computer
+    nothing more (converted_plugs takes only one with a MAC this computer
     knows).  A Tasmota on Sonoff's partition table is one part way through a
     conversion (the Berry Tasmota the routes pass through), whatever its
-    template; official Tasmota on its own layout counts only with the S60's.
+    template; official Tasmota on its own layout counts only with the
+    template of a kind of plug this tool converts, which names the kind.
 
     A Tasmota with a web password is given `password` - only once it has
     said it is a Tasmota that wants one, so the password goes to nothing else
@@ -86,7 +91,7 @@ def _tasmota(host: str, timeout: float, password: str | None = None) -> tuple[st
             raise Locked(host)
     try:
         if device.is_safeboot():
-            return "startup", None
+            return "startup", None, None
         status = device.command("Status 0")
         if isinstance(status, dict) and "StatusFWR" not in status:
             status["StatusFWR"] = device.command("Status 2").get("StatusFWR", {})
@@ -107,15 +112,15 @@ def _tasmota(host: str, timeout: float, password: str | None = None) -> tuple[st
     # Sonoff's table is one leaving Tasmota that has not restarted yet: still
     # Tasmota, so leaving it carries on (the plan finds its writes done).
     if sonoff_layout and "bluetooth" in version:
-        return "hub", name
+        return "hub", name, None
     template = _template(device)
     if template is None:
-        # Not a Tasmota without the S60's template: one too busy to say.
+        # Not a Tasmota without the plug's template: one too busy to say.
         raise Unreadable(host)
-    named = f"{status.get('Status', {}).get('Module')} {template}"
-    if "S60" not in named:
-        return None  # a Tasmota, but not an S60's
-    return "tasmota", name
+    kind = kinds.for_tasmota(f"{status.get('Status', {}).get('Module')} {template}")
+    if kind is None:
+        return None  # a Tasmota, but not on a plug this tool converts
+    return "tasmota", name, kind.key
 
 
 class Unreadable(RuntimeError):
@@ -139,9 +144,10 @@ def _template(device: Device) -> str | None:
 
 
 def _esphome(host: str, timeout: float, login: tuple[str, str] | None) -> str | None:
-    """"esphome" if an S60's ESPHome answers at `host`; "esphome-login" for an
+    """"esphome" if this tool's ESPHome answers at `host` - one with the relay
+    the ESPHome made for each kind of plug names; "esphome-login" for an
     ESPHome behind a web login that `login` (user name, password) is not;
-    "other" for an ESPHome that is not an S60's; None for no ESPHome page.
+    "other" for any other ESPHome; None for no ESPHome page.
 
     Its login goes only to a page that asked for one, and only once the
     update service there has answered as ESPHome's - Tasmota's page asks the
@@ -197,16 +203,16 @@ def identify(host: str, *, timeout: float = 3.0, password: str | None = None,
     return None
 
 
-def converted_s60s(near: str, *, known_macs: set[str] = frozenset(), timeout: float = 2.0,
-                   password: str | None = None,
-                   esphome_login: tuple[str, str] | None = None) -> list[Found]:
-    """The S60s on the network running Tasmota or ESPHome, found by asking every
+def converted_plugs(near: str, *, known_macs: set[str] = frozenset(), timeout: float = 2.0,
+                    password: str | None = None,
+                    esphome_login: tuple[str, str] | None = None) -> list[Found]:
+    """The plugs on the network running Tasmota or ESPHome, found by asking every
     device on the subnet of `near` (an address on it) what it is.  A Tasmota
     safeboot counts only with one of `known_macs`: a plug this computer was
     converting, left on the startup firmware - any Tasmota mid-update looks
     the same.  A Tasmota whose web password `password` is not is "locked",
     and an ESPHome whose web login `esphome_login` is not "esphome-login":
-    whether it is an S60 each says only once given its own."""
+    whether it is a plug this tool converts each says only once given its own."""
     hostsys.sweep(near)
     neighbours = hostsys.neighbour_table()
 
@@ -226,22 +232,22 @@ def converted_s60s(near: str, *, known_macs: set[str] = frozenset(), timeout: fl
             found = _tasmota(host, timeout, password)
         except Unreadable:
             # Left out this time - it is looked for again - rather than taken
-            # for a Tasmota not set up as an S60, and sent the wrong way.
+            # for a Tasmota without the plug's template yet, and sent the wrong way.
             return None
         except Locked:
             return Found(host, "locked", mac)
         known = hostsys.normalise_mac(mac) in known_macs
         if not found:
             # Official Tasmota put on by a run stopped before it gave it the
-            # S60's settings: any Tasmota, so only a plug this computer knows.
+            # plug's template: any Tasmota, so only a plug this computer knows.
             if known and _answers_as_tasmota(host, timeout):
-                return Found(host, "midway", mac, "Tasmota, not yet set up as an S60")
+                return Found(host, "midway", mac, "Tasmota, without the plug's template yet")
             return None
         if found[0] == "startup":
             if hostsys.normalise_mac(mac) not in known_macs:
                 return None
             return Found(host, "midway", mac, "the startup firmware")
-        return Found(host, "tasmota" if found[0] == "tasmota" else "midway", mac, found[1])
+        return Found(host, "tasmota" if found[0] == "tasmota" else "midway", mac, found[1], found[2])
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
         results = list(pool.map(ask, neighbours.items()))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send a non-flashing OTA URL probe to one owned S60 via eWeLink."""
+"""Send a non-flashing OTA URL probe to one owned plug via eWeLink."""
 
 from __future__ import annotations
 

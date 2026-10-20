@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze and validate every offline artifact for an exact S60 migration."""
+"""Freeze and validate every offline artifact for an exact migration."""
 
 from __future__ import annotations
 
@@ -129,7 +129,7 @@ def main() -> int:
     source_report = parse_partition_sector(source_table)
     require_exact_partitions(source_report, SOURCE_PARTITIONS)
     if source_report["sha256"] != SOURCE_TABLE_SHA256:
-        parser.error("source table does not match the captured S60 allow-list")
+        parser.error("source table does not match the captured stock allow-list")
 
     source_nvs = source_dump[
         CANONICAL_NVS_OFFSET : CANONICAL_NVS_OFFSET + CANONICAL_NVS_SIZE

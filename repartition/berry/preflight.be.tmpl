@@ -118,7 +118,7 @@ def run_preflight()
   guard(flash.current_ota() == 1, "Bluetooth must be running from old ota_1")
 
   var table_hash = sha_region(0x8000, 0x1000)
-  guard(table_hash == expected_table, "live partition table is not the allow-listed S60 table")
+  guard(table_hash == expected_table, "live partition table is not the allow-listed stock table")
   var nvs_hash = sha_region(0x9000, 0x5000)
   var otadata_hash = sha_region(0x1D000, 0x2000)
 

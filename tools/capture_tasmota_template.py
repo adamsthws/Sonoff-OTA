@@ -15,7 +15,7 @@ What happens to the plug, in about three minutes:
    record format end to end.
 4. The original backup is restored and checked.
 
-While its settings are reset, the plug forgets its S60 template, so whatever is
+While its settings are reset, the plug forgets its own template, so whatever is
 plugged into it may switch off until step 4.
 
     python tools/capture_tasmota_template.py --host 192.168.0.53
@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
             "Capture a Tasmota settings template", [
         f"The plug at {args.host} has its configuration backed up, "
         + ("" if args.verify else "reset to Tasmota's defaults, "),
-        "tested, and restored - a few minutes. Meanwhile it forgets its S60",
+        "tested, and restored - a few minutes. Meanwhile it forgets its own",
         "template, so what is plugged in may switch off.",
     ])
     try:

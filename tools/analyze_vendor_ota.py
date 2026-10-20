@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a Sonoff S60 vendor OTA wrapper and its ESP32-C3 app image."""
+"""Validate a Sonoff vendor OTA wrapper and its ESP32-C3 app image."""
 
 from __future__ import annotations
 

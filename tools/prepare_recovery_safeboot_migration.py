@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a separate guarded S60 migration manifest using private Safeboot."""
+"""Prepare a separate guarded migration manifest using private Safeboot."""
 
 from __future__ import annotations
 

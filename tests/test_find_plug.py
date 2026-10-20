@@ -1,4 +1,4 @@
-"""Stage 3: the S60s in the owner's eWeLink account, matched on the network."""
+"""Stage 3: the plugs in the owner's eWeLink account, matched on the network."""
 
 import types
 import unittest
@@ -16,8 +16,8 @@ SWITCH = {"deviceid": "1000aaaaaa", "name": "Hall light", "productModel": "MINIR
 class AccountPlugTests(unittest.TestCase):
     def test_an_s60_is_kept_without_its_key(self):
         plug = af.account_plug(S60)
-        self.assertEqual((plug.device_id, plug.name, plug.model, plug.online, plug.mac, plug.ssid),
-                         ("1001234abc", "Kitchen", "S60TPG", True, "aa:bb:cc:12:34:56", "Home-2G"))
+        self.assertEqual((plug.device_id, plug.name, plug.model, plug.online, plug.mac, plug.ssid, plug.kind),
+                         ("1001234abc", "Kitchen", "S60TPG", True, "aa:bb:cc:12:34:56", "Home-2G", "sonoff-s60"))
         self.assertNotIn("secret", repr(plug))
 
     def test_other_sonoff_devices_are_not_offered(self):
@@ -79,7 +79,8 @@ class TypedAddressTests(unittest.TestCase):
     def test_another_ewelink_device_is_not_taken_for_the_plug(self):
         with self.found(["1000aaaaaa"]), mock.patch.object(af, "tell"):
             problem = af.plug_at({"1001234abc"})("192.168.0.60")
-        self.assertEqual(problem, ["192.168.0.60 is a different eWeLink device, not an S60 in this account."])
+        self.assertEqual(problem, ["192.168.0.60 is a different eWeLink device, not one of this "
+                                   "account's Sonoff S60 plugs."])
 
     def test_without_an_account_any_ewelink_device_will_do(self):
         with self.found(["1000aaaaaa"]), mock.patch.object(af, "tell"):
@@ -176,7 +177,7 @@ class FindAccountPlugTests(unittest.TestCase):
              mock.patch.object(af, "section") as shown, \
              mock.patch.object(af, "tell"), mock.patch.object(af, "say"):
             self.assertEqual(af.find_account_plug(self.ctx(), [S60]), "192.168.0.99")
-        self.assertEqual("Your S60 is on this network but cannot reach the internet",
+        self.assertEqual("Your plug is on this network but cannot reach the internet",
                          shown.call_args.args[0])
         self.assertIn("cannot reach the internet", shown.call_args.args[1][0])
 

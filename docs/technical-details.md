@@ -184,8 +184,9 @@ IoT VLAN, not to change this tool.
 ## How your eWeLink account is handled
 
 The run signs in to your eWeLink account twice: once to find the plug, by
-matching the S60s in the account against what answers on your network, and
-once to send the plug the cloud update command that installs the bridge. Both
+matching the plugs it converts in the account against what answers on your
+network, and once to send the plug the cloud update command that installs the
+bridge. Both
 go straight to eWeLink's own servers over HTTPS, and the update command over
 an encrypted WebSocket. Nothing about the account passes through anyone else.
 

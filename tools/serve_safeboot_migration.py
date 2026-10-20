@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve one guarded S60 Safeboot migration phase to one LAN device.
+"""Serve one guarded Safeboot migration phase to one LAN device.
 
 Each invocation exposes exactly one rendered Berry program.  The plug uploads
 read-back flash bytes to this server, which validates them before recording a

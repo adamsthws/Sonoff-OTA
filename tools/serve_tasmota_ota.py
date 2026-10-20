@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve a validated wrapped ESP32-C3 app to one owned S60.
+"""Serve a validated wrapped ESP32-C3 app to one owned plug.
 
 This is the live, state-changing end of the research workflow.  It remains
 blocked by ``RECOVERY_LOCK`` and also requires an explicit no-rollback
@@ -22,17 +22,19 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tools.autoflash import kinds
     from tools.autoflash.prompts import ask_secret
     from tools.analyze_vendor_ota import analyze
-    from tools.build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE, DEFAULT_MODEL
+    from tools.build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE
     from tools.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
     from tools.probe_ota_command import WS_DISPATCH, nonce
     from tools.query_ota import ota_identity
     from tools.websocket_minimal import WebSocket, WebSocketError
 except ModuleNotFoundError:
+    from autoflash import kinds
     from autoflash.prompts import ask_secret
     from analyze_vendor_ota import analyze
-    from build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE, DEFAULT_MODEL
+    from build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE
     from get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
     from probe_ota_command import WS_DISPATCH, nonce
     from query_ota import ota_identity
@@ -40,9 +42,6 @@ except ModuleNotFoundError:
 
 
 SAFETY_FLAG = "--i-understand-stock-has-no-automatic-rollback"
-# The eWeLink model of every plug this bridge has been proven on.  Another
-# Sonoff on the same account must never be sent it.
-S60_DEVICE_MODEL = "SN-ESP32C3-S60-01"
 
 
 class FirmwareHandler(http.server.BaseHTTPRequestHandler):
@@ -263,7 +262,7 @@ def main():
         and wrapper["header_crc32_valid"] and wrapper["payload_offset_valid"]
         and wrapper["payload_size_valid"] and wrapper["payload_crc32_valid"]
         and wrapper["record_crc32_valid"] and wrapper["record_reserved_zero"]
-        and wrapper["model"] == DEFAULT_MODEL
+        and wrapper["model"] in {kind.wrapper_model for kind in kinds.ALL}
         and wrapper["actual_payload_size"] <= DEFAULT_MAX_PAYLOAD_SIZE
         and esp["chip_is_esp32_c3"] and esp["checksum_valid"]
         and esp["sha256_valid"] is not False and esp["trailing_bytes"] == 0
@@ -289,9 +288,18 @@ def main():
         identity = ota_identity(device)
         print(f"Device: {device.get('name')} ({identity['model']}, stock {identity['version']})")
 
-        if identity["model"] != S60_DEVICE_MODEL:
+        # Only a plug of a kind this tool converts, and only a file wrapped
+        # for it: another Sonoff on the same account must never be sent it.
+        kind = kinds.for_stock_model(identity["model"])
+        if kind is None:
             raise EwelinkError(
-                f"Device model is {identity['model']}, not the S60's {S60_DEVICE_MODEL}; refusing"
+                f"Device model is {identity['model']}, not one this tool converts "
+                f"({kinds.stock_models()}); refusing"
+            )
+        if wrapper["model"] != kind.wrapper_model:
+            raise EwelinkError(
+                f"The file is wrapped for {wrapper['model']}, not the {kind.name}'s "
+                f"{kind.wrapper_model}; refusing"
             )
         # Offline a while after a send cut off part way (this computer stopped
         # mid-download, say): the plug keeps Sonoff's firmware and comes back

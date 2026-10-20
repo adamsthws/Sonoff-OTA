@@ -128,15 +128,16 @@ advance); steps 1-7 are the same for both.
    file against a known fingerprint.
 3. **Find the plug on your network.** It signs in to your eWeLink account
    (your email and password are asked here, once for the whole run) and
-   looks on your network for the S60s in it, matched by their eWeLink id, so
-   no other device can be mistaken for yours. With one S60 it carries on by
-   itself; with several it asks which. A plug that answers here while
+   looks on your network for the plugs in it that it converts, matched by
+   their eWeLink id, so no other device can be mistaken for yours. With one
+   it carries on by itself; with several it asks which. A plug that answers here while
    eWeLink still shows it offline - one that has only just been switched on -
    is given up to a minute to reach eWeLink before anything is
    asked. If yours does not answer, it says why: offline in eWeLink, LAN
    Control off, or on a different network.
 4. **Ask the plug what firmware it has** and where it downloads updates from.
-   It stops here, before anything is written, unless the device is an S60.
+   It stops here, before anything is written, unless the device is a kind
+   it converts - so far, the Sonoff S60.
    It also reads the plug's Wi-Fi signal, from what Sonoff's firmware
    announces on your network (encrypted with the plug's own key, which your
    eWeLink account holds): a weak one is best fixed now, by moving the plug,
@@ -177,7 +178,7 @@ advance); steps 1-7 are the same for both.
    few milliseconds, twice each time - would leave a plug that has to be
    opened.
 9. **Install official Tasmota**, which joins your Wi-Fi by itself, apply the
-   S60 settings, and check the result. Only if it does not appear on your
+   plug's template and settings, and check the result. Only if it does not appear on your
    network are you asked to join its setup network.
 
 At the end it checks the finished plug against the official Tasmota release,

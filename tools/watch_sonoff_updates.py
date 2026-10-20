@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Watch a stock S60 for firmware-update activity, read-only, for hours at a time.
+"""Watch a stock plug for firmware-update activity, read-only, for hours at a time.
 
 Two independent views, either of which can be turned off:
 
@@ -38,14 +38,14 @@ try:
     from tools.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session
     from tools.probe_ota_command import WS_DISPATCH, nonce
     from tools.query_ota import ota_identity, query_ota
-    from tools.serve_tasmota_ota import S60_DEVICE_MODEL
+    from tools.autoflash import kinds
     from tools.websocket_minimal import WebSocket, WebSocketError, encode_client_frame
 except ModuleNotFoundError:  # Support direct execution as tools/watch_sonoff_updates.py.
     from autoflash.prompts import ask_secret
     from get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session
     from probe_ota_command import WS_DISPATCH, nonce
     from query_ota import ota_identity, query_ota
-    from serve_tasmota_ota import S60_DEVICE_MODEL
+    from autoflash import kinds
     from websocket_minimal import WebSocket, WebSocketError, encode_client_frame
 
 
@@ -310,14 +310,15 @@ def find_plug(devices: list[dict[str, Any]], device_id: str | None) -> dict[str,
         matches = []
         for device in devices:
             try:
-                if ota_identity(device)["model"] == S60_DEVICE_MODEL:
+                if kinds.for_stock_model(ota_identity(device)["model"]):
                     matches.append(device)
             except EwelinkError:
                 continue
     if len(matches) != 1:
         listed = ", ".join(f"{d.get('name')} ({d.get('deviceid')})" for d in devices) or "none"
         raise EwelinkError(
-            f"expected one S60 on the account, found {len(matches)}; pass --device-id. Devices: {listed}"
+            f"expected one {kinds.names()} on the account, found {len(matches)}; pass --device-id. "
+            f"Devices: {listed}"
         )
     return matches[0]
 
@@ -525,7 +526,7 @@ def main(argv: list[str] | None = None, *, secret: Callable[[str], str] = ask_se
     parser.add_argument("--email", help="eWeLink account; prompted when omitted")
     parser.add_argument("--country-code", default="+44")
     parser.add_argument("--region", choices=sorted(API), default="eu")
-    parser.add_argument("--device-id", help="needed only if the account has more than one S60")
+    parser.add_argument("--device-id", help="needed only if the account has more than one plug to watch")
     parser.add_argument("--poll-minutes", type=float, default=15.0)
     args = parser.parse_args(argv)
 

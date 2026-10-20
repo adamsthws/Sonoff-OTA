@@ -376,7 +376,7 @@ def back_to_sonoff(backup: bytes, running: int) -> list[Plan]:
     The bootloader stays ESPHome's: Sonoff's firmware starts under it.
     """
     if len(backup) != 0x400000 or sha256(backup[TABLE_ADDRESS:TABLE_ADDRESS + SECTOR]) != SONOFF_TABLE_SHA256:
-        raise PlanError("that is not a backup of an S60 on Sonoff's layout")
+        raise PlanError("that is not a backup of a plug on Sonoff's layout")
     slot = stock_slot(backup)
     if slot == running:
         raise PlanError("Sonoff's firmware belongs in the slot the plug is running from")

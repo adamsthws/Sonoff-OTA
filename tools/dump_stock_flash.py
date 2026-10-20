@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Image a stock S60's whole flash through the readout bridge (research only).
+"""Image a stock plug's whole flash through the readout bridge (research only).
 
 Reads the flash chip from the research bridge's read-only `GET /flash` (build
 env `autoflash-bridge-flash-readout`) and its eFuse read registers from
