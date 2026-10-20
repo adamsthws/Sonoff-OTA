@@ -2,7 +2,7 @@
 """Generate the local cloud stub's own CA and server certificate.
 
 This is self-hosting, not impersonation: we issue our own CA for a domain we
-own (`*.s60-stub.test`, reserved by RFC 6761), make our own firmware copy trust
+own (`*.autoflash-stub.test`, reserved by RFC 6761), make our own firmware copy trust
 it (see `patch_stock.py --trust-ca`), and serve it from our own stub. coolkit's
 name, cert and CA private key are never used or forged.
 
@@ -42,9 +42,9 @@ from cryptography.x509.oid import NameOID
 # The stub's private domain. `.test` is reserved (RFC 6761) and can never clash
 # with a real registered name. These must match the cert SANs below, the
 # /etc/hosts records and NVS `dis_server` (see docs/cloud-stub.md).
-DISP_HOST = "disp.s60-stub.test"
-IOT_HOST = "iot.s60-stub.test"
-WILDCARD = "*.s60-stub.test"
+DISP_HOST = "disp.autoflash-stub.test"
+IOT_HOST = "iot.autoflash-stub.test"
+WILDCARD = "*.autoflash-stub.test"
 # The plug connects to the IoT server dispatch hands it by numeric IP, without
 # DNS (it inet_aton()s the `IP` field), and the tool's app side does too: so the
 # leaf also carries the router's IP, where the stub listens.
@@ -100,8 +100,8 @@ def _locked(directory: Path):
 def make_ca() -> tuple[ec.EllipticCurvePrivateKey, x509.Certificate]:
     key = _ec_key()
     name = x509.Name([
-        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "S60 cloud stub (local)"),
-        x509.NameAttribute(NameOID.COMMON_NAME, "S60 stub local root CA"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Autoflash cloud stub (local)"),
+        x509.NameAttribute(NameOID.COMMON_NAME, "Autoflash stub local root CA"),
     ])
     cert = (
         x509.CertificateBuilder()

@@ -342,9 +342,9 @@ edit applied the same way (bytes checked, then `appimage.reseal`).
 Names resolved only by the emulator's `dnsmasq`, never registered publicly
 (`.test` is reserved by RFC 6761, so it can never clash with a real domain):
 
-- dispatch host: `disp.s60-stub.test`
-- IoT host (handed back by dispatch): `iot.s60-stub.test`
-- account API host: `apia.s60-stub.test`
+- dispatch host: `disp.autoflash-stub.test`
+- IoT host (handed back by dispatch): `iot.autoflash-stub.test`
+- account API host: `apia.autoflash-stub.test`
 
 All resolve, via `/etc/hosts` entries the stub mode adds (dnsmasq reads
 `/etc/hosts`), to the router address on the instance's network, `192.168.60.1`,
@@ -365,7 +365,7 @@ generates, into `captures/emulation/stub-cloud/` (git-ignored, private):
 - a **root CA**: EC P-256 (for the slot-size reason above), self-signed,
   `notAfter` ~2125 so it never needs renewing;
 - a **server leaf** signed by that CA, SAN
-  `DNS:disp.s60-stub.test, DNS:iot.s60-stub.test, DNS:*.s60-stub.test,
+  `DNS:disp.autoflash-stub.test, DNS:iot.autoflash-stub.test, DNS:*.autoflash-stub.test,
   IP:192.168.60.1` (the IP SAN is for the plug's and tool's bare-IP connection to
   the IoT/app host), also long-dated with a past `notBefore` so an unset device
   clock does not fail validity.
@@ -385,7 +385,7 @@ plain-boot path (no `--trust-ca`) is unchanged.
 
 ### Firmware change B — point the plug at our domain (NVS `dis_server`)
 
-[`rewrite_nvs.py --dis-server disp.s60-stub.test --dis-port 443`](../tools/emulator/rewrite_nvs.py)
+[`rewrite_nvs.py --dis-server disp.autoflash-stub.test --dis-port 443`](../tools/emulator/rewrite_nvs.py)
 sets those `frame_params` fields the same way it already rewrites
 `ssid`/`passwd`: the partition is decoded and regenerated with
 `nvs_partition_gen`, so the value length is not constrained. A pure NVS edit; no
@@ -461,7 +461,7 @@ The plug never reports its MAC (`staMac`) on this channel.
 
 | message | the tool sends | the stub answers |
 |---------|----------------|------------------|
-| sign-in, `POST /v2/user/login` | `{"password": "stub", "countryCode": "+44", "email": "stub@s60-stub.test"}` (the placeholder account), signed: `Authorization: Sign <HMAC-SHA256 of the body>`, `X-CK-Appid: <app id>`. The stub checks none of it. | `{"error": 0, "data": {"at": "stub-access-token", "rt": "stub-refresh-token", "region": "eu", "user": {"apikey": "<apikey>"}}}` |
+| sign-in, `POST /v2/user/login` | `{"password": "stub", "countryCode": "+44", "email": "stub@autoflash-stub.test"}` (the placeholder account), signed: `Authorization: Sign <HMAC-SHA256 of the body>`, `X-CK-Appid: <app id>`. The stub checks none of it. | `{"error": 0, "data": {"at": "stub-access-token", "rt": "stub-refresh-token", "region": "eu", "user": {"apikey": "<apikey>"}}}` |
 | device list, `GET /v2/device/thing?num=0` | `Authorization: Bearer stub-access-token` | `{"error": 0, "data": {"thingList": [{"itemData": {"deviceid": "<device id>", "devicekey": "<LAN key>", "apikey": "<apikey>", "name": "S60 (stub)", "online": true, "extra": {"uiid": 190, "model": "SN-ESP32C3-S60-01"}, "params": {"only_device": {"ota": "success", "ota_fail_reason": 0}, "fwVersion": "1.2.0", "ssid": "<network name>", "bssid": "<access point MAC>", "model": "SN-ESP32C3-S60-01", "staMac": "<plug MAC>"}, "productModel": "S60TPG"}}]}}` |
 | OTA query, `POST /v2/device/ota/query` | `{"deviceInfoList": [{"deviceid": "<device id>", "model": "SN-ESP32C3-S60-01", "version": "1.2.0"}]}` | `{"error": 0, "data": {"otaInfoList": []}}` |
 | app dispatch, `GET /dispatch/app` | `Authorization: Bearer stub-access-token` | `{"error": 0, "reason": "", "domain": "192.168.60.1", "IP": "192.168.60.1", "port": 443}` |
@@ -601,7 +601,8 @@ and the appended SHA-256 differ from stock, `ota_0` re-verifies, and the bytes
 after each slot are unchanged.
 
 **Result:** the plug booted the patched `ota_0` (re-seal accepted) and queried
-`disp.s60-stub.test`. The TLS 1.2 handshake ran to completion both directions —
+the dispatch host (`disp.s60-stub.test`, the domain's name then). The TLS 1.2
+handshake ran to completion both directions —
 ClientHello → ServerHello+Certificate+ServerKeyExchange+Done →
 ClientKeyExchange+ChangeCipherSpec+Finished → NewSessionTicket+CCS+Finished — with
 **no reset after the certificate**, and the plug then sent an encrypted 327-byte

@@ -126,7 +126,7 @@ echo "The emulated plug is up; converting it unattended..."
 answers=/tmp/autoflash-unattended.env
 if [ "$stub" = 1 ]; then
     # A placeholder account: the stub answers the account API and ignores it.
-    printf 'EWELINK_EMAIL=%s\nEWELINK_PASSWORD=%s\n' stub@s60-stub.test stub \
+    printf 'EWELINK_EMAIL=%s\nEWELINK_PASSWORD=%s\n' stub@autoflash-stub.test stub \
         | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
 else
     # Not the Wi-Fi in it, if any, nor a plug's password: those are your real
@@ -142,7 +142,7 @@ stamp=$(date +%Y%m%d-%H%M%S)
 status=0
 # In stub mode the tool talks to the local stub and trusts its CA.
 stub_env=()
-[ "$stub" = 1 ] && stub_env=(-e AUTOFLASH_EWELINK_API_BASE=https://apia.s60-stub.test
+[ "$stub" = 1 ] && stub_env=(-e AUTOFLASH_EWELINK_API_BASE=https://apia.autoflash-stub.test
                              -e SSL_CERT_FILE=/run/autoflash-emu/stub-ca-bundle.pem)
 # The emulator's Wi-Fi, for a run from an ESPHome that cannot say what it is
 # (one older than this project's 1.1.0); and the emulated plug's passwords,

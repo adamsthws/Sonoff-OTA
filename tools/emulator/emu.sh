@@ -225,7 +225,7 @@ if [ ! -f "$STATE/flash.bin" ]; then
     # stub mode, dispatch is also redirected to the stub and our CA is trusted.
     nvs_args=() patch_args=()
     if [ "$stub" = 1 ]; then
-        nvs_args=(--dis-server disp.s60-stub.test --dis-port 443)
+        nvs_args=(--dis-server disp.autoflash-stub.test --dis-port 443)
         patch_args=(--trust-ca "$STUB_CA/ca.crt")
     fi
     "$PY" -I "$ROOT/tools/emulator/rewrite_nvs.py" "$SRC/flash.bin" "$STATE/wifi-flash.bin" "${nvs_args[@]}" \

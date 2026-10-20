@@ -139,8 +139,8 @@ chown -R "$HOST_UID:$HOST_GID" "$RUN"
 # this instance's dnsmasq resolves (it reads /etc/hosts). Added before the
 # router starts, so the plug resolves them from its first dispatch lookup.
 if [ "$STUB_CLOUD" = 1 ]; then
-    grep -q s60-stub.test /etc/hosts 2>/dev/null \
-        || echo "192.168.60.1 disp.s60-stub.test iot.s60-stub.test apia.s60-stub.test" >> /etc/hosts
+    grep -q autoflash-stub.test /etc/hosts 2>/dev/null \
+        || echo "192.168.60.1 disp.autoflash-stub.test iot.autoflash-stub.test apia.autoflash-stub.test" >> /etc/hosts
 fi
 /opt/autoflash-emu/bin/wifi-root home >/dev/null
 ln -sfn /state/work /work
@@ -181,7 +181,7 @@ EOF
 if [ "$STUB_CLOUD" = 1 ] && ! grep -q autoflash-emu-stub "$home/.bashrc" 2>/dev/null; then
     cat >> "$home/.bashrc" <<'EOF'
 # autoflash-emu-stub
-export AUTOFLASH_EWELINK_API_BASE=https://apia.s60-stub.test
+export AUTOFLASH_EWELINK_API_BASE=https://apia.autoflash-stub.test
 export SSL_CERT_FILE=/run/autoflash-emu/stub-ca-bundle.pem
 EOF
 fi
