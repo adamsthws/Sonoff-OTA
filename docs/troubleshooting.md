@@ -109,9 +109,10 @@ updates.
 
 ## A plug from another region
 
-Every plug converted so far is a UK S60TPG. The European S60TPF is expected to
-work the same way (see [Regional variants](../README.md#regional-variants-of-the-s60-plugs)), and the
-tool checks the plug at two points rather than assuming:
+The UK S60TPG and the European S60TPF have both been converted (see
+[What it has been run on](../README.md#what-it-has-been-run-on)). A plug from
+another region is expected to work the same way, and the tool checks the plug
+at two points rather than assuming:
 
 - **"... is a ..., which this tool does not convert"** - the plug reports a
   different firmware family. The run stops here and nothing has been written;
