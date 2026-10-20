@@ -143,7 +143,8 @@ status=0
 stub_env=()
 [ "$stub" = 1 ] && stub_env=(-e S60_EWELINK_API_BASE=https://apia.s60-stub.test
                              -e SSL_CERT_FILE=/run/s60emu/stub-ca-bundle.pem)
-# The emulator's Wi-Fi, for a run from ESPHome, which cannot say what it is.
+# The emulator's Wi-Fi, for a run from an ESPHome that cannot say what it is
+# (one older than this project's 1.1.0).
 "${as_you[@]}" -e S60_EMULATOR_URL="http://localhost:$PORT" -e S60_EMULATOR_SUDO_PASSWORD=s60 \
     "${stub_env[@]}" -e S60_WIFI_SSID=PICSimLabWifi -e S60_EMULATOR_COUNTDOWN="${S60_EMULATOR_COUNTDOWN:-}" \
     -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/unattended_run.py --size 100x40 \

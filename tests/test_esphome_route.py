@@ -329,6 +329,12 @@ class ApiSignalTests(unittest.TestCase):
         port = self.serve(hello + _frame(7) + dump)
         self.assertEqual(af.esphome.api_signal("127.0.0.1", port), -61)
 
+    def test_the_dump_names_the_network_with_the_signal(self):
+        dump = self.log("[C][wifi:1297]:   SSID: 'Home-2G'\n  BSSID: 10:01:00:C4:0A:56\n"
+                        "  Signal strength: -61 dB ▂▄▆_".encode())
+        port = self.serve(dump)
+        self.assertEqual(af.esphome.api_wifi("127.0.0.1", port), {"signal": -61, "ssid": "Home-2G"})
+
     def test_an_encrypted_api_gives_nothing(self):
         port = self.serve(b"\x01\x00\x08Bad indicator")
         self.assertIsNone(af.esphome.api_signal("127.0.0.1", port))
@@ -344,6 +350,86 @@ class ApiSignalTests(unittest.TestCase):
         port = unused.getsockname()[1]
         unused.close()
         self.assertIsNone(af.esphome.api_signal("127.0.0.1", port, timeout=2.0))
+
+
+class WifiActionTests(unittest.TestCase):
+    """Our ESPHome gives the Wi-Fi it is on through its s60_wifi action: listed,
+    then called, its answer the details as JSON."""
+
+    def serve(self, *steps):
+        """A fake ESPHome API: for each (expected, answer), it waits until what it
+        has been sent holds `expected`, then sends `answer`."""
+        import socket
+        import threading
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        self.addCleanup(server.close)
+
+        def run():
+            connection, _ = server.accept()
+            received = b""
+            with connection:
+                for expected, answer in steps:
+                    while expected not in received:
+                        chunk = connection.recv(4096)
+                        if not chunk:
+                            return
+                        received += chunk
+                    connection.sendall(answer)
+                connection.recv(4096)
+
+        threading.Thread(target=run, daemon=True).start()
+        return server.getsockname()[1]
+
+    @staticmethod
+    def listed(*actions):
+        import struct
+        from tools.autoflash.esphome import _frame, _varint
+        out = b""
+        for name, key in actions:
+            out += _frame(41, b"\x0a" + _varint(len(name)) + name + b"\x15" + struct.pack("<I", key))
+        return out + _frame(19)
+
+    @staticmethod
+    def answer(success, data=b""):
+        from tools.autoflash.esphome import _frame, _varint
+        return _frame(131, b"\x08\x01" + (b"\x10\x01" if success else b"")
+                      + (b"\x22" + _varint(len(data)) + data if data else b""))
+
+    LIST = b"\x00\x00\x0b"  # the request to list entities
+
+    @staticmethod
+    def call(key):
+        import struct
+        return b"\x0d" + struct.pack("<I", key)  # the action named by its key
+
+    def test_the_action_gives_the_name_and_password(self):
+        # Answered only once it is called by the key it was listed with.
+        port = self.serve((self.LIST, self.listed((b"other", 7), (b"s60_wifi", 0xCAFEF00D))),
+                          (self.call(0xCAFEF00D), self.answer(True, b'{"ssid":"Home-2G","password":"pw"}')))
+        self.assertEqual(af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0), ("Home-2G", "pw"))
+
+    def test_an_esphome_without_the_action_gives_nothing(self):
+        port = self.serve((self.LIST, self.listed((b"other", 7))))
+        self.assertIsNone(af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
+
+    def test_a_failed_call_gives_nothing(self):
+        port = self.serve((self.LIST, self.listed((b"s60_wifi", 1))), (self.call(1), self.answer(False)))
+        self.assertIsNone(af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
+
+    def test_an_answer_not_of_json_gives_nothing(self):
+        from tools.autoflash.esphome import _frame
+        for data in (b"not json", b'["Home-2G"]', b'{"ssid": 7}'):
+            port = self.serve((self.LIST, self.listed((b"s60_wifi", 1))), (self.call(1), self.answer(True, data)))
+            self.assertIsNone(af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0), data)
+        port = self.serve((self.LIST, self.listed((b"s60_wifi", 1))),
+                          (self.call(1), _frame(131, b"\x08\x01\x10\x01\x20\x07")))  # its data a number
+        self.assertIsNone(af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
+
+    def test_an_encrypted_api_gives_nothing(self):
+        port = self.serve((b"", b"\x01\x00\x08Bad indicator"))
+        self.assertIsNone(af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
 
 
 class SignalBeforeLeavingESPHomeTests(RouteTestCase):

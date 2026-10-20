@@ -232,9 +232,14 @@ Sonoff writes the plug's own firmware and settings from its backup into the
 first half, checks them, and switches to them.
 
 - **From ESPHome**, the startup firmware is sent to ESPHome as an ordinary
-  ESPHome update, with your Wi-Fi written in (asked for: ESPHome does not
-  say what its password is). It joins your Wi-Fi, saves it for Tasmota, and
-  is sent the full Tasmota.
+  ESPHome update, with your Wi-Fi written in. This project's ESPHome gives
+  its Wi-Fi name and password from 1.1.0, through its native API, while the
+  API has no encryption key. From an ESPHome that does not, they come from
+  the plug's Sonoff backup on this computer - the Wi-Fi it was set up with -
+  when that is shown to be the plug's network still: the firmware bundle on
+  this computer was set up for exactly those details, or ESPHome says it is
+  on that network. Otherwise they are asked for. The startup firmware joins
+  your Wi-Fi, saves it for Tasmota, and is sent the full Tasmota.
 - **From Tasmota**, the plug is on Tasmota's own layout, where Tasmota sits
   across both halves of Sonoff's. A small ESPHome, the *mover*, fits in front
   of it: it is written there, the area Sonoff's layout keeps settings in is

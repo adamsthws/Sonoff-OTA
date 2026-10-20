@@ -2513,6 +2513,109 @@ class WifiFromPlugTests(unittest.TestCase):
             self.assertIn(words, " ".join(str(c.args[0]) for c in said.call_args_list), kwargs)
 
 
+class BackupWifiTests(unittest.TestCase):
+    """From a plug whose firmware cannot say its Wi-Fi password (ESPHome, the
+    mover), the details come from its Sonoff backup on this computer - when
+    the bundle, or the network ESPHome is on, shows they are the plug's still."""
+
+    def setUp(self):
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        self.af = autoflash
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        (Path(self.tmp.name) / "flash.bin").write_bytes(b"\xff" * 0x20000)
+        backup = mock.Mock(directory=Path(self.tmp.name))
+        for patch in (mock.patch.object(autoflash.plugs, "find_backup", return_value=backup),
+                      mock.patch.object(autoflash, "sonoff_backup_wifi", return_value=("Home-2G", "pw")),
+                      mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell")):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def ctx(self, **inputs):
+        from types import SimpleNamespace
+        inputs = {"plug_mac": "12:34:56:ab:cd:ef", "plug_ip": "192.168.0.50", **inputs}
+        state = SimpleNamespace(input=inputs.get, set_input=inputs.__setitem__, is_done=lambda step: False)
+        return SimpleNamespace(state=state, manifest_path=Path("unused"), args=SimpleNamespace(wifi=False),
+                               _wifi=None, _recovery=None)
+
+    def found(self, *, pinned=None, rebuilds=True, joined=None):
+        from unittest import mock
+        recovery = mock.Mock(return_value=b"image") if rebuilds else mock.Mock(
+            side_effect=self.af.BundleError("not the pinned password"))
+        with mock.patch.object(self.af, "bundle_ssid", return_value=pinned), \
+                mock.patch.object(self.af, "recovery_image", recovery), \
+                mock.patch.object(self.af.esphome, "api_wifi",
+                                  return_value={"signal": -50, "ssid": joined} if joined else None) as api:
+            return self.af.wifi_from_backup(self.ctx()), api
+
+    def test_the_bundle_set_up_for_them_proves_them(self):
+        details, api = self.found(pinned="Home-2G")
+        self.assertEqual(details, ("Home-2G", "pw"))
+        api.assert_not_called()
+
+    def test_an_older_password_than_the_bundles_is_not_used(self):
+        self.assertIsNone(self.found(pinned="Home-2G", rebuilds=False)[0])
+
+    def test_the_network_esphome_is_on_proves_them(self):
+        self.assertEqual(self.found(joined="Home-2G")[0], ("Home-2G", "pw"))
+
+    def test_another_network_or_no_proof_is_not_used(self):
+        self.assertIsNone(self.found(joined="Guest")[0])
+        self.assertIsNone(self.found()[0])
+
+    def test_no_backup_gives_nothing(self):
+        from unittest import mock
+        with mock.patch.object(self.af.plugs, "find_backup", return_value=None):
+            self.assertIsNone(self.af.wifi_from_backup(self.ctx()))
+
+    def test_a_plug_on_esphome_has_them_read_before_dotenv_or_asking(self):
+        from unittest import mock
+        ctx = self.ctx(source="esphome")
+        ctx.adopt_wifi = mock.Mock(side_effect=lambda ssid, password: setattr(ctx, "_wifi", (ssid, password)))
+        # .env names another network: taken first, it would be the answer.
+        with mock.patch.object(self.af, "wifi_from_esphome", return_value=None), \
+                mock.patch.object(self.af, "wifi_from_backup", return_value=("Home-2G", "pw")), \
+                mock.patch.object(self.af.credentials, "get", return_value="Elsewhere"), \
+                mock.patch.object(self.af, "read_wifi_from_plug") as off_tasmota:
+            self.assertEqual(self.af.Context.wifi(ctx), ("Home-2G", "pw"))
+        off_tasmota.assert_not_called()  # a Tasmota is not what runs
+        ctx.adopt_wifi.assert_called_once_with("Home-2G", "pw")
+        self.assertIs(ctx.state.input("wifi_typed"), False)
+
+    def test_esphomes_own_details_come_before_the_backups(self):
+        from unittest import mock
+        ctx = self.ctx(source="esphome")
+        ctx.adopt_wifi = mock.Mock(side_effect=lambda ssid, password: setattr(ctx, "_wifi", (ssid, password)))
+        with mock.patch.object(self.af.esphome, "api_wifi_details", return_value=("Home-5", "pw5")), \
+                mock.patch.object(self.af, "wifi_from_backup") as backup:
+            self.assertEqual(self.af.Context.wifi(ctx), ("Home-5", "pw5"))
+        backup.assert_not_called()
+
+
+class SonoffBackupWifiTests(unittest.TestCase):
+    """The Wi-Fi Sonoff's firmware was set up with, as its backup holds it."""
+
+    def read(self, content):
+        from unittest import mock
+        import tools.s60_autoflash as autoflash
+        from tools.inspect_stock_nvs import Value
+        value = Value(namespace=3, key="content", kind=0x21, chunks={0: content})
+        with mock.patch.object(autoflash.inspect_stock_nvs, "parse",
+                               return_value=({3: "frame_params"}, {(3, "content"): value})):
+            return autoflash.sonoff_backup_wifi(b"")
+
+    def test_the_name_and_password_come_from_frame_params(self):
+        self.assertEqual(self.read(b'{"ssid":"Home-2G","passwd":"pw","model":"SN-ESP32C3-S60-01"}\x00'),
+                         ("Home-2G", "pw"))
+
+    def test_an_open_network_has_no_password(self):
+        self.assertEqual(self.read(b'{"ssid":"Home-2G"}\x00\xff\xff'), ("Home-2G", ""))
+
+    def test_no_network_gives_nothing(self):
+        self.assertIsNone(self.read(b'{"ssid":"","passwd":""}\x00'))
+
+
 class WifiFallbackTests(unittest.TestCase):
     """Typing the Wi-Fi is the fallback: explained, asked once, and needs no rebuild."""
 

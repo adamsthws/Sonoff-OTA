@@ -62,6 +62,7 @@ from tools.autoflash.state import ATTEMPTED, DONE, FAILED, RunState  # noqa: E40
 from tools.discover_ewelink import answered_ids, discover  # noqa: E402
 from tools.dump_stock_flash import is_good, read_dump, summary  # noqa: E402
 from tools.get_device_key import EwelinkError, get_devices, login  # noqa: E402
+from tools import inspect_stock_nvs  # noqa: E402
 from tools.prepare_imprinted_bundle import (  # noqa: E402
     BundleError,
     ask_credentials,
@@ -542,7 +543,10 @@ class Context:
 
         From D1 the plug runs Tasmota connected to the home network, so the
         details are read from there rather than typed - and they are known to
-        work, which typed ones are not until F2 tries them.  Asking is the
+        work, which typed ones are not until F2 tries them.  ESPHome gives
+        them too, from 1.1.0 (its s60_wifi action); from an ESPHome or mover
+        that does not, they come from the plug's Sonoff backup, when this
+        computer has one and the plug is on that network still.  Asking is the
         fallback, with `why` saying what it is for; `--wifi` forces it.
         """
         forced = getattr(self.args, "wifi", False)
@@ -554,6 +558,11 @@ class Context:
             if found is not None:
                 self.adopt_wifi(*found)
                 # A run stopped at the question earlier must not report it as typed.
+                self.state.set_input("wifi_typed", False)
+        if self._wifi is None and not forced and not readable:
+            found = wifi_from_esphome(self) or wifi_from_backup(self)
+            if found is not None:
+                self.adopt_wifi(*found)
                 self.state.set_input("wifi_typed", False)
         given = credentials.get("S60_WIFI_SSID")
         if self._wifi is None and not forced and given:
@@ -1357,6 +1366,78 @@ def make_bundle(ctx: Context, problem: str | None) -> dict[str, Any]:
         raise Abort(f"the bundle could not be prepared: {exc}") from exc
     say("Bundle ready.")
     return validate_bundle(ctx.manifest_path)
+
+
+def sonoff_backup_wifi(flash: bytes) -> tuple[str, str] | None:
+    """The Wi-Fi Sonoff's firmware was set up with, from a backup of it: the
+    name and password in its frame_params (an open network has none)."""
+    names, values = inspect_stock_nvs.parse(flash[0x9000:0x19000])
+    for (namespace, key), value in values.items():
+        if names.get(namespace) == "frame_params" and key == "content":
+            params = json.loads(value.data.split(b"\x00", 1)[0])
+            ssid = params.get("ssid")
+            if isinstance(ssid, str) and ssid:
+                return ssid, str(params.get("passwd") or "")
+    return None
+
+
+def wifi_from_esphome(ctx: "Context") -> tuple[str, str] | None:
+    """The Wi-Fi the plug is on, name and password, from ESPHome itself: our
+    ESPHome gives them from 1.1.0, through its native API, while that has no
+    encryption key.  None from one that does not."""
+    host = ctx.state.input("plug_ip")
+    found = esphome.api_wifi_details(host) if host else None
+    if found is None:
+        return None
+    output.private(found[0], "wifi-name")
+    output.private(found[1], "wifi-password")
+    say(f"    Read the Wi-Fi details off ESPHome on the plug ('{found[0]}') - none to type.")
+    return found
+
+
+def wifi_from_backup(ctx: "Context") -> tuple[str, str] | None:
+    """The Wi-Fi in the plug's Sonoff backup on this computer - the network
+    its Sonoff firmware was set up on - when it is known to be the plug's
+    still: the bundle set up for exactly these details, or the network
+    ESPHome says it is on.  None otherwise, and the details are asked for.
+    The password is read in memory only, as the backup holds it already."""
+    mac = ctx.state.input("plug_mac")
+    backup = plugs.find_backup(mac) if mac else None
+    if backup is None:
+        return None
+    try:
+        found = sonoff_backup_wifi((backup.directory / "flash.bin").read_bytes())
+    except (OSError, ValueError, KeyError):
+        return None
+    if found is None:
+        return None
+    ssid, password = found
+    output.private(ssid, "wifi-name")
+    output.private(password, "wifi-password")
+    try:
+        pinned = bundle_ssid(ctx.manifest_path)
+    except (BundleError, OSError, ValueError):
+        pinned = None
+    if pinned == ssid:
+        # Its password rebuilds the bundle's own startup firmware, or it is not
+        # the one the bundle was proven with.
+        try:
+            recovery_image(ctx.manifest_path, ssid, password)
+        except BundleError:
+            tell(f"    The plug's Sonoff backup has an older password for '{ssid}' than the bundle's.")
+            return None
+        say(f"    The Wi-Fi in the plug's Sonoff backup, '{ssid}', is the bundle's - none to type.")
+        return found
+    host = ctx.state.input("plug_ip")
+    wifi = esphome.api_wifi(host) if host else None
+    joined = wifi.get("ssid") if wifi else None
+    if joined == ssid:
+        say(f"    The plug is on '{ssid}', the Wi-Fi in its Sonoff backup on this computer - "
+            "none to type.")
+        return found
+    if joined:
+        tell(f"    The plug is on '{joined}' now, not on '{ssid}' as in its Sonoff backup.")
+    return None
 
 
 def read_wifi_from_plug(ctx: "Context") -> tuple[str, str] | None:

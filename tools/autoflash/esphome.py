@@ -217,6 +217,8 @@ def sensor_signal(host: str) -> int | None:
 API_PORT = 6053
 _HELLO, _CONNECT, _DISCONNECT, _PING, _PONG, _SUBSCRIBE_LOGS, _LOG = 1, 3, 5, 7, 8, 28, 29
 _SIGNAL_LINE = re.compile(rb"Signal strength: (-?\d+) dB")
+# The network it is joined to, printed with the signal in the same message.
+_SSID_LINE = re.compile(rb"\bSSID: '([^'\r\n]*)'")
 
 
 def _varint(number: int) -> bytes:
@@ -260,48 +262,136 @@ def _fields(payload: bytes) -> dict[int, int | bytes]:
             fields[key >> 3] = _read_varint(read)
         elif key & 7 == 2:
             fields[key >> 3] = read(_read_varint(read))
+        elif key & 7 == 5:
+            fields[key >> 3] = struct.unpack("<I", read(4))[0]
+        elif key & 7 == 1:
+            fields[key >> 3] = struct.unpack("<Q", read(8))[0]
         else:
             raise ValueError(f"protobuf wire type {key & 7}")
     return fields
+
+
+class _Api:
+    """A plain connection to ESPHome's native API, hello said."""
+
+    def __init__(self, host: str, port: int, timeout: float) -> None:
+        self.deadline = time.monotonic() + timeout
+        self.sock = socket.create_connection((host, port), timeout=timeout)
+        self.reader = self.sock.makefile("rb")
+        client = b"s60-autoflash"
+        hello = b"\x0a" + _varint(len(client)) + client + b"\x10\x01\x18\x0a"  # API 1.10
+        # Hello; and Connect, which older servers want and newer ones let pass.
+        try:
+            self.sock.sendall(_frame(_HELLO, hello) + _frame(_CONNECT))
+        except OSError:
+            self.sock.close()
+            raise
+
+    def send(self, kind: int, payload: bytes = b"") -> None:
+        self.sock.sendall(_frame(kind, payload))
+
+    def _read(self, size: int) -> bytes:
+        self.sock.settimeout(max(0.1, self.deadline - time.monotonic()))
+        data = self.reader.read(size)
+        if len(data) < size:
+            raise ConnectionError("the API connection closed")
+        return data
+
+    def messages(self):
+        """Each message the plug sends, (kind, payload), until the time is up,
+        pings answered; none from an encrypted API, whose framing differs."""
+        while time.monotonic() < self.deadline:
+            if self._read(1) != b"\x00":
+                return
+            size, kind = _read_varint(self._read), _read_varint(self._read)
+            payload = self._read(size)
+            if kind == _PING:
+                self.send(_PONG)
+            else:
+                yield kind, payload
+
+    def close(self) -> None:
+        try:
+            self.send(_DISCONNECT)
+        except OSError:
+            pass
+        self.sock.close()
 
 
 def api_signal(host: str, port: int = API_PORT, timeout: float = 8.0) -> int | None:
     """The plug's Wi-Fi signal in dBm from ESPHome's native API: asked for its
     logs with its configuration, ESPHome prints it ("Signal strength: -50 dB").
     None from an ESPHome whose API is encrypted, or that does not say."""
-    client = b"s60-autoflash"
-    hello = b"\x0a" + _varint(len(client)) + client + b"\x10\x01\x18\x0a"  # API 1.10
-    deadline = time.monotonic() + timeout
+    wifi = api_wifi(host, port, timeout)
+    return wifi["signal"] if wifi else None
+
+
+def api_wifi(host: str, port: int = API_PORT, timeout: float = 8.0) -> dict[str, object] | None:
+    """What ESPHome's configuration dump says of its Wi-Fi: its signal in dBm,
+    and the network it is joined to (None if not printed with it). None from
+    an ESPHome whose API is encrypted, or that does not say."""
     try:
-        with socket.create_connection((host, port), timeout=timeout) as sock:
-            reader = sock.makefile("rb")
-
-            def read(size: int) -> bytes:
-                sock.settimeout(max(0.1, deadline - time.monotonic()))
-                data = reader.read(size)
-                if len(data) < size:
-                    raise ConnectionError("the API connection closed")
-                return data
-
-            # Hello; Connect, which older servers want and newer ones let
-            # pass; then the logs at DEBUG, the configuration dump with them.
-            sock.sendall(_frame(_HELLO, hello) + _frame(_CONNECT)
-                         + _frame(_SUBSCRIBE_LOGS, b"\x08\x05\x10\x01"))
-            while time.monotonic() < deadline:
-                if read(1) != b"\x00":
-                    return None  # an encrypted API's framing
-                size, kind = _read_varint(read), _read_varint(read)
-                payload = read(size)
-                if kind == _PING:
-                    sock.sendall(_frame(_PONG))
-                elif kind == _LOG:
-                    text = _fields(payload).get(3, b"")
-                    found = _SIGNAL_LINE.search(text) if isinstance(text, bytes) else None
-                    if found:
-                        sock.sendall(_frame(_DISCONNECT))
-                        return int(found.group(1))
+        api = _Api(host, port, timeout)
+    except OSError:
+        return None
+    try:
+        api.send(_SUBSCRIBE_LOGS, b"\x08\x05\x10\x01")  # at DEBUG, with the dump
+        for kind, payload in api.messages():
+            if kind == _LOG:
+                text = _fields(payload).get(3, b"")
+                found = _SIGNAL_LINE.search(text) if isinstance(text, bytes) else None
+                if found:
+                    ssid = _SSID_LINE.search(text)
+                    return {"signal": int(found.group(1)),
+                            "ssid": ssid.group(1).decode("utf-8", "replace") if ssid else None}
     except (OSError, ValueError, IndexError):
         return None
+    finally:
+        api.close()
+    return None
+
+
+# Our ESPHome's action that gives the Wi-Fi it is on (ESPHome/sonoff_s60.yaml,
+# from 1.1.0), and the API messages that list and call it.
+WIFI_ACTION = "s60_wifi"
+_LIST, _LISTED, _ACTION, _CALL, _ANSWER = 11, 19, 41, 42, 131
+
+
+def api_wifi_details(host: str, port: int = API_PORT, timeout: float = 8.0) -> tuple[str, str] | None:
+    """The Wi-Fi the plug is on, name and password, from ESPHome itself - its
+    s60_wifi action, which ours has from 1.1.0. None from an ESPHome without
+    it, or whose API is encrypted."""
+    try:
+        api = _Api(host, port, timeout)
+    except OSError:
+        return None
+    try:
+        api.send(_LIST)
+        key = None
+        for kind, payload in api.messages():
+            if kind == _ACTION:
+                action = _fields(payload)
+                if action.get(1) == WIFI_ACTION.encode() and isinstance(action.get(2), int):
+                    key = action[2]
+            elif kind == _LISTED:
+                if key is None:
+                    return None
+                # Called with no arguments, as call 1, its answer wanted.
+                api.send(_CALL, b"\x0d" + struct.pack("<I", key) + b"\x18\x01\x20\x01")
+            elif kind == _ANSWER:
+                answer = _fields(payload)
+                if answer.get(1) != 1:
+                    continue
+                data = answer.get(4)
+                details = json.loads(data) if answer.get(2) and isinstance(data, bytes) else {}
+                ssid = details.get("ssid") if isinstance(details, dict) else None
+                if isinstance(ssid, str) and ssid:
+                    return ssid, str(details.get("password") or "")
+                return None
+    except (OSError, ValueError, IndexError):  # json.JSONDecodeError is a ValueError
+        return None
+    finally:
+        api.close()
     return None
 
 
