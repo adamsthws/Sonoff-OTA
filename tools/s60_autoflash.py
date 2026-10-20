@@ -513,7 +513,7 @@ class Context:
         self.web_password = args.web_password or credentials.get("AUTOFLASH_TASMOTA_PASSWORD")
         output.private(self.web_password, "tasmota-password")
         # The same for ESPHome's update password (ask_esphome_password).
-        self.esphome_password = credentials.get("AUTOFLASH_ESPHOME_OTA_PASSWORD")
+        self.esphome_password = args.esphome_ota_password or credentials.get("AUTOFLASH_ESPHOME_OTA_PASSWORD")
         output.private(self.esphome_password, "esphome-password")
         self._ewelink_password: str | None = None
         # From .env or the environment: tried once, then asked for if eWeLink refuses it.
@@ -4252,7 +4252,8 @@ def ask_web_password(ctx: Context, host: str) -> None:
         kind="web password", prompt="Tasmota web password", label="tasmota-password")
 
 
-ESPHOME_PASSWORD_HINT = "give it as AUTOFLASH_ESPHOME_OTA_PASSWORD in .env or the environment"
+ESPHOME_PASSWORD_HINT = ("give it with --esphome-ota-password, or as "
+                         "AUTOFLASH_ESPHOME_OTA_PASSWORD in .env or the environment")
 
 
 def ask_esphome_password(ctx: Context, host: str) -> None:
@@ -4265,9 +4266,9 @@ def ask_esphome_password(ctx: Context, host: str) -> None:
     ctx.esphome_password = password_or_retry("ESPHome's update password", [
         f"ESPHome on the plug at {host} has an update password (set in Home",
         "Assistant, say). The next firmware goes on as an ESPHome update, which needs",
-        "it. Type it to go on; or remove it from the plug's ESPHome config yourself",
-        "(password: under ota:), install that, and try again without one.",
-        *(["The one given (AUTOFLASH_ESPHOME_OTA_PASSWORD) is not it."] if wrong else []),
+        "it. Type it to go on; or remove it from the plug's ESPHome YAML config (the",
+        "'password:' line under 'ota:'), re-flash, then try again without one.",
+        *(["The one given is not it."] if wrong else []),
         "A password typed is held in memory for this run only, never written to disk.",
     ], lambda password: esphome_update_check(host, password),
         still="ESPHome there still has an update password.",
@@ -4280,7 +4281,7 @@ def esphome_update_check(host: str, password: str | None) -> bool | None:
     try:
         return esphome_ota.wants_password(host, password)
     except esphome_ota.NeedsEncryption as exc:
-        raise Abort(f"{exc}: remove encryption: from its ota config and install that, then run this again") from exc
+        raise Abort(f"{exc}: remove that encryption: line, re-flash, then run this again") from exc
 
 
 def unencrypted_esphome(ctx: Context, host: str) -> None:
@@ -4288,13 +4289,13 @@ def unencrypted_esphome(ctx: Context, host: str) -> None:
     keyed by its API key), which this tool cannot make: waited on until its
     owner has removed that; then its update password, if it has one."""
     if prompts.UNATTENDED:
-        raise Abort(f"{esphome_ota.NeedsEncryption()}: remove encryption: from its ota config and "
-                    "install that, then run this again")
+        raise Abort(f"{esphome_ota.NeedsEncryption()}: remove that encryption: line, re-flash, "
+                    "then run this again")
     password_or_retry("ESPHome's encrypted updates", [
         f"ESPHome on the plug at {host} takes only encrypted updates:",
-        "its ota config has encryption:, made with its API key, which this tool",
-        "cannot use. Remove encryption: from it yourself (an update password instead",
-        "is fine: this asks for it), install that, and try again.",
+        "the ota: section of its ESPHome YAML config has encryption:, made with its",
+        "API key, which this tool cannot use. Remove encryption: from it yourself (an",
+        "update password instead is fine: this asks for it), re-flash, and try again.",
     ], lambda _: encrypted_only(host),
         still="ESPHome there still takes only encrypted updates.")
     if esphome_update_check(host, ctx.esphome_password) is True:
@@ -4311,8 +4312,9 @@ def encrypted_only(host: str) -> bool | None:
 def unlock_esphome(ctx: Context) -> None:
     """ESPHome's update password, when the plug's has one, known before the
     go-ahead - so that nothing is asked once the plug is being changed: given
-    (AUTOFLASH_ESPHOME_OTA_PASSWORD), or asked for.  The same for one that takes
-    only encrypted updates, which has to be changed first."""
+    (--esphome-ota-password, or AUTOFLASH_ESPHOME_OTA_PASSWORD), or asked for.
+    The same for one that takes only encrypted updates, which has to be changed
+    first."""
     host = ctx.state.input("plug_ip")
     if not host:
         return
@@ -5559,6 +5561,8 @@ def _main() -> int:
     parser.add_argument("--web-user", help="Tasmota web username, for a Tasmota built with another than admin")
     parser.add_argument("--web-password",
                         help="the plug's Tasmota web password, if it has one (asked for otherwise; never stored)")
+    parser.add_argument("--esphome-ota-password",
+                        help="the plug's ESPHome OTA update password, if it has one (asked for otherwise; never stored)")
     parser.add_argument("--wifi", action="store_true",
                         help="type the Wi-Fi details instead of reading them from the plug")
     parser.add_argument("--no-backup", action="store_true",

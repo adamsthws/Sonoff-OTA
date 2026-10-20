@@ -99,8 +99,8 @@ class NeedsEncryption(OTAError):
     made with its API key."""
 
     def __init__(self) -> None:
-        super().__init__("ESPHome on the plug takes only encrypted updates (its ota config has "
-                         "encryption:), which this tool cannot make")
+        super().__init__("ESPHome on the plug takes only encrypted updates (encryption: under ota: "
+                         "in its ESPHome YAML config), which this tool cannot make")
 
 
 @dataclass

@@ -2280,7 +2280,7 @@ class RunFilingTests(unittest.TestCase):
         self.assertTrue(name.startswith("plugs/unidentified/runs/"))
         ctx = self.autoflash.Context(SimpleNamespace(
             run=name, manifest=self.autoflash.DEFAULT_MANIFEST, dry_run=False, plug_ip=None,
-            email=None, web_user=None, web_password=None))
+            email=None, web_user=None, web_password=None, esphome_ota_password=None))
         ctx.state.set_input("plug_ip", "10.0.0.5")
         ctx.file_under_plug("58:CF:79:01:02:03")
         self.assertEqual(ctx.dir.parent, self.captures / "plugs/58-cf-79-01-02-03/runs")
@@ -2289,6 +2289,30 @@ class RunFilingTests(unittest.TestCase):
         self.assertTrue((ctx.dir / "autoflash-state.json").is_file())
         self.assertFalse((self.captures / name).exists())
         self.assertEqual(self.autoflash.read_current(), ctx.plug)
+
+    def test_firmware_passwords_come_from_the_flags_then_the_environment(self):
+        from types import SimpleNamespace
+        name = self.autoflash.new_run_name(None)
+
+        def args(**over):
+            base = dict(run=name, manifest=self.autoflash.DEFAULT_MANIFEST, dry_run=False,
+                        plug_ip=None, email=None, web_user=None, web_password=None,
+                        esphome_ota_password=None)
+            base.update(over)
+            return SimpleNamespace(**base)
+        # The flags win, each kept out of the log under its label.
+        private = mock.Mock()
+        with mock.patch.object(self.autoflash.output, "private", private):
+            ctx = self.autoflash.Context(args(web_password="tas-pw", esphome_ota_password="esp-pw"))
+        self.assertEqual((ctx.web_password, ctx.esphome_password), ("tas-pw", "esp-pw"))
+        private.assert_any_call("tas-pw", "tasmota-password")
+        private.assert_any_call("esp-pw", "esphome-password")
+        # With no flag, the environment (credentials) is the fallback.
+        with mock.patch.object(self.autoflash.credentials, "get",
+                               side_effect={"AUTOFLASH_TASMOTA_PASSWORD": "env-tas",
+                                            "AUTOFLASH_ESPHOME_OTA_PASSWORD": "env-esp"}.get):
+            ctx = self.autoflash.Context(args())
+        self.assertEqual((ctx.web_password, ctx.esphome_password), ("env-tas", "env-esp"))
 
     def test_older_runs_with_a_mac_are_adopted(self):
         old = RunState.open(self.captures / "conversion-20261011-1431")
@@ -3700,7 +3724,8 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
 
     def test_unattended_without_it_the_run_stops_saying_what_to_give(self):
         with mock.patch.object(self.af.prompts, "UNATTENDED", True):
-            with self.assertRaisesRegex(self.af.Abort, "update password: give it as AUTOFLASH_ESPHOME_OTA_PASSWORD"):
+            with self.assertRaisesRegex(self.af.Abort,
+                                        "update password: give it with --esphome-ota-password"):
                 self.af.unlock_esphome(self.ctx())
             with self.assertRaisesRegex(self.af.Abort, "the one given is not it"):
                 self.af.unlock_esphome(self.ctx("not-it-9"))
@@ -3745,5 +3770,6 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
         self.af.tell.assert_any_call("    ESPHome there still takes only encrypted updates.")
         self.encrypted = True
         with mock.patch.object(self.af.prompts, "UNATTENDED", True):
-            with self.assertRaisesRegex(self.af.Abort, "only encrypted updates.*remove encryption:"):
+            with self.assertRaisesRegex(self.af.Abort,
+                                        "only encrypted updates.*ESPHome YAML.*remove that encryption: line"):
                 self.af.unlock_esphome(self.ctx())

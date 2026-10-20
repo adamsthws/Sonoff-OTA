@@ -257,9 +257,10 @@ the run finds the plug, ESPHome's before the go-ahead to leave it. The
 question has a second choice, for once you have removed the password on the
 plug yourself: try again without one. Each try is checked on the plug, before
 anything is written. A password typed is held in memory for the run only, and
-sent only to a plug that has asked for one; `AUTOFLASH_TASMOTA_PASSWORD` and
-`AUTOFLASH_ESPHOME_OTA_PASSWORD`, in `.env` or the environment, give them in advance
-(for Tasmota, `--web-password` too). An ESPHome set to take only encrypted
+sent only to a plug that has asked for one. `AUTOFLASH_TASMOTA_PASSWORD` and
+`AUTOFLASH_ESPHOME_OTA_PASSWORD`, in `.env` or the environment, give them in
+advance, as do `--web-password` and `--esphome-ota-password`. An ESPHome set to
+take only encrypted
 updates (`encryption:` under `ota:`, keyed by its API key) is not one this
 tool can update: the run says so, and waits for it to be removed.
 
