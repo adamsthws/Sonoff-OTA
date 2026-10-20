@@ -198,7 +198,7 @@ fi
 # Ctrl-C (which the tool handles itself).
 trap ':' INT
 status=0
-"$python" "$here/tools/s60_autoflash.py" "$@" || status=$?
+"$python" "$here/tools/autoflash_cli.py" "$@" || status=$?
 trap - INT
 offer_removal
 exit "$status"

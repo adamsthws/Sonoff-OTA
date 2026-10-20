@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import tools.s60_autoflash as af
+import tools.autoflash_cli as af
 from tools.autoflash import hostsys
 
 PYTHON = r"C:\Users\O'Brien\S60\.python\python.exe"  # an apostrophe, as some names have

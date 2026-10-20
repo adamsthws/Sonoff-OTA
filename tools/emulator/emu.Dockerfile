@@ -39,8 +39,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 COPY --from=qemu /opt/qemu /opt/qemu
 # The tool needs only Python's standard library; the venv just provides `python`.
 RUN python3 -m venv /opt/venv
-COPY container/ /opt/s60emu/
-RUN chmod 0755 /opt/s60emu/bin/* /opt/s60emu/entrypoint.sh /opt/s60emu/udhcpc.script \
-    && ln -s /opt/s60emu/bin/* /usr/local/bin/
+COPY container/ /opt/autoflash-emu/
+RUN chmod 0755 /opt/autoflash-emu/bin/* /opt/autoflash-emu/entrypoint.sh /opt/autoflash-emu/udhcpc.script \
+    && ln -s /opt/autoflash-emu/bin/* /usr/local/bin/
 ENV PATH=/opt/venv/bin:$PATH
-ENTRYPOINT ["/opt/s60emu/entrypoint.sh"]
+ENTRYPOINT ["/opt/autoflash-emu/entrypoint.sh"]

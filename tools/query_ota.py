@@ -58,7 +58,7 @@ def query_ota(region: str, token: str, identity: dict[str, str]) -> dict[str, An
         headers={
             "Authorization": "Bearer " + token,
             "Content-Type": "application/json",
-            "User-Agent": "s60-ota-research/0.1",
+            "User-Agent": "autoflash-research/0.1",
         },
     )
     if response.get("error") != 0:

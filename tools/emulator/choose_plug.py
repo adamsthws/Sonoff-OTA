@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     found = choices()
     if not found:
         print("No Sonoff backup to emulate yet. A conversion keeps one for each plug, in\n"
-              "captures/plugs/<MAC>/sonoff-backup/; tools/s60_readout.py takes one without\n"
+              "captures/plugs/<MAC>/sonoff-backup/; tools/flash_readout.py takes one without\n"
               "converting. See docs/emulator.md.", file=sys.stderr)
         return 1
     interactive = sys.stdin.isatty() and sys.stdout.isatty()

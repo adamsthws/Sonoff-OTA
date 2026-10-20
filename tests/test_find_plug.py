@@ -4,7 +4,7 @@ import types
 import unittest
 from unittest import mock
 
-import tools.s60_autoflash as af
+import tools.autoflash_cli as af
 
 S60 = {"deviceid": "1001234abc", "name": "Kitchen", "productModel": "S60TPG", "online": True,
        "devicekey": "secret", "extra": {"model": "SN-ESP32C3-S60-01"},

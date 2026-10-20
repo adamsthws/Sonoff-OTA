@@ -3,7 +3,7 @@
 
     python3 tools/unattended_run.py [--size 100x40] [--save DIR] [-- run options...]
 
-The conversion (s60_autoflash.py run --unattended) runs on a terminal of its
+The conversion (autoflash_cli.py run --unattended) runs on a terminal of its
 own (a pseudo-terminal), so it draws exactly what a person would see - the
 colours, the stage lines redrawn in place, the notes taken away once read.
 Everything it writes is recorded, and afterwards the screen as it was left
@@ -37,7 +37,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOL = ROOT / "tools" / "s60_autoflash.py"
+TOOL = ROOT / "tools" / "autoflash_cli.py"
 
 # A control sequence (CSI), an operating-system command (OSC: links, titles),
 # any other escape, a control character, or a run of ordinary text.

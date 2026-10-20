@@ -4,15 +4,15 @@
 set -euo pipefail
 
 : "${HOST_UID:?}" "${HOST_GID:?}" "${PLUG_MAC:?}" "${CLOUD:=0}" "${PCAP:=0}" "${FIREWALL:=1}" "${WINDOWS:=0}" "${STUB_CLOUD:=0}" "${STUB_PRODUCT_MODEL:=}"
-RUN=/run/s60emu
+RUN=/run/autoflash-emu
 # The home network: the plug's tap on its own, or with emu.sh --windows a
 # bridge of it and the wire to Windows, which is then the computer on it.
 LAN=tap0
-[ "$WINDOWS" = 1 ] && LAN=br0 && cp /opt/s60emu/motd.windows /opt/s60emu/motd
+[ "$WINDOWS" = 1 ] && LAN=br0 && cp /opt/autoflash-emu/motd.windows /opt/autoflash-emu/motd
 mkdir -p "$RUN" /state/logs
 
 # -- you, with sudo that asks for your password, as on a real computer ----------
-# The password is s60: the welcome message says so, and the conversion tool
+# The password is autoflash: the welcome message says so, and the conversion tool
 # says so where it warns that sudo may ask. Only the emulator's own
 # Wi-Fi switching runs without it: on a real computer that is the desktop's
 # Wi-Fi menu, which asks for nothing.
@@ -22,12 +22,12 @@ if [ -z "$user" ]; then
     useradd -m -u "$HOST_UID" -g "$HOST_GID" -s /bin/bash you
     user=you
 fi
-SUDO_PASSWORD=s60
+SUDO_PASSWORD=autoflash
 echo "$user:$SUDO_PASSWORD" | chpasswd
 printf '%s\n' "Defaults lecture=never" \
-    "$user ALL=(root) NOPASSWD: /opt/s60emu/bin/wifi-root" \
-    "$user ALL=(ALL) ALL" > /etc/sudoers.d/s60emu
-chmod 0440 /etc/sudoers.d/s60emu
+    "$user ALL=(root) NOPASSWD: /opt/autoflash-emu/bin/wifi-root" \
+    "$user ALL=(ALL) ALL" > /etc/sudoers.d/autoflash-emu
+chmod 0440 /etc/sudoers.d/autoflash-emu
 home=$(getent passwd "$user" | cut -d: -f6)
 
 # -- a firewall, on, as on a typical Linux desktop ---------------------------
@@ -58,7 +58,7 @@ else
     # The welcome message says the firewall is on: not this time.
     on="This computer's firewall (ufw) is on, as on a typical Linux desktop."
     off=$(printf '%-*s' "${#on}" "This computer's firewall is off (emu.sh --no-firewall).")
-    sed -i "s|$on|$off|" /opt/s60emu/motd
+    sed -i "s|$on|$off|" /opt/autoflash-emu/motd
 fi
 
 # -- internet: only with --cloud, or for this computer with --stub-cloud -------
@@ -142,7 +142,7 @@ if [ "$STUB_CLOUD" = 1 ]; then
     grep -q s60-stub.test /etc/hosts 2>/dev/null \
         || echo "192.168.60.1 disp.s60-stub.test iot.s60-stub.test apia.s60-stub.test" >> /etc/hosts
 fi
-/opt/s60emu/bin/wifi-root home >/dev/null
+/opt/autoflash-emu/bin/wifi-root home >/dev/null
 ln -sfn /state/work /work
 # Start the stub once the router address (192.168.60.1) is up. It serves both
 # the plug (dispatch + IoT) and the tool (account API) from the repo copy at
@@ -171,30 +171,30 @@ if [ "$STUB_CLOUD" = 1 ]; then
         echo "stub: could not read the device identity; stub not started" >> /state/logs/stub.log
     fi
 fi
-cp /opt/s60emu/tmux.conf "$home/.tmux.conf"
-grep -q s60emu-motd "$home/.bashrc" 2>/dev/null || cat >> "$home/.bashrc" <<'EOF'
-# s60emu-motd
-[ -n "${TMUX:-}" ] && [ "$(tmux display -p '#W')" = conversion ] && cat /opt/s60emu/motd
+cp /opt/autoflash-emu/tmux.conf "$home/.tmux.conf"
+grep -q autoflash-emu-motd "$home/.bashrc" 2>/dev/null || cat >> "$home/.bashrc" <<'EOF'
+# autoflash-emu-motd
+[ -n "${TMUX:-}" ] && [ "$(tmux display -p '#W')" = conversion ] && cat /opt/autoflash-emu/motd
 EOF
 # In stub mode the conversion tool talks to the local stub, not coolkit, and
 # trusts the stub's CA. Exported for any conversion the user starts in here.
-if [ "$STUB_CLOUD" = 1 ] && ! grep -q s60emu-stub "$home/.bashrc" 2>/dev/null; then
+if [ "$STUB_CLOUD" = 1 ] && ! grep -q autoflash-emu-stub "$home/.bashrc" 2>/dev/null; then
     cat >> "$home/.bashrc" <<'EOF'
-# s60emu-stub
+# autoflash-emu-stub
 export AUTOFLASH_EWELINK_API_BASE=https://apia.s60-stub.test
-export SSL_CERT_FILE=/run/s60emu/stub-ca-bundle.pem
+export SSL_CERT_FILE=/run/autoflash-emu/stub-ca-bundle.pem
 EOF
 fi
 chown "$HOST_UID:$HOST_GID" "$home/.tmux.conf" "$home/.bashrc"
 
 as_you() { runuser -u "$user" -- env HOME="$home" PATH="$PATH" AUTOFLASH_EMULATOR_URL="${AUTOFLASH_EMULATOR_URL:-}" \
     AUTOFLASH_EMULATOR_SUDO_PASSWORD="$SUDO_PASSWORD" "$@"; }
-as_you /opt/s60emu/bin/plug-supervisor >/dev/null 2>&1 &
-as_you /opt/s60emu/bin/browser-forward >"$RUN/browser-forward.log" 2>&1 &
-[ "$WINDOWS" = 1 ] && /opt/s60emu/bin/windows-link tap1 >"$RUN/windows-link.log" 2>&1 &
+as_you /opt/autoflash-emu/bin/plug-supervisor >/dev/null 2>&1 &
+as_you /opt/autoflash-emu/bin/browser-forward >"$RUN/browser-forward.log" 2>&1 &
+[ "$WINDOWS" = 1 ] && /opt/autoflash-emu/bin/windows-link tap1 >"$RUN/windows-link.log" 2>&1 &
 
 cd /work
-as_you tmux new-session -d -s s60 -n conversion -c /work
-as_you tmux new-window -d -t s60 -n plug "plug log"
+as_you tmux new-session -d -s autoflash -n conversion -c /work
+as_you tmux new-window -d -t autoflash -n plug "plug log"
 exec runuser -u "$user" -- env HOME="$home" PATH="$PATH" AUTOFLASH_EMULATOR_URL="${AUTOFLASH_EMULATOR_URL:-}" \
-    AUTOFLASH_EMULATOR_SUDO_PASSWORD="$SUDO_PASSWORD" tmux attach -t s60
+    AUTOFLASH_EMULATOR_SUDO_PASSWORD="$SUDO_PASSWORD" tmux attach -t autoflash

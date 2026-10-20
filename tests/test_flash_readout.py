@@ -3,13 +3,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools import s60_readout
+from tools import flash_readout
 
 
 class FindBridgeTests(unittest.TestCase):
     def run_find(self, answers, by_mac=None, mac="aa:bb:cc:12:34:56"):
         ticks = iter(range(0, 1000, 3))
-        return s60_readout.find_bridge(
+        return flash_readout.find_bridge(
             "192.168.0.50", mac, timeout=30,
             probe=lambda host: host in answers,
             by_mac=by_mac or (lambda m, s: None),
@@ -48,10 +48,10 @@ class DeliverTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "RECOVERY_LOCK").write_text("lock")
-            with mock.patch.object(s60_readout, "ROOT", root), \
-                 mock.patch.object(s60_readout.subprocess, "Popen", side_effect=KeyboardInterrupt):
+            with mock.patch.object(flash_readout, "ROOT", root), \
+                 mock.patch.object(flash_readout.subprocess, "Popen", side_effect=KeyboardInterrupt):
                 with self.assertRaises(KeyboardInterrupt):
-                    s60_readout.deliver("192.168.0.50", "192.168.0.10", 8088, "a@b", "1.2.0", root, {})
+                    flash_readout.deliver("192.168.0.50", "192.168.0.10", 8088, "a@b", "1.2.0", root, {})
             self.assertTrue((root / "RECOVERY_LOCK").exists())
             self.assertFalse((root / "RECOVERY_LOCK.owner-authorized").exists())
 
@@ -61,38 +61,38 @@ class DeliverTests(unittest.TestCase):
             (root / "RECOVERY_LOCK").write_text("lock")
             seen = {}
             sender = FakeSender(root, seen, lines=("  Cloud: the plug went offline\n",))
-            with mock.patch.object(s60_readout, "ROOT", root), \
-                 mock.patch.object(s60_readout.subprocess, "Popen", side_effect=sender), \
+            with mock.patch.object(flash_readout, "ROOT", root), \
+                 mock.patch.object(flash_readout.subprocess, "Popen", side_effect=sender), \
                  mock.patch("builtins.print"):
-                self.assertEqual(s60_readout.deliver("192.168.0.50", "192.168.0.10", 8088, "a@b", "1.2.0", root, {}), 0)
+                self.assertEqual(flash_readout.deliver("192.168.0.50", "192.168.0.10", 8088, "a@b", "1.2.0", root, {}), 0)
             self.assertFalse(seen["lock_present"])
-            self.assertIn(str(s60_readout.READOUT_OTA), seen["command"])
+            self.assertIn(str(flash_readout.READOUT_OTA), seen["command"])
             self.assertIn("1.2.0", seen["command"])
             self.assertTrue((root / "RECOVERY_LOCK").exists())
             self.assertIn("went offline", (root / "sender.log").read_text())
 
     def test_the_readout_file_is_the_conversion_bridge_version(self):
-        from tools import s60_autoflash
-        self.assertEqual(s60_readout.READOUT_OTA.name.rsplit("-", 1)[1],
-                         s60_autoflash.BRIDGE_OTA.name.rsplit("-", 1)[1])
+        from tools import autoflash_cli
+        self.assertEqual(flash_readout.READOUT_OTA.name.rsplit("-", 1)[1],
+                         autoflash_cli.BRIDGE_OTA.name.rsplit("-", 1)[1])
 
 
 class CloudChatterTests(unittest.TestCase):
     def test_routine_cloud_lines_are_hidden_but_problems_are_not(self):
-        self.assertTrue(s60_readout.is_cloud_chatter("  Cloud: the plug went offline - expected while it restarts\n"))
-        self.assertTrue(s60_readout.is_cloud_chatter("  Cloud: upgrade command accepted\n"))
-        self.assertFalse(s60_readout.is_cloud_chatter("  Cloud: upgrade command rejected (error 406)\n"))
-        self.assertFalse(s60_readout.is_cloud_chatter("  Complete firmware byte coverage observed\n"))
+        self.assertTrue(flash_readout.is_cloud_chatter("  Cloud: the plug went offline - expected while it restarts\n"))
+        self.assertTrue(flash_readout.is_cloud_chatter("  Cloud: upgrade command accepted\n"))
+        self.assertFalse(flash_readout.is_cloud_chatter("  Cloud: upgrade command rejected (error 406)\n"))
+        self.assertFalse(flash_readout.is_cloud_chatter("  Complete firmware byte coverage observed\n"))
 
     def test_hidden_lines_still_reach_the_log(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "RECOVERY_LOCK").write_text("lock")
             sender = FakeSender(root, {}, lines=("  Cloud: the plug is back online\n", "Serving\n"))
-            with mock.patch.object(s60_readout, "ROOT", root), \
-                 mock.patch.object(s60_readout.subprocess, "Popen", side_effect=sender), \
+            with mock.patch.object(flash_readout, "ROOT", root), \
+                 mock.patch.object(flash_readout.subprocess, "Popen", side_effect=sender), \
                  mock.patch("builtins.print") as printed:
-                s60_readout.deliver("192.168.0.50", "192.168.0.10", 8088, "a@b", "1.2.0", root, {})
+                flash_readout.deliver("192.168.0.50", "192.168.0.10", 8088, "a@b", "1.2.0", root, {})
             shown = "".join(call.args[0] for call in printed.call_args_list)
             self.assertNotIn("Cloud", shown)
             self.assertIn("Serving", shown)
@@ -104,13 +104,13 @@ class SenderOutputTests(unittest.TestCase):
     REQUEST = '  [192.168.0.50] "GET /user1.bin?deviceid=1&ts=2&sign=3 HTTP/1.1" 206 -\n'
 
     def test_routine_http_lines_are_not_shown(self):
-        self.assertEqual(s60_readout.sender_line_kind(self.SERVED), "served")
-        self.assertEqual(s60_readout.sender_line_kind(self.REQUEST), "hide")
-        self.assertEqual(s60_readout.sender_line_kind(self.REQUEST.replace("206", "403")), "show")
-        self.assertEqual(s60_readout.sender_line_kind("  Complete firmware byte coverage observed\n"), "show")
+        self.assertEqual(flash_readout.sender_line_kind(self.SERVED), "served")
+        self.assertEqual(flash_readout.sender_line_kind(self.REQUEST), "hide")
+        self.assertEqual(flash_readout.sender_line_kind(self.REQUEST.replace("206", "403")), "show")
+        self.assertEqual(flash_readout.sender_line_kind("  Complete firmware byte coverage observed\n"), "show")
 
     def test_progress_line_reports_how_far_the_plug_has_got(self):
-        progress = s60_readout.SenderProgress(869332)
+        progress = flash_readout.SenderProgress(869332)
         with mock.patch("sys.stdout") as out:
             progress.update(self.SERVED)
         self.assertIn("45%", out.write.call_args_list[0].args[0])
@@ -120,10 +120,10 @@ class SenderOutputTests(unittest.TestCase):
             root = Path(tmp)
             (root / "RECOVERY_LOCK").write_text("lock")
             sender = FakeSender(root, {}, lines=(self.REQUEST, self.SERVED, "  Complete firmware byte coverage observed\n"))
-            with mock.patch.object(s60_readout, "ROOT", root), \
-                 mock.patch.object(s60_readout.subprocess, "Popen", side_effect=sender), \
+            with mock.patch.object(flash_readout, "ROOT", root), \
+                 mock.patch.object(flash_readout.subprocess, "Popen", side_effect=sender), \
                  mock.patch("builtins.print") as printed, mock.patch("sys.stdout"):
-                s60_readout.deliver("192.168.0.50", "192.168.0.10", 8088, "a@b", "1.2.0", root, {})
+                flash_readout.deliver("192.168.0.50", "192.168.0.10", 8088, "a@b", "1.2.0", root, {})
             shown = "".join(call.args[0] for call in printed.call_args_list)
             self.assertNotIn("GET", shown)
             self.assertNotIn("Served", shown)
@@ -133,21 +133,21 @@ class SenderOutputTests(unittest.TestCase):
 
 class ControlTests(unittest.TestCase):
     def test_controls_are_the_pinned_published_bridges(self):
-        sums = (s60_readout.ROOT / "SHA256SUMS").read_text()
-        for path, digest in s60_readout.CONTROL_FILES.values():
-            s60_readout.check_control_file(s60_readout.ROOT / path, digest)
+        sums = (flash_readout.ROOT / "SHA256SUMS").read_text()
+        for path, digest in flash_readout.CONTROL_FILES.values():
+            flash_readout.check_control_file(flash_readout.ROOT / path, digest)
             self.assertIn(f"{digest}  {Path(path).as_posix()}", sums)
 
     def test_the_default_control_is_what_the_conversion_sends(self):
-        from tools import s60_autoflash
-        self.assertEqual(s60_readout.CONTROL_FILES["4.4.3"][0], s60_autoflash.BRIDGE_OTA)
+        from tools import autoflash_cli
+        self.assertEqual(flash_readout.CONTROL_FILES["4.4.3"][0], autoflash_cli.BRIDGE_OTA)
 
     def test_a_changed_file_is_refused(self):
         with tempfile.NamedTemporaryFile() as handle:
             handle.write(b"not the bridge")
             handle.flush()
-            with self.assertRaises(s60_readout.Stop):
-                s60_readout.check_control_file(Path(handle.name), "0" * 64)
+            with self.assertRaises(flash_readout.Stop):
+                flash_readout.check_control_file(Path(handle.name), "0" * 64)
 
 
 class BridgeIdTests(unittest.TestCase):
@@ -155,15 +155,15 @@ class BridgeIdTests(unittest.TestCase):
         import re
         for status in (b"bridge v5\nhome network: joined", b"bridge 4.4.1\nhome network: joined",
                        b"bridge 4.4.12 flash readout\n"):
-            self.assertIsNotNone(re.match(s60_readout.BRIDGE_ID, status), status)
-        self.assertIsNone(re.match(s60_readout.BRIDGE_ID, b"tasmota"))
+            self.assertIsNotNone(re.match(flash_readout.BRIDGE_ID, status), status)
+        self.assertIsNone(re.match(flash_readout.BRIDGE_ID, b"tasmota"))
 
 
 class ConfirmTests(unittest.TestCase):
     def test_only_the_word_goes_ahead(self):
         for answer, expected in (("readout", True), (" READOUT ", True), ("proceed", False), ("", False)):
             with mock.patch("builtins.input", return_value=answer), mock.patch("builtins.print"):
-                self.assertEqual(s60_readout.confirmed("1.2.0"), expected, answer)
+                self.assertEqual(flash_readout.confirmed("1.2.0"), expected, answer)
 
 
 if __name__ == "__main__":

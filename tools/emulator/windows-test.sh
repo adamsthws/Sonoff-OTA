@@ -24,8 +24,8 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-CACHE=${AUTOFLASH_WINDOWS_CACHE:-$HOME/.cache/s60-emu/windows}
-VM_IMAGE=s60-win
+CACHE=${AUTOFLASH_WINDOWS_CACHE:-$HOME/.cache/autoflash-emu/windows}
+VM_IMAGE=autoflash-win
 # Microsoft's Windows Server 2025 evaluation ISO (en-US, build 26100.32230),
 # from the Evaluation Center. Pinned: a changed file is reported, never used unseen.
 ISO_URL="https://go.microsoft.com/fwlink/?linkid=2345730"
@@ -41,7 +41,7 @@ TERMINAL_SHA256=bf3ef2012f6c44d8340a4c58125acc9498d19b580f9890dc043cdf831852e796
 GUEST_TOOLS_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.302-1/virtio-win-guest-tools.exe"
 GUEST_TOOLS_SHA256=d8ae9ea1e943384ac195e012cd36f82c3161620e5fc9529be4e42e6f420e222d
 # Not a secret: Remote Desktop listens on this computer's 127.0.0.1 only.
-PASSWORD=S60-emulator
+PASSWORD=Windows-emulator
 # What Windows gets: Server Core with only the tool to run is content in 2 GB.
 # Its container is capped at that plus 1 GB for QEMU itself and the disk tools
 # between runs, without swap, so it can never take more of this computer.
@@ -73,7 +73,7 @@ done
 # setting of the computer's is changed, and the lock goes when this exits,
 # however it exits. It cannot hold off a flat battery: that is warned of.
 if [ -z "${AUTOFLASH_AWAKE:-}" ] && systemd-inhibit --what=sleep:idle true 2>/dev/null; then
-    exec env AUTOFLASH_AWAKE=1 systemd-inhibit --what=sleep:idle --who="S60 emulator" \
+    exec env AUTOFLASH_AWAKE=1 systemd-inhibit --what=sleep:idle --who="Autoflash emulator" \
         --why="Windows set-up or a test run" --mode=block "$0" "$@"
 fi
 
@@ -149,7 +149,7 @@ elif ! docker info >/dev/null 2>&1; then
 fi
 
 venv=$ROOT/.venv
-[ -x "$venv/bin/python" ] || venv=$HOME/.local/share/s60-emu/venv
+[ -x "$venv/bin/python" ] || venv=$HOME/.local/share/autoflash-emu/venv
 if ! "$venv/bin/python" -c 'import esp_idf_nvs_partition_gen' 2>/dev/null; then
     if ! python3 -c 'import venv, ensurepip' 2>/dev/null; then
         case "$pkg" in
@@ -248,10 +248,10 @@ fi
 # Rebuilt when what it is built from changes, as emu.sh does the emulator's.
 built_from=$(cd "$ROOT/tools/emulator/windows" && find . -type f -print0 \
     | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
-if [ "$rebuild" = 1 ] || [ "$(docker image inspect -f '{{index .Config.Labels "s60.built-from"}}' \
+if [ "$rebuild" = 1 ] || [ "$(docker image inspect -f '{{index .Config.Labels "autoflash.built-from"}}' \
         "$VM_IMAGE" 2>/dev/null)" != "$built_from" ]; then
     say "Building the Windows VM's image..."
-    docker build -q -t "$VM_IMAGE" --label "s60.built-from=$built_from" \
+    docker build -q -t "$VM_IMAGE" --label "autoflash.built-from=$built_from" \
         -f "$ROOT/tools/emulator/windows/vm.Dockerfile" "$ROOT/tools/emulator/windows" >/dev/null
 fi
 vm() {  # vm DOCKER-RUN-OPTIONS... -- VM-RUN-COMMAND...: the Windows VM container
@@ -272,16 +272,16 @@ for name in "${stale[@]}"; do
     rm -f "$CACHE/$name.built-from"  # until it is set up again
     if [ "$name" = installed ]; then
         say "Installing Windows - watch it in your browser at http://localhost:6080 if you like."
-        vm --rm --name s60-win-setup -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080 -- install
+        vm --rm --name autoflash-win-setup -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080 -- install
     else
         say "Setting up Windows' $name layer (a few minutes)..."
-        vm --rm --name s60-win-setup -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080 -- layer "$name"
+        vm --rm --name autoflash-win-setup -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080 -- layer "$name"
     fi
     built_from "$name" > "$CACHE/$name.built-from"
 done
 
 # -- a run -----------------------------------------------------------------------------
-for name in s60-emu s60-win; do
+for name in autoflash-emu autoflash-win; do
     if docker ps -q --filter "name=^$name\$" | grep -q .; then
         say "$name is already running. Stop it first: docker stop $name"
         exit 1
@@ -293,11 +293,11 @@ routed=0
 stop_all() {
     say "Shutting Windows down (its captures are kept for next time)..."
     [ "$routed" = 1 ] && host_route del
-    docker stop -t 150 s60-win >/dev/null 2>&1 || true
-    docker stop s60-emu >/dev/null 2>&1 || true
+    docker stop -t 150 autoflash-win >/dev/null 2>&1 || true
+    docker stop autoflash-emu >/dev/null 2>&1 || true
 }
 trap stop_all EXIT
-emu_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' s60-emu)
+emu_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' autoflash-emu)
 # The plug's own address, http://192.168.60.50 - the link the conversion ends
 # with - reachable from this computer's browser: a route to the plug's network
 # through the emulator, for as long as this runs. Set by a container on the
@@ -305,7 +305,7 @@ emu_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{e
 # connections to the plug (entrypoint.sh). Not over a route of this
 # computer's own to that network, which would be its real one.
 host_route() {  # replace|del
-    docker run --rm --network host --cap-add NET_ADMIN --entrypoint ip s60-emu \
+    docker run --rm --network host --cap-add NET_ADMIN --entrypoint ip autoflash-emu \
         route "$1" 192.168.60.0/24 via "$emu_ip" >/dev/null 2>&1
 }
 existing=$(ip route show 192.168.60.0/24 2>/dev/null)
@@ -314,24 +314,24 @@ if [ -z "$existing" ] || [[ $existing == *"dev docker0"* ]]; then
     host_route replace && routed=1
 fi
 [ "$routed" = 1 ] || say "This computer has a network of its own at 192.168.60.0/24, so the plug's page is at http://localhost:8080 only."
-docker rm -f s60-win >/dev/null 2>&1 || true
+docker rm -f autoflash-win >/dev/null 2>&1 || true
 # The key windows-ssh.sh logs on with, made once and kept with the disks.
 if [ ! -f "$CACHE/ssh/id_ed25519" ]; then
     mkdir -p "$CACHE/ssh" && chmod 700 "$CACHE/ssh"
-    ssh-keygen -q -t ed25519 -N "" -C "s60-emulator" -f "$CACHE/ssh/id_ed25519"
+    ssh-keygen -q -t ed25519 -N "" -C "autoflash-emulator" -f "$CACHE/ssh/id_ed25519"
 fi
-vm -d --name s60-win --stop-timeout 150 -e "LINK_HOST=$emu_ip" -e "CONSOLE=$console" -e "LAYER=$from" -e "FRESH=$fresh" \
+vm -d --name autoflash-win --stop-timeout 150 -e "LINK_HOST=$emu_ip" -e "CONSOLE=$console" -e "LAYER=$from" -e "FRESH=$fresh" \
     -p 127.0.0.1:3389:3389 -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080 -p "127.0.0.1:$SSH_PORT:22" -- run >/dev/null
 
 [ "$routed" = 1 ] && say "The plug's page is at http://192.168.60.50, as the conversion's last link says (or http://localhost:8080)."
 say "Windows is starting (about a minute). Open it in your browser:"
 say "    http://localhost:6080    (copy and paste: the clipboard in noVNC's side panel)"
-say "or with Remote Desktop, localhost:3389, user s60, password $PASSWORD, e.g."
-say "    xfreerdp /v:localhost /u:s60 /p:$PASSWORD /cert:ignore /clipboard /dynamic-resolution"
+say "or with Remote Desktop, localhost:3389, user autoflash, password $PASSWORD, e.g."
+say "    xfreerdp /v:localhost /u:autoflash /p:$PASSWORD /cert:ignore /clipboard /dynamic-resolution"
 say "or a VNC viewer on localhost:5900, or SSH (PowerShell) from another terminal:"
 say "    tools/emulator/windows-ssh.sh     (windows-ssh.sh log -f follows the run's log)"
 say "Windows opens the link and a window to run the conversion in."
 say "This terminal is the emulator: plug restart, plug log, ... -"
 say "leaving it (exit, or Ctrl-b d) shuts Windows down too."
 read -r -p "Press Enter to open the emulator here. " _
-docker attach s60-emu || true
+docker attach autoflash-emu || true

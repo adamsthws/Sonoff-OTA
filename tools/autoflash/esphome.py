@@ -278,7 +278,7 @@ class _Api:
         self.deadline = time.monotonic() + timeout
         self.sock = socket.create_connection((host, port), timeout=timeout)
         self.reader = self.sock.makefile("rb")
-        client = b"s60-autoflash"
+        client = b"autoflash"
         hello = b"\x0a" + _varint(len(client)) + client + b"\x10\x01\x18\x0a"  # API 1.10
         # Hello; and Connect, which older servers want and newer ones let pass.
         try:

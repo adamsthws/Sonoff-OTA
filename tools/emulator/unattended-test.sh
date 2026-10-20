@@ -24,8 +24,8 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 STATE=$ROOT/captures/emulation/state
-case "$ROOT" in /mnt/[a-z]/*) STATE=$HOME/.local/share/s60-emu/state ;; esac
-NAME=s60-emu PORT=8080
+case "$ROOT" in /mnt/[a-z]/*) STATE=$HOME/.local/share/autoflash-emu/state ;; esac
+NAME=autoflash-emu PORT=8080
 PLUG=192.168.60.50
 
 emu_args=(--detach) keep=0 stub=0 run_args=() from="" save=""
@@ -35,7 +35,7 @@ while [ $# -gt 0 ]; do
     --stub-cloud) stub=1 ;;
     --instance=[1-9]|--instance=[12][0-9]|--instance=30)  # another emulator beside the first: see emu.sh
         n=${1#--instance=}; emu_args+=("$1")
-        NAME=s60-emu-$n PORT=$((8080 + n)) STATE=$STATE-$n ;;
+        NAME=autoflash-emu-$n PORT=$((8080 + n)) STATE=$STATE-$n ;;
     --keep) keep=1 ;;
     --from=*) from=${1#--from=} ;;
     --save=*) save=${1#--save=} ;;
@@ -92,7 +92,7 @@ if [ -n "$from" ] || [[ " ${emu_args[*]} " == *" --fresh "* ]] || \
 fi
 keep_plug() {
     [ -n "$save" ] || return 0
-    docker exec "$NAME" /opt/s60emu/bin/plug off >/dev/null 2>&1 || true
+    docker exec "$NAME" /opt/autoflash-emu/bin/plug off >/dev/null 2>&1 || true
     rm -rf "${SAVED:?}/$save" && mkdir -p "$SAVED/$save"
     cp "$STATE/flash.bin" "$SAVED/$save/flash.bin"
     cat "$STATE/.flash-mode" 2>/dev/null > "$SAVED/$save/flash-mode" || echo plain > "$SAVED/$save/flash-mode"
@@ -104,7 +104,7 @@ keep_plug() {
 
 as_you=(docker exec -u "$(id -u):$(id -g)" -w /work)
 waited=0
-until "${as_you[@]}" "$NAME" tmux has-session -t s60 >/dev/null 2>&1; do
+until "${as_you[@]}" "$NAME" tmux has-session -t autoflash >/dev/null 2>&1; do
     [ $((waited += 2)) -le 120 ] || { echo "The emulator did not start within 120s." >&2; exit 1; }
     sleep 2
 done
@@ -123,7 +123,7 @@ echo "The emulated plug is up; converting it unattended..."
 # The eWeLink account, for this run only: the emulator's copy of the
 # repository has no .env, so a run you sit through asks for it. Kept in the
 # container's /tmp, gone when it stops, and removed after the run anyway.
-answers=/tmp/s60-unattended.env
+answers=/tmp/autoflash-unattended.env
 if [ "$stub" = 1 ]; then
     # A placeholder account: the stub answers the account API and ignores it.
     printf 'EWELINK_EMAIL=%s\nEWELINK_PASSWORD=%s\n' stub@s60-stub.test stub \
@@ -143,11 +143,11 @@ status=0
 # In stub mode the tool talks to the local stub and trusts its CA.
 stub_env=()
 [ "$stub" = 1 ] && stub_env=(-e AUTOFLASH_EWELINK_API_BASE=https://apia.s60-stub.test
-                             -e SSL_CERT_FILE=/run/s60emu/stub-ca-bundle.pem)
+                             -e SSL_CERT_FILE=/run/autoflash-emu/stub-ca-bundle.pem)
 # The emulator's Wi-Fi, for a run from an ESPHome that cannot say what it is
 # (one older than this project's 1.1.0); and the emulated plug's passwords,
 # for one given one to test with, as this script's environment has them.
-"${as_you[@]}" -e AUTOFLASH_EMULATOR_URL="http://localhost:$PORT" -e AUTOFLASH_EMULATOR_SUDO_PASSWORD=s60 \
+"${as_you[@]}" -e AUTOFLASH_EMULATOR_URL="http://localhost:$PORT" -e AUTOFLASH_EMULATOR_SUDO_PASSWORD=autoflash \
     "${stub_env[@]}" -e AUTOFLASH_WIFI_SSID=PICSimLabWifi -e AUTOFLASH_EMULATOR_COUNTDOWN="${AUTOFLASH_EMULATOR_COUNTDOWN:-}" \
     -e AUTOFLASH_TASMOTA_PASSWORD="${AUTOFLASH_TASMOTA_PASSWORD:-}" -e AUTOFLASH_ESPHOME_OTA_PASSWORD="${AUTOFLASH_ESPHOME_OTA_PASSWORD:-}" \
     -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/unattended_run.py --size 100x40 \

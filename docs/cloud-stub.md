@@ -65,7 +65,7 @@ keep a few `--cloud` smoke runs.
 ## The goal
 
 Run many emulator conversions in parallel. The per-instance networks already
-parallelise (`--instance N`, `s60-emu-N`, `state-N`, port `8080+N`). The one
+parallelise (`--instance N`, `autoflash-emu-N`, `state-N`, port `8080+N`). The one
 thing they share is the **real eWeLink cloud**, which keeps **one connection per
 device id**. Every emulated plug is a clone with the same device id, so only one
 can be "online" at a time — the eWeLink-dependent part of each run has to be
@@ -74,7 +74,7 @@ own cloud, served locally, so nothing is shared and runs go fully parallel.
 
 ## What the cloud is actually used for
 
-Tracing the conversion ([`tools/s60_autoflash.py`](../tools/s60_autoflash.py)
+Tracing the conversion ([`tools/autoflash_cli.py`](../tools/autoflash_cli.py)
 `step_discover` / `step_bridge`) shows the cloud's role is smaller than it looks.
 It is needed for two things:
 
@@ -220,8 +220,8 @@ makes it necessary. The evidence is in [the firmware facts](#firmware-facts-stat
   refused without `--fresh`, and the mode moves with `--save`/`--from` and a
   plug swap ([harness wiring](#harness-wiring-and-how-to-run-it)).
 - **Leave the shared image alone.** `AUTOFLASH_EMU_IMAGE` builds and runs a separate
-  image (here `s60-emu-stub`), so a worktree's build does not replace the
-  `s60-emu` that other work runs.
+  image (here `autoflash-emu-stub`), so a worktree's build does not replace the
+  `autoflash-emu` that other work runs.
 
 ## Firmware facts (static analysis)
 
@@ -493,7 +493,7 @@ after the list.
 - **`emu.sh --stub-cloud`** builds the stub flash (changes A + B), generates the
   CA, mounts the certs read-only at `/stub-cloud`, and sets `STUB_CLOUD=1`.
   `AUTOFLASH_EMU_IMAGE` builds/runs an isolated image (so a worktree's build need not
-  disturb a shared `s60-emu`); instances run 1–30.
+  disturb a shared `autoflash-emu`); instances run 1–30.
 - **`container/entrypoint.sh`**, in stub mode, adds the `/etc/hosts` records for
   the three stub hosts → `192.168.60.1`, opens inbound 443 on the LAN in ufw,
   builds a CA bundle of the system roots plus the stub's CA, reads the plug's
@@ -554,8 +554,8 @@ don't rewrite old results.
 **Running tests safely.** Use a fresh, unused instance (`emu.sh --instance N`
 with no `captures/emulation/state-N/` yet); a new instance sets up a clean stock
 image from the backup. Never `--fresh` the default/shared low-numbered instances
-other work uses — check `docker ps | grep s60-emu` first. Stay offline unless a
-test needs the real cloud. `docker stop s60-emu-N` and `rm -rf
+other work uses — check `docker ps | grep autoflash-emu` first. Stay offline unless a
+test needs the real cloud. `docker stop autoflash-emu-N` and `rm -rf
 captures/emulation/state-N` when finished with a throwaway instance. Logs land in
 `state-N/logs/` (`uart.log` and, in stub mode, `stub.log`, both appended across
 runs, and `wifi-*.pcap` with `--pcap`):
@@ -668,7 +668,7 @@ which drives the app side: login, app dispatch, a `userAgent:"app"` WebSocket,
 and an `upgrade` the cloud passes to the device. So the stub gained
 `/dispatch/app`, the `WS_DISPATCH` override (`probe_ota_command.py`), and the
 **app↔device relay**: until then it answered each socket on its own, and the
-command never reached the plug. Run: `emu.sh --stub-cloud`, then `s60_autoflash.py step
+command never reached the plug. Run: `emu.sh --stub-cloud`, then `autoflash_cli.py step
 {A0,A5,A1,A2,C2}` pointed at the stub. A5 built the Tasmota bundle by downloading
 the official files (stub mode lets this computer reach the firmware CDN while
 eWeLink stays blocked). **Result:** A1 discover, A2 device key from the stub,
@@ -693,7 +693,7 @@ needed again only to send the installer again (see [Status](#status)).
 device id) online at once, which the real cloud forbids.
 
 **Run:** `emu.sh --stub-cloud` on instances 24 and 25 at the same time (the same
-plug MAC), each on the isolated `s60-emu-stub` image.
+plug MAC), each on the isolated `autoflash-emu-stub` image.
 
 **Result:** both plugs came online **simultaneously** — each with an
 `ESTABLISHED` WebSocket to its own stub on `192.168.60.1:443`, each registered,

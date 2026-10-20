@@ -7,8 +7,8 @@ administrator rights, one elevation prompt.
     tools\emulator\windows-bootstrap.ps1                  Windows wired to an emulator elsewhere
     tools\emulator\windows-bootstrap.ps1 -LocalEmulator   the emulator on this computer too, in WSL
 
-Always: Python 3.10 or newer, OpenVPN's TAP-Windows6 driver and the "S60
-emulator" network adapter. With -LocalEmulator also WSL 2, a Linux
+Always: Python 3.10 or newer, OpenVPN's TAP-Windows6 driver and the
+"Autoflash emulator" network adapter. With -LocalEmulator also WSL 2, a Linux
 distribution, and in it Docker and the NVS generator - installing WSL needs
 one restart, after which running this again carries on without asking.
 
@@ -29,9 +29,9 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest is many times slower with it
 $env:WSL_UTF8 = "1"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$Adapter = "S60 emulator"
+$Adapter = "Autoflash emulator"
 $Address = "192.168.60.10"
-$State = Join-Path $env:LOCALAPPDATA "s60-emu"
+$State = Join-Path $env:LOCALAPPDATA "autoflash-emu"
 $Approved = Join-Path $State "bootstrap-approved"
 
 $OpenVpn = @{
@@ -66,7 +66,7 @@ function Test-Wsl {
 function Test-Distro { return [bool]((wsl.exe --list --quiet 2>$null) -contains $Distro) }
 
 function Test-DistroReady {
-    wsl.exe -d $Distro --exec sh -c 'command -v docker >/dev/null && command -v rsync >/dev/null && test -x "$HOME/.local/share/s60-emu/venv/bin/python" && docker info >/dev/null 2>&1' 2>$null | Out-Null
+    wsl.exe -d $Distro --exec sh -c 'command -v docker >/dev/null && command -v rsync >/dev/null && test -x "$HOME/.local/share/autoflash-emu/venv/bin/python" && docker info >/dev/null 2>&1' 2>$null | Out-Null
     return $LASTEXITCODE -eq 0   # wsl.exe's complaints go to stdout: kept out of the answer above
 }
 

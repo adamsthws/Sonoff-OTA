@@ -1,35 +1,35 @@
 <#
 At each logon (the hook firstlogon.ps1 adds). vm-run.sh layer leaves the name
-of a layer to set up in C:\S60\layer.txt: its script runs, and shuts Windows
+of a layer to set up in C:\Autoflash\layer.txt: its script runs, and shuts Windows
 down. In a test run: wire Windows into the emulator's home network, and open
 a window at the checkout to run the conversion tool in. vm-run.sh
-puts the checkout in C:\S60\repo, and the emulator's address and the console to
-run in in C:\S60\run.json: OpenConsole - Windows Terminal's console, as on
+puts the checkout in C:\Autoflash\repo, and the emulator's address and the console to
+run in in C:\Autoflash\run.json: OpenConsole - Windows Terminal's console, as on
 Windows 11 (Terminal itself needs XAML, which Server Core lacks) - or the
 classic one, as on Windows 10.
 #>
-if (Test-Path C:\S60\layer.txt) {
-    $layer = (Get-Content C:\S60\layer.txt -Raw).Trim()
-    Remove-Item C:\S60\layer.txt
-    & "C:\S60\$layer.ps1"
+if (Test-Path C:\Autoflash\layer.txt) {
+    $layer = (Get-Content C:\Autoflash\layer.txt -Raw).Trim()
+    Remove-Item C:\Autoflash\layer.txt
+    & "C:\Autoflash\$layer.ps1"
     exit 0
 }
-$run = "C:\S60\run.json"
+$run = "C:\Autoflash\run.json"
 if (-not (Test-Path $run)) { exit 0 }  # a layer itself, booted by hand: nothing to start
 $config = Get-Content $run -Raw | ConvertFrom-Json
 # The Linux side's key for SSH (vm-run.sh puts it here; rig.ps1 runs sshd).
-# s60 is an administrator, so sshd reads administrators' one file, and only
+# autoflash is an administrator, so sshd reads administrators' one file, and only
 # when no one but them and SYSTEM can change it.
-if (Test-Path C:\S60\authorized_keys) {
+if (Test-Path C:\Autoflash\authorized_keys) {
     $keys = "$env:ProgramData\ssh\administrators_authorized_keys"
-    Copy-Item C:\S60\authorized_keys $keys -Force
+    Copy-Item C:\Autoflash\authorized_keys $keys -Force
     icacls.exe $keys /inheritance:r /grant "*S-1-5-32-544:F" /grant "*S-1-5-18:F" | Out-Null
 }
-$repo = "C:\S60\repo"
+$repo = "C:\Autoflash\repo"
 . "$repo\tools\windows-python.ps1"
 # The link's own Python (rig.ps1), never the tool's: in a --first-run there is
 # none yet, and the tool must find that so.
-$python = Join-Path (Join-Path C:\S60\rig-python $PortablePython.Folder) python.exe
+$python = Join-Path (Join-Path C:\Autoflash\rig-python $PortablePython.Folder) python.exe
 
 Start-Process $python -ArgumentList "tools\emulator\windows_link.py", "--host", $config.link_host `
     -WorkingDirectory $repo
@@ -45,7 +45,7 @@ Write-Host 'Switch the plug off and on in the emulator, on the Linux side: plug 
 Write-Host 'Your home Wi-Fi there is PICSimLabWifi, with no password.'
 Write-Host ''
 "@
-$openconsole = "C:\S60\openconsole\OpenConsole.exe"
+$openconsole = "C:\Autoflash\openconsole\OpenConsole.exe"
 if ($config.console -eq "openconsole" -and (Test-Path $openconsole)) {
     # Its command line goes to PowerShell as one string: encoded, nothing to quote.
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($welcome))

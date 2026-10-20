@@ -43,7 +43,7 @@ def page(host: str = SETUP_HOST, path: str = "/", timeout: float = 3.0) -> str |
     """The page at `path`, or None when nothing answers."""
     request = urllib.request.Request(
         f"http://{host}{path}",
-        headers={"User-Agent": "S60Autoflash/1", "Referer": f"http://{host}/"},
+        headers={"User-Agent": "Autoflash/1", "Referer": f"http://{host}/"},
     )
     try:
         with _OPENER.open(request, timeout=timeout) as response:

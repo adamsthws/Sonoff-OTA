@@ -74,9 +74,9 @@ def saved(name):
 
 
 MAC = None  # --plug: the backed-up plug the emulators run copies of
-PLUG_CMD = "/opt/s60emu/bin/plug"
+PLUG_CMD = "/opt/autoflash-emu/bin/plug"
 MAX_RUNS = 4
-TOOL = "tools/s60_autoflash.py"
+TOOL = "tools/autoflash_cli.py"
 HELPERS = ("serve_safeboot_migration.py", "serve_tasmota_ota.py")
 
 # Each direction: the saved plug it starts from, its target, and the steps that
@@ -462,7 +462,7 @@ class PlugMonitor:
 
 
 def name(n):
-    return f"s60-emu-{n}"
+    return f"autoflash-emu-{n}"
 
 
 def sh(*args, timeout=None):
@@ -626,10 +626,10 @@ class Scenario:
             ends = time.time() + arg
             joined = None
             while time.time() < ends:
-                network = self.ex("cat", "/run/s60emu/softap").stdout.strip()
+                network = self.ex("cat", "/run/autoflash-emu/softap").stdout.strip()
                 if network and not joined:
                     time.sleep(5)
-                    result = self.ex("/opt/s60emu/bin/wifi-root", "join", network, timeout=90)
+                    result = self.ex("/opt/autoflash-emu/bin/wifi-root", "join", network, timeout=90)
                     joined = network
                     self.joined = network
                     self.say(f"PERSON: joined {network} before being asked (rc {result.returncode})")
@@ -676,8 +676,8 @@ class Scenario:
             # A second window, same command, while this one works.
             out = sh("docker", "exec", "-u", f"{os.getuid()}:{os.getgid()}", "-w", "/work",
                      "-e", "HOME=/tmp", "-e", f"AUTOFLASH_EMULATOR_URL=http://localhost:{8080 + self.n}",
-                     "-e", "AUTOFLASH_EMULATOR_SUDO_PASSWORD=s60", name(self.n), "timeout", "150",
-                     "/opt/venv/bin/python", TOOL, "run", "--unattended", "--env-file", "/tmp/s60-unattended.env",
+                     "-e", "AUTOFLASH_EMULATOR_SUDO_PASSWORD=autoflash", name(self.n), "timeout", "150",
+                     "/opt/venv/bin/python", TOOL, "run", "--unattended", "--env-file", "/tmp/autoflash-unattended.env",
                      "--firmware", self.target, timeout=200)
             said = re.sub(r"\s+", " ", re.sub(r"\x1b\[[0-9;]*m", "", out.stdout + out.stderr))
             self.notes["second_refused"] = "another run is converting this plug" in said
@@ -689,7 +689,7 @@ class Scenario:
             time.sleep(60)
             self.ex("prlimit", f"--pid={pid}", "--fsize=unlimited")
         elif fault == "token":
-            out = self.ex("sh", "-c", "cd /work && set -a && . /tmp/s60-unattended.env && "
+            out = self.ex("sh", "-c", "cd /work && set -a && . /tmp/autoflash-unattended.env && "
                           "/opt/venv/bin/python -c 'import os; from tools.get_device_key import login; "
                           "login(os.environ[\"EWELINK_EMAIL\"], os.environ[\"EWELINK_PASSWORD\"], \"+44\", \"eu\"); "
                           "print(\"logged in again\")'", timeout=60)
@@ -732,14 +732,14 @@ class Scenario:
         gone_since = None
         while not stop.is_set():
             joined = joined or getattr(self, "joined", None)
-            on_air = self.ex("cat", "/run/s60emu/softap").stdout.strip()
+            on_air = self.ex("cat", "/run/autoflash-emu/softap").stdout.strip()
             if joined:
                 if on_air:
                     gone_since = None
                 elif gone_since is None:
                     gone_since = time.time()
                 elif time.time() - gone_since > 5:
-                    self.ex("/opt/s60emu/bin/wifi-root", "home", timeout=60)
+                    self.ex("/opt/autoflash-emu/bin/wifi-root", "home", timeout=60)
                     self.say(f"PERSON: {joined} gone; this computer back on the home network by itself")
                     joined = self.joined = None
                     gone_since = None
@@ -759,7 +759,7 @@ class Scenario:
                 if backs > done_backs:
                     wanted = None
                     if joined:
-                        self.ex("/opt/s60emu/bin/wifi-root", "home", timeout=60)
+                        self.ex("/opt/autoflash-emu/bin/wifi-root", "home", timeout=60)
                         self.say("PERSON: back on the home network")
                         joined = self.joined = None
                 seen[log] = (len(joins), backs)
@@ -777,9 +777,9 @@ class Scenario:
             if wanted and not joined:
                 # The network picked from the list once it shows: the run may
                 # give a pattern (tasmota-ABCDEF-NNNN) or two names.
-                on_air = self.ex("cat", "/run/s60emu/softap").stdout.strip()
+                on_air = self.ex("cat", "/run/autoflash-emu/softap").stdout.strip()
                 if on_air:
-                    result = self.ex("/opt/s60emu/bin/wifi-root", "join", on_air, timeout=90)
+                    result = self.ex("/opt/autoflash-emu/bin/wifi-root", "join", on_air, timeout=90)
                     self.say(f"PERSON: joined {on_air} (as told: {wanted[1]}; rc {result.returncode})")
                     if result.returncode == 0:
                         joined = on_air
@@ -788,7 +788,7 @@ class Scenario:
                         stop.wait(5)
             stop.wait(2)
         if joined:
-            self.ex("/opt/s60emu/bin/wifi-root", "home", timeout=60)
+            self.ex("/opt/autoflash-emu/bin/wifi-root", "home", timeout=60)
 
     def probe(self):
         """What the network shows while the plug is asked to connect here: does

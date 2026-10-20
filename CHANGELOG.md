@@ -15,6 +15,17 @@ ESPHome, as well as Tasmota: the run asks at the start which the plug should
 end up running. And a plug can move between them later, or back to Sonoff's
 own firmware.
 
+A major release because the tool is now Autoflash, and the names that called
+it after the S60 have gone:
+
+- `tools/s60_autoflash.py` is `tools/autoflash_cli.py`. `start.sh`,
+  `start.ps1` and `start.cmd` run it as before; a command that named the
+  old file needs the new name.
+- The settings it reads start `AUTOFLASH_`. In `.env`, `S60_WIFI_SSID`,
+  `S60_WIFI_PASSWORD` and `S60_SUDO_PASSWORD` are still read, and the run asks
+  for them to be renamed; `S60_PYTHON_HOME` is not, and is now
+  `AUTOFLASH_PYTHON_HOME`.
+
 - A run looks for the plug first. One already on Tasmota or ESPHome is offered
   the other two: Tasmota, ESPHome, or Sonoff's own firmware and settings put
   back from the backup taken when it was first converted (only where that

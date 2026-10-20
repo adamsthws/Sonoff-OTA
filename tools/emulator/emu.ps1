@@ -33,10 +33,10 @@ $wsl = @("-d", $Distro)
 
 # Closing the emulator's window stops only the Docker client: the emulator
 # carries on, and emu.sh would refuse to start another.
-if (& wsl.exe @wsl --exec docker ps -q --filter 'name=^s60-emu$') {
+if (& wsl.exe @wsl --exec docker ps -q --filter 'name=^autoflash-emu$') {
     throw ("The emulator is still running from before (its window was closed without leaving it).`n" +
-           "Rejoin it with:  wsl docker attach s60-emu`n" +
-           "or stop it with: wsl docker stop s60-emu")
+           "Rejoin it with:  wsl docker attach autoflash-emu`n" +
+           "or stop it with: wsl docker stop autoflash-emu")
 }
 $wslRoot = (& wsl.exe @wsl -- wslpath -a ($Root -replace '\\', '/')).Trim()
 $flags = @("--windows")

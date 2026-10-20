@@ -170,7 +170,7 @@ class BundleWithoutWifiTests(unittest.TestCase):
 
 class RunSecretsTests(unittest.TestCase):
     def test_only_the_secret_files_are_removed(self):
-        import tools.s60_autoflash as autoflash
+        import tools.autoflash_cli as autoflash
         with tempfile.TemporaryDirectory(dir=ROOT / "tests") as directory:
             run = Path(directory)
             (run / "live").mkdir()

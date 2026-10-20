@@ -77,7 +77,7 @@ replaces the temporary one.
 Other secrets are not kept either, outside the backup: the plug's eWeLink
 LAN key is never saved, and the update links, the plug's settings memory and staged firmware
 are deleted or reduced to hashes as soon as they have been checked - however
-the run ends. `python3 tools/s60_autoflash.py cleanup` deletes any such file
+the run ends. `python3 tools/autoflash_cli.py cleanup` deletes any such file
 still on disk, such as after the computer lost power mid-run. It leaves the
 backups alone.
 
@@ -128,7 +128,7 @@ the plug on the installer, to carry on from there next time or go back to
 Sonoff with a power cycle. Carrying on marks the stage "Skipped", in green:
 the conversion is not affected. An unattended run carries on without one.
 The test report says how the backup went - completed, failed, or not taken -
-and never where it is or which plug it came from. `python3 tools/s60_autoflash.py list` shows
+and never where it is or which plug it came from. `python3 tools/autoflash_cli.py list` shows
 every backed-up plug.
 
 It is for two things. **Going back to Sonoff:** writing `flash.bin` back

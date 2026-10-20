@@ -3,7 +3,7 @@
 
 The plug's address depends on which network this "computer" is joined to
 (the home network, or the plug's own), so each new connection goes to the
-address `wifi` last wrote to /run/s60emu/browser-target.
+address `wifi` last wrote to /run/autoflash-emu/browser-target.
 
 Not a plain port forward: Tasmota answers every page but / only when the
 Referer names its own address (a guard against cross-site requests), and a
@@ -17,7 +17,7 @@ import asyncio
 import re
 from pathlib import Path
 
-TARGET = Path("/run/s60emu/browser-target")
+TARGET = Path("/run/autoflash-emu/browser-target")
 LISTEN = ("0.0.0.0", 8080)
 HEADER_END = b"\r\n\r\n"
 MAX_HEADER = 64 * 1024

@@ -33,7 +33,7 @@ IMAGE_NAME=${WINDOWS_IMAGE:-Windows Server 2025 SERVERDATACENTERCORE}
 GUEST=/opt/s60win/guest
 MON=/run/qemu-monitor.sock
 # Not a secret: the VM is reachable from this computer only (127.0.0.1).
-PASSWORD=${WINDOWS_PASSWORD:-S60-emulator}
+PASSWORD=${WINDOWS_PASSWORD:-Windows-emulator}
 
 log() { echo "[vm] $*"; }
 
@@ -109,10 +109,10 @@ repo_tar() {  # $1: this checkout, without its private captures or .env, as a ta
 
 set_up() {  # $1: a disk $2 (a layer's name) has just been set up on; shows its log
     guestfish --ro -a "$1" -i <<EOF > /run/setup.log 2>&1 || true
-cat /S60/$2.log
+cat /Autoflash/$2.log
 EOF
     cat /run/setup.log
-    guestfish --ro -a "$1" -i is-file "/S60/$2.done" | grep -q true
+    guestfish --ro -a "$1" -i is-file "/Autoflash/$2.done" | grep -q true
 }
 
 drop_above() {  # the layers above $1: built on what it was, so no longer valid
@@ -127,11 +127,11 @@ drop_above() {  # the layers above $1: built on what it was, so no longer valid
 seed_disc() {  # the answer file and the first logon's scripts, on a disc
     local layout=0409:00000409
     case "${KEYBOARD:-}" in en_GB*|en-GB*) layout=0809:00000809 ;; esac
-    rm -rf /run/seed && mkdir -p /run/seed/S60
+    rm -rf /run/seed && mkdir -p /run/seed/Autoflash
     sed -e "s|@PASSWORD@|$PASSWORD|g" -e "s|@LAYOUT@|$layout|g" -e "s|@IMAGE@|$IMAGE_NAME|g" \
         "$GUEST/unattend.xml" > /run/seed/autounattend.xml
-    cp "$GUEST/firstlogon.ps1" "$GUEST/start.ps1" /run/seed/S60/
-    genisoimage -quiet -J -joliet-long -r -V S60SEED -o /run/seed.iso /run/seed
+    cp "$GUEST/firstlogon.ps1" "$GUEST/start.ps1" /run/seed/Autoflash/
+    genisoimage -quiet -J -joliet-long -r -V AUTOFLASHSEED -o /run/seed.iso /run/seed
 }
 
 # A clean shutdown when the container is stopped, so the disk can be read after.
@@ -186,17 +186,17 @@ layer() {
     repo_tar /run/repo.tar
     printf '%s\n' "$name" > /run/layer.txt
     guestfish --rw -a "$disk" -i <<EOF
-rm-rf /S60/repo
-mkdir-p /S60/repo
-tar-in /run/repo.tar /S60/repo
-upload $GUEST/$name.ps1 /S60/$name.ps1
-upload $GUEST/start.ps1 /S60/start.ps1
-upload /run/layer.txt /S60/layer.txt
+rm-rf /Autoflash/repo
+mkdir-p /Autoflash/repo
+tar-in /run/repo.tar /Autoflash/repo
+upload $GUEST/$name.ps1 /Autoflash/$name.ps1
+upload $GUEST/start.ps1 /Autoflash/start.ps1
+upload /run/layer.txt /Autoflash/layer.txt
 EOF
     if [ "$name" = rig ]; then
         # Fetched and checked by windows-test.sh; rig.ps1 installs them.
         [ -f "$CACHE/virtio-win-guest-tools.exe" ] || { log "missing $CACHE/virtio-win-guest-tools.exe"; exit 1; }
-        guestfish --rw -a "$disk" -i upload "$CACHE/virtio-win-guest-tools.exe" /S60/virtio-win-guest-tools.exe
+        guestfish --rw -a "$disk" -i upload "$CACHE/virtio-win-guest-tools.exe" /Autoflash/virtio-win-guest-tools.exe
     fi
     qemu "$disk"
     wait "$QEMU" || true
@@ -206,7 +206,7 @@ EOF
         log "$name did not finish - see above. The layers are as they were."
         exit 1
     fi
-    guestfish --rw -a "$disk" -i rm-rf /S60/repo
+    guestfish --rw -a "$disk" -i rm-rf /Autoflash/repo
     drop_above "$name"
     mv "$disk" "$CACHE/$name.qcow2"
     log "layer ready: $name.qcow2"
@@ -249,15 +249,15 @@ with zipfile.ZipFile(sys.argv[1]) as z:
     # start.ps1 too, so a change to it needs no layer set up again.
     # rm-f .env: a layer set up before it was left out may still hold one.
     guestfish --rw -a "$disk" -i <<EOF
-mkdir-p /S60/repo/captures
-mkdir-p /S60/openconsole
-rm-f /S60/repo/.env
-tar-in /run/repo.tar /S60/repo
-tar-in /run/captures.tar /S60/repo/captures
-tar-in /run/openconsole.tar /S60/openconsole
-upload $GUEST/start.ps1 /S60/start.ps1
-upload /run/config.json /S60/run.json
-upload /run/authorized_keys /S60/authorized_keys
+mkdir-p /Autoflash/repo/captures
+mkdir-p /Autoflash/openconsole
+rm-f /Autoflash/repo/.env
+tar-in /run/repo.tar /Autoflash/repo
+tar-in /run/captures.tar /Autoflash/repo/captures
+tar-in /run/openconsole.tar /Autoflash/openconsole
+upload $GUEST/start.ps1 /Autoflash/start.ps1
+upload /run/config.json /Autoflash/run.json
+upload /run/authorized_keys /Autoflash/authorized_keys
 EOF
     trap 'stop_windows' TERM INT
     log "starting Windows - Remote Desktop: localhost:3389, browser: http://localhost:6080, VNC: localhost:5900, SSH: port 22"
@@ -268,7 +268,7 @@ EOF
     QEMU=
     log "Windows is off; keeping the conversion's captures for next time"
     rm -rf /run/captures-out && mkdir /run/captures-out
-    if guestfish --ro -a "$disk" -i copy-out /S60/repo/captures /run/captures-out 2>/dev/null; then
+    if guestfish --ro -a "$disk" -i copy-out /Autoflash/repo/captures /run/captures-out 2>/dev/null; then
         cp -a /run/captures-out/captures/. "$CACHE/captures/"
     fi
     rm -f "$disk"

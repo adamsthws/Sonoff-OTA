@@ -455,7 +455,7 @@ class FallbackScreenTests(OutputTestCase):
     """The Wi-Fi fallbacks still say everything the person has to read or do."""
 
     def test_typing_the_wifi_shows_why_and_every_question(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         from tools.autoflash.device import DeviceError
 
         class Ctx:
@@ -485,7 +485,7 @@ class FallbackScreenTests(OutputTestCase):
         self.assertNotIn("password-one", log)
 
     def test_the_setup_network_steps_are_all_on_screen(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         from tools.autoflash import setup_network
         polls = iter([None, "192.168.0.77"])
         ctx = mock.Mock(wifi=lambda why=None: ("Home-2G", "password-one"))
@@ -507,7 +507,7 @@ class FallbackScreenTests(OutputTestCase):
 
 
     def send(self, outcomes, unattended=False):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         from tools.autoflash import prompts, setup_network
         polls = iter([None, "192.168.0.77"])
         ctx = mock.Mock(wifi=lambda why=None: ("Home-2G", "password-one"))
@@ -572,7 +572,7 @@ class FailureReasonTests(OutputTestCase):
         self.assertEqual(output.tool_problems(), ["one", "two"])
 
     def test_a_phase_refusal_is_shown_and_its_progress_is_not(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
 
         def body():
             af.phase_log("    The plug fetched its instructions.")
@@ -616,7 +616,7 @@ class ReportTests(OutputTestCase):
         return SimpleNamespace(state=state)
 
     def test_the_report_is_filled_in_from_the_run(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         fields = dict(af.report_fields(self.ctx(), 441, False))
         self.assertEqual(fields["Result"], "Converted")
         self.assertEqual(fields["Plug model"], "S60TPG")
@@ -630,7 +630,7 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60TPG")
 
     def test_the_report_has_each_stages_time_and_how_long_the_plug_was_busy(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         ctx = self.ctx()
         for key, value in {"E2.seconds": 36, "E2.plug_busy_seconds": 34.2, "E2.attempts": 2,
                            "G1.seconds": 43, "G1.plug_busy_seconds": 61, "G1.attempts": 1,
@@ -644,19 +644,19 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Plug Wi-Fi signal"], "-61 dBm")
 
     def test_on_the_way_to_esphome_the_signal_is_from_its_install(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         ctx = self.ctx(firmware="esphome")
         ctx.state.capture("I1.signal_dbm", -58)
         self.assertEqual(dict(af.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-58 dBm")
 
     def test_from_tasmota_to_esphome_the_signal_is_from_leaving_tasmota(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         ctx = self.ctx(firmware="esphome", source="tasmota")
         ctx.state.capture("L1.signal_dbm", -63)
         self.assertEqual(dict(af.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-63 dBm")
 
     def test_with_several_readings_the_report_gives_the_lowest(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         ctx = self.ctx()
         for key, value in {"A2.signal_dbm": -48, "D4.signal_dbm": -71, "E1.signal_dbm": -55,
                            "I1.signal_dbm": None}.items():
@@ -664,13 +664,13 @@ class ReportTests(OutputTestCase):
         self.assertEqual(dict(af.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-71 dBm")
 
     def test_a_run_from_before_the_timings_says_so(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         fields = dict(af.report_fields(self.ctx(), 441, False))
         self.assertEqual(fields["Stage times"], "Not recorded")
         self.assertEqual(fields["Retries"], "None")
 
     def test_the_result_says_where_and_why_a_run_stopped(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         from tools.autoflash.state import DONE
         # Values other tests made private ("wrong", as a password) are not this run's.
         self.enterContext(mock.patch.dict(af.output._private, {}, clear=True))
@@ -693,7 +693,7 @@ class ReportTests(OutputTestCase):
     def test_the_result_names_the_stage_that_failed_not_one_it_sent_back(self):
         # A refused commit sends E1 and E2 back to be done again: the run still
         # stopped at the commit.
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         from tools.autoflash.state import DONE
         self.enterContext(mock.patch.dict(af.output._private, {}, clear=True))
         ctx = self.ctx()
@@ -710,7 +710,7 @@ class ReportTests(OutputTestCase):
                          f"({af.stage_name('E3')}): commit refused")
 
     def test_only_a_run_that_failed_offers_its_report_not_one_the_operator_stopped(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         self.assertEqual(af.report_ending(1, None), "failed")       # a stage failed
         self.assertEqual(af.report_ending(1, "crashed"), "crashed")  # something unexpected
         self.assertIsNone(af.report_ending(130, None))               # quit at a question
@@ -719,14 +719,14 @@ class ReportTests(OutputTestCase):
         self.assertIsNone(af.report_ending(None, None))              # the terminal was closed
 
     def test_a_long_reason_is_cut_short_on_one_line(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         text = af.public_text("first line\n" + "x" * 500)
         self.assertNotIn("\n", text)
         self.assertLessEqual(len(text), 240)
         self.assertTrue(text.endswith("..."))
 
     def test_python_says_where_it_came_from(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         portable = Path(self.tmp.name) / ".python"
         with mock.patch.dict(os.environ, {"AUTOFLASH_PYTHON_HOME": str(portable)}):
             with mock.patch.object(af.sys, "executable", str(portable / "linux-x86_64/python/bin/python3")):
@@ -740,7 +740,7 @@ class ReportTests(OutputTestCase):
                 self.assertIn("(in a virtual environment)", af.python_description())
 
     def test_a_run_that_stopped_offers_its_report_without_the_hat(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         ctx = self.ctx()
         ctx.last_failure, ctx.run_resumed, ctx.reported = "timed out", False, False
         ctx.run_started = af.time.monotonic() - 60
@@ -758,7 +758,7 @@ class ReportTests(OutputTestCase):
         self.assertFalse(any("hold out my hat" in str(call) for call in told.call_args_list + shown.call_args_list))
 
     def test_the_report_says_how_the_backup_went_but_not_where_it_is(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         mac_path = "captures/plugs/58-cf-79-01-02-03/sonoff-backup"
         for outcome, said in (("saved", "Completed"), ("failed", "Failed"),
                               ("existing", "Taken by an earlier run")):
@@ -775,7 +775,7 @@ class ReportTests(OutputTestCase):
                          "Not taken")
 
     def test_hardware_that_was_not_checked_says_so(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         fields = dict(af.report_fields(self.ctx(), 441, False))
         self.assertEqual(fields["Relay"], "Not checked")
         self.assertNotIn("Mains voltage", fields)
@@ -784,7 +784,7 @@ class ReportTests(OutputTestCase):
         self.assertNotIn("__", fields.values())
 
     def test_every_answer_starts_with_a_capital_and_only_that_changes(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         fields = dict(af.report_fields(self.ctx(), 441, False,
                                        {"Relay": "switches (meter confirms)",
                                         "Power meter": "on: 239 V, 0 W; off: 0 V, 0 W"}))
@@ -793,7 +793,7 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Plug model"], "S60TPG")
 
     def test_the_plug_page_is_the_plug_or_the_emulators_forward(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AUTOFLASH_EMULATOR_URL", None)
             self.assertEqual(af.plug_page_url("192.168.0.50"), "http://192.168.0.50/")
@@ -802,13 +802,13 @@ class ReportTests(OutputTestCase):
             self.assertEqual(af.plug_page_url("192.168.60.50"), "http://localhost:8080")
 
     def test_the_report_holds_nothing_private(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         report = af.report_markdown(af.report_fields(self.ctx(), 441, False))
         for private in ("me@example.com", "192.168.0.50", "tasmota-1A2B3C-4567", "1001234abc"):
             self.assertNotIn(private, report)
 
     def test_fallbacks_and_unknown_models_are_reported_as_such(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         ctx = self.ctx(product_model="", wifi_typed=True)
         ctx.state.capture("F4.wifi_route", "setup network")
         fields = dict(af.report_fields(ctx, 60, True))
@@ -819,7 +819,7 @@ class ReportTests(OutputTestCase):
         self.assertIn("(since resuming)", fields["Time taken"])
 
     def test_the_invitation_links_the_thread_and_copies_the_report(self):
-        import tools.s60_autoflash as af
+        import tools.autoflash_cli as af
         copied = []
 
         def body():

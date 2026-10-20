@@ -209,7 +209,7 @@ class Device:
         # answers by closing the connection, which looks exactly like the device
         # being absent.  Presenting the device's own page satisfies the check
         # without asking the operator to set SetOption128.
-        sent = {"User-Agent": "S60Autoflash/1", "Referer": f"{self.base_url}/",
+        sent = {"User-Agent": "Autoflash/1", "Referer": f"{self.base_url}/",
                 "Connection": "close", **(headers or {})}
         if auth:
             token = base64.b64encode(f"{auth['user']}:{auth['password']}".encode()).decode("ascii")

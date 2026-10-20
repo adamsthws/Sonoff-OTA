@@ -2,8 +2,8 @@
 # build tooling stays out of the host. Ubuntu 24.04 matches Linux Mint 22, so
 # the binary it builds also runs on the host.
 #
-#   docker build -t s60-qemu-build -f tools/emulator/qemu-build.Dockerfile tools/emulator
-#   docker run --rm -u "$(id -u):$(id -g)" -v ~/Git/emu/lcgamboa-qemu:/src s60-qemu-build
+#   docker build -t autoflash-qemu-build -f tools/emulator/qemu-build.Dockerfile tools/emulator
+#   docker run --rm -u "$(id -u):$(id -g)" -v ~/Git/emu/lcgamboa-qemu:/src autoflash-qemu-build
 FROM ubuntu:24.04
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

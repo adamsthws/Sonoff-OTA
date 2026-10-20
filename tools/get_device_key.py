@@ -68,7 +68,7 @@ def signed_login_body(email: str, password: str, country_code: str) -> tuple[byt
         "Authorization": "Sign " + base64.b64encode(signature).decode("ascii"),
         "Content-Type": "application/json",
         "X-CK-Appid": APP_ID,
-        "User-Agent": "s60-ota-research/0.1",
+        "User-Agent": "autoflash-research/0.1",
     }
     return body, headers
 
@@ -115,7 +115,7 @@ def get_devices(region: str, token: str) -> list[dict[str, Any]]:
         API[region] + "/v2/device/thing?" + query,
         headers={
             "Authorization": "Bearer " + token,
-            "User-Agent": "s60-ota-research/0.1",
+            "User-Agent": "autoflash-research/0.1",
         },
     )
     if response.get("error") != 0:

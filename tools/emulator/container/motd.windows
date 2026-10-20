@@ -1,11 +1,12 @@
 
-  ┌─ S60 emulator, for Windows ─────────────────────────────────────────────┐
+  ┌─ Autoflash emulator, for Windows ───────────────────────────────────────┐
   │ Windows is the computer on the simulated home Wi-Fi PICSimLabWifi (its  │
-  │ "S60 emulator" adapter is 192.168.60.10). The plug is the emulated      │
-  │ stock Sonoff 1.2.0, already paired with your account, at 192.168.60.50. │
+  │ "Autoflash emulator" adapter is 192.168.60.10). The plug is the         │
+  │ emulated stock Sonoff 1.2.0, already paired with your account, at       │
+  │ 192.168.60.50.                                                          │
   │                                                                         │
   │ Run the conversion on Windows, exactly as on a real plug:               │
-  │     python tools\s60_autoflash.py run                                   │
+  │     python tools\autoflash_cli.py run                                   │
   │                                                                         │
   │ When it asks you to do something to the plug, do it here:               │
   │     plug restart | plug off | plug on | plug cycle 7    (power)         │

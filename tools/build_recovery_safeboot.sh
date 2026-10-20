@@ -4,7 +4,7 @@ umask 077
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 project_dir=$(cd -- "$script_dir/.." && pwd)
-source_dir=${1:-/tmp/s60-tasmota-recovery-src}
+source_dir=${1:-/tmp/autoflash-tasmota-recovery-src}
 private_header=${2:-$project_dir/captures/safeboot-recovery/user_config_override.h}
 output_dir=${3:-$project_dir/captures/safeboot-recovery}
 environment=tasmota32c3-safeboot

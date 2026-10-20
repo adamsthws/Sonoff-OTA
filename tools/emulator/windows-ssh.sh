@@ -1,6 +1,6 @@
 #!/bin/bash
 # SSH into the Windows VM that tools/emulator/windows-test.sh is running, as
-# its user s60, into PowerShell: to drive a test run and read its log from
+# its user autoflash, into PowerShell: to drive a test run and read its log from
 # another terminal, without the screen.
 #
 #   tools/emulator/windows-ssh.sh                   PowerShell on Windows
@@ -9,17 +9,17 @@
 #   tools/emulator/windows-ssh.sh log [-f] [LINES]  the conversion's latest run.log,
 #                                                   its last LINES (50); -f follows it
 #   tools/emulator/windows-ssh.sh get REMOTE LOCAL  copy a file off Windows (scp -r)
-#   tools/emulator/windows-ssh.sh put LOCAL REMOTE  ... onto it, e.g. C:/S60/repo/tools/
+#   tools/emulator/windows-ssh.sh put LOCAL REMOTE  ... onto it, e.g. C:/Autoflash/repo/tools/
 #
-# It logs on with the key windows-test.sh made in ~/.cache/s60-emu/windows/ssh,
+# It logs on with the key windows-test.sh made in ~/.cache/autoflash-emu/windows/ssh,
 # which Windows lets in once it has logged on (start.ps1), about a minute after
 # the run starts; before that, --wait. Its host key is not checked: it is a VM
 # on 127.0.0.1 that is set up afresh now and then. The port is
 # AUTOFLASH_WINDOWS_SSH_PORT (2222), as windows-test.sh's. The checkout is
-# C:\S60\repo, the conversion's captures C:\S60\repo\captures.
+# C:\Autoflash\repo, the conversion's captures C:\Autoflash\repo\captures.
 set -euo pipefail
 
-CACHE=${AUTOFLASH_WINDOWS_CACHE:-$HOME/.cache/s60-emu/windows}
+CACHE=${AUTOFLASH_WINDOWS_CACHE:-$HOME/.cache/autoflash-emu/windows}
 PORT=${AUTOFLASH_WINDOWS_SSH_PORT:-2222}
 KEY=$CACHE/ssh/id_ed25519
 
@@ -32,7 +32,7 @@ win() {  # win SSH-OPTIONS... -- COMMAND...: ssh to Windows
     local options=()
     while [ "$1" != -- ]; do options+=("$1"); shift; done
     shift
-    ssh "${opts[@]}" -p "$PORT" "${options[@]}" s60@127.0.0.1 "$@"
+    ssh "${opts[@]}" -p "$PORT" "${options[@]}" autoflash@127.0.0.1 "$@"
 }
 
 encoded() {  # $1: a PowerShell script, as a command that runs it with nothing to quote
@@ -66,7 +66,7 @@ log)
     done
     [ -n "$follow" ] && [ -t 0 ] && tty=(-t)  # so Ctrl-C stops it on Windows too
     win "${tty[@]}" -- "$(encoded "
-\$log = Get-ChildItem C:\\S60\\repo\\captures -Recurse -Filter run.log -ErrorAction SilentlyContinue |
+\$log = Get-ChildItem C:\\Autoflash\\repo\\captures -Recurse -Filter run.log -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime | Select-Object -Last 1
 if (-not \$log) { 'No run.log yet: the conversion has not started.'; exit 1 }
 '== ' + \$log.FullName
@@ -74,7 +74,7 @@ Get-Content \$log.FullName -Tail $lines$follow")"
     ;;
 get|put)
     [ $# = 3 ] || { echo "$1 takes two paths"; exit 2; }
-    if [ "$1" = get ]; then from="s60@127.0.0.1:$2" to=$3; else from=$2 to="s60@127.0.0.1:$3"; fi
+    if [ "$1" = get ]; then from="autoflash@127.0.0.1:$2" to=$3; else from=$2 to="autoflash@127.0.0.1:$3"; fi
     scp "${opts[@]}" -P "$PORT" -r "$from" "$to"
     ;;
 *)

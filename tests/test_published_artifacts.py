@@ -25,7 +25,7 @@ class PublishedArtifactTests(unittest.TestCase):
         )
 
     def test_the_run_installs_the_pinned_bridge(self):
-        from tools.s60_autoflash import BRIDGE_OTA, ROOT
+        from tools.autoflash_cli import BRIDGE_OTA, ROOT
         self.assertEqual(BRIDGE_OTA.name, "s60-ota-bridge-4.4.3.ota")
         line = f"{sha256_bytes((ROOT / BRIDGE_OTA).read_bytes())}  {BRIDGE_OTA.as_posix()}"
         self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
@@ -34,7 +34,7 @@ class PublishedArtifactTests(unittest.TestCase):
         import re
         from tools.analyze_vendor_ota import analyze
         from tools.build_vendor_ota import app_version
-        from tools.s60_autoflash import BRIDGE_OTA, ROOT
+        from tools.autoflash_cli import BRIDGE_OTA, ROOT
         source = (ROOT / "archive/bridge/main/main.c").read_text()
         project = (ROOT / "archive/bridge/CMakeLists.txt").read_text()
         version = re.search(r'#define BRIDGE_VERSION "([^"]+)"', source).group(1)
@@ -48,7 +48,7 @@ class PublishedArtifactTests(unittest.TestCase):
         self.assertIn(f"bridge {version}\n".encode(), wrapped)
 
     def test_the_bridge_can_back_up_the_stock_flash(self):
-        from tools.s60_autoflash import BRIDGE_OTA, ROOT
+        from tools.autoflash_cli import BRIDGE_OTA, ROOT
         wrapped = (ROOT / BRIDGE_OTA).read_bytes()
         self.assertIn(b"/flash\0", wrapped)
         self.assertIn(b"/efuse\0", wrapped)
@@ -71,14 +71,14 @@ if __name__ == "__main__":
 class PublishedESPHomeTests(unittest.TestCase):
     def test_the_esphome_image_is_pinned(self):
         from tools.autoflash import esphome
-        from tools.s60_autoflash import ROOT
+        from tools.autoflash_cli import ROOT
         image = esphome.published_image()  # refuses a changed file
         line = f"{sha256_bytes(image)}  {esphome.IMAGE.relative_to(ROOT).as_posix()}"
         self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
 
     def test_its_bootloader_is_pinned_and_comes_from_the_same_build(self):
         from tools.autoflash import esphome
-        from tools.s60_autoflash import ROOT
+        from tools.autoflash_cli import ROOT
         bootloader = esphome.published_bootloader()  # refuses a changed or broken file
         line = f"{sha256_bytes(bootloader)}  {esphome.BOOTLOADER.relative_to(ROOT).as_posix()}"
         self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
@@ -95,7 +95,7 @@ class PublishedESPHomeTests(unittest.TestCase):
         self.assertEqual(len(written), len(image))
 
     def test_the_esphome_config_has_no_passwords_and_can_be_adopted(self):
-        from tools.s60_autoflash import ROOT
+        from tools.autoflash_cli import ROOT
         config = (ROOT / "ESPHome" / "sonoff_s60.yaml").read_text()
         for key in ("password:", "encryption:", "auth:", "key:"):
             self.assertNotIn(key, config.replace("password: !lambda", ""), key)
@@ -125,7 +125,7 @@ class PublishedFilesAreInGitTests(unittest.TestCase):
         # name; one not named passes every test here and is missing from a clone.
         import shutil
         import subprocess
-        from tools.s60_autoflash import ROOT
+        from tools.autoflash_cli import ROOT
         if shutil.which("git") is None or not (ROOT / ".git").exists():
             self.skipTest("not a Git checkout")
         pinned = [line.split()[1] for line in (ROOT / "SHA256SUMS").read_text().splitlines() if line.strip()]

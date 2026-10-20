@@ -11,7 +11,7 @@
 #                        SECS if given
 #   plug router on       the Wi-Fi is back, and the plug rejoins by itself
 set -euo pipefail
-RUN=/run/s60emu
+RUN=/run/autoflash-emu
 LOG=/state/logs/uart.log
 
 kill_qemu() {

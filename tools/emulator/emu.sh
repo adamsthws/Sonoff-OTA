@@ -11,19 +11,19 @@
 #   tools/emulator/emu.sh --fresh    put the plug back to its Sonoff backup, and forget the run and the account
 #   tools/emulator/emu.sh --pcap     also record the plug's Wi-Fi traffic (captures/emulation/state/logs)
 #   tools/emulator/emu.sh --rebuild  rebuild the image first
-#   tools/emulator/emu.sh --detach   start in the background; join with: docker attach s60-emu
+#   tools/emulator/emu.sh --detach   start in the background; join with: docker attach autoflash-emu
 #   tools/emulator/emu.sh --no-firewall  without the "computer's" firewall (ufw), on by default
 #   tools/emulator/emu.sh --windows  Windows is the computer, wired in by windows_link.py
 #                                    (from Windows, start it all with tools/emulator/emu.ps1)
 #   tools/emulator/emu.sh --instance N  another emulator beside the first (N = 1-30): its own
-#                                    container (s60-emu-N), state (state-N) and browser
+#                                    container (autoflash-emu-N), state (state-N) and browser
 #                                    port (8080+N), so tests can run side by side
 #
 # Runs a plug from its Sonoff backup, which every conversion keeps in
 # captures/plugs/<MAC>/sonoff-backup/ (or a dump in captures/emulation/; see
 # docs/emulator.md). The backup is only read: the plug runs a copy. Everything
 # the emulator writes stays in captures/emulation/state/, which is private and
-# Git-ignored (from a Windows checkout under WSL: ~/.local/share/s60-emu/state,
+# Git-ignored (from a Windows checkout under WSL: ~/.local/share/autoflash-emu/state,
 # on WSL's own disk); each plug's flash is kept there between runs.
 set -euo pipefail
 
@@ -33,14 +33,14 @@ STATE=$EMU/state
 # A Windows checkout under WSL (/mnt/c, reached through 9p) is far too slow for
 # the plug's flash: a write can take 100 ms, and the bridge then trips its
 # interrupt watchdog while flashing Tasmota. Its state lives on WSL's own disk.
-case "$ROOT" in /mnt/[a-z]/*) STATE=$HOME/.local/share/s60-emu/state ;; esac
+case "$ROOT" in /mnt/[a-z]/*) STATE=$HOME/.local/share/autoflash-emu/state ;; esac
 PY=$ROOT/.venv/bin/python
 # A Windows checkout's .venv is Windows' own: under WSL the NVS generator lives here.
-[ -x "$PY" ] || PY=$HOME/.local/share/s60-emu/venv/bin/python
+[ -x "$PY" ] || PY=$HOME/.local/share/autoflash-emu/venv/bin/python
 # The image tag; override to build/run an isolated image (e.g. the cloud-stub
 # work) without disturbing the shared one.
-IMAGE=${AUTOFLASH_EMU_IMAGE:-s60-emu}
-NAME=s60-emu PORT=8080 LINK_PORT=7860
+IMAGE=${AUTOFLASH_EMU_IMAGE:-autoflash-emu}
+NAME=autoflash-emu PORT=8080 LINK_PORT=7860
 
 cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 yes=0 stub=0 tty=-it plug="" instance=""
 while [ $# -gt 0 ]; do
@@ -65,7 +65,7 @@ while [ $# -gt 0 ]; do
 done
 if [ -n "$instance" ]; then
     case "$instance" in [1-9]|[12][0-9]|30) ;; *) echo "--instance needs a number, 1-30" >&2; exit 2 ;; esac
-    STATE=$STATE-$instance NAME=s60-emu-$instance
+    STATE=$STATE-$instance NAME=autoflash-emu-$instance
     PORT=$((8080 + instance)) LINK_PORT=$((7860 + instance))
 fi
 # The local cloud stub stands in for eWeLink for this instance alone, so it
@@ -196,7 +196,7 @@ qemu_source() {
 # an image from an older checkout would otherwise run unseen.
 built_from=$(cd "$ROOT/tools/emulator" && find emu.Dockerfile fork container -type f -print0 \
     | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
-if [ "$rebuild" = 1 ] || [ "$(docker image inspect -f '{{index .Config.Labels "s60.built-from"}}' \
+if [ "$rebuild" = 1 ] || [ "$(docker image inspect -f '{{index .Config.Labels "autoflash.built-from"}}' \
         "$IMAGE" 2>/dev/null)" != "$built_from" ]; then
     context=$(mktemp -d)
     trap 'rm -rf "$context"' EXIT
@@ -204,7 +204,7 @@ if [ "$rebuild" = 1 ] || [ "$(docker image inspect -f '{{index .Config.Labels "s
           "$ROOT/tools/emulator/container" "$context/"
     qemu_source "$context/qemu-source.tar.xz"
     echo "Building the emulator image (the first time takes a few minutes)..."
-    docker build -q -t "$IMAGE" --label "s60.built-from=$built_from" \
+    docker build -q -t "$IMAGE" --label "autoflash.built-from=$built_from" \
         -f "$context/emu.Dockerfile" "$context" >/dev/null
 fi
 
@@ -291,10 +291,10 @@ stubvol=()
 # held only while this runs (systemd-inhibit), changing no setting.
 awake=()
 if [ "$tty" = -it ] && systemd-inhibit --what=sleep:idle true 2>/dev/null; then
-    awake=(systemd-inhibit --what=sleep:idle --who="S60 emulator" --why="the emulated plug's conversion" --mode=block)
+    awake=(systemd-inhibit --what=sleep:idle --who="Autoflash emulator" --why="the emulated plug's conversion" --mode=block)
 fi
 # Capped: the plug, its router and the tool used about 80 MB between them.
-exec "${awake[@]}" docker run --rm $tty --name "$NAME" --hostname s60-emu-computer \
+exec "${awake[@]}" docker run --rm $tty --name "$NAME" --hostname autoflash-emu-computer \
     --memory "${AUTOFLASH_EMU_MEMORY:-256m}" --cpus "${AUTOFLASH_EMU_CPUS:-2}" \
     --cap-add NET_ADMIN --device /dev/net/tun \
     --sysctl net.ipv4.ip_forward="$(( cloud || windows ))" \

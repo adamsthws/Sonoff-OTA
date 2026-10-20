@@ -91,13 +91,13 @@ def main() -> int:
     print("Run the rest from the repository root, not from tools/.")
     print()
     print("1. Get the pinned Tasmota source, if you do not have it already:")
-    print("     git clone https://github.com/arendst/Tasmota.git /tmp/s60-tasmota-imprintable")
-    print("     git -C /tmp/s60-tasmota-imprintable checkout "
+    print("     git clone https://github.com/arendst/Tasmota.git /tmp/autoflash-tasmota-imprintable")
+    print("     git -C /tmp/autoflash-tasmota-imprintable checkout "
           "db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892")
     print()
     print("2. Build, pointing at this header and this output directory - the")
     print("   defaults are the private build and would use real credentials:")
-    print("     tools/build_recovery_safeboot.sh /tmp/s60-tasmota-imprintable \\")
+    print("     tools/build_recovery_safeboot.sh /tmp/autoflash-tasmota-imprintable \\")
     print(f"       {args.output} \\")
     print(f"       {output_dir}")
     print()

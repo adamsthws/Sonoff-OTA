@@ -1,12 +1,12 @@
 # Build ESPHome/sonoff_s60.yaml on Windows with a portable uv, keeping everything
 # it downloads under one short folder. In the emulator's Windows:
-#     & C:\S60\repo\ESPHome\prototype\windows-uv-build.ps1
+#     & C:\Autoflash\repo\ESPHome\prototype\windows-uv-build.ps1
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest crawls with its progress bar
 $started = Get-Date
 
 # Short: ESP-IDF's folders are deep, and Windows' path limit is 260 characters.
-$root = "C:\S60\b"
+$root = "C:\Autoflash\b"
 $uvVersion = "0.13.0"
 $uvSha256 = "088962f9e7b7bd9ea740c04c650b2a21c8928c345bd99ac24350dc924dba656c"
 New-Item -ItemType Directory -Force $root, "$root\cfg" | Out-Null

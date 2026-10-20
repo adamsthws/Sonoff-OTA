@@ -4,7 +4,7 @@
 #   wifi join NAME       join a network (the home one, or the plug's own)
 #   wifi home            back to the home network
 set -euo pipefail
-RUN=/run/s60emu
+RUN=/run/autoflash-emu
 HOME_SSID=PICSimLabWifi
 
 case "${1:-status}" in
@@ -19,7 +19,7 @@ home)
 join)
     name=${2:?usage: wifi join NAME}
     if [ "$name" = "$HOME_SSID" ]; then
-        sudo /opt/s60emu/bin/wifi-root home
+        sudo /opt/autoflash-emu/bin/wifi-root home
         echo "Joined $HOME_SSID (this computer is 192.168.60.1)."
         exit 0
     fi
@@ -35,7 +35,7 @@ join)
         ;;
     esac
     echo "Joining $name..."
-    if sudo /opt/s60emu/bin/wifi-root join "$name"; then
+    if sudo /opt/autoflash-emu/bin/wifi-root join "$name"; then
         echo "Joined $name; the plug is at $(cat "$RUN/gateway"). Back home: wifi home"
     else
         echo "Could not get an address from $name. Back home: wifi home" >&2

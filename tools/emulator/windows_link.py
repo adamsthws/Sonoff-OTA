@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Wire Windows into the emulator's home network (emu.sh --windows).
 
-Carries Ethernet frames between the "S60 emulator" TAP adapter and the
+Carries Ethernet frames between the "Autoflash emulator" TAP adapter and the
 container's windows-link, over TCP port 7860, so that Windows is a computer
 on the emulated Wi-Fi: the plug's MAC in its ARP table, its mDNS answers, its
 connections in through the Windows firewall - what the conversion tool meets
@@ -31,7 +31,7 @@ import threading
 import time
 import winreg
 
-ADAPTER = "S60 emulator"
+ADAPTER = "Autoflash emulator"
 HOST, PORT = "127.0.0.1", 7860
 NETWORK_CLASS = r"SYSTEM\CurrentControlSet\Control\Network\{4D36E972-E325-11CE-BFC1-08002BE10318}"
 

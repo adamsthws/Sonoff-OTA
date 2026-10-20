@@ -16,7 +16,7 @@ another regional version's power meter.
   built or run lives in containers; nothing is installed on the host.
 - **A Sonoff backup of a stock plug.** Every conversion keeps one for each
   plug, in `captures/plugs/<MAC>/sonoff-backup/`;
-  `tools/s60_readout.py` takes one without converting (over Wi-Fi; the plug is
+  `tools/flash_readout.py` takes one without converting (over Wi-Fi; the plug is
   put back to stock afterwards). `emu.sh` lists them by MAC address - on the
   plug's label, and in your router and the eWeLink app - and asks which plug
   to run when there are several (`--plug <MAC>` says beforehand; with nobody
@@ -112,7 +112,7 @@ tools/emulator/emu.sh --plug 58:cf:79:01:02:03  # run that backed-up plug, witho
 tools/emulator/emu.sh --fresh    # put the plug back to its Sonoff backup, and forget the previous run and the eWeLink account
 tools/emulator/emu.sh --pcap     # also record the plug's Wi-Fi traffic
 tools/emulator/emu.sh --rebuild  # rebuild the image first
-tools/emulator/emu.sh --detach   # start in the background; join with: docker attach s60-emu
+tools/emulator/emu.sh --detach   # start in the background; join with: docker attach autoflash-emu
 tools/emulator/emu.sh --no-firewall  # without the "computer's" firewall, which is on by default
 tools/emulator/emu.sh --windows  # Windows is the computer (see "On Windows"; started by emu.ps1 and windows-test.sh)
 tools/emulator/emu.sh --instance 2  # a second emulator beside the first (see "Several at once")
@@ -129,7 +129,7 @@ few minutes.
 ### Several at once
 
 `--instance N` (1-30, on `emu.sh` and `unattended-test.sh`) runs another
-emulator beside the first: its own container (`s60-emu-N`), state
+emulator beside the first: its own container (`autoflash-emu-N`), state
 (`captures/emulation/state-N/`) and browser port (8080+N), so tests can run side
 by side. Each is its own small network, so the identical plugs do not meet.
 They do meet in eWeLink, though: every clone has the same device id, the cloud
@@ -143,7 +143,7 @@ The terminal becomes a tmux session. Window **conversion** is "your computer
 on the home Wi-Fi": run the tool there exactly as on a real plug,
 
 ```sh
-python tools/s60_autoflash.py run    # or just: run  (options pass through: run --verbose)
+python tools/autoflash_cli.py run    # or just: run  (options pass through: run --verbose)
 ```
 
 and window **plug** follows the plug's serial output, with the dump's secrets
@@ -158,7 +158,7 @@ Wi-Fi:
 | Power-cycle it quickly, N times | `plug cycle N` |
 | Your desktop's Wi-Fi menu | `wifi`, `wifi join NAME`, `wifi home` |
 | Your home Wi-Fi's name and password | `PICSimLabWifi`, empty password |
-| Your computer's password, when sudo asks | `s60` |
+| Your computer's password, when sudo asks | `autoflash` |
 | The plug's web page | http://localhost:8080 |
 
 The tool knows when it runs in the emulator (`AUTOFLASH_EMULATOR_URL`), and its
@@ -255,17 +255,17 @@ which plug runs is asked before Windows starts, when there are several.
 The first run fetches Microsoft's **Windows Server 2025 evaluation ISO** - 8.2
 GB, straight from Microsoft's Evaluation Center link, no sign-up, checked
 against its pinned SHA-256, and kept - and sets Windows up from it in three
-**layers**, each a disk in `~/.cache/s60-emu/windows` holding only its changes
+**layers**, each a disk in `~/.cache/autoflash-emu/windows` holding only its changes
 to the one below:
 
 | Layer | What it adds | Set up by | Takes |
 |---|---|---|---|
-| `installed` | Windows Server Core, as Setup leaves it: the user `s60`, who logs on by itself, and a hook that runs `start.ps1` at logon | the ISO, `unattend.xml`, `firstlogon.ps1` | 5-10 min |
-| `rig` | what only the tests need: Remote Desktop, SSH, the clipboard over VNC (virtio-win's guest tools, pinned), no Windows Update or SConfig, and for the link OpenVPN's TAP driver, the "S60 emulator" adapter and a Python of its own, from the same `windows-bootstrap.ps1` a Windows computer uses | `rig.ps1` | a few min |
+| `installed` | Windows Server Core, as Setup leaves it: the user `autoflash`, who logs on by itself, and a hook that runs `start.ps1` at logon | the ISO, `unattend.xml`, `firstlogon.ps1` | 5-10 min |
+| `rig` | what only the tests need: Remote Desktop, SSH, the clipboard over VNC (virtio-win's guest tools, pinned), no Windows Update or SConfig, and for the link OpenVPN's TAP driver, the "Autoflash emulator" adapter and a Python of its own, from the same `windows-bootstrap.ps1` a Windows computer uses | `rig.ps1` | a few min |
 | `tool` | what the tool's own first run leaves: its portable Python - set up with progress bars on, as in a person's window, and failed if any shows | `tool.ps1` | about a min |
 
 Every run starts from a throwaway layer on `tool`, with this checkout in
-`C:\S60\repo`, in about a minute. `--first-run` starts it on `rig` instead:
+`C:\Autoflash\repo`, in about a minute. `--first-run` starts it on `rig` instead:
 Windows has never seen the tool, so `start.cmd` gets its Python itself, as on
 a new computer. When a layer's scripts change, the next run sets it up again
 first, and every layer above it; `--rebuild-layer=installed|rig|tool` does
@@ -276,7 +276,7 @@ Windows logs on by itself, opens the link and a PowerShell window for the
 conversion - in **OpenConsole**, Windows Terminal's own console, as on Windows
 11, or with `--classic-console` in Windows' classic one, as on Windows 10. Work
 in it in your browser, at **http://localhost:6080** - nothing to install - or
-over Remote Desktop, `localhost:3389`, user `s60`, password `S60-emulator`, or
+over Remote Desktop, `localhost:3389`, user `autoflash`, password `Windows-emulator`, or
 with a VNC viewer on `localhost:5900`, or over SSH (below). Only this computer can reach any of them.
 Copy and paste works in all three: in the browser through the clipboard box in
 noVNC's side panel (the browser keeps pages from reading the clipboard
@@ -291,30 +291,30 @@ plug (and still nothing to the internet without `--cloud`). It is set and
 removed without sudo, and left out if this computer has a network of its own
 at 192.168.60.0/24 - http://localhost:8080 works either way. The terminal you started from is the emulator's, for `plug
 restart` and the serial log; leaving it shuts Windows down. The conversion's
-captures are kept between runs (`~/.cache/s60-emu/windows/captures`), so an
+captures are kept between runs (`~/.cache/autoflash-emu/windows/captures`), so an
 unfinished one can be resumed.
 
 #### SSH, to drive a run from a terminal
 
 Windows runs OpenSSH's server (set up in the `rig` layer) with PowerShell as
 its shell, on `127.0.0.1:2222` (`AUTOFLASH_WINDOWS_SSH_PORT` to change), logged on
-to as `s60` with a key `windows-test.sh` makes once in
-`~/.cache/s60-emu/windows/ssh`. `tools/emulator/windows-ssh.sh` wraps it:
+to as `autoflash` with a key `windows-test.sh` makes once in
+`~/.cache/autoflash-emu/windows/ssh`. `tools/emulator/windows-ssh.sh` wraps it:
 
 ```sh
 tools/emulator/windows-ssh.sh --wait          # until Windows has logged on and lets the key in
-tools/emulator/windows-ssh.sh                 # PowerShell, in C:\Users\s60
-tools/emulator/windows-ssh.sh 'Get-ChildItem C:\S60\repo\captures'  # any PowerShell command
+tools/emulator/windows-ssh.sh                 # PowerShell, in C:\Users\autoflash
+tools/emulator/windows-ssh.sh 'Get-ChildItem C:\Autoflash\repo\captures'  # any PowerShell command
 tools/emulator/windows-ssh.sh log -f          # follow the conversion's latest run.log
-tools/emulator/windows-ssh.sh get C:/S60/repo/captures ./win-captures
-tools/emulator/windows-ssh.sh put tools/s60_autoflash.py C:/S60/repo/tools/
+tools/emulator/windows-ssh.sh get C:/Autoflash/repo/captures ./win-captures
+tools/emulator/windows-ssh.sh put tools/autoflash_cli.py C:/Autoflash/repo/tools/
 ```
 
 The key is let in at logon (`start.ps1`), so about a minute after a run
 starts. SSH is a session of its own, beside the console the run opens, not
 in it: what the conversion shows there is read through its `run.log`. A
 conversion can also be run over SSH itself (`windows-ssh.sh`, then
-`cd C:\S60\repo; .\start.ps1`), in the console SSH gives it, which is neither
+`cd C:\Autoflash\repo; .\start.ps1`), in the console SSH gives it, which is neither
 OpenConsole nor the classic one.
 
 Server Core has no desktop, which is what makes it quick to install and run,
@@ -326,14 +326,14 @@ every way instead, and a Windows 11 computer shows the real one), Windows
 Security's notifications, and
 Windows Terminal's window itself. Terminal cannot start on Server Core, which
 lacks the XAML it draws with; OpenConsole, from the same release (pinned, 12
-MB, fetched once into `~/.cache/s60-emu/windows`), is the same code for what
+MB, fetched once into `~/.cache/autoflash-emu/windows`), is the same code for what
 the tool's output depends on - colours, the escape sequences that redraw a
 line or take a block back off the screen, wrapping - but not Terminal's tabs,
 or its clickable links. Everything the tool does on the network - finding the
 plug, the firewall rule, serving the firmware - is the same as on any Windows.
 
 ```
- ~/.cache/s60-emu/windows/
+ ~/.cache/autoflash-emu/windows/
    server2025-eval.iso ─ Setup ─▶ installed.qcow2      Windows as Setup leaves it
                                     └─ rig.qcow2        + what the tests need
                                         └─ tool.qcow2   + the tool's Python
@@ -354,9 +354,9 @@ The evaluation lasts 180 days from when Windows was installed; after that,
 | A Windows that has never seen the tool | `--first-run` |
 | The test rig, or the tool's Python, set up again | `--rebuild-layer=rig` or `--rebuild-layer=tool`; changing their scripts does it by itself |
 | Windows installed again | `--rebuild-layer=installed`, from the kept ISO |
-| None of it on the computer | `docker rmi s60-win s60-emu`, and delete `~/.cache/s60-emu` |
+| None of it on the computer | `docker rmi autoflash-win autoflash-emu`, and delete `~/.cache/autoflash-emu` |
 
-Everything under `~/.cache/s60-emu` belongs to you, not root, though the
+Everything under `~/.cache/autoflash-emu` belongs to you, not root, though the
 containers write it.
 
 ### On a Windows computer
@@ -373,7 +373,7 @@ which installs what is missing: WSL 2 (one restart - run it again after, and
 it carries on without asking), Ubuntu in it with Docker and the NVS
 generator, Python if there is no 3.10 or newer (python.org's, for your
 account), OpenVPN's TAP-Windows6 driver (pinned installers, checked by
-SHA-256), and the "S60 emulator" adapter - 192.168.60.10/24, no gateway, so
+SHA-256), and the "Autoflash emulator" adapter - 192.168.60.10/24, no gateway, so
 Windows' internet stays where it is, and the lowest interface metric, so the
 tool's mDNS goes out on it. While the emulator is not running the adapter
 shows as disconnected and does nothing. `windows-bootstrap.ps1 -ListPython`
@@ -385,8 +385,8 @@ serial log. To wire a Windows computer to an emulator running elsewhere,
 `windows_link.py --host ADDRESS`.
 
 From a Windows checkout the emulator keeps its state - the plug's flash, the
-serial log, the in-container run's captures - in `~/.local/share/s60-emu/state`
-inside WSL (`\\wsl$\<distribution>\home\<you>\.local\share\s60-emu\state` from
+serial log, the in-container run's captures - in `~/.local/share/autoflash-emu/state`
+inside WSL (`\\wsl$\<distribution>\home\<you>\.local\share\autoflash-emu\state` from
 Windows), not in `captures/emulation/state/`. WSL reaches the Windows drive
 through 9p, where one flash write can take 100 ms, and the bridge then trips its
 interrupt watchdog while writing Tasmota. The Windows tool's own captures stay
@@ -396,9 +396,9 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
 `emu.sh --detach`, keep a WSL window open.
 
 ```
- Windows: s60_autoflash.py ── "S60 emulator" TAP 192.168.60.10
+ Windows: autoflash_cli.py ── "Autoflash emulator" TAP 192.168.60.10
                                    │  windows_link.py ⇄ 127.0.0.1:7860 (length-prefixed frames)
- container s60-emu ────────────────┼───────────────────────────────────────
+ container autoflash-emu ──────────┼───────────────────────────────────────
    windows-link ⇄ tap1 ─┐          │
                         br0 192.168.60.1 (dnsmasq, ufw) ── tap0 ── QEMU (plug .50)
 ```
@@ -407,10 +407,10 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
 
 ```
  your browser ── localhost:8080 ─┐
-                                 │  container s60-emu ("your computer")
+                                 │  container autoflash-emu ("your computer")
  ┌───────────────────────────────┼──────────────────────────────────────────┐
  │  browser-forward ─────────────┘                                          │
- │  s60_autoflash.py, nmcli stand-in, wifi / plug commands                  │
+ │  autoflash_cli.py, nmcli stand-in, wifi / plug commands                  │
  │        │                                                                 │
  │  tap0 192.168.60.1/24 ── dnsmasq (DHCP + DNS; plug fixed at .50)         │
  │        │                    └─ internet: only with --cloud (iptables)    │
@@ -442,7 +442,7 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
 - **The browser.** `browser-forward` takes localhost:8080 to the plug,
   wherever it is (see the Referer check below).
 - **The firewall and sudo.** As on a typical Linux desktop, ufw is on and
-  blocks incoming connections, and sudo asks for your password (`s60`). So
+  blocks incoming connections, and sudo asks for your password (`autoflash`). So
   the conversion has to add its temporary rule for the plug, through sudo,
   and remove it again, and any exit path that leaves it behind shows up. ufw
   allows only what the emulator itself needs: the plug's DHCP and DNS, and
@@ -583,7 +583,7 @@ gives each request its own connection.
   rebuilding the image (`qemu-build.Dockerfile` builds one from a fork
   checkout with the patches applied). Patches in `tools/emulator/fork/` apply
   in name order, each on top of those before it.
-- **The QEMU monitor** is at `/run/s60emu/monitor.sock` in the container.
+- **The QEMU monitor** is at `/run/autoflash-emu/monitor.sock` in the container.
   It does not answer while the guest is in a tight crash loop.
 - **gdb** (PlatformIO's `riscv32-esp-elf-gdb`) against QEMU's `-s` needs a
   pseudo-terminal (run it under `script -qfc`), and hardware breakpoints

@@ -10,5 +10,5 @@ if [ "$1" = is-active ] && [ "$2" = ufw ]; then
     echo inactive
     exit 3
 fi
-echo "systemctl (S60 emulator stand-in): only 'is-active ufw' is supported" >&2
+echo "systemctl (Autoflash emulator stand-in): only 'is-active ufw' is supported" >&2
 exit 2

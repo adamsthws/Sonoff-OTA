@@ -9,7 +9,7 @@ each application slot holds and which one otadata selects.
 The dump holds the plug's Wi-Fi password and eWeLink keys in cleartext. It is
 written only under captures/ (never committed), readable by you alone.
 
-tools/s60_readout.py does the whole readout and uses this; run this alone
+tools/flash_readout.py does the whole readout and uses this; run this alone
 only to read again from a readout bridge that is already on a plug:
 
     python3 tools/dump_stock_flash.py --host <bridge address>

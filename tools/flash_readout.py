@@ -10,7 +10,7 @@ What it costs: the spare slot is overwritten, so whatever was there - often
 the Sonoff version the plug had before its last update - is gone. The Sonoff
 firmware it is running, its settings and its pairing are kept.
 
-    python3 tools/s60_readout.py
+    python3 tools/flash_readout.py
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ from tools.autoflash.prompts import (  # noqa: E402
 )
 from tools.discover_ewelink import discover  # noqa: E402
 from tools.dump_stock_flash import fetch, is_readout_bridge, save_dump  # noqa: E402
-from tools.s60_autoflash import (  # noqa: E402
+from tools.autoflash_cli import (  # noqa: E402
     DELIVERY_PORTS,
     LEGACY_BRIDGE_PASSWORD,
     LEGACY_BRIDGE_PREFIX,

@@ -116,7 +116,7 @@ a run. The run's report gives the lowest reading.
 
 ## The run, step by step
 
-This is what `python3 tools/s60_autoflash.py run` does, in order, for a plug
+This is what `python3 tools/autoflash_cli.py run` does, in order, for a plug
 still on Sonoff's firmware (one already converted is in
 [Changing firmware later](#changing-firmware-later)). First it asks which
 firmware you would like, Tasmota or ESPHome (`--firmware` answers in

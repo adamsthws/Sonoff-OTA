@@ -36,7 +36,7 @@ class VersionTests(unittest.TestCase):
         self.assertEqual(out, __version__)
 
     def test_the_tool_reports_its_version(self):
-        out = subprocess.run([sys.executable, str(ROOT / "tools/s60_autoflash.py"), "--version"],
+        out = subprocess.run([sys.executable, str(ROOT / "tools/autoflash_cli.py"), "--version"],
                              capture_output=True, text=True, check=True).stdout
         self.assertEqual(out.strip(), f"S60 conversion tool {__version__}")
         self.assertTrue(re.search(r"\d+\.\d+\.\d+", out))

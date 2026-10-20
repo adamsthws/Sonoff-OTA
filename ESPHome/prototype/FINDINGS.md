@@ -45,7 +45,7 @@ ESPHome. With `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_TOOL_DIR` and
 `ESPHOME_ESP_IDF_PREFIX`, everything stays in one folder - nothing was written
 anywhere else on Linux or Windows. On Windows the folder needs a short path
 (ESP-IDF's folders are deep; the build worked with `LongPathsEnabled` off at
-`C:\S60\b`). On macOS, `start.sh` uses python.org's signed Python, which uv can
+`C:\Autoflash\b`). On macOS, `start.sh` uses python.org's signed Python, which uv can
 use with `--python`; macOS is untested.
 
 Even so, 3.5 GB and 11 minutes per user is the opposite of fast and
@@ -125,7 +125,7 @@ plug to confirm.
 |---|---|
 | `imprint_image.py` | imprints a built image with the tool's `imprint.py` |
 | `emulator_flash.py` | erases the emulated plug's settings, or writes an image to a slot, for control tests |
-| `windows-uv-build.ps1` | builds `ESPHome/sonoff_s60.yaml` on Windows with a portable uv, all under `C:\S60\b` (tested with the prototype config: 889,984 bytes, as on Linux; 6 minutes with ESP-IDF already downloaded) |
+| `windows-uv-build.ps1` | builds `ESPHome/sonoff_s60.yaml` on Windows with a portable uv, all under `C:\Autoflash\b` (tested with the prototype config: 889,984 bytes, as on Linux; 6 minutes with ESP-IDF already downloaded) |
 | `firmware_choice_mockup.py` | the Tasmota or ESPHome question, as the tool would ask it |
 
 The config itself is `ESPHome/sonoff_s60.yaml`, one self-contained file. Building on Linux, from `ESPHome/`: `esphome compile sonoff_s60.yaml`, then

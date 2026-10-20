@@ -10,7 +10,7 @@ record is in `autoflash-state.json` in the same directory, with the phase eviden
 beside it.
 
 First thing to try, always: start it again - `start.cmd` on Windows, `sh
-start.sh` on macOS or Linux (or `python3 tools/s60_autoflash.py run`; the
+start.sh` on macOS or Linux (or `python3 tools/autoflash_cli.py run`; the
 examples below use that form, and the start scripts take the same options).
 
 It picks up where it stopped. Re-running is safe - every step checks the plug
@@ -74,7 +74,7 @@ computer's address afresh each time and says when it has changed, so nothing
 needs doing. If it chooses the wrong connection, name the address yourself:
 
 ```sh
-python3 tools/s60_autoflash.py run --listen-ip 192.168.1.20
+python3 tools/autoflash_cli.py run --listen-ip 192.168.1.20
 ```
 
 Stay on one connection from the rebuild onwards, ideally wired.
@@ -366,7 +366,7 @@ After a new router or a changed Wi-Fi password, the plug cannot join any more.
 ## Checking a finished plug at any time
 
 ```sh
-python3 tools/s60_autoflash.py step H1 --plug-ip 192.168.1.50
+python3 tools/autoflash_cli.py step H1 --plug-ip 192.168.1.50
 ```
 
 Reads four areas of the plug's memory - the bootloader, the memory map, Safeboot

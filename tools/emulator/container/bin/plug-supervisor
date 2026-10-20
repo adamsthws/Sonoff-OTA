@@ -1,5 +1,5 @@
 #!/bin/bash
-# Keeps the emulated plug powered: runs QEMU while /run/s60emu/power says "on",
+# Keeps the emulated plug powered: runs QEMU while /run/autoflash-emu/power says "on",
 # and starts it again after it is killed (that is what a power cut looks like).
 # Its serial output goes through the redactor before it reaches the log.
 # (`-serial file:/dev/stdout`, not `-serial stdio`: with stdin at /dev/null the
@@ -12,7 +12,7 @@
 # power-on. Nothing in the conversion depends on the reset type: the bridge
 # picks its next boot itself, and Tasmota's quick power-cycle count clears
 # after 8 s of uptime.
-RUN=/run/s60emu
+RUN=/run/autoflash-emu
 LOG=/state/logs/uart.log
 . "$RUN/env"
 

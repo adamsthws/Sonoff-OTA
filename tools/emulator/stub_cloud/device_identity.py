@@ -8,7 +8,7 @@ expects. Run inside the instance container against the read-only stock image,
 writing to the container's own /run (not /state, which is on your disk), so the
 key never leaves that network:
 
-    python3 -I -B device_identity.py /secrets/stock-flash.bin --out /run/s60emu/stub-device.json
+    python3 -I -B device_identity.py /secrets/stock-flash.bin --out /run/autoflash-emu/stub-device.json
 """
 
 from __future__ import annotations
