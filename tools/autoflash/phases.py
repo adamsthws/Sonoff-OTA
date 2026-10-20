@@ -21,19 +21,19 @@ from . import hostsys, interrupt, output
 from .device import Device
 
 ARMED_PHASES = {"commit", "restore"}
-CLOSURE_NAME = {"commit": "s60_commit", "restore": "s60_restore"}
+CLOSURE_NAME = {"commit": "autoflash_commit", "restore": "autoflash_restore"}
 
-LOADER_RE = re.compile(r"s60_urlbeload\('(?P<url>http://[^']+)'\)")
+LOADER_RE = re.compile(r"autoflash_urlbeload\('(?P<url>http://[^']+)'\)")
 # The server prints instructions for a human pasting into the Berry console.
 # This tool delivers the same program over HTTP instead, so echoing them would
 # invite someone to run it a second time - next to the irreversible step.
 MANUAL_INSTRUCTION_RE = re.compile(
     r"paste this as one line|do not prefix it with|paste the loader|"
-    r"^\s*def s60_urlbeload|^\s*s60_(commit|restore)\(|"
+    r"^\s*def autoflash_urlbeload|^\s*autoflash_(commit|restore)\(|"
     r"loading performs no writes|arm separately with",
     re.IGNORECASE,
 )
-ARM_RE = re.compile(r"(?P<name>s60_(?:commit|restore))\(\"(?P<token>[^\"]+)\"\)")
+ARM_RE = re.compile(r"(?P<name>autoflash_(?:commit|restore))\(\"(?P<token>[^\"]+)\"\)")
 
 
 class PhaseError(RuntimeError):

@@ -31,7 +31,12 @@ $PortablePython = @{
 }
 # Where the portable Python, and the record of an installed one, are kept.
 $PythonHome = if ($env:AUTOFLASH_PYTHON_HOME) { $env:AUTOFLASH_PYTHON_HOME } else { Join-Path (Split-Path $PSScriptRoot) ".python" }
-$InstalledMarker = Join-Path $PythonHome "installed-by-s60.json"
+# Until 2.0.0 the record was installed-by-s60.json.
+$InstalledMarker = Join-Path $PythonHome "installed-by-autoflash.json"
+$LegacyMarker = Join-Path $PythonHome "installed-by-s60.json"
+if ((Test-Path $LegacyMarker) -and -not (Test-Path $InstalledMarker)) {
+    Move-Item $LegacyMarker $InstalledMarker -ErrorAction SilentlyContinue
+}
 
 $PythonInstaller = @{
     Name = "Python 3.12 (64-bit, from python.org)"
@@ -47,7 +52,7 @@ function Update-SessionPath {
                 [Environment]::GetEnvironmentVariable("Path", "User")
 }
 
-function Get-Pinned($what, $pin, $dir = (Join-Path $env:TEMP "s60-downloads")) {
+function Get-Pinned($what, $pin, $dir = (Join-Path $env:TEMP "autoflash-downloads")) {
     # Downloaded once, and used only if it is exactly the pinned file.
     New-Item -ItemType Directory -Force $dir | Out-Null
     $file = Join-Path $dir ([IO.Path]::GetFileName($pin.Url))

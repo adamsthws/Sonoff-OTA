@@ -30,7 +30,7 @@ LAYERS=(installed rig tool)
 # The image Setup installs from the ISO, by its name in install.wim:
 # Datacenter, Server Core. (SERVERDATACENTER, without CORE, has the desktop.)
 IMAGE_NAME=${WINDOWS_IMAGE:-Windows Server 2025 SERVERDATACENTERCORE}
-GUEST=/opt/s60win/guest
+GUEST=/opt/autoflash-win/guest
 MON=/run/qemu-monitor.sock
 # Not a secret: the VM is reachable from this computer only (127.0.0.1).
 PASSWORD=${WINDOWS_PASSWORD:-Windows-emulator}

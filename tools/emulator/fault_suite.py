@@ -911,7 +911,7 @@ class Scenario:
     def leftovers(self):
         found = []
         rules = self.ex("ufw", "status").stdout
-        if "8088" in rules or "8089" in rules or "S60" in rules:
+        if "8088" in rules or "8089" in rules or "autoflash" in rules.lower():
             found.append("firewall rule")
         if self.ex("pgrep", "-f", "|".join(HELPERS)).stdout.strip():
             found.append("helper running")

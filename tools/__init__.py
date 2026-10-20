@@ -1,2 +1,2 @@
-"""S60 OTA research tools."""
+"""Autoflash, the plug conversion tool, and the research tools it grew from."""
 

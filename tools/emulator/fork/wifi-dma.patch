@@ -4,7 +4,7 @@
      // do a DMA transfer from the hardware to esp32 memory
      dma_list_item item;
      address_space_read(&address_space_memory, s->dma_inlink_ptr, MEMTXATTRS_UNSPECIFIED, &item, 12);
-+    /* S60 emulation: write only where real hardware would - a descriptor the
++    /* Autoflash emulator: write only where real hardware would - a descriptor the
 +     * driver has handed over (owner set), with room for the frame. Writing
 +     * anywhere else corrupts the guest's heap, which then fails in free(). A
 +     * frame with nowhere to go is dropped, as the hardware drops it. */
@@ -12,7 +12,7 @@
 +        static int shown;
 +        if (shown < 20) {
 +            shown++;
-+            printf("S60DMA: frame dropped - descriptor %08x owner=%u size=%u, frame %d bytes\n",
++            printf("WIFIDMA: frame dropped - descriptor %08x owner=%u size=%u, frame %d bytes\n",
 +                   s->dma_inlink_ptr, item.owner, item.size, length);
 +            fflush(stdout);
 +        }

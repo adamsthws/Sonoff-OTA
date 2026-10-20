@@ -81,7 +81,7 @@ def obtain(path: Path | None, url: str, destination: Path) -> bytes:
         data = path.read_bytes()
         source = str(path.resolve())
     else:
-        request = urllib.request.Request(url, headers={"User-Agent": "S60MigrationPrep/1"})
+        request = urllib.request.Request(url, headers={"User-Agent": "AutoflashMigrationPrep/1"})
         with urlopen(request, timeout=60) as response:
             data = response.read()
         source = url

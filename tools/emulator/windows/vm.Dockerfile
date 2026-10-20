@@ -15,7 +15,7 @@ RUN ln -s vnc.html /usr/share/novnc/index.html \
 # libguestfs boots its own small appliance from the kernel installed above,
 # given a fixed 768 MB so it stays inside the container's memory cap.
 ENV LIBGUESTFS_BACKEND=direct LIBGUESTFS_MEMSIZE=768
-COPY guest/ /opt/s60win/guest/
+COPY guest/ /opt/autoflash-win/guest/
 COPY vm-run.sh /usr/local/bin/vm-run
 RUN chmod 0755 /usr/local/bin/vm-run
 ENTRYPOINT ["/usr/local/bin/vm-run"]

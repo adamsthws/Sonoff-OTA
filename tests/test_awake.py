@@ -28,10 +28,10 @@ class AwakeTests(unittest.TestCase):
     def test_systemd_holds_off_sleep_and_lets_go(self):
         self.assertEqual(awake.keep_awake(), "kept awake with systemd-inhibit")
         time.sleep(0.5)
-        self.assertIn("S60 conversion tool", inhibitors())
+        self.assertIn("Autoflash", inhibitors())
         awake.let_sleep()
         time.sleep(0.5)
-        self.assertNotIn("S60 conversion tool", inhibitors())
+        self.assertNotIn("Autoflash", inhibitors())
 
     @unittest.skipUnless(shutil.which("systemd-inhibit") and sys.platform.startswith("linux"),
                          "systemd-inhibit is not on this system")
@@ -46,13 +46,13 @@ class AwakeTests(unittest.TestCase):
         run = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
         self.assertIn("kept awake", run.stdout.readline())
         time.sleep(0.5)
-        self.assertIn("S60 conversion tool", inhibitors())
+        self.assertIn("Autoflash", inhibitors())
         run.kill()  # no clean-up of its own
         run.wait()
         deadline = time.monotonic() + 15
-        while "S60 conversion tool" in inhibitors() and time.monotonic() < deadline:
+        while "Autoflash" in inhibitors() and time.monotonic() < deadline:
             time.sleep(1)
-        self.assertNotIn("S60 conversion tool", inhibitors())
+        self.assertNotIn("Autoflash", inhibitors())
 
 
 if __name__ == "__main__":

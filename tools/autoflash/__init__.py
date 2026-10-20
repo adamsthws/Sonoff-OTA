@@ -1,4 +1,5 @@
-"""Automated stock-S60 to canonical-Tasmota conversion.
+"""Autoflash: a plug converted over the air, between its stock firmware,
+Tasmota and ESPHome.
 
 The modules here orchestrate the reviewed tools in tools/; they do not
 reimplement any validator, Berry phase or safety gate.

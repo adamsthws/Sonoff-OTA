@@ -5,7 +5,7 @@
      wifi_pkt_rx_ctrl_c3_t *pkt=(wifi_pkt_rx_ctrl_c3_t *)header;
      *pkt=(wifi_pkt_rx_ctrl_c3_t){
 -        .rssi=(signal_strength+(rand()%10)+96),
-+        /* S60 emulation: the signal in dBm, as the hardware gives it - the
++        /* Autoflash emulator: the signal in dBm, as the hardware gives it - the
 +         * access point's own strength (-25 dBm for the plug's network), give
 +         * or take. The fork added 96, and the firmware passes the value on
 +         * as it is: Tasmota reported +71 to +80 dBm, which no Wi-Fi gives. */

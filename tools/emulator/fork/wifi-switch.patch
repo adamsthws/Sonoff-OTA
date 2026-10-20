@@ -4,7 +4,7 @@
      }
  }
  
-+/* S60 emulation: the access points can be switched off, as a router is when
++/* Autoflash emulator: the access points can be switched off, as a router is when
 + * it restarts. While the file named by ESP32_WIFI_AP_OFF_FILE exists, they
 + * send no beacons and answer nothing, and a guest station joined to one is
 + * deauthenticated - a few times, as real access points do, in case one is

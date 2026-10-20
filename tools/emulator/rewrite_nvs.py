@@ -107,7 +107,7 @@ def rewritten(nvs: bytes, ssid: str, dis_server: str | None = None,
 
 
 def rebuild(rows: list[tuple[str, str, str, str]]) -> bytes:
-    with tempfile.TemporaryDirectory(prefix="s60-nvs-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="autoflash-nvs-") as tmp:
         csv, out = Path(tmp) / "nvs.csv", Path(tmp) / "nvs.bin"
         csv.write_text("key,type,encoding,value\n" + "".join(",".join(r) + "\n" for r in rows))
         subprocess.run([sys.executable, "-m", "esp_idf_nvs_partition_gen", "generate",

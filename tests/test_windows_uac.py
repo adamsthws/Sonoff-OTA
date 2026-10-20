@@ -16,7 +16,7 @@ from unittest import mock
 import tools.autoflash_cli as af
 from tools.autoflash import hostsys
 
-PYTHON = r"C:\Users\O'Brien\S60\.python\python.exe"  # an apostrophe, as some names have
+PYTHON = r"C:\Users\O'Brien\Autoflash\.python\python.exe"  # an apostrophe, as some names have
 CANCELLED = "This operation was canceled by the user."
 
 
@@ -73,7 +73,7 @@ class PromptTests(unittest.TestCase):
         with powershell() as run:
             hostsys.elevated([PYTHON, f"program={PYTHON}"])
         script = script_of(run)
-        self.assertIn("-FilePath 'C:\\Users\\O''Brien\\S60\\.python\\python.exe'", script)
+        self.assertIn("-FilePath 'C:\\Users\\O''Brien\\Autoflash\\.python\\python.exe'", script)
         self.assertIn("-ArgumentList 'program=C:\\Users\\O''Brien", script)
 
     def test_a_program_alone_has_no_argument_list(self):
@@ -123,7 +123,7 @@ class FirewallRuleTests(unittest.TestCase):
 
         rule = self.open(allowed)
         self.assertEqual((rule.kind, rule.plug_ip, rule.ports), ("windows", "192.168.1.50", [8088, 8089]))
-        self.assertEqual(rule.detail, {"program": PYTHON, "paused": ["{block-1}"]})
+        self.assertEqual(rule.detail, {"program": PYTHON, "paused": ["{block-1}"], "name": "Autoflash"})
 
     def test_yes_without_a_result_still_gives_the_rule(self):
         self.assertEqual(self.open(lambda script: 0).detail["paused"], [])
@@ -131,19 +131,19 @@ class FirewallRuleTests(unittest.TestCase):
     def test_the_elevated_script_admits_only_the_plug_to_this_python(self):
         scripts = []
         self.open(lambda script: scripts.append(script) or 0)
-        self.assertIn("$program = 'C:\\Users\\O''Brien\\S60\\.python\\python.exe'", scripts[0])
+        self.assertIn("$program = 'C:\\Users\\O''Brien\\Autoflash\\.python\\python.exe'", scripts[0])
         self.assertIn("'remoteip=192.168.1.50'", scripts[0])
         self.assertIn("'localport=8088,8089'", scripts[0])
 
     def test_removing_it_on_no_reports_it_left(self):
         rule = hostsys.FirewallRule("windows", "192.168.1.50", [8088, 8089],
-                                    {"program": PYTHON, "paused": ["{block-1}"]})
+                                    {"program": PYTHON, "paused": ["{block-1}"], "name": "Autoflash"})
         with mock.patch.object(hostsys, "elevated", return_value=1223):
             self.assertFalse(hostsys.close_firewall(rule))
         scripts = []
         with mock.patch.object(hostsys, "elevated", side_effect=lambda c: scripts.append(decoded(c)) or 0):
             self.assertTrue(hostsys.close_firewall(rule))
-        self.assertIn("'name=S60 autoflash 192.168.1.50'", scripts[0])
+        self.assertIn("'name=Autoflash 192.168.1.50'", scripts[0])
         self.assertIn("@('{block-1}')", scripts[0])  # the paused block rule, back on
 
     def test_a_rule_that_was_already_there_is_left_without_asking(self):
@@ -171,7 +171,8 @@ class FakeState:
 class ToolTests(unittest.TestCase):
     """What the person sees when they answer the prompt No."""
 
-    RULE = hostsys.FirewallRule("windows", "192.168.1.50", [8088, 8089], {"program": PYTHON, "paused": []})
+    RULE = hostsys.FirewallRule("windows", "192.168.1.50", [8088, 8089],
+                                {"program": PYTHON, "paused": [], "name": "Autoflash"})
 
     def setUp(self):
         self.screen = []
@@ -209,7 +210,7 @@ class ToolTests(unittest.TestCase):
             af.ensure_firewall(ctx)  # does not raise
         screen = "\n".join(self.screen)
         self.assertIn("The firewall rule could not be added", screen)
-        self.assertIn('netsh advfirewall firewall add rule "name=S60 autoflash 192.168.1.50"', screen)
+        self.assertIn('netsh advfirewall firewall add rule "name=Autoflash 192.168.1.50"', screen)
         self.assertIn("Adding it needs administrator rights", screen)
         self.assertEqual(af.recorded_rules(ctx), [])
 
@@ -220,7 +221,7 @@ class ToolTests(unittest.TestCase):
         screen = "\n".join(self.screen)
         self.assertIn("Windows will ask for permission again", screen)
         self.assertIn("Remove the temporary firewall rules yourself", screen)
-        self.assertIn('netsh advfirewall firewall delete rule "name=S60 autoflash 192.168.1.50"', screen)
+        self.assertIn('netsh advfirewall firewall delete rule "name=Autoflash 192.168.1.50"', screen)
         self.assertEqual(af.recorded_rules(ctx), [self.RULE])  # kept, to try again next time
 
     def test_yes_on_the_way_out_forgets_the_rule(self):

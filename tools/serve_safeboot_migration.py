@@ -684,7 +684,7 @@ class MigrationState:
 
 
 class MigrationHandler(http.server.BaseHTTPRequestHandler):
-    server_version = "S60SafebootMigration/1.0"
+    server_version = "AutoflashSafebootMigration/1.0"
     protocol_version = "HTTP/1.1"
     # A request the plug stopped sending part way - its network went, say - is
     # dropped after this long, not waited on for ever: one request at a time is
@@ -819,15 +819,15 @@ def validate_lan_ipv4(value: str, option: str) -> str:
 
 def berry_loader(base_url: str, phase: str) -> str:
     prefix = (
-        "def s60_urlbeload(url) var wc=webclient() wc.begin(url) var st=wc.GET() "
+        "def autoflash_urlbeload(url) var wc=webclient() wc.begin(url) var st=wc.GET() "
         "if st!=200 wc.close() raise 'connection_error',format('status:%i',st) end "
         "var code=wc.get_string() return compile(code)() end "
     )
     url = f"{base_url}/berry/{phase}.be"
     if phase in {"commit", "restore"}:
-        name = "s60_commit" if phase == "commit" else "s60_restore"
-        return prefix + f"{name}=s60_urlbeload('{url}')"
-    return prefix + f"return s60_urlbeload('{url}')"
+        name = "autoflash_commit" if phase == "commit" else "autoflash_restore"
+        return prefix + f"{name}=autoflash_urlbeload('{url}')"
+    return prefix + f"return autoflash_urlbeload('{url}')"
 
 
 def wait_for_result(server: Any, state: MigrationState, wait: float, idle: float) -> str:
@@ -952,7 +952,7 @@ def main() -> int:
     print("\nPaste this as ONE line in the Berry console (do not prefix it with `br`):")
     print(berry_loader(base_url, args.phase))
     if args.phase in {"commit", "restore"}:
-        function_name = "s60_commit" if args.phase == "commit" else "s60_restore"
+        function_name = "autoflash_commit" if args.phase == "commit" else "autoflash_restore"
         print("\nLoading performs no writes. After it prints a loaded closure, arm separately with:")
         print(f'{function_name}("{state.arm_token}")')
 

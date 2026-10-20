@@ -74,20 +74,20 @@ class LoaderTests(unittest.TestCase):
 
     def test_short_loader_is_equivalent_and_much_shorter(self):
         printed = (
-            "def s60_urlbeload(url) var wc=webclient() wc.begin(url) var st=wc.GET() "
+            "def autoflash_urlbeload(url) var wc=webclient() wc.begin(url) var st=wc.GET() "
             "if st!=200 wc.close() raise 'connection_error',format('status:%i',st) end "
-            f"var code=wc.get_string() return compile(code)() end s60_commit=s60_urlbeload('{self.URL}')"
+            f"var code=wc.get_string() return compile(code)() end autoflash_commit=autoflash_urlbeload('{self.URL}')"
         )
-        compact = short_loader(self.URL, assign_to="s60_commit")
+        compact = short_loader(self.URL, assign_to="autoflash_commit")
         self.assertLess(len(compact), len(printed) / 2)
-        for fragment in ("webclient()", self.URL, "compile(", "s60_commit="):
+        for fragment in ("webclient()", self.URL, "compile(", "autoflash_commit="):
             self.assertIn(fragment, compact)
 
     def test_loader_url_and_arm_token_are_parsed_from_server_output(self):
-        printed = f"return s60_urlbeload('{self.URL}')"
+        printed = f"return autoflash_urlbeload('{self.URL}')"
         self.assertEqual(LOADER_RE.search(printed).group("url"), self.URL)
-        found = ARM_RE.search('s60_commit("d2_fjQTqh4KzfHDFSefx")')
-        self.assertEqual(found.group("name"), "s60_commit")
+        found = ARM_RE.search('autoflash_commit("d2_fjQTqh4KzfHDFSefx")')
+        self.assertEqual(found.group("name"), "autoflash_commit")
         self.assertEqual(found.group("token"), "d2_fjQTqh4KzfHDFSefx")
 
     def test_armed_phase_refuses_to_run_without_a_confirmation_callback(self):
@@ -809,7 +809,7 @@ class PhaseWaitTests(unittest.TestCase):
         release = threading.Event()
         runner.device = mock.Mock(berry_fire=mock.Mock(side_effect=lambda *a, **k: release.wait(5)))
         runner.log = mock.Mock()
-        runner._start('s60_commit("x")')
+        runner._start('autoflash_commit("x")')
         release.set()
         runner.device.berry_fire.assert_called_once()
 
@@ -1093,7 +1093,7 @@ class BerryFireTests(unittest.TestCase):
         device = Device("10.0.0.63")
         for error in (http.client.IncompleteRead(b""), ConnectionResetError(54, "reset")):
             with mock.patch.object(device, "berry", side_effect=error):
-                self.assertFalse(device.berry_fire('s60_commit("x")'))
+                self.assertFalse(device.berry_fire('autoflash_commit("x")'))
 
     def test_other_errors_still_surface(self):
         from unittest import mock

@@ -132,6 +132,8 @@ PINNED_ARTIFACTS = {
 }
 
 RECOVERY_MODE = "private-volatile-wifi-safeboot-v1"
+# What validate_recovery_safeboot.py's report says it is.
+RECOVERY_KIND = "volatile-wifi-recovery-safeboot"
 # The published recovery image, with placeholders where credentials go. A user's
 # copy is that file with their own network details written in - no local build.
 IMPRINTED_MODE = "public-imprinted-safeboot-v1"
@@ -410,7 +412,7 @@ def require_recovery_manifest(manifest_path: Path, manifest: dict[str, Any]) -> 
         raise ValueError("recovery validation report hash differs")
     expected = {
         "schema": 1,
-        "kind": "s60-volatile-wifi-recovery-safeboot",
+        "kind": RECOVERY_KIND,
         "tasmota_commit": OFFICIAL_TASMOTA_COMMIT,
         "size": len(image),
         "sha256": sha256_bytes(image),

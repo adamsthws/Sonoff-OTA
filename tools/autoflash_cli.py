@@ -5437,8 +5437,8 @@ def python_description() -> str:
     portable = Path(os.environ.get("AUTOFLASH_PYTHON_HOME") or ROOT / ".python").resolve()
     if portable in running.parents:
         source = "portable"
-    elif (hostsys.IS_MAC and (portable / "installed-by-s60").exists()
-          and "Python.framework" in running.parts):
+    elif (hostsys.IS_MAC and "Python.framework" in running.parts
+          and any((portable / name).exists() for name in ("installed-by-autoflash", "installed-by-s60"))):
         source = "installed by start.sh"
     elif sys.prefix != sys.base_prefix:
         source = "in a virtual environment"
@@ -5849,7 +5849,7 @@ def _main() -> int:
     # and is remembered (tools/autoflash/interrupt.py).
     interrupt.install()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", action="version", version=f"S60 conversion tool {__version__}")
+    parser.add_argument("--version", action="version", version=f"Autoflash {__version__}")
     parser.add_argument("command", choices=["run", "status", "step", "list", "cleanup"])
     parser.add_argument("step_id", nargs="?")
     parser.add_argument(

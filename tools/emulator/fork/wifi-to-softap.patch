@@ -7,7 +7,7 @@ index dd73ca7..8a8c0c2 100644
  }
  
 +
-+/* S60 emulation: the host side of the tap as a station of the guest's SoftAP,
++/* Autoflash emulator: the host side of the tap as a station of the guest's SoftAP,
 + * alongside the guest's own station link with the fork's access points - the
 + * guest may run both at once, as Tasmota and ESPHome do while trying Wi-Fi
 + * details their setup page was given (AP+STA). Kept apart from ap_state and
@@ -222,7 +222,7 @@ index dd73ca7..8a8c0c2 100644
                  ap_info=&access_points[i];
                  break;
          }
-+        /* S60 emulation: one sent to an access point by its MAC (authenticating,
++        /* Autoflash emulator: one sent to an access point by its MAC (authenticating,
 +         * associating) is answered whatever channel the radio is on. With its
 +         * own SoftAP up and a station on it (AP+STA), the guest stays on the
 +         * SoftAP's channel - a real one moves its SoftAP to the router's. */

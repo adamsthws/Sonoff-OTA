@@ -16,7 +16,7 @@ class FirewallCommandTests(unittest.TestCase):
     def test_ufw_rule_admits_only_the_plug_on_both_ports(self):
         add, remove = hostsys.firewall_commands("ufw", "192.168.1.50", [8088, 8089])
         self.assertEqual(add, ["ufw", "allow", "from", "192.168.1.50", "to", "any", "port",
-                               "8088,8089", "proto", "tcp", "comment", "S60 autoflash"])
+                               "8088,8089", "proto", "tcp", "comment", "Autoflash"])
         self.assertEqual(remove, ["ufw", "delete", "allow", "from", "192.168.1.50", "to", "any",
                                   "port", "8088,8089", "proto", "tcp"])
 
@@ -28,10 +28,21 @@ class FirewallCommandTests(unittest.TestCase):
 
     def test_windows_rule_is_named_per_plug_and_removed_by_name(self):
         add, remove = hostsys.firewall_commands("windows", "192.168.1.50", [8088, 8089])
-        self.assertIn("name=S60 autoflash 192.168.1.50", add)
+        self.assertIn("name=Autoflash 192.168.1.50", add)
         self.assertIn("remoteip=192.168.1.50", add)
         self.assertIn("localport=8088,8089", add)
-        self.assertEqual(remove[-1], "name=S60 autoflash 192.168.1.50")
+        self.assertEqual(remove[-1], "name=Autoflash 192.168.1.50")
+
+    def test_a_windows_rule_is_removed_by_the_name_it_was_added_under(self):
+        # One a run before 2.0.0 added has no name with it: it was called that.
+        for detail, name in (({"name": "Autoflash"}, "Autoflash"), ({}, "S60 autoflash")):
+            rule = hostsys.FirewallRule("windows", "192.168.1.50", [8088],
+                                        {"program": r"C:\Python\python.exe", **detail})
+            with mock.patch.object(hostsys, "IS_WINDOWS", True):
+                self.assertIn(f'"name={name} 192.168.1.50"', hostsys.undo_commands(rule)[0])
+            with mock.patch.object(hostsys, "_elevated_powershell", return_value=0) as ran:
+                self.assertTrue(hostsys.close_firewall(rule))
+            self.assertIn(f"'name={name} 192.168.1.50'", ran.call_args[0][0])
 
     def test_a_rule_that_was_already_there_is_left_alone(self):
         rule = hostsys.FirewallRule("macos", "192.168.1.50", [8088], {"preexisting": True})
@@ -70,16 +81,19 @@ class FirewallCommandTests(unittest.TestCase):
         # Seen in the fault suite: a run stopped with Ctrl-C as ufw added the
         # rule, before it was recorded; the next took it for the computer's own.
         status = ("Status: active\n\nTo                         Action      From\n"
-                  "8088/tcp                   ALLOW       192.168.1.50               # S60 autoflash\n")
-        with mock.patch.object(hostsys, "active_firewall", return_value="ufw"), \
-             mock.patch.object(hostsys, "elevated_output",
-                               side_effect=[(0, "Skipping adding existing rule\n"), (0, status)]), \
-             mock.patch.object(hostsys, "elevated", return_value=0) as elevated:
-            rule = hostsys.open_firewall("192.168.1.50", [8088])
-            self.assertFalse(rule.detail.get("preexisting"))
-            self.assertTrue(rule.detail.get("left_by_earlier_run"))
-            self.assertTrue(hostsys.close_firewall(rule))
-        elevated.assert_called_once()
+                  "8088/tcp                   ALLOW       192.168.1.50               # {}\n")
+        # Its comment now, and before 2.0.0.
+        for comment in ("Autoflash", "S60 autoflash"):
+            with mock.patch.object(hostsys, "active_firewall", return_value="ufw"), \
+                 mock.patch.object(hostsys, "elevated_output",
+                                   side_effect=[(0, "Skipping adding existing rule\n"),
+                                                (0, status.format(comment))]), \
+                 mock.patch.object(hostsys, "elevated", return_value=0) as elevated:
+                rule = hostsys.open_firewall("192.168.1.50", [8088])
+                self.assertFalse(rule.detail.get("preexisting"), comment)
+                self.assertTrue(rule.detail.get("left_by_earlier_run"), comment)
+                self.assertTrue(hostsys.close_firewall(rule))
+            elevated.assert_called_once()
 
     def test_one_without_the_comment_is_the_computers_own(self):
         status = "Status: active\n\n8088/tcp                   ALLOW       192.168.1.50\n"
@@ -167,13 +181,13 @@ class WindowsFirewallTests(unittest.TestCase):
         with mock.patch.object(hostsys, "_elevated_powershell", return_value=0) as ran:
             self.assertTrue(hostsys.close_firewall(rule))
         script = ran.call_args[0][0]
-        self.assertIn("'name=S60 autoflash 192.168.1.50'", script)
+        self.assertIn("'name=S60 autoflash 192.168.1.50'", script)  # added before 2.0.0
         self.assertIn("@('{abc}')", script)
 
     def test_windows_commands_are_shown_with_double_quotes(self):
         with mock.patch.object(hostsys, "IS_WINDOWS", True):
-            shown = hostsys.display(["netsh", "name=S60 autoflash 1.2.3.4", r"program=C:\Python\python.exe"])
-        self.assertEqual(shown, r'netsh "name=S60 autoflash 1.2.3.4" program=C:\Python\python.exe')
+            shown = hostsys.display(["netsh", "name=Autoflash 1.2.3.4", r"program=C:\Python\python.exe"])
+        self.assertEqual(shown, r'netsh "name=Autoflash 1.2.3.4" program=C:\Python\python.exe')
 
 
 class WindowsRootCertificateTests(unittest.TestCase):
@@ -336,7 +350,7 @@ class WindowsElevationTests(unittest.TestCase):
             self.assertEqual(hostsys.elevated(add), 0)
         script = run.call_args[0][0][-1]
         # Start-Process given a list joins it unquoted; one quoted line keeps the name whole.
-        self.assertIn("-ArgumentList 'advfirewall firewall add rule \"name=S60 autoflash 192.168.1.50\" "
+        self.assertIn("-ArgumentList 'advfirewall firewall add rule \"name=Autoflash 192.168.1.50\" "
                       "dir=in action=allow", script)
 
     @unittest.skipUnless(hostsys.IS_WINDOWS, "runs PowerShell")
@@ -348,7 +362,7 @@ class WindowsElevationTests(unittest.TestCase):
             return real([*command[:-1], command[-1].replace("-Verb RunAs ", "")], **kwargs)
 
         with mock.patch.object(hostsys.subprocess, "run", side_effect=without_elevation):
-            self.assertNotEqual(hostsys.elevated(["no-such-program-s60.exe"]), 0)
+            self.assertNotEqual(hostsys.elevated(["no-such-program-autoflash.exe"]), 0)
 
 
 class SystemCommandTests(unittest.TestCase):
@@ -483,7 +497,7 @@ class SudoPromptTests(unittest.TestCase):
 class AdminPasswordTests(unittest.TestCase):
     """With a password_asker, sudo never writes to the terminal itself."""
 
-    def run_with_asker(self, will_ask, password="s60"):
+    def run_with_asker(self, will_ask, password="hunter2"):
         from tools.autoflash import hostsys
         completed = mock.Mock(returncode=0, stdout="Rule added\n")
         asker = mock.Mock(return_value=password)
@@ -500,8 +514,8 @@ class AdminPasswordTests(unittest.TestCase):
         asker, call = self.run_with_asker(True)
         asker.assert_called_once()
         self.assertEqual(call.args[0], ["sudo", "-S", "-p", "", "ufw", "status"])
-        self.assertEqual(call.kwargs["input"], "s60\n")
-        self.assertNotIn("s60", " ".join(call.args[0]))  # never on a command line
+        self.assertEqual(call.kwargs["input"], "hunter2\n")
+        self.assertNotIn("hunter2", " ".join(call.args[0]))  # never on a command line
 
     def test_a_remembered_password_is_not_asked_for(self):
         asker, call = self.run_with_asker(False)
@@ -512,14 +526,14 @@ class AdminPasswordTests(unittest.TestCase):
         from tools.autoflash import hostsys
         with mock.patch.object(hostsys.subprocess, "run",
                                return_value=mock.Mock(returncode=0, stderr="")):
-            self.assertIsNone(hostsys.check_sudo_password("s60"))
+            self.assertIsNone(hostsys.check_sudo_password("hunter2"))
         wrong = mock.Mock(returncode=1, stderr="Sorry, try again.\nsudo: 1 incorrect password attempt\n")
         with mock.patch.object(hostsys.subprocess, "run", return_value=wrong):
             self.assertEqual(hostsys.check_sudo_password("nope"), "wrong")
         refused = mock.Mock(returncode=1, stderr="someone is not in the sudoers file.\n")
         with mock.patch.object(hostsys.subprocess, "run", return_value=refused), \
              self.assertRaisesRegex(OSError, "not in the sudoers file"):
-            hostsys.check_sudo_password("s60")
+            hostsys.check_sudo_password("hunter2")
 
     def test_three_wrong_passwords_give_up(self):
         from tools.autoflash import hostsys, prompts

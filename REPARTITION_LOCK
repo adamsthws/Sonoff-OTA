@@ -1,4 +1,4 @@
-S60 SAFEBOOT REPARTITION SAFETY LOCK
+SAFEBOOT REPARTITION SAFETY LOCK
 
 The final canonical-layout commit server refuses to expose its Berry payload
 while this file exists. Preflight and staging remain available because they do

@@ -46,7 +46,7 @@ SAFETY_FLAG = "--i-understand-this-sends-an-upgrade-command"
 
 
 class CaptureHandler(http.server.BaseHTTPRequestHandler):
-    server_version = "S60Probe/0.1"
+    server_version = "AutoflashProbe/0.1"
 
     def _reject_without_body(self) -> None:
         self.server.captures.append(

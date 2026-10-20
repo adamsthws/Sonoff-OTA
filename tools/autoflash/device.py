@@ -546,7 +546,7 @@ class Device:
         return self._upload("/rs", "Config.dmp", backup, timeout)
 
     def _upload(self, page: str, filename: str, payload: bytes, timeout: float) -> str:
-        boundary = "----s60autoflash" + secrets.token_hex(8)
+        boundary = "----autoflash" + secrets.token_hex(8)
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         body = b"".join(
             [

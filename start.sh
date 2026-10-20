@@ -1,5 +1,5 @@
 #!/bin/sh
-# Start the S60 conversion tool on macOS or Linux:
+# Start Autoflash, the conversion tool, on macOS or Linux:
 #
 #   sh start.sh                 convert a plug (the same as: sh start.sh run)
 #   sh start.sh run --verbose   any of the tool's own commands and options
@@ -18,8 +18,12 @@ set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 PYTHON_HOME=${AUTOFLASH_PYTHON_HOME:-$here/.python}
-# Left by a Python this script installed, so that only that one is ever removed.
-MARKER=$PYTHON_HOME/installed-by-s60
+# Left by a Python this script installed, so that only that one is ever removed;
+# until 2.0.0 it was installed-by-s60.
+MARKER=$PYTHON_HOME/installed-by-autoflash
+if [ -f "$PYTHON_HOME/installed-by-s60" ] && [ ! -f "$MARKER" ]; then
+    mv "$PYTHON_HOME/installed-by-s60" "$MARKER" 2>/dev/null || true
+fi
 
 # Linux: python-build-standalone (Astral's, as uv uses), pinned. The SHA-256s
 # are the ones published in the release's SHA256SUMS.

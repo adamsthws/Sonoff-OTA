@@ -131,7 +131,7 @@ def windows_update_roots() -> ssl.SSLContext | None:
     _windows_update_tried = True
     output.detail("Reading Windows Update's list of trusted root certificates...")
     completed = powershell(
-        "$f = Join-Path $env:TEMP ('s60-roots-' + [guid]::NewGuid() + '.sst'); "
+        "$f = Join-Path $env:TEMP ('autoflash-roots-' + [guid]::NewGuid() + '.sst'); "
         "try { certutil -generateSSTFromWU $f | Out-Null; "
         "$c = New-Object Security.Cryptography.X509Certificates.X509Certificate2Collection; "
         "$c.Import($f); $c | ForEach-Object { [Convert]::ToBase64String($_.RawData) } } "
@@ -454,8 +454,8 @@ def elevated(command: Sequence[str]) -> int:
     if IS_WINDOWS:
         program, *arguments = command
         # One command line, quoted the Windows way: given a list, Start-Process
-        # joins it with spaces and no quotes, so "name=S60 autoflash 1.2.3.4"
-        # would reach netsh as three arguments.
+        # joins it with spaces and no quotes, so "name=Autoflash 1.2.3.4"
+        # would reach netsh as two arguments.
         line = subprocess.list2cmdline(arguments).replace("'", "''")
         # A declined or cancelled prompt makes Start-Process fail, leaving no
         # process - whose exit code would read as 0, success.
@@ -571,7 +571,10 @@ def elevated_output(command: Sequence[str]) -> tuple[int, str]:
 # to someone else - perhaps kept on purpose for the next plug - so it stays.
 ALREADY_PRESENT = ("skipping adding existing rule", "already_enabled")
 
-RULE_NAME = "S60 autoflash"
+# The tool's rule is called this; until 2.0.0 it was LEGACY_RULE_NAME, which
+# one a run left then still has (ufw's comment, Windows' rule name).
+RULE_NAME = "Autoflash"
+LEGACY_RULE_NAME = "S60 autoflash"
 
 
 @dataclass
@@ -764,16 +767,17 @@ def _ports(ports: Sequence[int]) -> str:
 
 
 def firewall_commands(kind: str, plug_ip: str, ports: Sequence[int],
-                      program: str | None = None) -> tuple[list[str], list[str]]:
+                      program: str | None = None, *, name: str = RULE_NAME) -> tuple[list[str], list[str]]:
     """(add, remove) commands for one rule.  Pure, so it can be shown and tested.
 
     On Windows the rule names `program` too: a rule for the program is what
     stops Windows Security asking whether Python may use networks - where a
-    "Cancel" would block the plug whatever the rule says.
+    "Cancel" would block the plug whatever the rule says.  `name`: what the
+    rule is called, for one added under an earlier name.
     """
     if kind == "ufw":
         spec = ["from", plug_ip, "to", "any", "port", _ports(ports), "proto", "tcp"]
-        return (["ufw", "allow", *spec, "comment", RULE_NAME], ["ufw", "delete", "allow", *spec])
+        return (["ufw", "allow", *spec, "comment", name], ["ufw", "delete", "allow", *spec])
     if kind == "firewalld":
         low, high = min(ports), max(ports)
         rule = (f"rule family=ipv4 source address={plug_ip} port port={low}-{high} "
@@ -782,12 +786,12 @@ def firewall_commands(kind: str, plug_ip: str, ports: Sequence[int],
         return (["firewall-cmd", f"--add-rich-rule={rule}"],
                 ["firewall-cmd", f"--remove-rich-rule={rule}"])
     if kind == "windows":
-        name = f"{RULE_NAME} {plug_ip}"
+        named = f"{name} {plug_ip}"
         return (
-            ["netsh", "advfirewall", "firewall", "add", "rule", f"name={name}", "dir=in",
+            ["netsh", "advfirewall", "firewall", "add", "rule", f"name={named}", "dir=in",
              "action=allow", *([f"program={program}"] if program else []),
              "protocol=TCP", f"localport={_ports(ports)}", f"remoteip={plug_ip}"],
-            ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={name}"],
+            ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={named}"],
         )
     if kind == "macos":
         tool = "/usr/libexec/ApplicationFirewall/socketfilterfw"
@@ -806,10 +810,17 @@ def display(command: Sequence[str]) -> str:
     )
 
 
+def rule_name(rule: FirewallRule) -> str:
+    """What `rule` was added as: kept with it from 2.0.0, so one without was
+    added under the name before."""
+    return rule.detail.get("name", LEGACY_RULE_NAME)
+
+
 def undo_commands(rule: FirewallRule) -> list[str]:
     """What to type to undo `rule` by hand, when the tool could not."""
     program = rule.detail.get("program")
-    lines = [display(firewall_commands(rule.kind, rule.plug_ip, rule.ports, program)[1])]
+    lines = [display(firewall_commands(rule.kind, rule.plug_ip, rule.ports, program,
+                                       name=rule_name(rule))[1])]
     # Block rules paused for the run: on again, in an administrator PowerShell.
     lines += [f"Enable-NetFirewallRule -Name {_ps_string(name)}" for name in rule.detail.get("paused", [])]
     return lines
@@ -879,11 +890,13 @@ def _windows_open(plug_ip: str, ports: Sequence[int]) -> FirewallRule:
             paused = json.loads(result.read_text(encoding="utf-8-sig")).get("paused") or []
         except (OSError, ValueError):
             paused = []
-    return FirewallRule("windows", plug_ip, list(ports), {"program": program, "paused": list(paused)})
+    return FirewallRule("windows", plug_ip, list(ports),
+                        {"program": program, "paused": list(paused), "name": RULE_NAME})
 
 
 def _windows_close(rule: FirewallRule) -> bool:
-    _, remove = firewall_commands("windows", rule.plug_ip, rule.ports, rule.detail.get("program"))
+    _, remove = firewall_commands("windows", rule.plug_ip, rule.ports, rule.detail.get("program"),
+                                  name=rule_name(rule))
     paused = ", ".join(_ps_string(name) for name in rule.detail.get("paused", []))
     script = WINDOWS_CLOSE.replace("@REMOVE@", _ps_arguments(remove[1:])).replace("@PAUSED@", paused)
     return _elevated_powershell(script) == 0
@@ -919,12 +932,14 @@ def open_firewall(plug_ip: str, ports: Sequence[int]) -> FirewallRule | None:
 
 
 def ufw_rule_is_ours(plug_ip: str, ports: Sequence[int]) -> bool:
-    """Whether ufw's rule for the plug carries this tool's comment."""
+    """Whether ufw's rule for the plug carries this tool's comment, now or
+    as it was before 2.0.0."""
     code, listing = elevated_output(["ufw", "status"])
     if code != 0:
         return False
     wanted = _ports(ports)
-    return any(plug_ip in line and wanted in line and f"# {RULE_NAME}" in line
+    return any(plug_ip in line and wanted in line
+               and any(f"# {name}" in line for name in (RULE_NAME, LEGACY_RULE_NAME))
                for line in listing.splitlines())
 
 

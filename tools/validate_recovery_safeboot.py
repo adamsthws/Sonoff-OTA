@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate an S60 recovery Safeboot image without displaying credentials."""
+"""Validate a recovery Safeboot image without displaying credentials."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ try:
     from tools.safeboot_migration import (
         OFFICIAL_TASMOTA_COMMIT,
         PINNED_ARTIFACTS,
+        RECOVERY_KIND,
         RECOVERY_MARKER,
         SAFEBOOT_SIZE,
         sha256_bytes,
@@ -26,6 +27,7 @@ except ModuleNotFoundError:
     from safeboot_migration import (
         OFFICIAL_TASMOTA_COMMIT,
         PINNED_ARTIFACTS,
+        RECOVERY_KIND,
         RECOVERY_MARKER,
         SAFEBOOT_SIZE,
         sha256_bytes,
@@ -56,7 +58,7 @@ def validate(image: bytes, header: bytes) -> dict[str, object]:
         raise ValueError("recovery image unexpectedly equals official Safeboot")
     return {
         "schema": 1,
-        "kind": "s60-volatile-wifi-recovery-safeboot",
+        "kind": RECOVERY_KIND,
         "tasmota_commit": OFFICIAL_TASMOTA_COMMIT,
         "size": len(image),
         "sha256": image_hash,

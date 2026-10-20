@@ -103,7 +103,7 @@ class HeldRequestTests(unittest.TestCase):
         plug = Device(f"127.0.0.1:{listener.getsockname()[1]}")
         with mock.patch.object(device, "_keep_alive", wraps=device._keep_alive) as kept:
             with self.assertRaises(TimeoutError):
-                plug._get("/cm", {"cmnd": "Br s60_busy(600000)"}, timeout=0.3)
+                plug._get("/cm", {"cmnd": "Br autoflash_busy(600000)"}, timeout=0.3)
         kept.assert_called_once()
         self.assertTrue(kept.call_args.args[0].getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE))
         self.assertEqual(device.held_requests(plug.host), 1)

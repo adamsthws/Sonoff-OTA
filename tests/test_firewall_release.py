@@ -75,10 +75,10 @@ class QuitTests(unittest.TestCase):
 class EmulatorPasswordTests(unittest.TestCase):
     def test_the_emulator_password_is_given_only_inside_the_emulator(self):
         import os
-        with mock.patch.dict(os.environ, {"AUTOFLASH_EMULATOR_SUDO_PASSWORD": "s60"}), \
+        with mock.patch.dict(os.environ, {"AUTOFLASH_EMULATOR_SUDO_PASSWORD": "autoflash"}), \
              mock.patch.object(hostsys, "IS_WINDOWS", False):
             self.assertEqual(af.emulator_password_hint(),
-                             ["In the emulator, the password is: s60"])
+                             ["In the emulator, the password is: autoflash"])
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AUTOFLASH_EMULATOR_SUDO_PASSWORD", None)
             self.assertEqual(af.emulator_password_hint(), [])
@@ -87,12 +87,12 @@ class EmulatorPasswordTests(unittest.TestCase):
         import os
         ctx = types.SimpleNamespace(state=FakeState([ReleaseFirewallTests.RULE]))
         lines = []
-        with mock.patch.dict(os.environ, {"AUTOFLASH_EMULATOR_SUDO_PASSWORD": "s60"}), \
+        with mock.patch.dict(os.environ, {"AUTOFLASH_EMULATOR_SUDO_PASSWORD": "autoflash"}), \
              mock.patch.object(hostsys, "IS_WINDOWS", False), \
              mock.patch.object(hostsys, "close_firewall", return_value=True), \
              mock.patch.object(af, "tell", side_effect=lines.append), mock.patch.object(af, "say"):
             af.close_firewall_rules(ctx)
-        self.assertIn("In the emulator, the password is: s60", lines)
+        self.assertIn("In the emulator, the password is: autoflash", lines)
 
 
 if __name__ == "__main__":

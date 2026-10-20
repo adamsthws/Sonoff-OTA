@@ -241,7 +241,7 @@ class MigrationValidationTests(unittest.TestCase):
             )
 
     def test_private_recovery_header_round_trip_without_plaintext(self):
-        ssid = "S60 test café"
+        ssid = "Home test café"
         password = 'safe-quote-"-test'
         header = render_header(ssid, password)
         self.assertEqual(header_value(header, "STA_SSID1"), ssid.encode("utf-8"))

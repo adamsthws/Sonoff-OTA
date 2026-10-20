@@ -40,7 +40,7 @@ def _linux() -> str:
     watcher = f"while kill -0 {os.getpid()} 2>/dev/null; do sleep 5; done"
     try:
         process = subprocess.Popen(
-            [tool, "--what=sleep:idle", "--who=S60 conversion tool",
+            [tool, "--what=sleep:idle", "--who=Autoflash",
              "--why=A plug is being converted", "--mode=block", "sh", "-c", watcher],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True)

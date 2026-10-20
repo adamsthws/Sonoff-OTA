@@ -57,7 +57,7 @@ def flash(*, seqs=(5, 6), states=(0xFFFFFFFF, 0xFFFFFFFF), table_md5=True) -> by
         if seq is not None:
             image[base : base + 32] = otadata_record(seq, state)
     for offset, version in ((0x20000, "1.2.0"), (0x210000, "1.1.1")):
-        app = esp_image(version, "s60")
+        app = esp_image(version, "esp32_fw")
         image[offset : offset + len(app)] = app
     return image
 

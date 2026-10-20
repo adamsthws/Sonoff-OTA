@@ -6,7 +6,7 @@ index 6686115..0c17272 100644
  
  int nb_aps=sizeof(access_points)/sizeof(access_point_info);
  
-+/* S60 emulation: tell the container which network the guest broadcasts as a
++/* Autoflash emulator: tell the container which network the guest broadcasts as a
 + * SoftAP (empty: none), so its stand-in `nmcli` can list it. */
 +static void esp32_wifi_report_softap(const char *ssid)
 +{

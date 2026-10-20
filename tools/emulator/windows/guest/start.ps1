@@ -34,7 +34,7 @@ $python = Join-Path (Join-Path C:\Autoflash\rig-python $PortablePython.Folder) p
 Start-Process $python -ArgumentList "tools\emulator\windows_link.py", "--host", $config.link_host `
     -WorkingDirectory $repo
 $welcome = @"
-`$host.UI.RawUI.WindowTitle = 'S60 conversion - $(if ($config.console -eq "openconsole") { "OpenConsole" } else { "classic console" })'
+`$host.UI.RawUI.WindowTitle = 'Autoflash - $(if ($config.console -eq "openconsole") { "OpenConsole" } else { "classic console" })'
 Write-Host ''
 Write-Host 'Windows is on the emulated home Wi-Fi once the link window says Connected.'
 Write-Host 'Run the conversion here, as a Windows user would:'

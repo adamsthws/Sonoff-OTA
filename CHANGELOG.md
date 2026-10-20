@@ -196,6 +196,11 @@ it after the S60 have gone:
   installer's had a password to type (`S60-OTA-Bridge-XXXX`). ESPHome's own,
   once installed, is
   `Sonoff-Setup-CDEF`; official Tasmota keeps Tasmota's names.
+- The tool calls itself Autoflash, not the S60 conversion tool - in
+  `--version`, and to the system it keeps awake - as it is to convert more
+  than one kind of plug. Its firewall rule is called `Autoflash` (it was
+  `S60 autoflash`); one a run of an earlier version left is still found and
+  removed.
 - ESPHome that cannot join your Wi-Fi at the end (I2) is set up through its
   own network by the run, as the mover already was, where before the run
   stopped and left it to you - and both carry on by themselves when you have

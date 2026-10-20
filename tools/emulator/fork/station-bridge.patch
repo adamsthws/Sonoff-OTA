@@ -6,7 +6,7 @@ index 0c17272..85207a0 100644
  
  int nb_aps=sizeof(access_points)/sizeof(access_point_info);
  
-+/* S60 emulation: the MAC this fork's virtual station uses on the guest's
++/* Autoflash emulator: the MAC this fork's virtual station uses on the guest's
 + * SoftAP, so the host side of the tap can take it ($ESP32_WIFI_SOFTAP_FILE.station). */
 +static void esp32_wifi_report_station(const uint8_t *mac)
 +{
@@ -24,7 +24,7 @@ index 0c17272..85207a0 100644
 +    }
 +}
 +
- /* S60 emulation: tell the container which network the guest broadcasts as a
+ /* Autoflash emulator: tell the container which network the guest broadcasts as a
   * SoftAP (empty: none), so its stand-in `nmcli` can list it. */
  static void esp32_wifi_report_softap(const char *ssid)
 @@ -510,6 +528,10 @@ static ssize_t Esp32_WLAN_receive(NetClientState *ncs,
@@ -32,7 +32,7 @@ index 0c17272..85207a0 100644
          }
          Esp32_WLAN_init_ap_frame(s, frame);
 +        if (s->mode == Esp32_Mode_Station && s->ap_state == Esp32_WLAN__STATE_ASSOCIATED) {
-+            /* S60 emulation: from-DS frame, addr3 = the real sender. */
++            /* Autoflash emulator: from-DS frame, addr3 = the real sender. */
 +            memcpy(frame->bssid_address, &buf[6], 6);
 +        }
          Esp32_WLAN_insert_frame(s, frame);
@@ -51,7 +51,7 @@ index 0c17272..85207a0 100644
                      memset(ssid,0,sizeof(ssid));
                      strncpy(ssid,(char *)frame->data_and_fcs+14,MIN(frame->data_and_fcs[13],32));
 +                    if (!memcmp(s->ap_macaddr, (uint8_t[6]){0}, 6)) {
-+                        /* S60 emulation: after a cold start the virtual
++                        /* Autoflash emulator: after a cold start the virtual
 +                         * station has no MAC yet; an all-zero one is not a
 +                         * usable station address (nor a host interface's). */
 +                        memcpy(s->ap_macaddr, (uint8_t[]){0x02,0x53,0x36,0x30,0x00,0x01}, 6);
@@ -72,7 +72,7 @@ index 0c17272..85207a0 100644
 -                memcpy(&ethernet_frame[6], s->ap_macaddr, 6);
 -            else
 +            if(s->ap_state == Esp32_WLAN__STATE_ASSOCIATED) {
-+                /* S60 emulation: bridge, do not NAT. A to-DS frame carries
++                /* Autoflash emulator: bridge, do not NAT. A to-DS frame carries
 +                 * addr1 = BSSID, addr2 = sender, addr3 = destination; put the
 +                 * real ones on the wire so a tap/bridge network sees the
 +                 * plug's own MAC (slirp is happy either way). */

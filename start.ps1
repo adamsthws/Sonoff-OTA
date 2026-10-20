@@ -1,5 +1,5 @@
 <#
-Start the S60 conversion tool on Windows.
+Start Autoflash, the conversion tool, on Windows.
 
     .\start.ps1                 convert a plug (the same as: start.ps1 run)
     .\start.ps1 run --verbose   any of the tool's own commands and options
