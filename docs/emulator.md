@@ -112,7 +112,7 @@ tools/emulator/emu.sh --plug 58:cf:79:01:02:03  # run that backed-up plug, witho
 tools/emulator/emu.sh --fresh    # put the plug back to its Sonoff backup, and forget the previous run and the eWeLink account
 tools/emulator/emu.sh --pcap     # also record the plug's Wi-Fi traffic
 tools/emulator/emu.sh --rebuild  # rebuild the image first
-tools/emulator/emu.sh --detach   # start in the background; join with: docker attach autoflash-emu
+tools/emulator/emu.sh --detach   # start in the background; join: docker exec -it -u ubuntu autoflash-emu tmux attach -t autoflash
 tools/emulator/emu.sh --no-firewall  # without the "computer's" firewall, which is on by default
 tools/emulator/emu.sh --windows  # Windows is the computer (see "On Windows"; started by emu.ps1 and windows-test.sh)
 tools/emulator/emu.sh --instance 2  # a second emulator beside the first (see "Several at once")
@@ -148,7 +148,10 @@ python tools/autoflash_cli.py run    # or just: run  (options pass through: run 
 
 and window **plug** follows the plug's serial output, with the dump's secrets
 masked (Ctrl-b n / Ctrl-b p switch windows; Ctrl-b d leaves, keeping the
-plug's flash). When the tool asks you to do something to the plug or your
+plug's flash). Started with `--detach`, it is joined with
+`docker exec -it -u ubuntu autoflash-emu tmux attach -t autoflash`, and Ctrl-b d
+then leaves it running - not `docker attach`, which shows the session but
+takes no typing. When the tool asks you to do something to the plug or your
 Wi-Fi:
 
 | On a real plug | In the emulator |

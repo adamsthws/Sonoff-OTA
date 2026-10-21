@@ -184,5 +184,5 @@ stub_env=()
     --save "captures/unattended/$stamp" -- --env-file "$answers" "${run_args[@]}" || status=$?
 
 echo "On this computer: ${STATE#"$ROOT/"}/work/captures/unattended/$stamp/"
-[ "$keep" = 1 ] && echo "The emulator is still running: http://localhost:$PORT, or docker attach $NAME"
+[ "$keep" = 1 ] && echo "The emulator is still running: http://localhost:$PORT, or docker exec -it -u ubuntu $NAME tmux attach -t autoflash"
 exit "$status"

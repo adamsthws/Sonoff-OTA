@@ -334,4 +334,7 @@ say "Windows opens the link and a window to run the conversion in."
 say "This terminal is the emulator: plug restart, plug log, ... -"
 say "leaving it (exit, or Ctrl-b d) shuts Windows down too."
 read -r -p "Press Enter to open the emulator here. " _
-docker attach autoflash-emu || true
+# Its own client, not docker attach: a container started detached takes no
+# typing through that (seen 2026-10-22). Leaving it ends this script, which
+# shuts everything down.
+docker exec -it -u ubuntu autoflash-emu tmux attach -t autoflash || true

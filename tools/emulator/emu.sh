@@ -11,7 +11,7 @@
 #   tools/emulator/emu.sh --fresh    put the plug back to its Sonoff backup, and forget the run and the account
 #   tools/emulator/emu.sh --pcap     also record the plug's Wi-Fi traffic (captures/emulation/state/logs)
 #   tools/emulator/emu.sh --rebuild  rebuild the image first
-#   tools/emulator/emu.sh --detach   start in the background; join with: docker attach autoflash-emu
+#   tools/emulator/emu.sh --detach   start in the background; join: docker exec -it -u ubuntu autoflash-emu tmux attach -t autoflash
 #   tools/emulator/emu.sh --no-firewall  without the "computer's" firewall (ufw), on by default
 #   tools/emulator/emu.sh --windows  Windows is the computer, wired in by windows_link.py
 #                                    (from Windows, start it all with tools/emulator/emu.ps1)
@@ -87,7 +87,7 @@ fi
     exit 1
 }
 if docker ps -q --filter "name=^$NAME$" | grep -q .; then
-    echo "The emulator is already running. Attach to it with: docker attach $NAME" >&2
+    echo "The emulator is already running. Join it with: docker exec -it -u ubuntu $NAME tmux attach -t autoflash" >&2
     exit 1
 fi
 
