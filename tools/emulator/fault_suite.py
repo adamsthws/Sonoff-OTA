@@ -69,8 +69,16 @@ STUB_CLOUD = os.environ.get("AUTOFLASH_STUB_CLOUD") == "1"
 def saved(name):
     """A saved starting plug's name. A stub run's are kept apart from the real
     cloud's: their flash is the other kind (emu.sh), so each would be refused,
-    or replaced, by a batch of the other."""
-    return f"stub-{name}" if STUB_CLOUD else name
+    or replaced, by a batch of the other. Each plug has its own (a test copy
+    under another MAC: tools/emulator/copy_plug.py): one saved from another
+    plug - its run records filed under that plug's MAC - is that plug's, and
+    this one's goes beside it, its MAC's last four digits after the name."""
+    base = f"stub-{name}" if STUB_CLOUD else name
+    plugs_saved = EMU / "saved" / base / "captures/plugs"
+    owners = {d.name for d in plugs_saved.iterdir() if d.name != "unidentified"} if plugs_saved.is_dir() else set()
+    if MAC and owners and MAC.replace(":", "-").lower() not in owners:
+        return f"{base}-{MAC.replace(':', '').lower()[-4:]}"
+    return base
 
 
 MAC = None  # --plug: the backed-up plug the emulators run copies of
@@ -111,8 +119,12 @@ OTHER = {"tasmota": "esphome", "esphome": "tasmota"}
 # emulator starting is the plug switched on) and sends the installer again
 # first: the backup itself starts at its own line. C3fb is the fault in that
 # finding and sending again, at C3's own line.
-STARTS = {"C3": (r"Backing up the plug's Sonoff firmware", 12), "C3fb": (r"\] C3  ", 14)}
-STEP_OF = {"C3fb": "C3"}  # the tool's own name for a step
+# F4rs is the moment F4's reset restarts the plug and saves the defaults it
+# rebuilt, with the plug's name and template put in (one restart): a fault
+# there may cut it off before the save, or after.
+STARTS = {"C3": (r"Backing up the plug's Sonoff firmware", 12), "C3fb": (r"\] C3  ", 14),
+          "F4rs": (r"Settings reset to Tasmota's defaults", 3)}
+STEP_OF = {"C3fb": "C3", "F4rs": "F4"}  # the tool's own name for a step
 
 CORE = ([("outage", s) for s in (1, 5, 15, 30, 60, 120, 180)]
         + [("plugoff", s) for s in (1, 5, 30, 180)]
@@ -160,6 +172,38 @@ def scenarios():
     for route, target in C2_ROUTES.items():
         for fault, arg in CORE + NEW + [("cancel", "switch"), ("token", "login")]:
             yield dict(id=sid(route, "C2", fault, arg), route=route, step="C2", fault=fault, arg=arg, at=40)
+    yield from composite_scenarios()
+
+
+def composite_scenarios():
+    """Faults a moment in a step cannot make alone (docs/testing.md):
+
+    ownnet-cut, ownnet-dropupload, ownnet-dropsetup (at C3): the home Wi-Fi
+        gone from the backup, so D1 goes through the installer's own network;
+        then the run cut off just after the upload, or this computer back on
+        the home network during the upload, or while Tasmota is given the Wi-Fi.
+    lostanswer-once (D1): the upload takes, its answer never arrives.
+    seven-times (D4, F4, G1): the plug switched off and on 7 times, which
+        erases a Tasmota's settings; seven-advised (D1): Tasmota cannot join
+        the home Wi-Fi, and that is done when the run advises it.
+    nohook-run (F4): Tasmota will not take F4's name and template at the save.
+    F4rs: a power cut or crash at F4's reset, at 10, 50 and 90% of it."""
+    def one(route, step, fault, arg, at=40):
+        return dict(id=sid(route, step, fault, arg, at), route=route, step=step, fault=fault, arg=arg, at=at)
+
+    for route in C2_ROUTES:
+        for arg in ("cut", "dropupload", "dropsetup"):
+            yield one(route, "C3", "ownnet", arg)
+        yield one(route, "D1", "lostanswer", "once")
+        yield one(route, "D1", "seven", "advised")
+        yield one(route, "D4", "seven", "times")
+    for route in ("sonoff>tasmota", "esphome>tasmota"):
+        for step in ("F4", "G1"):
+            yield one(route, step, "seven", "times")
+        yield one(route, "F4", "nohook", "run")
+        for at, fault, arg in ((10, "plugoff", 1), (50, "plugoff", 1), (90, "plugoff", 1),
+                               (50, "plugoff", 5), (50, "crash", 1)):
+            yield one(route, "F4rs", fault, arg, at)
 
 
 def needs_cloud(sc):
@@ -531,6 +575,8 @@ class Scenario:
         env = dict(os.environ)
         if (self.sc["fault"], self.sc["arg"]) == ("ctrlc", "countdown"):
             env["AUTOFLASH_EMULATOR_COUNTDOWN"] = "30"
+        if self.sc["fault"] == "nohook":
+            env["AUTOFLASH_EMULATOR_NO_AT_SAVE"] = "1"
         with open(self.log, "a") as out:
             out.write(f"--- {' '.join(args[1:])}\n")
             out.flush()
@@ -696,6 +742,71 @@ class Scenario:
                           "login(os.environ[\"EWELINK_EMAIL\"], os.environ[\"EWELINK_PASSWORD\"], \"+44\", \"eu\"); "
                           "print(\"logged in again\")'", timeout=60)
             self.notes["token"] = (out.stdout + out.stderr).strip()[-200:]
+        elif fault == "ownnet":
+            # D1 through the installer's own network (the fallback, below);
+            # and, on it, when the run gets that far: the run cut off just
+            # after the upload, or this computer back on the home network.
+            words, act = {"cut": ("the plug is restarting into Tasmota", self.cut_run),
+                          "dropupload": ("Sending Tasmota (", self.drop_join),
+                          "dropsetup": ("Sending the Wi-Fi details", self.drop_join)}[arg]
+            threading.Thread(target=self.when_said, args=(since, words, act), daemon=True).start()
+            self.fault("fallback", 150, since, headers)
+        elif fault == "lostanswer":
+            # The installer's answer to the upload ("Upload verified") never
+            # reaches this computer, every retransmission dropped too: on only
+            # now, as the backup's flash - which holds the same words - is read.
+            rule = ["INPUT", "-s", "192.168.60.50", "-p", "tcp", "--sport", "80", "-m", "string",
+                    "--string", "Upload verified", "--algo", "bm", "-j", "DROP"]
+            self.notes["answer_dropped"] = self.ex("iptables", "-I", *rule).returncode == 0
+            deadline = time.time() + 600
+            while time.time() < deadline:
+                text = self.current_run(since, headers) or ""
+                if "did not complete" in text or "=== run ended ===" in text or re.search(r"\] D1 done", text):
+                    break
+                time.sleep(1)
+            self.ex("iptables", "-D", *rule)
+        elif fault == "seven" and arg == "times":
+            self.ex(PLUG_CMD, "cycle", "7", timeout=300)
+            self.notes["seven_times"] = True
+        elif fault == "seven" and arg == "advised":
+            # Tasmota sent through the installer cannot join the home Wi-Fi
+            # (gone from just after the upload), and the run advises the 7
+            # power cycles: done, and the Wi-Fi back.
+            if not self.when_said(since, "the plug is restarting into Tasmota", lambda: None):
+                return
+            self.ex(PLUG_CMD, "router", "off")
+            self.say("FAULT: the home Wi-Fi gone after the upload")
+            if self.when_said(since, "Switch the plug off and on 7 times", lambda: None, limit=900):
+                time.sleep(10)  # a person reads it
+                self.say("PERSON: switching the plug off and on 7 times")
+                self.ex(PLUG_CMD, "cycle", "7", timeout=300)
+                self.notes["seven_times"] = True
+            self.ex(PLUG_CMD, "router", "on")
+        elif fault == "nohook":
+            pass  # the run's own condition (run_tool): there is nothing to do to it
+
+    def when_said(self, since, words, act, limit=1800):
+        """Once any run since `since` has said `words`: act(). False if none
+        did within `limit` seconds, or the scenario ended first."""
+        deadline = time.time() + limit
+        while time.time() < deadline and not getattr(self, "ended", False):
+            if any(words in text for m, _, text in run_logs(self.state) if m >= since):
+                act()
+                return True
+            time.sleep(0.3)
+        return False
+
+    def cut_run(self):
+        self.say("FAULT: the tool killed just after the upload")
+        self.signal("KILL", *HELPERS, TOOL)
+        self.notes["cut_after_upload"] = True
+
+    def drop_join(self):
+        time.sleep(3)  # part way
+        self.ex("/opt/autoflash-emu/bin/wifi-root", "home", timeout=60)
+        self.say("FAULT: this computer back on the home network, off the plug's")
+        self.notes["dropped_off"] = True
+        self.dropped = True  # the person stand-in joins again when asked
 
     def offline(self, off):
         """The computer off the network: nothing between it and the plug, and
@@ -734,6 +845,9 @@ class Scenario:
         gone_since = None
         silent = 0  # looks in a row the plug has not answered on its network
         while not stop.is_set():
+            if getattr(self, "dropped", False):
+                joined = self.joined = None
+                self.dropped = False
             joined = joined or getattr(self, "joined", None)
             on_air = self.ex("cat", "/run/autoflash-emu/softap").stdout.strip()
             if joined:
@@ -848,6 +962,8 @@ class Scenario:
             monitor.preheld = True
         monitor.start()
         self.started = time.time()
+        uart = self.state / "logs/uart.log"
+        self.uart_from = uart.stat().st_size if uart.exists() else 0  # this scenario's networks: from here
         attending = threading.Event()
         threading.Thread(target=self.person, args=(attending,), daemon=True).start()
         try:
@@ -867,7 +983,7 @@ class Scenario:
             source, self.target, steps = ROUTES[route]
             if route in AFTER_D1 and step not in CLOUD_STEPS:
                 source = AFTER_D1[route]
-        length = STARTS.get(step, (None, steps[step]))[1]
+        length = STARTS[step][1] if step in STARTS else steps[step]
         self.step_length = length
         delay = max(0.3, sc["at"] / 100 * length)
         if sc["fault"] == "corrupt":
@@ -919,6 +1035,27 @@ class Scenario:
         self.target_final = target
         return self.finish(results, None)
 
+    def names_seen(self):
+        """The names the plug went by on the home network (DHCP, in order,
+        repeats folded) and the networks it put out (its serial log)."""
+        dhcp = self.ex("sh", "-c", "grep DHCPACK /run/autoflash-emu/dnsmasq.log 2>/dev/null"
+                                   " | grep ' 192.168.60.50 '").stdout
+        names, networks = [], []
+        for line in dhcp.splitlines():
+            name = line.split()[-1]
+            if ":" not in name and (not names or names[-1] != name):
+                names.append(name)
+        try:
+            with open(self.state / "logs/uart.log", "rb") as uart:
+                uart.seek(getattr(self, "uart_from", 0))
+                text = uart.read().decode("utf-8", "replace")
+            for network in re.findall(r"WIFIAP: guest SoftAP (\S+) up", text):
+                if not networks or networks[-1] != network:
+                    networks.append(network)
+        except OSError:
+            pass
+        return names, networks
+
     def backup_whole(self):
         backups = list((self.state / "work/captures/plugs").glob("*/sonoff-backup/flash.bin"))
         return bool(backups) and all(b.stat().st_size == 4 * 1024 * 1024 for b in backups)
@@ -935,10 +1072,14 @@ class Scenario:
         return found
 
     def finish(self, results, special):
+        self.ended = True
         sc = self.sc
         converted = "Converted" in results[-1][1]
         fault, arg = sc["fault"], sc["arg"]
         left = self.leftovers()
+        names, networks = self.names_seen()
+        self.notes["names"], self.notes["networks"] = names, networks
+        unknown, final = name_problems(names, networks, getattr(self, "target_final", self.target))
         if not special:
             if self.notes.get("mistimed"):
                 special = "MISTIMED"
@@ -961,6 +1102,14 @@ class Scenario:
                 special = "FAIL-DISTURBED"  # the refused run must not disturb the first
             elif fault == "diskfull" and not self.backup_whole():
                 special = "FAIL-BAD-BACKUP"  # never on without the whole backup
+            elif fault == "nohook" and "Settings reset to Tasmota's defaults, keeping the Wi-Fi; the plug" \
+                    not in re.sub(r"\s+", " ", "".join(t for _, _, t in run_logs(self.state))):
+                special = "NOT-FIRED"  # F4 took the name and template at the save after all
+            elif converted and (unknown or final):
+                # A name this plug should never have, or not its converted
+                # one at the end (docs/device-names.md).
+                special = "BAD-NAME"
+                self.notes["bad_names"] = unknown + ([final] if final else [])
             elif left and converted:
                 special = "LEFTOVER"
         bricked = False
@@ -996,6 +1145,26 @@ class Scenario:
                 (keep / "uart-tail.log").write_text(uart.read_text(errors="replace")[-300_000:])
         sh("docker", "stop", name(self.n), timeout=120)
         return row
+
+
+def name_problems(names, networks, target):
+    """The names (DHCP) and networks the plug had that this plug should never
+    have, and - when the last name is not the converted plug's - that name.
+    A plug's names are made from its MAC (docs/device-names.md); those of
+    earlier releases are allowed, for a plug saved by one."""
+    raw = (MAC or "").replace(":", "").replace("-", "").lower()
+    if len(raw) != 12:
+        return [], None
+    two, three = raw[-4:].upper(), raw[-6:]
+    ap = f"{(int(raw, 16) + 1) & 0xFFFFFFFFFFFF:012X}"[-6:]
+    allowed = {"espressif", f"autoflash-recovery-{two}", f"tasmota-{three}", f"esphome-{three}", f"ESP_{ap}",
+               f"Sonoff-Setup-{two}", f"sonoff-s60-{three}", "s60-ota-bridge", f"sonoff-s60-mover-{three}",
+               f"S60-OTA-Bridge-{two}"}
+    tasmotas_own = re.compile(rf"^tasmota-{three.upper()}-\d{{4}}$")  # its settings erased
+    unknown = [n for n in dict.fromkeys(names + networks) if n not in allowed and not tasmotas_own.match(n)]
+    converted = {"tasmota": f"tasmota-{three}", "esphome": f"esphome-{three}", "sonoff": "espressif"}.get(target)
+    final = names[-1] if names and converted and names[-1] != converted else None
+    return unknown, final
 
 
 def key(scenario_id):

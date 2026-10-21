@@ -49,7 +49,7 @@ person converting it again would have.
 ## The fault suite
 
 `tools/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,453 scenarios:
+every direction - 1,481 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
@@ -72,6 +72,19 @@ every direction - 1,453 scenarios:
   - the plug falling back to its own setup network, and the person joining
     it before being asked: the run must find the plug there and carry on by
     itself.
+- **Faults that take two things at once** (`composite_scenarios()`):
+  - Tasmota sent through the installer's own network (the home Wi-Fi gone
+    from the backup), and then the run cut off just after the upload, or the
+    computer back on the home network during the upload or while Tasmota is
+    given the Wi-Fi (`ownnet-cut`, `ownnet-dropupload`, `ownnet-dropsetup`);
+  - the installer's answer to the upload never arriving, though the upload
+    took (`lostanswer-once`);
+  - the plug switched off and on 7 times, which erases a Tasmota's settings:
+    at D4, F4 and once converted (G1), and when the run advises it, for a
+    Tasmota that cannot join the home Wi-Fi (`seven-times`, `seven-advised`);
+  - F4's Berry driver refused, so F4 falls back to two restarts
+    (`nohook-run`), and a power cut or crash at F4's reset itself, at 10, 50
+    and 90% of it (step `F4rs`).
 - **When:** at 40% of the step's usual time; at the riskiest steps also at 10%
   and 90%, and two faults running.
 
@@ -82,7 +95,28 @@ joining the plug's own network, where the run says to - until the plug is
 converted, or four runs have failed. A scenario **passes** when the plug ends
 up converted and checked - Tasmota read back against the official files,
 ESPHome answering and confirmed, Sonoff's firmware back on the network - and
-the run left no firewall rule or helper behind.
+the run left no firewall rule or helper behind. It is **BAD-NAME** when the
+plug went by a name it never should (the names are made from its MAC:
+[device-names.md](device-names.md)), on the home network or as a network of
+its own, or did not end under its converted name; every name it had is kept
+with the result.
+
+The emulated computer's list of networks keeps one the plug put out for a
+minute after it has gone or been renamed, as a real computer's does (the
+emulator's `nmcli`; a number of seconds in `/run/autoflash-emu/scan-cache`
+in the container changes it, 0 for only what is on air now). A run then sees
+what a person would: the installer's network still listed as Tasmota starts,
+or `ESP_` and the access-point MAC for a moment as Tasmota names its own.
+
+To run the suite on another plug - so that names made from the MAC can be
+seen to follow it - make a test copy of a backed-up one with another MAC, and
+give that to `--plug`; its saved starting plugs are its own (the MAC's last
+four digits after the name):
+
+```sh
+python -I tools/emulator/copy_plug.py --from MAC --to 12:34:56:ab:cd:ef
+python -I tools/emulator/copy_plug.py --remove 12:34:56:ab:cd:ef
+```
 
 ```sh
 tools/emulator/fault_suite.py --plug=MAC prep           # the starting plugs (eWeLink)

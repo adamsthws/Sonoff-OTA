@@ -1,8 +1,12 @@
 #!/bin/bash
 # Stand-in for NetworkManager's nmcli, just enough for the conversion tool's
 # Wi-Fi scan (`nmcli -t -f SSID device wifi list`). The emulated "air" holds
-# the fork's fixed access points and, while it is broadcasting one, the
-# plug's own network (reported by our QEMU patch).
+# the fork's fixed access points and the plug's own networks: the one it is
+# broadcasting now (reported by our QEMU patch), and - as a real computer's
+# list does - every one it went out under in the last minute, since gone or
+# renamed (the "WIFIAP: guest SoftAP <name> up" lines in its serial log). Put
+# another number of seconds in $RUN/scan-cache to remember them for; 0 lists
+# only the one on air now.
 RUN=/run/autoflash-emu
 if [[ " $* " != *" device wifi list"* && " $* " != *" dev wifi list"* && " $* " != *" d wifi list"* ]]; then
     echo "nmcli (Autoflash emulator stand-in): only 'device wifi list' is supported" >&2
@@ -10,4 +14,52 @@ if [[ " $* " != *" device wifi list"* && " $* " != *" dev wifi list"* && " $* " 
 fi
 softap=$(cat "$RUN/softap" 2>/dev/null || true)
 [ -n "$softap" ] && echo "$softap"
+/opt/venv/bin/python - "$RUN" "$softap" <<'EOF' 2>/dev/null
+import os, re, sys, time
+run, on_air = sys.argv[1], sys.argv[2]
+uart, seen_file, offset_file = "/state/logs/uart.log", f"{run}/air.seen", f"{run}/air.offset"
+try:
+    keep = float(open(f"{run}/scan-cache").read().strip())
+except (OSError, ValueError):
+    keep = 60.0
+now = time.time()
+seen = {}
+try:
+    for line in open(seen_file):
+        stamp, _, name = line.rstrip("\n").partition(" ")
+        seen[name] = float(stamp)
+except OSError:
+    pass
+try:
+    size = os.path.getsize(uart)
+except OSError:
+    size = 0
+try:
+    offset = int(open(offset_file).read())
+except (OSError, ValueError):
+    offset = size  # this container's first look: what went out before it is not on air
+if offset > size:  # the log started again
+    offset = 0
+try:
+    with open(uart, "rb") as log:
+        log.seek(offset)
+        for name in re.findall(rb"WIFIAP: guest SoftAP (\S+) up", log.read(size - offset)):
+            seen[name.decode("utf-8", "replace")] = now
+except OSError:
+    pass
+if on_air:
+    seen[on_air] = now
+seen = {name: stamp for name, stamp in seen.items() if now - stamp <= keep}
+try:
+    with open(seen_file + ".new", "w") as out:
+        out.writelines(f"{stamp} {name}\n" for name, stamp in seen.items())
+    os.replace(seen_file + ".new", seen_file)
+    with open(offset_file, "w") as out:
+        out.write(str(size))
+except OSError:
+    pass  # listed all the same; remembered from the next look that can write
+for name in sorted(seen, key=seen.get, reverse=True):
+    if name != on_air:
+        print(name)
+EOF
 printf '%s\n' PICSimLabWifi Espressif MasseyWifi

@@ -12,6 +12,7 @@ import base64
 import http.client
 import io
 import json
+import os
 import mimetypes
 import re
 import secrets
@@ -339,6 +340,8 @@ class Device:
 
         True once Tasmota took the driver; False from a firmware without
         Berry (the startup firmware) or one that refused it."""
+        if os.environ.get("AUTOFLASH_EMULATOR_NO_AT_SAVE"):
+            return False  # the emulator's tests: as a Tasmota that would not take it
         if any("'" in c or "\\" in c for c in commands):
             raise ValueError("a command for at_next_save cannot hold a quote or backslash")
         if any(c.split()[0].lower() in ("savedata", "backlog", "restart", "reset") for c in commands):
