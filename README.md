@@ -159,6 +159,8 @@ report back on how it went here:
   nobody at the keyboard - for testing.
 - **[docs/testing.md](docs/testing.md)** - how the tool is tested: unit tests,
   the emulator, every fault in the way of every step, and real plugs.
+- **[docs/device-names.md](docs/device-names.md)** - the name the plug goes by
+  at each stage, where each is set, and how to change them.
 - **[docs/upstream-contributions.md](docs/upstream-contributions.md)** - bugs
   found and fixed while building this project.
 - **[archive/docs/reference/](archive/docs/reference/)** - the original
