@@ -60,13 +60,29 @@ class NamesTests(SetupNetworkTestCase):
 
 
 class SearchTests(SetupNetworkTestCase):
-    def find(self, visible, ctx):
-        with mock.patch.object(prompts, "scan_wifi_ssids", return_value=visible):
+    def find(self, visible, ctx, *later):
+        scans = iter([visible, *later])
+        with mock.patch.object(prompts, "scan_wifi_ssids", side_effect=lambda **_: next(scans, visible)), \
+             mock.patch.object(prompts.time, "sleep"):
             return prompts.find_ssid(af.setup_networks(ctx))
 
     def test_the_plugs_network_is_found_by_either_name(self):
         self.assertEqual(self.find(["Home", "tasmota-ABCDEF-1234"], self.ctx()), "tasmota-ABCDEF-1234")
         self.assertEqual(self.find(["Home", "ESP_ABCDF0"], self.ctx()), "ESP_ABCDF0")
+
+    def test_its_real_name_over_the_one_it_had_for_a_moment(self):
+        # Tasmota turns its setup network on, then names it: for that moment
+        # it is ESP-IDF's ESP_ABCDF0, which a computer lists for a while after,
+        # perhaps first. Asked to join it, a person would find it gone.
+        self.assertEqual(self.find(["ESP_ABCDF0", "Home", "tasmota-ABCDEF-1234"], self.ctx()),
+                         "tasmota-ABCDEF-1234")
+
+    def test_caught_in_that_moment_it_is_looked_at_again(self):
+        self.assertEqual(self.find(["Home", "ESP_ABCDF0"], self.ctx(), ["Home", "tasmota-abcdef"]),
+                         "tasmota-abcdef")
+
+    def test_the_name_asked_for_first_wins_over_scan_order(self):
+        self.assertEqual(self.find(["tasmota-ABCDEF-1234", "tasmota-abcdef"], self.ctx()), "tasmota-abcdef")
 
     def test_a_neighbours_tasmota_or_esp_is_not(self):
         self.assertIsNone(self.find(["tasmota-112233-0001", "ESP_112234", "ESP_ABCDEF"], self.ctx()))

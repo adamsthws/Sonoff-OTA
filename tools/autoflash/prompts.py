@@ -709,12 +709,35 @@ def scan_wifi_ssids(timeout: float = 20.0) -> list[str]:
     return hostsys.wifi_ssids(timeout=timeout)
 
 
+# ESP-IDF's own name for a network a firmware is still naming: Tasmota turns
+# its setup network on, then names it (WifiManagerBegin), and for that moment
+# it goes out as ESP_ and its access-point MAC (ESP_ABCDF0); a computer can
+# list it for a minute after, beside the network's real name.
+PROVISIONAL_PREFIX = "ESP_"
+PROVISIONAL_SETTLE = 5.0
+
+
 def find_ssid(prefix: str | tuple[str, ...], timeout: float = 20.0) -> str | None:
-    """The first visible network whose name starts with `prefix` (or any of
-    several), if any."""
-    for name in scan_wifi_ssids(timeout=timeout):
-        if name.startswith(prefix):
-            return name
+    """The visible network that best matches: of several prefixes, one for
+    the first that any network starts with - not whichever the scan listed
+    first.  A network still under ESP-IDF's own name, the only match, is
+    looked at again a few seconds on, for the name it was being given."""
+    prefixes = (prefix,) if isinstance(prefix, str) else prefix
+    names = scan_wifi_ssids(timeout=timeout)
+    best = _best_ssid(names, prefixes)
+    if best and best.startswith(PROVISIONAL_PREFIX):
+        time.sleep(PROVISIONAL_SETTLE)
+        again = _best_ssid(scan_wifi_ssids(timeout=timeout), prefixes)
+        if again:
+            return again
+    return best
+
+
+def _best_ssid(names: list[str], prefixes: tuple[str, ...]) -> str | None:
+    for wanted in sorted(prefixes, key=lambda p: p.startswith(PROVISIONAL_PREFIX)):
+        for name in names:
+            if name.startswith(wanted):
+                return name
     return None
 
 

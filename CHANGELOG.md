@@ -59,6 +59,11 @@ it after the S60 have gone:
   and the `ESP_` name it sometimes shows instead, which was missed before - so
   a neighbour's Tasmota is never mistaken for it. Wherever you are asked to
   join it, its exact name is given.
+- That `ESP_` name is only the one Tasmota's network has for a moment, as it
+  turns it on and before it names it - which a computer can still list for a
+  minute after, perhaps first. The network is now taken by its real name
+  wherever that is listed, and caught in that moment it is looked at again,
+  where before you could be asked to join one already gone.
 - A power cut while the memory layout is rebuilt for Tasmota no longer costs
   Tasmota its settings. The rebuild wrote over where they were kept, so the
   plug came back waiting on its setup network, and the next run then stopped
