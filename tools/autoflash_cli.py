@@ -2209,8 +2209,9 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
 
 
 
-def bridge_on_home_network(ctx: Context, *, timeout: float = 60.0) -> str | None:
-    """The bridge's address on the home network, if it joined it.
+def bridge_on_home_network(ctx: Context, *, timeout: float = 60.0, tasmota: bool = False) -> str | None:
+    """The bridge's address on the home network, if it joined it - or, with
+    `tasmota`, TASMOTA_HOME if Tasmota is there instead (reach_bridge).
 
     Bridge v4 and later join the network the stock firmware was using.  It has
     the plug's own hardware address there, so it is found where the plug was.
@@ -2223,6 +2224,8 @@ def bridge_on_home_network(ctx: Context, *, timeout: float = 60.0) -> str | None
             if setup_network.is_bridge_page(body):
                 output.progress_clear()
                 return address
+            if tasmota and setup_network.is_tasmota_page(body) and tasmota_at_home(ctx):
+                return TASMOTA_HOME
         output.progress(f"looking for the installer on your network... {time.monotonic() - started:.0f}s")
         time.sleep(2.0)
     output.progress_clear()
@@ -2250,14 +2253,19 @@ def reach_bridge(ctx: Context, *, tasmota: bool = False) -> str:
     the bridge's own network, else where it joined the home network.  Asks the
     person to join the bridge's network only when it raised one.
 
-    With `tasmota` - Tasmota named as the installer was, so its network has
-    the installer's name - TASMOTA_THERE once Tasmota answers on it instead:
-    installed already, by a run cut off after the upload."""
+    With `tasmota` (D1), Tasmota found instead, installed already - by a run
+    cut off after the upload, or an upload that took though its answer was
+    lost (a weak signal, seen in the fault suite): TASMOTA_HOME once it
+    answers on the home network, its address noted (it joins by itself with
+    the Wi-Fi the installer gave it), or TASMOTA_THERE on its own network -
+    named as the installer was (tasmota_named_alone), by the same name."""
     if bridge_answers(setup_network.SETUP_HOST):
         return setup_network.SETUP_HOST  # joined at C3, or by hand
     if tasmota and setup_network.tasmota_answers():
         return TASMOTA_THERE
-    address = bridge_on_home_network(ctx)
+    address = bridge_on_home_network(ctx, tasmota=tasmota)
+    if address == TASMOTA_HOME:
+        return address
     if address:
         say(f"    The installer joined your network at {address}.")
         return address
@@ -2272,7 +2280,7 @@ def reach_bridge(ctx: Context, *, tasmota: bool = False) -> str:
             return address
         bridge = find_ssid(bridge_networks(ctx)) or our_setup_network(ctx)
         if not asked:
-            ask_to_join_bridge(bridge, tasmota=tasmota)
+            ask_to_join_bridge(bridge, tasmota=tasmota and bool(ctx.state.input("tasmota_named_alone")))
             asked = True
 
         def gone_back() -> bool:
@@ -2385,12 +2393,17 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
         ip = configure_plug_wifi(ctx, setup)
         return {"plug_ip": ip, "device_name": setup, "resumed": True}
 
-    address = reach_bridge(ctx, tasmota=bool(ctx.state.input("tasmota_named_alone")))
+    address = reach_bridge(ctx, tasmota=True)
+    if address == TASMOTA_HOME:
+        say("    Tasmota is already installed, and joined your network by itself.")
+        return {"plug_ip": ctx.state.input("plug_ip"), "upload_route": "home network", "wifi": "preset",
+                "device_name": ctx.state.input("device_name"), "resumed": True}
     if address == TASMOTA_THERE:
-        # Run again after the upload: the network the installer had is
-        # Tasmota's now, by the same name, and it is waiting on it.
-        say(f"    Tasmota is already installed and waiting on {our_setup_network(ctx)}.")
-        ip = configure_plug_wifi(ctx, our_setup_network(ctx))
+        # Run again after the upload: Tasmota is waiting on its own network -
+        # the one the installer had, by the same name, when it was named so.
+        network = our_setup_network(ctx) if ctx.state.input("tasmota_named_alone") else None
+        say(f"    Tasmota is already installed and waiting on {network or 'its own network'}.")
+        ip = configure_plug_wifi(ctx, network)
         return {"plug_ip": ip, "device_name": ctx.state.input("device_name"), "resumed": True}
     if address == setup_network.SETUP_HOST:
         if not ctx.state.input("tasmota_wifi_preset"):
@@ -2547,8 +2560,10 @@ def back_up_stock(ctx: Context, host: str) -> str:
 
 # What wait_for_bridge says when the plug went back to Sonoff's firmware meanwhile.
 BACK_ON_SONOFF = "back on Sonoff's firmware"
-# What reach_bridge says when Tasmota answers on the installer's network instead.
+# What reach_bridge says when Tasmota answers instead, installed already: on
+# the installer's network (by the same name), or on the home network.
 TASMOTA_THERE = "Tasmota on the installer's network"
+TASMOTA_HOME = "Tasmota on the home network"
 GONE_BACK_EVERY = 30.0
 # Nothing at all at the plug's address this long, and the person is told to
 # switch it off and on: Sonoff's firmware, its Wi-Fi gone while it started, does
@@ -2568,7 +2583,8 @@ def _wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None
     """Wait for this computer to join the bridge's network, or for the bridge to
     turn up on the home network instead.  The bridge's address on the home
     network, or None once this computer has joined the bridge's own - or,
-    with `tasmota`, TASMOTA_THERE once Tasmota answers on it (reach_bridge).
+    with `tasmota`, TASMOTA_THERE or TASMOTA_HOME once Tasmota answers on it
+    or on the home network instead (reach_bridge).
 
     A bridge on a weak signal can take longer to join the home network than
     the first look allows; it then never raises its own network, so waiting
@@ -2609,6 +2625,8 @@ def _wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None
             if setup_network.is_bridge_page(body):
                 output.progress_clear()
                 return address
+            if tasmota and setup_network.is_tasmota_page(body) and tasmota_at_home(ctx):
+                return TASMOTA_HOME
         output.progress(f"waiting for this computer to join {network}, or the installer "
                         f"to join your Wi-Fi... {time.monotonic() - started:.0f}s")
         time.sleep(2.0)

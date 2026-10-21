@@ -2295,6 +2295,29 @@ class TasmotaWifiPresetTests(unittest.TestCase):
         by_hand.assert_called_once_with(ctx, "autoflash-recovery-CDEF")
         self.assertEqual(result["plug_ip"], "192.168.1.52")
 
+    def test_tasmota_already_at_home_when_run_again_is_carried_on_with(self):
+        # Seen in the fault suite (D1, a weak signal): the upload took, but its
+        # answer was lost; Tasmota, given the Wi-Fi, joined by itself, and the
+        # try again waited a quarter of an hour for the installer, gone.
+        from types import SimpleNamespace
+        from unittest import mock
+        from tools import autoflash_cli
+        from tools.autoflash import setup_network
+        self.inputs.update(plug_mac="12:34:56:ab:cd:ef", tasmota_wifi_preset=True)
+        ctx = SimpleNamespace(state=self.ctx.state, finder=SimpleNamespace(poll=lambda: "192.168.1.51"),
+                              set_plug_ip=lambda ip: self.inputs.__setitem__("plug_ip", ip))
+        pages = {"192.168.1.51": "<title>Tasmota</title> Tasmota 15.6.0 by Theo Arends"}
+        with mock.patch.object(autoflash_cli, "find_ssid", return_value=None), \
+             mock.patch.object(setup_network, "page", side_effect=lambda host, *a, **k: pages.get(host)), \
+             mock.patch.object(autoflash_cli, "Device", side_effect=OSError), \
+             mock.patch.object(autoflash_cli, "upload_tasmota") as uploaded, \
+             mock.patch.object(autoflash_cli, "ask_to_join_bridge") as asked, \
+             mock.patch.object(autoflash_cli, "say"):
+            result = autoflash_cli.step_berry_tasmota(ctx)
+        uploaded.assert_not_called()
+        asked.assert_not_called()
+        self.assertEqual((result["plug_ip"], result["wifi"]), ("192.168.1.51", "preset"))
+
     def test_the_installer_is_waited_for_until_it_has_restarted(self):
         from unittest import mock
         from tools import autoflash_cli

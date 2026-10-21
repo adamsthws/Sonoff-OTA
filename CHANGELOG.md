@@ -75,6 +75,10 @@ it after the S60 have gone:
   own network - is read again wherever the installer is once you have joined
   that, where before both tries went to its address on the home network and
   timed out, and an unattended run carried on without a backup.
+- Tasmota sent through the installer whose upload took, though its answer
+  was lost on the way back (a weak signal), joined your Wi-Fi by itself -
+  and the try again waited a quarter of an hour for the installer, gone. It
+  now finds Tasmota there, on your network or its own, and carries on.
 - An ESPHome plug whose API is encrypted, asked for its Wi-Fi without the
   key, could be taken for one without the tool's Wi-Fi action, where it
   answered and hung up before the tool's next write; the run then asked for
