@@ -192,8 +192,9 @@ the emulator, in both builds we install (the 15.6.0 release: 4 starts of 5).
 Calling `WiFi.softAP()` first - which turns the access point on and names
 it at once - ends it: built from the same commit, 8 starts of 8 without the
 change went out as `ESP_ABCDF0` first, none of 8 with it, and the setup
-page still worked. That is a change to Tasmota, so it reaches plugs only
-with a Tasmota release that has it. Until then a computer can list that
+page still worked. That is a change to Tasmota
+([#25169](https://github.com/arendst/Tasmota/pull/25169)), so it reaches plugs
+only with a Tasmota release that has it. Until then a computer can list that
 name for a minute after, and the tool never takes it over the real one
 (`find_ssid()`).
 

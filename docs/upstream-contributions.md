@@ -133,6 +133,7 @@ to its own setup network: join it, and let the conversion carry on through it.
 | Project | Pull request | What it fixes |
 |---|---|---|
 | Tasmota | [#25163](https://github.com/arendst/Tasmota/pull/25163) | Berry's `webclient` logged a connection timeout's error code as its time: "Connection timeout after -1 ms" |
+| Tasmota | [#25169](https://github.com/arendst/Tasmota/pull/25169) | Its setup network went out under the chip's default name (`ESP_` and its MAC) for its first tenth of a second, which phones and computers then list beside the real one |
 
 ## How each fix was proven
 
