@@ -343,6 +343,22 @@ Safeboot is the small recovery firmware. Seeing it after the rebuild is normal;
 seeing it after the whole run has finished is not. It means the full Tasmota
 was never installed - re-run and let the tool redo that step.
 
+It is also what a converted plug shows after another firmware's whole-flash
+image - an ESPHome `factory.bin`, say - was uploaded through Tasmota's own
+*Firmware Upgrade* page. Tasmota switches to Safeboot for a file that big,
+which writes it over Tasmota - whether it then says "Upload Failed" or
+"Upload Successful" - so the plug comes back on Safeboot every time, even
+switched off and on; `SetOption78` makes no difference. Its settings are
+still there. Run the tool on this computer, or with `--plug-ip` and the
+plug's address: it sees Tasmota's own Safeboot, puts official Tasmota back
+with those settings, and goes on to the firmware you choose - or stops
+there, if you choose Tasmota. By hand, upload the ordinary `tasmota32c3.bin`
+(not a `factory.bin`) on Safeboot's *Firmware Upgrade* page.
+
+To move a converted plug to ESPHome, run the tool and choose ESPHome rather
+than uploading ESPHome yourself: Tasmota's layout has a single place for its
+firmware, and the tool moves the plug to one ESPHome can update itself in.
+
 Note that Safeboot has no Wi-Fi setup of its own. It relies on settings already
 saved on the plug. That is why the conversion uses a temporary version with
 Wi-Fi details built in, and swaps it for the official one at the very end.

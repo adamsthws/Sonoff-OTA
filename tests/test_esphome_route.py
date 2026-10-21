@@ -658,6 +658,12 @@ class FromAConvertedPlugTests(RouteTestCase):
                 if firmware == source or (source == "sonoff" and firmware == "sonoff"):
                     continue
                 steps = [step for step, _, _ in af.steps_for(firmware, source)]
+                if (source, firmware) == ("safeboot", "tasmota"):
+                    # Its own Tasmota put back, not converted: T1 sees it running,
+                    # set up as before; H1 would hold its safeboot and bootloader,
+                    # whatever made them, to this version's.
+                    self.assertEqual(steps, ["A0", "A5", "T1"])
+                    continue
                 self.assertEqual(steps[-1], last[firmware], (source, firmware))
                 self.assertEqual(len(steps), len(set(steps)), (source, firmware))
                 # The bootloader is written on every route, before any firmware goes

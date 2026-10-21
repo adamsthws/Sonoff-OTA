@@ -277,6 +277,17 @@ it after the S60 have gone:
   version's. For such a run it is now written over without that check, once
   the plug shows the official memory layout and runs official Tasmota, which
   never starts from there; the final check reads the official one back.
+- A converted plug left on Tasmota's own safeboot - after another firmware's
+  whole-flash image (an ESPHome `factory.bin`, say) was uploaded through
+  Tasmota's page, which writes it over Tasmota, so the plug starts the
+  safeboot from then on; or just switched to it - was taken for one part way
+  through a conversion, and sent down steps that need Sonoff's layout, which
+  stopped at D4. The run now tells Tasmota's own safeboot from its own startup
+  firmware, starts the plug's Tasmota again if it is there, else puts official
+  Tasmota back, with its settings either way, and goes on from there to the
+  firmware chosen - or stops there, for Tasmota. It looks for such a plug as
+  for one it converted: one this computer converted, or the one `--plug-ip`
+  names.
 
 ## 1.2.0
 

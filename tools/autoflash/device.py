@@ -418,8 +418,10 @@ class Device:
             page = self._get("/", {}, self.timeout)
         except (DeviceError, urllib.error.URLError, OSError):
             return ""
-        found = re.search(r"(\d+\.\d+\.\d+[^<\s]*)", page)
-        version = found.group(1) if found else ""
+        # Its footer: "Tasmota 15.6.0 (release-safeboot) by Theo Arends" - the
+        # build's name too, which tells Tasmota's own from this tool's.
+        found = re.search(r"(\d+\.\d+\.\d+[^<\s]*)(\s*\([\w.-]+\))?", page)
+        version = "".join(part for part in found.groups() if part) if found else ""
         if "safeboot" in page.lower() and "safeboot" not in version.lower():
             version = (version + " (safeboot)").strip()
         return version
@@ -454,6 +456,12 @@ class Device:
             return "safeboot" in self._get("/", {}, self.timeout).lower()
         except (DeviceError, urllib.error.URLError, OSError):
             return False
+
+    def start_app(self) -> str:
+        """Ask Tasmota's safeboot to start the Tasmota it holds, as its own
+        page's switch does: that set to start, and a restart.  One that cannot
+        start leaves the plug on the safeboot again."""
+        return self._get("/u4", {"u4": "ota", "api": ""}, self.timeout)
 
     def current_ota(self, timeout: float = 15.0) -> int | None:
         """Running OTA slot, or None when Berry is unavailable (e.g. Safeboot)."""

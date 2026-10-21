@@ -49,7 +49,7 @@ person converting it again would have.
 ## The fault suite
 
 `tools/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,330 scenarios:
+every direction - 1,335 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
@@ -100,6 +100,14 @@ every direction - 1,330 scenarios:
   startup firmware without checking it, which it cannot rebuild, and the next
   run must carry on after the sectors already written. `unattended-test.sh
   --code=DIR` runs the tool from another tree.
+- **A converted plug left on Tasmota's own safeboot** (`lostapp-factory`): an
+  ESPHome factory image - bootloader, partition table and app, for a serial
+  flasher - uploaded through Tasmota's page, as a person once asked about
+  did: Tasmota switches to its safeboot for a file that big, which writes it
+  over Tasmota, and the plug starts the safeboot from then on. Then the tool,
+  to Tasmota, ESPHome or Sonoff. And one only switched to its safeboot, its
+  Tasmota unharmed (`lostapp-switched`), which must be started again, never
+  written over (FAIL-REPLACED).
 - **When:** at 40% of the step's usual time; at the riskiest steps also at 10%
   and 90%, and two faults running.
 

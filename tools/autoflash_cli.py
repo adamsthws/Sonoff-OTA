@@ -3274,6 +3274,84 @@ def step_canonical(ctx: Context) -> dict[str, Any]:
             "startup_settings": saved}
 
 
+def step_tasmota_back(ctx: Context) -> dict[str, Any]:
+    """T1 - Tasmota back on a plug left on Tasmota's own safeboot (SOURCES:
+    "safeboot"): its own started again if it is there - switched to the
+    safeboot by hand, say - else official Tasmota uploaded as F2 does, which
+    writes app0 only, so its settings stay.  It must then be a plug this tool
+    converts."""
+    app = ROOT / "captures/safeboot-recovery-migration/tasmota32c3.bin"
+    how = outcome = None
+    if ctx.finder.poll() and not ctx.device.is_safeboot():
+        say("Tasmota is back on the plug already.")
+    else:
+        section("Putting Tasmota back", quiet=True, body=[
+            "The plug runs Tasmota's safeboot, the small firmware Tasmota keeps for",
+            "updates. Its own Tasmota is started again if it is there; if not - after",
+            "an upload through its page that failed part way, say - official Tasmota",
+            "goes back on. Its settings stay as they were either way.",
+        ])
+        if ctx.dry_run:
+            say("[dry-run] would start Tasmota again, or upload official Tasmota")
+            return {}
+        if tasmota_started_again(ctx):
+            how, outcome = "started again", "rejoined the network"
+        else:
+            how, outcome = install_official(ctx, app)
+        if not outcome.startswith("rejoined"):
+            raise Abort(f"official Tasmota is back on the plug, but {outcome}: it lost its settings. "
+                        "Set it up there - its Wi-Fi, and the plug's template - then run this again")
+    found = None
+    for _ in range(3):
+        try:
+            found = detect.tasmota(ctx.device.host, timeout=10, password=ctx.web_password)
+            break
+        except detect.Unreadable:  # just started, too busy to say its template
+            time.sleep(5)
+        except detect.Locked:
+            raise Abort(str(NeedsPassword(ctx.device.host, bool(ctx.web_password)))) from None
+    if not found or found[0] != "tasmota":
+        raise Abort("official Tasmota is back on the plug, with its settings, but it is not set up as "
+                    "a plug this tool converts (no template for one). It runs as it did before")
+    _, name, kind = found
+    if kind:
+        ctx.state.set_input("plug_kind", kind)
+    say(f"    Tasmota is back{f' as {name}' if name else ''}, with its settings.")
+    return {"app_upload": how, "outcome": outcome, "name": name}
+
+
+# How long a plug asked to start Tasmota again may take before it is back on
+# the safeboot - nothing there to start - or Tasmota answers.
+TASMOTA_START_WAIT = 90.0
+BACK_ON_SAFEBOOT_AFTER = 30.0
+
+
+def tasmota_started_again(ctx: Context) -> bool:
+    """Whether the Tasmota a plug on Tasmota's safeboot holds starts when the
+    safeboot is asked to start it (Device.start_app) - so is there, unharmed."""
+    say("Asking the safeboot to start the Tasmota it holds, as its own page's switch does...")
+    try:
+        ctx.device.start_app()
+    except (DeviceError, OSError) as exc:
+        say(f"    It did not take the request ({exc}).")
+        return False
+    started = time.monotonic()
+    time.sleep(5)  # it answers once more before it restarts
+    while time.monotonic() - started < TASMOTA_START_WAIT:
+        try:
+            version = ctx.device.firmware_version() or ""
+        except (DeviceError, OSError):
+            version = ""
+        if version and "safeboot" not in version.lower():
+            say(f"    Tasmota started again ({version}): it was there, unharmed.")
+            return True
+        if "safeboot" in version.lower() and time.monotonic() - started > BACK_ON_SAFEBOOT_AFTER:
+            break
+        time.sleep(3)
+    say("    It came back on its safeboot: there is no Tasmota there that starts.")
+    return False
+
+
 def install_official(ctx: Context, app: Path) -> tuple[str, str]:
     """Official Tasmota uploaded to the startup firmware, and seen running -
     sent again when the plug comes back on the startup firmware instead (the
@@ -4270,7 +4348,11 @@ FIRMWARES = {"tasmota": "Tasmota", "esphome": "ESPHome", "sonoff": "Sonoff"}
 # firmware, on Sonoff's layout.
 # "installer": one a run left on this tool's installer (the bridge), part way
 # from Sonoff's firmware: the backup and D1 need only the installer, not eWeLink.
-SOURCES = ("sonoff", "tasmota", "esphome", "midway", "committed", "installer")
+# "safeboot": a converted plug on Tasmota's own safeboot, its Tasmota missing -
+# an upload through Tasmota's page that failed part way (another firmware's
+# whole-flash image, say): official Tasmota goes back on, then on from there.
+SOURCES = ("sonoff", "tasmota", "esphome", "midway", "committed", "installer", "safeboot")
+TASMOTA_BACK_STEP = ("T1", "Official Tasmota back, from Tasmota's safeboot", step_tasmota_back)
 
 
 def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Callable[[Context], dict[str, Any]]]]:
@@ -4295,6 +4377,9 @@ def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Cal
         if firmware != "tasmota":
             rest += steps_for(firmware, "tasmota")[len(START_STEPS):]
         return START_STEPS + rest
+    if source == "safeboot":
+        # Tasmota back first, as it was; then on from Tasmota, as any converted plug.
+        return START_STEPS + [TASMOTA_BACK_STEP] + steps_for(firmware, "tasmota")[len(START_STEPS):]
     leave = [LEAVE_TASMOTA_STEP] if source == "tasmota" else []
     return START_STEPS + leave + TO_HUB_STEPS + HUB_STEPS + final  # esphome and midway alike
 
@@ -4396,7 +4481,9 @@ FIRMWARE_BLURBS = {
 def ask_firmware(source: str, choices: list[str]) -> str:
     output.transient_begin()
     body = (["This plug was left part way through a conversion; it can go on to any",
-             "of these from where it is.", ""] if source in ("midway", "committed", "installer") else [])
+             "of these from where it is.", ""] if source in ("midway", "committed", "installer") else
+            ["Its Tasmota goes back on first, with its settings; choosing Tasmota",
+             "stops there. Or it can go on to either of the others.", ""] if source == "safeboot" else [])
     for name in choices:
         body += FIRMWARE_BLURBS[name]
     if source != "sonoff" and "sonoff" not in choices:
@@ -4865,8 +4952,36 @@ def past_the_commit(ctx: Context, running: str) -> str:
                 ctx.state.set_input("bootloader_kept", "sonoff")
                 ctx.state.set_input("startup_unproven", True)
             return "committed"
-        return running  # its latest run says otherwise
-    return running
+        return tasmota_missing(ctx, running)  # its latest run says otherwise
+    return tasmota_missing(ctx, running)
+
+
+# Tasmota's own safeboot, as a build of Tasmota's own says it is - "15.6.0
+# (release-safeboot)" - where this tool's startup firmware, built from the
+# same source here, says "15.6.0(safeboot)". Tasmota's own runs only on
+# Tasmota's layout: no route puts it in Sonoff's slots, only G1 into Tasmota's
+# safeboot partition. Its page is all it serves: no commands, no Information.
+OFFICIAL_SAFEBOOT_RE = re.compile(r"\(\s*[a-z0-9]+-safeboot\s*\)", re.IGNORECASE)
+
+
+def tasmota_missing(ctx: Context, running: str) -> str:
+    """"safeboot" for a plug part way by the look of it - a safeboot answering -
+    that no run of this computer's left past the commit, and whose safeboot is
+    Tasmota's own: a converted plug, on Tasmota's layout, not starting its
+    Tasmota (its own upload of another firmware failed part way, say, or it
+    was switched to its safeboot). Taken for part way, it went down steps that
+    need Sonoff's layout, and stopped at D4."""
+    if running != "midway":
+        return running
+    try:
+        version = ctx.device.firmware_version() if ctx.device.is_safeboot() else ""
+    except (DeviceError, OSError):
+        version = ""
+    if not OFFICIAL_SAFEBOOT_RE.search(version or ""):
+        return running
+    say(f"    It runs Tasmota's own safeboot ({version}), so is on Tasmota's layout: its Tasmota")
+    say("    is started again, or put back, first.")
+    return "safeboot"
 
 
 RESTART_GRACE = 45.0
@@ -5203,6 +5318,7 @@ STAGE_NAMES = {
     "D5": "Updating the bootloader",
     "R1": "Restoring Sonoff firmware",
     "R2": "Checking Sonoff firmware",
+    "T1": "Putting Tasmota back",
 }
 # Where a shared step means something else on the way to another firmware: D4
 # frees the half of the memory it goes into, and the layout is not changed.
@@ -5238,6 +5354,7 @@ PLAIN_DESCRIPTION = {
     "D5": "updates the plug's bootloader, the program that starts its firmware",
     "R1": "writes the plug's own Sonoff firmware and settings back, from its backup",
     "R2": "checks the plug has started its Sonoff firmware and joined your Wi-Fi",
+    "T1": "puts official Tasmota back from its safeboot, its settings kept as they are",
 }
 
 
@@ -5401,6 +5518,7 @@ ATTEMPTED_EVIDENCE: dict[str, Callable[["Context"], tuple[bool | None, str]]] = 
     "X2": evidence_by_what_answers({"hub"}, {"startup"}),
     "D5": evidence_bootloader,
     "R1": evidence_by_what_answers({"sonoff"}, {"hub"}),
+    "T1": evidence_by_what_answers({"tasmota"}, {"startup"}),
 }
 
 

@@ -82,6 +82,7 @@ def saved(name):
 
 
 MAC = None  # --plug: the backed-up plug the emulators run copies of
+APP0_OFFSET = 0xE0000  # Tasmota's own firmware, on its layout (tools/safeboot_migration.py)
 PLUG_CMD = "/opt/autoflash-emu/bin/plug"
 MAX_RUNS = 4
 TOOL = "tools/autoflash_cli.py"
@@ -215,7 +216,12 @@ def composite_scenarios():
     legacy-v1.2.0: a run of release 1.2.0 (legacy_tree) killed at 40% of
         each of its steps, then this checkout's tool, over the same captures,
         as a person updating their checkout would; and (step "start") a plug
-        1.2.0 converted to Tasmota, then taken to ESPHome or back to Sonoff."""
+        1.2.0 converted to Tasmota, then taken to ESPHome or back to Sonoff.
+    lostapp-factory: a converted plug's Tasmota written over by an ESPHome
+        factory image uploaded through Tasmota's page (go_lostapp), then the
+        tool, to Tasmota, ESPHome or Sonoff; lostapp-switched: only switched
+        to its safeboot, its Tasmota unharmed, which must be started again,
+        never replaced."""
     def one(route, step, fault, arg, at=40):
         return dict(id=sid(route, step, fault, arg, at), route=route, step=step, fault=fault, arg=arg, at=at)
 
@@ -240,6 +246,10 @@ def composite_scenarios():
         yield one("sonoff>tasmota", "F4", "legacy", f"{tag}+G1off")
         for route in ("tasmota>esphome", "tasmota>sonoff"):
             yield one(route, "start", "legacy", tag)
+    for route in ("tasmota>tasmota", "tasmota>esphome", "tasmota>sonoff"):
+        yield one(route, "start", "lostapp", "factory")
+    for route in ("tasmota>tasmota", "tasmota>esphome"):
+        yield one(route, "start", "lostapp", "switched")
 
 
 # The releases whose runs this checkout must carry on: each one's steps (from
@@ -268,6 +278,21 @@ def legacy_tree(tag):
                             str(REPO / f"tools/emulator/legacy/{tag}.patch")], check=True)
             (tree / ".complete").write_text(f"{tag}\n")
     return tree
+
+
+def esphome_factory_image():
+    """A whole-flash image as ESPHome's builder makes one (factory.bin), for
+    a serial flasher: its bootloader from 0, a partition table at 0x8000 -
+    Sonoff's, which ESPHome's S60 config keeps - and the app in the first
+    slot, at 0x20000. It starts with the bootloader's 0xE9, as an app does."""
+    artifacts = REPO / "artifacts"
+    image = bytearray(b"\xff" * 0x20000)
+    bootloader = next(artifacts.glob("esphome-sonoff-s60-bootloader-*.bin")).read_bytes()
+    table = (artifacts / "sonoff-s60-partition-table.bin").read_bytes()
+    image[:len(bootloader)] = bootloader
+    image[0x8000:0x8000 + len(table)] = table
+    app = next(artifacts.glob("esphome-sonoff-s60-imprintable-*.bin")).read_bytes()
+    return bytes(image) + app
 
 
 def needs_cloud(sc):
@@ -1055,6 +1080,8 @@ class Scenario:
         route, step = sc["route"], sc["step"]
         if sc["fault"] == "legacy":
             return self.go_legacy()
+        if sc["fault"] == "lostapp":
+            return self.go_lostapp()
         if step == "C2":
             source, self.target, steps = None, C2_ROUTES[route], {"C2": 20}
         else:
@@ -1116,6 +1143,71 @@ class Scenario:
         elif self.fired is None:
             return self.finish(results, "NOT-FIRED")
         return self.again(results, self.target, [], code=REPO, later=later)
+
+    def go_lostapp(self):
+        """A converted plug on Tasmota, and what was asked on Reddit: another
+        firmware's whole-flash image (ESPHome's factory.bin) uploaded through
+        Tasmota's page, which switches to its safeboot for a file that big,
+        whose upload takes the image, writes it over Tasmota and refuses it at
+        the end. The plug then starts the safeboot, even switched off and on.
+        Then the tool, as a person would run it, until the plug is converted."""
+        sc = self.sc
+        self.target = sc["route"].split(">")[1]
+        # The emulator up with the converted plug: asked for what it runs, a
+        # run says there is nothing to do.
+        results = [(self.run_tool("tasmota", source="suite-tasmota"), None)]
+        results[-1] = (results[-1][0], self.screen_result())
+        if "nothing to convert" not in results[-1][1]:
+            return self.finish(results, "NOT-FIRED")
+        factory = self.state / "work/captures/esphome-factory.bin"
+        factory.write_bytes(esphome_factory_image())
+        plug = "http://192.168.60.50"
+        # From the plug's own page, as a browser on it is: Tasmota turns away
+        # a request without (CSRF protection).
+        page_of = ["curl", "-s", "-e", f"{plug}/"]
+        self.say("LOSTAPP: Tasmota switched to its safeboot, as its page does for a large file")
+        self.ex(*page_of, "-m", "10", f"{plug}/u4?u4=fct&api=")
+        if not self.until_page("/", "safeboot", 120):
+            return self.finish(results, "NOT-FIRED")
+        if sc["arg"] == "factory":  # "switched": its Tasmota left as it is
+            self.say(f"LOSTAPP: ESPHome's factory image ({factory.stat().st_size} bytes) uploaded to it")
+            page = self.ex(*page_of, "-m", "300", "-F", "u2=@/work/captures/esphome-factory.bin",
+                           f"{plug}/u2?fsz={factory.stat().st_size}", timeout=320).stdout
+            self.notes["upload_page"] = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page))[-300:]
+            self.say(f"LOSTAPP: it answered: {self.notes['upload_page'][-120:]}")
+            # The emulated Tasmota 15.6.0 safeboot says the upload worked and
+            # writes nothing (app0 seen unchanged, 2026-10-21); a real one
+            # writes the image over Tasmota as it arrives, and checks it only
+            # at the end. That, as it is on such a plug: the plug off, the
+            # image where Tasmota was, and on again.
+            sh("docker", "stop", name(self.n), timeout=120)
+            with open(self.state / "flash.bin", "r+b") as flash:
+                flash.seek(APP0_OFFSET)
+                flash.write(factory.read_bytes())
+            self.say("LOSTAPP: off; the image written over Tasmota (app0), as a real safeboot does; on again")
+            sh(str(REPO / "tools/emulator/emu.sh"), *(["--stub-cloud"] if STUB_CLOUD else ["--cloud", "--yes"]),
+               "--detach", f"--plug={MAC}", f"--instance={self.n}", timeout=300)
+        else:
+            self.say("LOSTAPP: switched off and on")
+            self.ex(PLUG_CMD, "restart")
+            time.sleep(5)
+        if not self.until_page("/", "safeboot", 120):
+            self.say("LOSTAPP: not on its safeboot after all")
+            return self.finish(results, "NOT-FIRED")
+        self.notes["stuck_on_safeboot"] = True
+        results[-1] = (results[-1][0], "on Tasmota's safeboot, Tasmota missing")
+        return self.again(results, self.target, [])
+
+    def until_page(self, path, words, limit):
+        """Whether the plug's page `path` says `words`, in any case, within `limit` seconds."""
+        deadline = time.time() + limit
+        while time.time() < deadline:
+            page = self.ex("curl", "-s", "-m", "5", "-e", "http://192.168.60.50/",
+                           f"http://192.168.60.50{path}").stdout
+            if words.lower() in page.lower():
+                return True
+            time.sleep(3)
+        return False
 
     def again(self, results, target, extra, delay=None, first_fault=None, code=None, later=None):
         """The tool run again, as a person would - switching the plug off and
@@ -1223,6 +1315,10 @@ class Scenario:
                 special = "MISTIMED"
             elif fault == "corrupt" and not self.notes.get("corrupted_packets"):
                 special = "NO-TRAFFIC"
+            elif fault == "lostapp" and (arg == "switched") == ("Official Tasmota (app0) uploaded" in "".join(
+                    t for m, _, t in run_logs(self.state) if m >= self.started)):  # not the saved plug's own
+                # Its own Tasmota, there all along, written over - or none there, not put back.
+                special = "FAIL-REPLACED" if arg == "switched" else "FAIL-NOT-PUT-BACK"
             elif fault == "ctrlc" and arg in ("once", "apart") and converted and len(results) > 1:
                 special = "FAIL-STOPPED"  # one Ctrl-C (or two, apart) must not stop the run
             elif fault == "ctrlc" and arg == "countdown" and not self.notes.get("countdown_pressed"):

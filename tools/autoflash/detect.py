@@ -25,6 +25,7 @@ NAMES = {
     "esphome": "ESPHome",
     "midway": "a firmware part way through a conversion",
     "installer": "this tool's installer, part way from Sonoff's firmware",
+    "safeboot": "Tasmota's safeboot, its Tasmota missing",
     "locked": "Tasmota with a web password",
     "esphome-login": "ESPHome with a web login",
 }
@@ -174,6 +175,13 @@ def _answers_as_tasmota(host: str, timeout: float) -> bool:
     except Exception:  # noqa: BLE001 - anything but Tasmota answering
         return False
     return isinstance(status, dict) and "Status" in status
+
+
+def tasmota(host: str, *, timeout: float = 3.0,
+            password: str | None = None) -> tuple[str, str | None, str | None] | None:
+    """What a Tasmota at `host` is to this tool: (what it runs, its name, its
+    kind's key), as identify sees it - or None. Unreadable and Locked as there."""
+    return _tasmota(host, timeout, password)
 
 
 def identify(host: str, *, timeout: float = 3.0, password: str | None = None,

@@ -199,6 +199,40 @@ class UploadRefusalTests(unittest.TestCase):
             self.assertIn("Successful", plug._upload("/up", "tasmota32c3.bin", b"\xe9" * 16, 10))
 
 
+class VersionFromPageTests(unittest.TestCase):
+    """A safeboot answers no Status: its version is read off its page, with
+    the build's name, which tells Tasmota's own from this tool's."""
+
+    def version(self, footer):
+        from unittest import mock
+        plug = Device("192.0.2.1")
+        page = f"<h3>SAFEBOOT</h3>...<div style='text-align:right;font-size:11px;'><hr/>{footer}</div>"
+        with mock.patch.object(plug, "_get", return_value=page):
+            return plug.version_from_page()
+
+    def test_tasmotas_own(self):
+        self.assertEqual(self.version("<a href='https://bit.ly/tasmota' target='_blank'>Tasmota 15.6.0 "
+                                      "(release-safeboot) by Theo Arends</a>"), "15.6.0 (release-safeboot)")
+
+    def test_one_built_here(self):
+        self.assertEqual(self.version("Tasmota 15.6.0 (safeboot) by Theo Arends"), "15.6.0 (safeboot)")
+
+    def test_no_build_name_still_says_safeboot(self):
+        self.assertEqual(self.version("Tasmota 15.6.0 by Theo Arends"), "15.6.0 (safeboot)")
+
+
+class StartAppTests(unittest.TestCase):
+    """Tasmota's safeboot asked to start the Tasmota it holds, as its page's
+    switch does - its only way: a safeboot answers no commands."""
+
+    def test_the_switch_its_page_has(self):
+        from unittest import mock
+        plug = Device("192.0.2.1")
+        with mock.patch.object(plug, "_get", return_value="false") as get:
+            self.assertEqual(plug.start_app(), "false")
+        self.assertEqual(get.call_args.args[:2], ("/u4", {"u4": "ota", "api": ""}))
+
+
 class LockedTasmota(http.server.ThreadingHTTPServer):
     """Answers as Tasmota with a web password does (Tasmota 15.6.0's
     xdrv_01_9_webserver.ino): its command interface takes the password as

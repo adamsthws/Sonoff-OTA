@@ -103,6 +103,13 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn("sonoff>tasmota:F4:legacy-v1.2.0+G1off", ids)
         self.assertTrue(fs.needs_cloud({"route": "tasmota>esphome", "step": "start", "fault": "legacy"}))
 
+    def test_an_esphome_factory_image_as_its_builder_makes_one(self):
+        image = fs.esphome_factory_image()
+        self.assertEqual(image[0], 0xE9)  # all Tasmota's page checks of it, with the size
+        self.assertEqual(image[0x8000:0x8002], b"\xaa\x50")  # a partition table
+        self.assertEqual(image[0x20000], 0xE9)  # the app, in the first slot
+        self.assertIn("tasmota>esphome:start:lostapp-factory", {sc["id"] for sc in fs.scenarios()})
+
     def test_a_legacy_run_goes_without_firmware_and_the_next_with_it(self):
         with tempfile.TemporaryDirectory() as tree:
             (Path(tree) / "tools").mkdir()
@@ -131,6 +138,9 @@ class ScenarioTests(unittest.TestCase):
         for sc in fs.scenarios():
             if sc["fault"] == "legacy":
                 self.assertTrue(sc["step"] == "start" or sc["step"] in fs.LEGACY_STEPS[sc["arg"].partition("+")[0]], sc["id"])
+                continue
+            if sc["fault"] == "lostapp":
+                self.assertEqual(sc["step"], "start", sc["id"])
                 continue
             if sc["step"] == "C2":
                 continue

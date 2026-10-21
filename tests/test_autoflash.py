@@ -2020,6 +2020,79 @@ class BackOnSonoffTests(unittest.TestCase):
         self.assertEqual((sent, waited), (0, 1))
 
 
+class TasmotaBackTests(unittest.TestCase):
+    """T1: a plug on Tasmota's own safeboot, its Tasmota missing, given
+    official Tasmota back - its settings kept - before going on."""
+
+    def back(self, *, safeboot=True, starts=False, outcome="rejoined the network",
+             found=("tasmota", "tasmota-abcdef", "s60")):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        ctx = SimpleNamespace(state=RunState.open(Path(directory.name)), dry_run=False, web_password=None,
+                              finder=mock.Mock(poll=mock.Mock(return_value=True)),
+                              device=mock.Mock(host="192.0.2.50", is_safeboot=mock.Mock(return_value=safeboot)))
+        with mock.patch.object(autoflash, "install_official", return_value=("http:9s", outcome)) as install, \
+             mock.patch.object(autoflash, "tasmota_started_again", return_value=starts), \
+             mock.patch.object(autoflash.detect, "tasmota", return_value=found), \
+             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
+            result = autoflash.step_tasmota_back(ctx)
+        return result, install.called, ctx.state
+
+    def test_put_back_and_found_as_before(self):
+        result, installed, state = self.back()
+        self.assertTrue(installed)
+        self.assertEqual(result["name"], "tasmota-abcdef")
+        self.assertEqual(state.input("plug_kind"), "s60")
+
+    def started(self, versions, refused=False):
+        """tasmota_started_again, the plug's version each look in turn, 3 s apart."""
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        clock = [0.0]
+        answers = iter(versions)
+        device = mock.Mock(firmware_version=lambda: next(answers, versions[-1]))
+        if refused:
+            device.start_app.side_effect = autoflash.DeviceError("refused")
+        with mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: clock[0]), \
+             mock.patch.object(autoflash.time, "sleep", side_effect=lambda s: clock.__setitem__(0, clock[0] + s)), \
+             mock.patch.object(autoflash, "say"):
+            return autoflash.tasmota_started_again(SimpleNamespace(device=device))
+
+    def test_its_own_starts(self):
+        self.assertTrue(self.started(["15.6.0(release-safeboot)", "", "16.0.0(release-tasmota32)"]))
+
+    def test_none_starts_it_is_back_on_its_safeboot(self):
+        self.assertFalse(self.started(["15.6.0(release-safeboot)"]))
+
+    def test_the_request_refused(self):
+        self.assertFalse(self.started(["15.6.0(release-safeboot)"], refused=True))
+
+    def test_its_own_started_again_is_not_replaced(self):
+        # Switched to its safeboot by hand, its Tasmota unharmed: never an
+        # upload over it - perhaps a newer Tasmota than the one pinned here.
+        result, installed, _ = self.back(starts=True)
+        self.assertFalse(installed)
+        self.assertEqual(result["app_upload"], "started again")
+
+    def test_back_already_is_not_sent_again(self):
+        _, installed, _ = self.back(safeboot=False)
+        self.assertFalse(installed)
+
+    def test_back_but_not_a_plug_this_tool_converts(self):
+        import tools.autoflash_cli as autoflash
+        with self.assertRaisesRegex(autoflash.Abort, "not set up as a plug this tool converts"):
+            self.back(found=None)
+
+    def test_back_but_its_settings_gone(self):
+        import tools.autoflash_cli as autoflash
+        with self.assertRaisesRegex(autoflash.Abort, "lost its settings"):
+            self.back(outcome="raised its setup network tasmota-ABCDEF-1234")
+
+
 class BegunByAnEarlierVersionTests(unittest.TestCase):
     """A run of 1.2.0 carried on by this version: it had no D5 (ESPHome's
     bootloader), which needs the plug as it is before the commit."""
@@ -2108,7 +2181,7 @@ class PastTheCommitTests(unittest.TestCase):
     """A plug left on the startup firmware is on Tasmota's layout if this
     computer's run of it got past the commit - Sonoff's otherwise."""
 
-    def source(self, earlier, safeboot=False):
+    def source(self, earlier, safeboot=False, version="15.6.0(safeboot)"):
         import json
         from types import SimpleNamespace
         from unittest import mock
@@ -2133,7 +2206,7 @@ class PastTheCommitTests(unittest.TestCase):
         now = root / "now"
         now.mkdir()
         ctx = SimpleNamespace(dir=now, state=RunState.open(now), evidence=now / "live",
-                              device=SimpleNamespace(is_safeboot=lambda: safeboot))
+                              device=SimpleNamespace(is_safeboot=lambda: safeboot, firmware_version=lambda: version))
         self.evidence, self.state = ctx.evidence, ctx.state
         ctx.state.set_input("plug_mac", "12:34:56:ab:cd:ef")
         with mock.patch.object(autoflash, "run_directories", return_value=runs), \
@@ -2147,6 +2220,23 @@ class PastTheCommitTests(unittest.TestCase):
         self.assertEqual(self.source([(["E1", "E2"], "PASS")]), "committed")
         # And G1 has that run's record of the startup firmware it put on.
         self.assertTrue((self.evidence / "commit-report.json").is_file())
+
+    def test_tasmotas_own_safeboot_is_on_tasmotas_layout(self):
+        # Seen asked on Reddit: an ESPHome factory image uploaded through
+        # Tasmota's page wrote over its Tasmota: Tasmota's safeboot from then
+        # on. Taken for part way, it went down the hub's steps, stopping at D4.
+        tasmotas = "15.6.0(release-safeboot)"
+        self.assertEqual(self.source([], safeboot=True, version=tasmotas), "safeboot")
+        self.assertEqual(self.source([], safeboot=True, version="15.6.0 (development-safeboot)"), "safeboot")
+        # Converted here, and finished: Tasmota's own safeboot all the same.
+        self.assertEqual(self.source([(["E3", "F2", "F4", "G1", "H1"], None)], safeboot=True,
+                                     version=tasmotas), "safeboot")
+        # This tool's startup firmware, built here: part way, as before.
+        self.assertEqual(self.source([], safeboot=True, version="15.6.0(safeboot)"), "midway")
+        self.assertEqual(self.source([], safeboot=True, version=""), "midway")
+        # Past the commit on this computer's record: the commit's own way on.
+        self.assertEqual(self.source([(["E1", "E2", "E3"], None)], safeboot=True, version=tasmotas),
+                         "committed")
 
     def test_a_run_begun_by_1_2_0_keeps_its_bootloader_through_the_next(self):
         # It never put ESPHome's bootloader on (no D5 then): H1 is not to look
