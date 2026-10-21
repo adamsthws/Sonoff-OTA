@@ -71,6 +71,10 @@ it after the S60 have gone:
   back to Sonoff's firmware - by design, so nothing is lost - but the run then
   waited a quarter of an hour for an installer that was gone. It now sees
   Sonoff's firmware and sends the installer again, up to three times.
+- A backup cut off by the home Wi-Fi going - the installer then raises its
+  own network - is read again wherever the installer is once you have joined
+  that, where before both tries went to its address on the home network and
+  timed out, and an unattended run carried on without a backup.
 - A run started again (`--new`) after the memory layout was rebuilt for
   Tasmota, before official Tasmota was set up, took the plug for one on its
   way from ESPHome and sent it round steps that need Sonoff's layout, which

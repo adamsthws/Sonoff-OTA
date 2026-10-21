@@ -2482,9 +2482,18 @@ def back_up_stock(ctx: Context, host: str) -> str:
         return skip[0]
     known = ctx.state.input("plug_mac")
     say("Backing up the plug's Sonoff firmware - about a minute...")
+    first = True
     while True:
         problem = ""
         for _ in range(2):
+            if not first:
+                # Read where the installer is now: when the home network goes
+                # it raises its own, where it is read once this computer has
+                # joined that - not again at the address it had (seen in the
+                # fault suite: both reads timed out there, and an unattended
+                # run went on without a backup).
+                host = reach_bridge(ctx)
+            first = False
             try:
                 flash, efuse, report = read_for_backup(host)
                 break

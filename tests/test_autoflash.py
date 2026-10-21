@@ -2564,6 +2564,7 @@ class StockBackupTests(unittest.TestCase):
                                 set_input=self.inputs.__setitem__)
         self.ctx = SimpleNamespace(state=state, args=SimpleNamespace(no_backup=False))
         self.dump = (b"F" * 8, efuse_with_mac(self.MAC), dict(self.REPORT))
+        self.reached = "192.168.1.51"  # where reach_bridge finds the installer again
 
     def back_up(self, reads, answers=(1,)):
         """Run the backup with each read in turn returning or raising `reads`,
@@ -2572,8 +2573,10 @@ class StockBackupTests(unittest.TestCase):
         from tools.autoflash.prompts import QuitRun
         outcomes, replies = iter(reads), iter(answers)
         asked = []
+        self.read_from = []
 
         def read(host):
+            self.read_from.append(host)
             outcome = next(outcomes)
             if isinstance(outcome, Exception):
                 raise outcome
@@ -2587,6 +2590,7 @@ class StockBackupTests(unittest.TestCase):
             return reply
 
         with mock.patch.object(autoflash_cli, "read_dump", side_effect=read), \
+             mock.patch.object(autoflash_cli, "reach_bridge", return_value=self.reached), \
              mock.patch.object(autoflash_cli, "ask_choice", side_effect=ask), \
              mock.patch.object(autoflash_cli, "section"), \
              mock.patch.object(autoflash_cli, "say"):
@@ -2617,6 +2621,15 @@ class StockBackupTests(unittest.TestCase):
 
     def test_one_failed_read_is_retried(self):
         self.back_up([OSError("timed out"), self.dump])
+        self.assertIn("stock_backup", self.inputs)
+
+    def test_a_retry_reads_where_the_installer_is_now(self):
+        # Seen in the fault suite: the home Wi-Fi gone mid-backup, the
+        # installer raised its own network, and this computer joined it -
+        # both reads went to its address on the home network, and timed out.
+        self.reached = "192.168.4.1"
+        self.back_up([OSError("timed out"), self.dump])
+        self.assertEqual(self.read_from, ["192.168.1.51", "192.168.4.1"])
         self.assertIn("stock_backup", self.inputs)
 
     def test_a_bridge_that_cannot_read_flash_means_no_backup(self):
