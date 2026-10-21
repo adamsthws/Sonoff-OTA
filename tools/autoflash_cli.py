@@ -4909,6 +4909,7 @@ def _execute(ctx: Context, step: str) -> int:
     title, handler = STEP_INDEX[step]
     begin_stage(step)
     say(f"{step}  {title}")
+    set_up_if_erased(ctx, step)
     if step in DESTRUCTIVE_STEPS:
         ctx.state.mark(step, ATTEMPTED)
     try:
@@ -5046,6 +5047,42 @@ def execute_with_retries(ctx: Context, step: str) -> int:
 
 
 PLUG_BACK_HINT_AFTER = 45.0
+# The steps run on a Tasmota given the Wi-Fi: one that has lost its settings
+# instead raises its own network (F4 looks for that itself, F2 starts on the
+# startup firmware).
+ERASED_CHECK_STEPS = {"D4", "D5", "E1", "E2", "E3", "I1", "G1", "H1"}
+ERASED_LOOK_EVERY = 30.0
+
+
+def set_up_if_erased(ctx: Context, step: str) -> bool:
+    """A Tasmota not on the Wi-Fi but on its own setup network has lost its
+    settings - switched off and on 7 times, say, or an earlier run's advice
+    taken late - so it is set up through that network again; and, past F4, as
+    its template went with them, F4 sets it up again too.  True when it was:
+    the step then goes on with the plug back.  Seen in the fault suite: G1
+    asked for Wi-Fi details for a plug it could not reach, run after run."""
+    # Every route reaches these steps on such a Tasmota: from stock through D1,
+    # from ESPHome or back to Sonoff through the mover and the startup firmware.
+    if step not in ERASED_CHECK_STEPS or not ctx.state.input("plug_mac"):
+        return False
+    if ctx.state.input("plug_ip") and ctx.device.answers(timeout=3.0):
+        return False
+    network = find_ssid(setup_networks(ctx), timeout=10)
+    if not network:
+        return False
+    output.progress_clear()
+    tell("    The plug is not on your Wi-Fi but on its own setup network: its settings were")
+    tell("    erased (switched off and on 7 times, say), so it is set up through that again.")
+    configure_plug_wifi(ctx, network)
+    if ctx.state.is_done("F4"):
+        device = ctx.device
+        device.wait_reachable(timeout=120)
+        template = kinds.of_run(ctx.state).tasmota_template(ctx.state.input("product_model"))
+        if not template_in_place(device, template, final_name(ctx, "tasmota")):
+            tell("    Its template went with its settings: Tasmota is set up again (F4).")
+            ctx.state.capture("F4.again_after_erase", True)
+            step_configure(ctx)
+    return True
 
 
 def wait_for_plug_back(ctx: Context, step: str | None = None) -> None:
@@ -5065,19 +5102,24 @@ def wait_for_plug_back(ctx: Context, step: str | None = None) -> None:
         return
     tell("    The plug is not answering yet - waiting for it (a router restarting, say).")
     started = time.monotonic()
+    looked = started
     hinted = False
-    while time.monotonic() - started < PLUG_BACK_WAIT:
+    while (now := time.monotonic()) - started < PLUG_BACK_WAIT:
         # Part way through, the plug runs a Tasmota holding your Wi-Fi details,
         # which keeps trying them and never opens a network of its own - all but
         # F4's official Tasmota, which may not have them yet (F4 looks for its
-        # setup network itself).
-        if not hinted and step != "F4" and time.monotonic() - started > PLUG_BACK_HINT_AFTER:
+        # setup network itself), and one that has lost its settings, looked for.
+        if not hinted and step != "F4" and now - started > PLUG_BACK_HINT_AFTER:
             output.progress_clear()
-            tell("    At this stage the plug has no setup network of its own: it rejoins")
-            tell("    your Wi-Fi by itself as soon as it can. Check your router is on and")
-            tell("    the plug is plugged in; this keeps waiting.")
+            tell("    At this stage the plug has no setup network of its own unless its settings")
+            tell("    were erased: it rejoins your Wi-Fi by itself as soon as it can. Check your")
+            tell("    router is on and the plug is plugged in; this keeps waiting.")
             hinted = True
-        output.progress(f"waiting for the plug... {time.monotonic() - started:.0f}s")
+        if step and now - looked >= ERASED_LOOK_EVERY:
+            looked = now
+            if set_up_if_erased(ctx, step):
+                return
+        output.progress(f"waiting for the plug... {now - started:.0f}s")
         if back():
             output.progress_clear()
             tell("    It is answering again.")

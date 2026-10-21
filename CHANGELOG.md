@@ -84,6 +84,11 @@ it after the S60 have gone:
   was lost on the way back (a weak signal), joined your Wi-Fi by itself -
   and the try again waited a quarter of an hour for the installer, gone. It
   now finds Tasmota there, on your network or its own, and carries on.
+- A plug whose Tasmota lost its settings part way through - switched off and
+  on 7 times, say - waited on its own network while the run kept looking for
+  it on yours, and once past setting Tasmota up (F4), the run asked for Wi-Fi
+  details it could not use. It is now found on its own network and set up
+  through it again, and Tasmota set up again where its template went too.
 - Tasmota given the Wi-Fi on its setup network that took the details and
   restarted onto your Wi-Fi before saying so was sent them again, and the run
   then waited a quarter of an hour for you to join its network - gone. A

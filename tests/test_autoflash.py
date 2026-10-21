@@ -3221,6 +3221,80 @@ class NamedWithTheWifiTests(unittest.TestCase):
             self.assertEqual(self.run_it(name), [], name)
 
 
+class ErasedTasmotaTests(unittest.TestCase):
+    """A Tasmota that lost its settings part way is set up through its own
+    network again - and set up again (F4), when it had been already."""
+
+    def run_it(self, step="G1", answers=False, network="tasmota-ABCDEF-1234", f4_done=True, in_place=False):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        done = {"D1", "F4"} if f4_done else {"D1"}
+        inputs = {"plug_mac": "12:34:56:ab:cd:ef", "plug_ip": "192.168.1.51", "product_model": "S60TPG"}
+        device = SimpleNamespace(answers=lambda timeout=None: answers, wait_reachable=lambda timeout=None: None)
+        ctx = SimpleNamespace(device=device, state=SimpleNamespace(
+            input=inputs.get, is_done=lambda s: s in done, capture=lambda *a: None))
+        with mock.patch.object(autoflash, "find_ssid", return_value=network) as looked, \
+             mock.patch.object(autoflash, "configure_plug_wifi") as by_hand, \
+             mock.patch.object(autoflash, "template_in_place", return_value=in_place), \
+             mock.patch.object(autoflash, "step_configure") as configured, \
+             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash.output, "progress_clear"):
+            result = autoflash.set_up_if_erased(ctx, step)
+        return result, looked, by_hand, configured
+
+    def test_one_answering_is_left_alone(self):
+        result, looked, by_hand, _ = self.run_it(answers=True)
+        self.assertFalse(result)
+        looked.assert_not_called()
+
+    def test_on_its_own_network_it_is_set_up_through_it_and_f4_again(self):
+        # Seen in the fault suite: switched off and on 7 times during G1, the
+        # run asked for Wi-Fi details for a plug it could not reach, run after run.
+        result, _, by_hand, configured = self.run_it()
+        self.assertTrue(result)
+        by_hand.assert_called_once()
+        configured.assert_called_once()
+
+    def test_its_template_still_there_needs_no_f4(self):
+        _, _, by_hand, configured = self.run_it(in_place=True)
+        by_hand.assert_called_once()
+        configured.assert_not_called()
+
+    def test_before_f4_only_the_wifi(self):
+        _, _, by_hand, configured = self.run_it(step="D4", f4_done=False)
+        by_hand.assert_called_once()
+        configured.assert_not_called()
+
+    def test_no_network_of_its_own_is_left_to_the_step(self):
+        result, _, by_hand, _ = self.run_it(network=None)
+        self.assertFalse(result)
+        by_hand.assert_not_called()
+
+    def test_on_a_route_with_no_d1_as_well(self):
+        # From ESPHome, Tasmota comes by the mover and the startup firmware:
+        # seen in the fault suite, G1 there was never helped.
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        inputs = {"plug_mac": "12:34:56:ab:cd:ef", "plug_ip": "192.168.1.51", "product_model": "S60TPG"}
+        ctx = SimpleNamespace(device=SimpleNamespace(answers=lambda timeout=None: False,
+                                                     wait_reachable=lambda timeout=None: None),
+                              state=SimpleNamespace(input=inputs.get, is_done=lambda s: s == "F4",
+                                                    capture=lambda *a: None))
+        with mock.patch.object(autoflash, "find_ssid", return_value="tasmota-ABCDEF-1234"), \
+             mock.patch.object(autoflash, "configure_plug_wifi") as by_hand, \
+             mock.patch.object(autoflash, "template_in_place", return_value=True), \
+             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash.output, "progress_clear"):
+            self.assertTrue(autoflash.set_up_if_erased(ctx, "G1"))
+        by_hand.assert_called_once()
+
+    def test_not_at_a_step_of_a_tasmota_with_the_wifi(self):
+        for step in ("F2", "F4", "L1", "X1"):
+            result, looked, _, _ = self.run_it(step=step)
+            self.assertFalse(result, step)
+            looked.assert_not_called()
+
+
 class SetupNetworkGoneTests(unittest.TestCase):
     """Whether the plug's setup network has gone, after the Wi-Fi was sent."""
 
