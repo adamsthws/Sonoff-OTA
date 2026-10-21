@@ -217,6 +217,9 @@ def composite_scenarios():
         each of its steps, then this checkout's tool, over the same captures,
         as a person updating their checkout would; and (step "start") a plug
         1.2.0 converted to Tasmota, then taken to ESPHome or back to Sonoff.
+    blips-3, lossy-phase (BLIP_STEPS): two 3 s outages from 10% to 90% of a
+        Berry phase, or one packet in ten lost for all of it: converted with
+        no step tried again, or FAIL-RETRIED.
     lostapp-factory: a converted plug's Tasmota written over by an ESPHome
         factory image uploaded through Tasmota's page (go_lostapp), then the
         tool, to Tasmota, ESPHome or Sonoff; lostapp-switched: only switched
@@ -250,6 +253,18 @@ def composite_scenarios():
         yield one(route, "start", "lostapp", "factory")
     for route in ("tasmota>tasmota", "tasmota>esphome"):
         yield one(route, "start", "lostapp", "switched")
+    for route, step in BLIP_STEPS:
+        yield one(route, step, "blips", 3, at=10)
+        yield one(route, step, "lossy", "phase", at=10)
+
+
+# The steps that run a Berry phase on the plug (stage, restore, plan) long
+# enough for two blips more than its 20 s of retrying apart, each on one way
+# it is taken: a phase must ride out blips and a weak signal by itself, never
+# needing the step tried again (PR #5: one early blip used up the retrying,
+# and a later one failed on its first try).
+BLIP_STEPS = (("sonoff>tasmota", "E2"), ("esphome>tasmota", "G1"), ("sonoff>esphome", "I1"),
+              ("tasmota>esphome", "L1"), ("tasmota>sonoff", "R1"))
 
 
 # The releases whose runs this checkout must carry on: each one's steps (from
@@ -475,6 +490,23 @@ BOOTS = re.compile(r"(?P<sonoff>\[BUILD TIME\]|colinkTcp|tmp ip = )|(?P<bridge>a
                    r"(?P<tasmota>Project tasmota)|(?P<esphome>\[I\]\[app)")
 INTENT = re.compile(r"\] (?:A1|A2|C2)  |Sending the installer again")
 HOLD_AT_MOST = 240.0
+
+
+def plug_busy(state, since):
+    """Each Berry step's longest busy time, from the runs since `since`."""
+    busy = {}
+    for path in (state / "work/captures/plugs").glob("*/runs/*/autoflash-state.json"):
+        try:
+            if path.stat().st_mtime < since:
+                continue
+            captures = json.loads(path.read_text()).get("captures", {})
+        except (OSError, ValueError):
+            continue
+        for key, seconds in captures.items():
+            if key.endswith(".plug_busy_seconds") and isinstance(seconds, (int, float)):
+                step = key.split(".")[0]
+                busy[step] = max(busy.get(step, 0), round(seconds, 1))
+    return busy
 
 
 def run_logs(state):
@@ -795,6 +827,22 @@ class Scenario:
             self.ex("tc", "filter", "add", "dev", "tap0", "ingress", "pref", "6", "protocol", "ip",
                     "u32", "match", "u32", "0", "0", "action", "gact", "ok", "random", "netrand", "drop", "10")
             time.sleep(arg)
+            self.ex("tc", "filter", "del", "dev", "tap0", "ingress", "pref", "6")
+            self.ex("tc", "qdisc", "del", "dev", "tap0", "root")
+        elif fault == "blips":
+            # Two short outages in one Berry phase, from 10% to 90% of it:
+            # further apart than its 20 s of retrying (BLIP_STEPS).
+            self.ex(p, "router", "off"); time.sleep(arg); self.ex(p, "router", "on")
+            time.sleep(max(0.0, 0.8 * self.step_length - arg))
+            self.say(f"FAULT blips: the second, {0.8 * self.step_length:.0f}s after the first")
+            self.ex(p, "router", "off"); time.sleep(arg); self.ex(p, "router", "on")
+        elif fault == "lossy":
+            # One packet in ten lost, as "weak", for the rest of the phase.
+            self.ex("tc", "qdisc", "add", "dev", "tap0", "root", "netem",
+                    "delay", "150ms", "100ms", "loss", "10%")
+            self.ex("tc", "filter", "add", "dev", "tap0", "ingress", "pref", "6", "protocol", "ip",
+                    "u32", "match", "u32", "0", "0", "action", "gact", "ok", "random", "netrand", "drop", "10")
+            time.sleep(self.step_length)
             self.ex("tc", "filter", "del", "dev", "tap0", "ingress", "pref", "6")
             self.ex("tc", "qdisc", "del", "dev", "tap0", "root")
         elif fault == "corrupt":
@@ -1298,6 +1346,11 @@ class Scenario:
         names, networks = self.names_seen()
         self.notes["names"], self.notes["networks"] = names, networks
         unknown, final = name_problems(names, networks, getattr(self, "target_final", self.target))
+        # How long each Berry phase kept the plug busy, the longest try of
+        # each (the run's report: "Plug busy"). Kept, not judged: a real
+        # S60TPG once stopped answering at 70-90 s, an S60TPF was fine at 2
+        # minutes (report, test-reports discussion) - report lists the longest.
+        self.notes["plug_busy"] = plug_busy(self.state, self.started)
         if fault == "legacy" and sc["step"] in LEGACY_NAMED and final and re.match(r"^tasmota-[0-9A-F]{6}-\d{4}$", final):
             final = None  # set up by that release's F4, under Tasmota's own name, as it left every plug
         if fault == "legacy" and "+" in arg:
@@ -1319,6 +1372,10 @@ class Scenario:
                     t for m, _, t in run_logs(self.state) if m >= self.started)):  # not the saved plug's own
                 # Its own Tasmota, there all along, written over - or none there, not put back.
                 special = "FAIL-REPLACED" if arg == "switched" else "FAIL-NOT-PUT-BACK"
+            elif fault in ("blips", "lossy") and converted and (len(results) > 1 or any(
+                    "That may have been the network - trying again" in t
+                    for m, _, t in run_logs(self.state) if m >= self.started)):
+                special = "FAIL-RETRIED"  # the phase did not ride it out by itself
             elif fault == "ctrlc" and arg in ("once", "apart") and converted and len(results) > 1:
                 special = "FAIL-STOPPED"  # one Ctrl-C (or two, apart) must not stop the run
             elif fault == "ctrlc" and arg == "countdown" and not self.notes.get("countdown_pressed"):
@@ -1544,6 +1601,15 @@ def report():
     for r in rows.values():
         if r["verdict"] != "PASS":
             print(f"  {r['verdict']:16} {r['id']}  runs={r.get('runs')}  {r.get('results', r.get('error'))}")
+    # The plug kept busiest by one Berry phase (plug_busy): a real S60TPG once
+    # stopped answering at 70-90 s, so the longest are worth a look.
+    busiest = sorted(((max(busy.values()), r["id"], step) for r in rows.values()
+                      for busy in [r.get("notes", {}).get("plug_busy") or {}] if busy
+                      for step, s in busy.items() if s == max(busy.values())), reverse=True)[:10]
+    if busiest:
+        print("Longest the plug was kept busy by one phase:")
+        for seconds, scenario, step in busiest:
+            print(f"  {seconds:6.1f}s  {step:3}  {scenario}")
 
 
 def main():

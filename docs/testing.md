@@ -49,7 +49,7 @@ person converting it again would have.
 ## The fault suite
 
 `tools/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,335 scenarios:
+every direction - 1,345 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
@@ -108,6 +108,15 @@ every direction - 1,335 scenarios:
   to Tasmota, ESPHome or Sonoff. And one only switched to its safeboot, its
   Tasmota unharmed (`lostapp-switched`), which must be started again, never
   written over (FAIL-REPLACED).
+- **A Berry phase riding out the network by itself** (`blips-3`,
+  `lossy-phase`, at E2, G1, I1, L1 and R1): two 3 s outages from 10% to 90%
+  of the phase - further apart than its 20 s of retrying - or one packet in
+  ten lost for all of it. The plug must convert without the tool trying the
+  step again: a phase given up and started over from its first block passes
+  everywhere else, but is FAIL-RETRIED here. Each scenario also keeps how
+  long each phase kept the plug busy (`plug_busy`), and `report` lists the
+  longest: a real S60TPG once stopped answering after 70-90 s busy, though an
+  S60TPF in the test reports was busy for two minutes without harm.
 - **When:** at 40% of the step's usual time; at the riskiest steps also at 10%
   and 90%, and two faults running.
 

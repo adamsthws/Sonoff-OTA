@@ -103,6 +103,31 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn("sonoff>tasmota:F4:legacy-v1.2.0+G1off", ids)
         self.assertTrue(fs.needs_cloud({"route": "tasmota>esphome", "step": "start", "fault": "legacy"}))
 
+    def test_phases_must_ride_out_blips_by_themselves(self):
+        # PR #5: one early blip used up a phase's 20 s of retrying, and a later
+        # one failed on its first try - the step then tried again from the start.
+        ids = {sc["id"] for sc in fs.scenarios()}
+        for route, step in fs.BLIP_STEPS:
+            self.assertIn(f"{route}:{step}@10:blips-3", ids)
+            self.assertIn(f"{route}:{step}@10:lossy-phase", ids)
+            # Two blips 80% of the step apart: more than the phase's 20 s.
+            self.assertGreater(0.8 * fs.ROUTES[route][2][step], 20, step)
+
+    def test_how_busy_each_phase_kept_the_plug(self):
+        import json, os, time
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            for name, captures, age in (("new", {"E2.plug_busy_seconds": 31.2, "G1.plug_busy_seconds": 12,
+                                                 "E2.seconds": 40}, 0),
+                                        ("again", {"E2.plug_busy_seconds": 44.0}, 0),
+                                        ("old", {"E2.plug_busy_seconds": 99.0}, 3600)):
+                run = state / "work/captures/plugs/12-34-56-ab-cd-ef/runs" / name
+                run.mkdir(parents=True)
+                path = run / "autoflash-state.json"
+                path.write_text(json.dumps({"captures": captures}))
+                os.utime(path, (time.time() - age, time.time() - age))
+            self.assertEqual(fs.plug_busy(state, time.time() - 60), {"E2": 44.0, "G1": 12})
+
     def test_an_esphome_factory_image_as_its_builder_makes_one(self):
         image = fs.esphome_factory_image()
         self.assertEqual(image[0], 0xE9)  # all Tasmota's page checks of it, with the size
