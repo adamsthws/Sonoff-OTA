@@ -107,6 +107,7 @@ MAX_POST_SIZE = 9000
 # by the tool between tries, not here.
 IDLE_LIMIT = 120
 RESTORE_FLAG = "--i-confirm-normal-app-is-stable"
+RECOVERY_UNPROVEN_FLAG = "--recovery-unproven"
 
 
 def utc_now() -> str:
@@ -146,7 +147,7 @@ def sector_digests(image: bytes) -> list[bytes]:
             for i in range(0, SAFEBOOT_SIZE, SECTOR_SIZE)]
 
 
-def restore_resume_point(digests: list[bytes], official: bytes, recovery: bytes) -> int:
+def restore_resume_point(digests: list[bytes], official: bytes, recovery: bytes | None) -> int:
     """How many leading sectors of the factory partition already hold the
     official Safeboot, for a restore to carry on after.
 
@@ -155,13 +156,19 @@ def restore_resume_point(digests: list[bytes], official: bytes, recovery: bytes)
     them, the one sector a power cut came in the middle of: erased, or part
     written.  That one is written again.  Anything else is refused: the
     partition holds something this run did not put there.
+
+    With no `recovery` (--recovery-unproven: a startup firmware this checkout
+    cannot rebuild), whatever follows the official sectors is written over.
     """
-    official_sectors, recovery_sectors = sector_digests(official), sector_digests(recovery)
+    official_sectors = sector_digests(official)
     if len(digests) != len(official_sectors):
         raise ValueError("factory partition sector count differs")
     done = 0
     while done < len(digests) and digests[done] == official_sectors[done]:
         done += 1
+    if recovery is None:
+        return min(done, (len(official) + SECTOR_SIZE - 1) // SECTOR_SIZE)
+    recovery_sectors = sector_digests(recovery)
     for index in range(done, len(digests)):
         if digests[index] != recovery_sectors[index]:
             if index == done:
@@ -241,6 +248,7 @@ class MigrationState:
         evidence_dir: Path,
         max_evidence_age: int,
         plan: "Plan | None" = None,
+        recovery_unproven: bool = False,
     ) -> None:
         self.manifest_path = manifest_path
         self.manifest = manifest
@@ -272,8 +280,15 @@ class MigrationState:
         self.recovery_mode = is_recovery_manifest(manifest)
         if phase == "restore" and not self.recovery_mode:
             raise ValueError("official migration manifests have no recovery image to restore")
+        if recovery_unproven and phase != "restore":
+            raise ValueError("only the restore can go without the recovery Safeboot")
+        # The restore of a run begun by an earlier version, whose startup
+        # firmware this checkout cannot rebuild: it goes without it, and the
+        # plug's own checks (official table, official app0 running) stand.
+        self.recovery_unproven = recovery_unproven
         self.safeboot_name = safeboot_artifact_name(manifest)
-        self.safeboot = artifact_bytes(manifest_path, manifest, self.safeboot_name)
+        self.safeboot = (b"" if recovery_unproven
+                         else artifact_bytes(manifest_path, manifest, self.safeboot_name))
         self.official_safeboot = artifact_bytes(manifest_path, manifest, "safeboot")
         self.app = artifact_bytes(manifest_path, manifest, "app")
         self.target_table = artifact_bytes(manifest_path, manifest, "target_table")
@@ -319,6 +334,22 @@ class MigrationState:
             #
             # A commit whose report was lost (it is sent as the plug restarts)
             # leaves the staging's record instead, of the image it then copied.
+            #
+            # Unproven, only the table is held to the commit's record, where
+            # there is one: the image it names is not one this checkout has.
+            if recovery_unproven:
+                try:
+                    self.commit_evidence = load_evidence(
+                        evidence_dir / "commit-report.json", "commit", sys.maxsize
+                    )
+                except ValueError:
+                    print("  No commit report; the plug's own check of its table stands.")
+                else:
+                    if self.commit_evidence.get("target_table_sha256") != self.target_table_sha256:
+                        raise ValueError("commit evidence names a different partition table")
+                print("  The startup firmware on the plug is not one this checkout can rebuild:")
+                print("  whatever follows the official sectors is written over.")
+                return
             try:
                 self.commit_evidence = load_evidence(
                     evidence_dir / "commit-report.json", "commit", sys.maxsize
@@ -463,7 +494,8 @@ class MigrationState:
         """Where the restore should carry on, from the plug's sector digests."""
         raw = self.assembled_capture("factory-sha", FACTORY_SECTORS * 32)
         digests = [raw[i:i + 32] for i in range(0, len(raw), 32)]
-        start = restore_resume_point(digests, self.official_safeboot, self.safeboot)
+        start = restore_resume_point(digests, self.official_safeboot,
+                                     None if self.recovery_unproven else self.safeboot)
         print(f"  The factory partition holds the official Safeboot up to sector {start}.")
         return start
 
@@ -876,9 +908,17 @@ def main() -> int:
         help="keep only hashes of the plug's NVS and of the staged recovery image, "
         "not the bytes - they can hold credentials",
     )
+    parser.add_argument(
+        RECOVERY_UNPROVEN_FLAG, action="store_true",
+        help="restore: the startup firmware on the plug is one this checkout cannot "
+        "rebuild (a run begun by 1.2.0); write the official Safeboot over whatever "
+        "follows its official sectors, once the plug shows the official table and app0",
+    )
     args = parser.parse_args()
     if args.recovery_from_stdin and args.plan_from_stdin:
         parser.error("standard input carries one thing: the recovery Safeboot or a plan")
+    if args.recovery_unproven and (args.phase != "restore" or args.recovery_from_stdin):
+        parser.error(f"{RECOVERY_UNPROVEN_FLAG} is for a restore with no recovery Safeboot given")
     if args.recovery_from_stdin:
         provide_in_memory(RECOVERY_ARTIFACT, sys.stdin.buffer.read())
     plan = None
@@ -906,10 +946,12 @@ def main() -> int:
         # A plan brings what it writes, not the recovery Safeboot, which only
         # the migration phases use: that one is absent here, and its
         # provenance, proved from its bytes, is not this phase's concern.
+        # An unproven restore goes without it too: the plug has another.
         planned = args.phase == "plan"
-        verify_manifest_files(manifest_path, manifest, allow_unprovided=planned)
+        without_recovery = planned or args.recovery_unproven
+        verify_manifest_files(manifest_path, manifest, allow_unprovided=without_recovery)
         require_pinned_artifacts(manifest)
-        if not planned:
+        if not without_recovery:
             require_recovery_manifest(manifest_path, manifest)
     except (KeyError, ValueError) as exc:
         print(f"REFUSING: {exc}", file=sys.stderr)
@@ -928,7 +970,7 @@ def main() -> int:
     try:
         state = MigrationState(
             manifest_path, manifest, args.phase, base_url, evidence_dir, args.max_evidence_age,
-            plan=plan,
+            plan=plan, recovery_unproven=args.recovery_unproven,
         )
         state.sensitive_captures = not args.no_sensitive_captures
         rendered = state.render_berry()

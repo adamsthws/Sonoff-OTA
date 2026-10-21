@@ -564,6 +564,60 @@ class MigrationValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "sector 3 holds neither"):
             restore_resume_point(self.digests(bytes(partition)), official, recovery)
 
+    def test_unproven_whatever_follows_the_official_sectors_is_written_over(self):
+        # A run begun by 1.2.0: its startup firmware, which this checkout cannot
+        # rebuild, is in the partition - after any official sectors a cut left.
+        from tools.serve_safeboot_migration import restore_resume_point
+        official = bytes((i * 7) & 0xFF for i in range(20_000))
+        theirs = bytes((i * 13 + 5) & 0xFF for i in range(22_000))
+        for done, expected in ((0, 0), (2, 2), (5, 5), (40, 5)):
+            partition = self.factory(official, theirs, done)
+            self.assertEqual(restore_resume_point(self.digests(partition), official, None), expected, done)
+
+    def unproven_state(self, commit_table=None, commit=True):
+        """A restore with --recovery-unproven, the commit's record naming
+        another startup firmware than any this checkout has."""
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        fixture = MigrationFixture(Path(directory.name))
+        fixture.enable_recovery()
+        fixture.evidence_dir.mkdir(parents=True, exist_ok=True)
+        if commit:
+            fixture.write_commit_evidence(sha256_bytes(b"1.2.0's own startup firmware"))
+            if commit_table:
+                report = json.loads((fixture.evidence_dir / "commit-report.json").read_text())
+                report["target_table_sha256"] = commit_table
+                (fixture.evidence_dir / "commit-report.json").write_text(json.dumps(report))
+        return MigrationState(fixture.manifest_path, fixture.manifest, "restore",
+                              "http://192.168.1.10:8089", fixture.evidence_dir, 7200,
+                              recovery_unproven=True), fixture
+
+    def test_unproven_needs_no_record_of_the_firmware_it_writes_over(self):
+        state, fixture = self.unproven_state()
+        self.assertEqual(state.safeboot, b"")
+        self.assertIn('fetch_text("/restore-from")', state.render_berry().decode())
+        # Any sectors after the official ones: carried on after those.
+        partition = self.factory(fixture.safeboot, bytes(range(256)) * 90, 2)
+        send_chunks(state, "factory-sha", b"".join(self.digests(partition)))
+        self.assertEqual(state.restore_from(), 2)
+
+    def test_unproven_without_a_commit_report_the_plugs_check_stands(self):
+        state, _ = self.unproven_state(commit=False)
+        self.assertIsNone(state.commit_evidence)
+
+    def test_unproven_still_holds_the_table_to_the_commits_record(self):
+        with self.assertRaisesRegex(ValueError, "different partition table"):
+            self.unproven_state(commit_table="00" * 32)
+
+    def test_unproven_is_for_the_restore_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = MigrationFixture(Path(directory))
+            fixture.enable_recovery()
+            with self.assertRaisesRegex(ValueError, "only the restore"):
+                MigrationState(fixture.manifest_path, fixture.manifest, "stage",
+                               "http://192.168.1.10:8089", fixture.evidence_dir, 7200,
+                               recovery_unproven=True)
+
     def test_the_plug_is_told_where_to_carry_on(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = MigrationFixture(Path(directory))

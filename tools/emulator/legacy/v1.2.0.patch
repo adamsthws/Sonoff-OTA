@@ -1,0 +1,28 @@
+--- a/tools/get_device_key.py
++++ b/tools/get_device_key.py
+@@ -37,6 +37,12 @@
+     "eu": "https://eu-apia.coolkit.cc",
+ }
+ 
++# Emulator tests only (tools/emulator/legacy/): every region to the local cloud
++# stub, as get_device_key has had since 2.0.0. Unset, coolkit is used.
++_STUB_API_BASE = os.environ.get("AUTOFLASH_EWELINK_API_BASE", "").rstrip("/")
++if _STUB_API_BASE:
++    API = {region: _STUB_API_BASE for region in API}
++
+ 
+ # A certificate this computer does not trust, from a site that has a good one -
+ # even after Windows was asked for the root it needs (hostsys.urlopen): almost
+--- a/tools/probe_ota_command.py
++++ b/tools/probe_ota_command.py
+@@ -37,6 +37,10 @@
+     "us": "https://us-dispa.coolkit.cc/dispatch/app",
+     "eu": "https://eu-dispa.coolkit.cc/dispatch/app",
+ }
++# Emulator tests only: the dispatch to the stub too, as since 2.0.0.
++_STUB_API_BASE = os.environ.get("AUTOFLASH_EWELINK_API_BASE", "").rstrip("/")
++if _STUB_API_BASE:
++    WS_DISPATCH = {region: _STUB_API_BASE + "/dispatch/app" for region in WS_DISPATCH}
+ SAFETY_FLAG = "--i-understand-this-sends-an-upgrade-command"
+ 
+ 

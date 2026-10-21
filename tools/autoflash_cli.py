@@ -59,7 +59,7 @@ from tools.autoflash.prompts import (  # noqa: E402
     warning_box,
     wait_or_ask,
 )
-from tools.autoflash.state import ATTEMPTED, DONE, FAILED, RunState  # noqa: E402
+from tools.autoflash.state import ATTEMPTED, DONE, FAILED, PENDING, RunState  # noqa: E402
 from tools.discover_ewelink import answered_ids, discover  # noqa: E402
 from tools.dump_stock_flash import is_good, read_dump, summary  # noqa: E402
 from tools.get_device_key import EwelinkError, get_devices, login  # noqa: E402
@@ -865,7 +865,9 @@ class Context:
             password=self.web_password,
         )
 
-    def phase_runner(self) -> PhaseRunner:
+    def phase_runner(self, with_recovery: bool = True) -> PhaseRunner:
+        """The migration server's runner, given the startup firmware - unless
+        `with_recovery` is False: a restore with none to prove (step_restore)."""
         port = choose_port(self, "phase_port", PHASE_PORTS, "the migration steps")
         ensure_firewall(self)
         self.last_runner = PhaseRunner(
@@ -877,7 +879,7 @@ class Context:
             log=phase_log,
             listen_port=port,
             # Piped, never a file; and only hashes of captures that hold secrets.
-            recovery=self.recovery_bytes(),
+            recovery=self.recovery_bytes() if with_recovery else None,
         )
         return self.last_runner
 
@@ -2981,6 +2983,13 @@ def step_preflight(ctx: Context) -> dict[str, Any]:
 
 def step_stage(ctx: Context) -> dict[str, Any]:
     """E2 - writes the inactive slot only.  Re-runnable; changes no boot state."""
+    if not of_this_bundle(ctx, "preflight-report.json"):
+        # E1 checked the plug against another bundle: one a run of an earlier
+        # version built, which this one rebuilt at A5 (1.2.0's, seen in the
+        # fault suite), so the stage server refuses its report every time.
+        # E1 only reads: done again here.
+        say("E1 again: its checks were made with another bundle than this run's")
+        ctx.state.mark("E1", DONE, result=step_preflight(ctx))
     code, captured = ctx.phase_runner().run("stage")
     if code != 0:
         raise phase_failed("stage", code, captured)
@@ -3078,23 +3087,26 @@ def commit_recovered(ctx: Context) -> bool:
     return False
 
 
+def of_this_bundle(ctx: Context, report_name: str) -> bool:
+    """Whether a step's report in the run's evidence (E1's preflight-report.json,
+    E2's stage-report.json) was made with the bundle the run has now."""
+    try:
+        report = json.loads((ctx.evidence / report_name).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return report.get("manifest_sha256") == sha256_bytes(ctx.manifest_path.read_bytes())
+
+
 def commit_once(ctx: Context) -> dict[str, Any]:
     """One try of the commit, from a plug its checks and staging just saw."""
     # E1 and E2 pinned the bundle as it was then.  If it has been rebuilt since,
     # or the plug has moved networks, send the run back to E1 rather than fail
     # inside the commit server with nothing the operator can act on.
-    def staged_bundle_is_current() -> bool:
-        try:
-            report = json.loads((ctx.evidence / "stage-report.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return False
-        return report.get("manifest_sha256") == sha256_bytes(ctx.manifest_path.read_bytes())
-
     plug_back_on_wifi(ctx)
     sonoff_layout_back(ctx)
     try:
         check_plug_network(ctx)  # may rebuild the bundle
-        if not staged_bundle_is_current():
+        if not of_this_bundle(ctx, "stage-report.json"):
             raise Abort(
                 "the bundle has changed since the checks and staging were done, so "
                 "they need to run again - run the same command. Nothing was written"
@@ -3546,10 +3558,22 @@ def conversion_wifi(ctx: Context) -> None:
 
 
 def step_restore(ctx: Context) -> dict[str, Any]:
-    """G - replace the private recovery Safeboot with official bytes."""
-    conversion_wifi(ctx)  # before the runner, which would otherwise pin the plug's own
-    runner = ctx.phase_runner()
+    """G - replace the private recovery Safeboot with official bytes.
+
+    A run begun by 1.2.0 past its commit (startup_unproven) has that version's
+    startup firmware on the plug, which this checkout cannot rebuild, so no
+    Wi-Fi details prove it: the restore goes without it, writing over
+    whatever follows the official sectors, once the plug shows the official
+    table and official app0 running (the plug's own checks, and the gate
+    below) - the factory partition is unused then, and H1 checks the result."""
+    unproven = bool(ctx.state.input("startup_unproven"))
+    if not unproven:
+        conversion_wifi(ctx)  # before the runner, which would otherwise pin the plug's own
+    runner = ctx.phase_runner(with_recovery=not unproven)
     say("== Restore official Safeboot")
+    if unproven:
+        say("This run was begun by an earlier version of this tool, whose startup firmware")
+        say("this one cannot rebuild to check: the official one goes over it all the same.")
 
     def gate(_: str) -> bool:
         say("Swapping the temporary startup firmware - the one with your Wi-Fi")
@@ -3566,7 +3590,8 @@ def step_restore(ctx: Context) -> dict[str, Any]:
         return False
 
     code, captured = runner.run(
-        "restore", extra_flags=["--i-confirm-normal-app-is-stable"], confirm=gate
+        "restore", extra_flags=["--i-confirm-normal-app-is-stable", *(["--recovery-unproven"] if unproven else [])],
+        confirm=gate,
     )
     if code != 0:
         raise phase_failed("restore", code, captured)
@@ -3587,6 +3612,10 @@ def step_verify(ctx: Context) -> dict[str, Any]:
         "safeboot": (SAFEBOOT_OFFSET, artifacts["safeboot"]["size"], artifacts["safeboot"]["sha256"]),
         "app0": (APP0_OFFSET, artifacts["app"]["size"], artifacts["app"]["sha256"]),
     }
+    if ctx.state.input("bootloader_kept"):
+        # D5 left out, for a run begun by 1.2.0: Sonoff's, as that version left it.
+        del expected["bootloader"]
+        say("  bootloader: Sonoff's, kept - this run was begun by an earlier version")
     results: dict[str, Any] = {}
     ok = True
     for name, (address, length, wanted) in expected.items():
@@ -3602,7 +3631,7 @@ def step_verify(ctx: Context) -> dict[str, Any]:
     if not ok:
         raise Abort("device does not match the pinned artifacts")
     say("")
-    say("All four regions match the pinned artifacts.")
+    say(f"All {'four' if len(expected) == 4 else 'three'} regions match the pinned artifacts.")
     return results
 
 
@@ -4043,6 +4072,19 @@ def step_bootloader(ctx: Context) -> dict[str, Any]:
     """D5 - ESPHome's bootloader, written once for every firmware: it starts
     Tasmota, ESPHome and Sonoff's firmware alike, and rolls back an update
     that fails to start.  Skipped when it is already in place."""
+    if ctx.state.status("E3") != PENDING:
+        # A run begun before this step was (1.2.0's), carried on by this
+        # version once its commit had begun: the plug may no longer have the
+        # layout and the Tasmota this needs, and never will on this route.
+        # Its bootloader stays Sonoff's, as runs of that version left every
+        # plug; the next change of firmware puts ESPHome's on (L1).
+        say("Left as it is: this run was begun by an earlier version of this tool, which")
+        say("kept Sonoff's bootloader, and is past the commit that step needs to come before.")
+        ctx.state.set_input("bootloader_kept", "sonoff")
+        # And the commit put that version's startup firmware on, which this
+        # checkout cannot rebuild to prove at G1 (step_restore).
+        ctx.state.set_input("startup_unproven", True)
+        return {"skipped": "begun before this step, and past the commit"}
     sonoff_layout_back(ctx)
     return run_plan(ctx, plans.bootloader(esphome.published_bootloader()))
 
@@ -4817,6 +4859,11 @@ def past_the_commit(ctx: Context, running: str) -> str:
                 kept = directory / "live" / name
                 if kept.is_file() and not (ctx.evidence / name).exists():
                     shutil.copy2(kept, ctx.evidence / name)
+            if not state.is_done("D5") or state.input("startup_unproven"):
+                # That run never put ESPHome's bootloader on - begun by 1.2.0 -
+                # and its commit put that version's startup firmware on.
+                ctx.state.set_input("bootloader_kept", "sonoff")
+                ctx.state.set_input("startup_unproven", True)
             return "committed"
         return running  # its latest run says otherwise
     return running

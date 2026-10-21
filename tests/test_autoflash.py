@@ -1238,6 +1238,36 @@ class CommitEvidenceTests(unittest.TestCase):
         self.assertIn("run the same command", str(caught.exception))
         self.assertEqual([ctx.state.status(s) for s in ("E1", "E2")], [FAILED, FAILED])
 
+    def staged_after(self, preflight_manifest):
+        """step_stage, E1's report made with `preflight_manifest`: which steps
+        ran, the run's bundle being {}."""
+        import json
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+
+        ctx = self.ctx(None)
+        manifest = ctx.evidence / "manifest.json"
+        manifest.write_text("{}")
+        (ctx.evidence / "preflight-report.json").write_text(json.dumps(
+            {"manifest_sha256": autoflash.sha256_bytes(preflight_manifest)}))
+        ctx.manifest_path = manifest
+        ctx.state = RunState.open(ctx.evidence)
+        ctx.state.mark("E1", "done")
+        ran = []
+        ctx.phase_runner = lambda: mock.Mock(run=lambda phase: ran.append(phase) or (0, ""))
+        with mock.patch.object(autoflash, "step_preflight", side_effect=lambda c: ran.append("E1") or {}), \
+             mock.patch.object(autoflash, "say"):
+            autoflash.step_stage(ctx)
+        return ran
+
+    def test_staging_after_checks_with_this_bundle(self):
+        self.assertEqual(self.staged_after(b"{}"), ["stage"])
+
+    def test_staging_after_checks_with_another_bundle_checks_again_first(self):
+        # A run of 1.2.0 stopped after E1, carried on by this version, which
+        # rebuilt the bundle at A5: the stage server refused E1's report.
+        self.assertEqual(self.staged_after(b'{"version": "1.2.0"}'), ["E1", "stage"])
+
     def commit_tries(self, outcomes, recovered=False):
         """step_commit with each try's outcome given: an exception, or a result."""
         from types import SimpleNamespace
@@ -1990,6 +2020,90 @@ class BackOnSonoffTests(unittest.TestCase):
         self.assertEqual((sent, waited), (0, 1))
 
 
+class BegunByAnEarlierVersionTests(unittest.TestCase):
+    """A run of 1.2.0 carried on by this version: it had no D5 (ESPHome's
+    bootloader), which needs the plug as it is before the commit."""
+
+    def ctx(self, done=(), e3=None):
+        from types import SimpleNamespace
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        for step in done:
+            state.mark(step, "done")
+        if e3:
+            state.mark("E3", e3)
+        return SimpleNamespace(state=state)
+
+    def bootloader(self, ctx):
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        with mock.patch.object(autoflash, "run_plan", return_value={"plan": "ran"}) as plan, \
+             mock.patch.object(autoflash, "sonoff_layout_back"), mock.patch.object(autoflash, "say"):
+            result = autoflash.step_bootloader(ctx)
+        return result, plan.called
+
+    def test_d5_before_the_commit_writes_it(self):
+        self.assertEqual(self.bootloader(self.ctx(["D4", "E1", "E2"])), ({"plan": "ran"}, True))
+
+    def test_d5_once_the_commit_began_leaves_sonoffs(self):
+        for e3 in (ATTEMPTED, "done"):
+            ctx = self.ctx(["D4", "E1", "E2"], e3=e3)
+            result, planned = self.bootloader(ctx)
+            self.assertFalse(planned)
+            self.assertIn("skipped", result)
+            self.assertEqual(ctx.state.input("bootloader_kept"), "sonoff")
+            self.assertTrue(ctx.state.input("startup_unproven"))
+
+    def restored(self, unproven):
+        """step_restore: whether the Wi-Fi was proven, the runner given the
+        startup firmware, and the flags the restore server was started with."""
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        ctx = self.ctx()
+        if unproven:
+            ctx.state.set_input("startup_unproven", True)
+        runner = mock.Mock(run=mock.Mock(return_value=(0, "")))
+        given = []
+        ctx.phase_runner = lambda with_recovery=True: given.append(with_recovery) or runner
+        with mock.patch.object(autoflash, "conversion_wifi") as wifi, mock.patch.object(autoflash, "say"):
+            autoflash.step_restore(ctx)
+        return wifi.called, given[0], runner.run.call_args.kwargs["extra_flags"]
+
+    def test_g1_proves_the_startup_firmware_it_writes_over(self):
+        self.assertEqual(self.restored(unproven=False), (True, True, ["--i-confirm-normal-app-is-stable"]))
+
+    def test_g1_on_a_run_begun_by_1_2_0_goes_without(self):
+        # 1.2.0's startup firmware is not one this checkout can rebuild: no
+        # Wi-Fi details would ever prove it, and the run stopped there for good.
+        self.assertEqual(self.restored(unproven=True),
+                         (False, False, ["--i-confirm-normal-app-is-stable", "--recovery-unproven"]))
+
+    def verified(self, kept):
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        ctx = self.ctx()
+        if kept:
+            ctx.state.set_input("bootloader_kept", "sonoff")
+        artifacts = {"target_table": {"sha256": "aa"}, "safeboot": {"size": 1, "sha256": "bb"},
+                     "app": {"size": 1, "sha256": "cc"}}
+        hashes = {autoflash.TABLE_OFFSET: "aa", autoflash.SAFEBOOT_OFFSET: "bb", autoflash.APP0_OFFSET: "cc",
+                  0: "sonoffs-own"}
+        ctx.manifest_path = Path("unused")
+        ctx.device = mock.Mock(sha_region=lambda address, length: hashes[address])
+        with mock.patch.object(autoflash, "load_manifest", return_value={"artifacts": artifacts}), \
+             mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"):
+            return autoflash.step_verify(ctx)
+
+    def test_h1_takes_the_kept_bootloader(self):
+        self.assertEqual(sorted(self.verified(kept=True)), ["app0", "safeboot", "table"])
+
+    def test_h1_otherwise_wants_esphomes(self):
+        import tools.autoflash_cli as autoflash
+        with self.assertRaises(autoflash.Abort):
+            self.verified(kept=False)
+
+
 class PastTheCommitTests(unittest.TestCase):
     """A plug left on the startup firmware is on Tasmota's layout if this
     computer's run of it got past the commit - Sonoff's otherwise."""
@@ -2020,7 +2134,7 @@ class PastTheCommitTests(unittest.TestCase):
         now.mkdir()
         ctx = SimpleNamespace(dir=now, state=RunState.open(now), evidence=now / "live",
                               device=SimpleNamespace(is_safeboot=lambda: safeboot))
-        self.evidence = ctx.evidence
+        self.evidence, self.state = ctx.evidence, ctx.state
         ctx.state.set_input("plug_mac", "12:34:56:ab:cd:ef")
         with mock.patch.object(autoflash, "run_directories", return_value=runs), \
              mock.patch.object(autoflash.plugs, "mac_of_run", return_value="12:34:56:ab:cd:ef"), \
@@ -2033,6 +2147,16 @@ class PastTheCommitTests(unittest.TestCase):
         self.assertEqual(self.source([(["E1", "E2"], "PASS")]), "committed")
         # And G1 has that run's record of the startup firmware it put on.
         self.assertTrue((self.evidence / "commit-report.json").is_file())
+
+    def test_a_run_begun_by_1_2_0_keeps_its_bootloader_through_the_next(self):
+        # It never put ESPHome's bootloader on (no D5 then): H1 is not to look
+        # for it - nor G1 to prove the startup firmware that version put on.
+        self.assertEqual(self.source([(["D4", "E1", "E2", "E3"], None)]), "committed")
+        self.assertEqual(self.state.input("bootloader_kept"), "sonoff")
+        self.assertTrue(self.state.input("startup_unproven"))
+        self.assertEqual(self.source([(["D4", "D5", "E1", "E2", "E3"], None)]), "committed")
+        self.assertIsNone(self.state.input("bootloader_kept"))
+        self.assertIsNone(self.state.input("startup_unproven"))
 
     def test_otherwise_part_way_as_before(self):
         self.assertEqual(self.source([(["X1", "X2"], None)]), "midway")       # the ESPHome route

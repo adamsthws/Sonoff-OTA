@@ -36,7 +36,8 @@ class NameProblemTests(unittest.TestCase):
         self.assertEqual(final, "tasmota-ABCDEF-1234")
 
     def test_names_of_earlier_releases_are_allowed(self):
-        names = ["sonoff-s60-abcdef", "s60-ota-bridge", "sonoff-s60-mover-abcdef", "tasmota-abcdef"]
+        names = ["sonoff-s60-abcdef", "s60-ota-bridge", "s60-recovery-0042", "x0042", "sonoff-s60-mover-abcdef",
+                 "tasmota-abcdef"]
         self.assertEqual(fs.name_problems(names, ["Sonoff-Setup-CDEF", "S60-OTA-Bridge-CDEF"], "tasmota"),
                          ([], None))
 
@@ -92,6 +93,30 @@ class ScenarioTests(unittest.TestCase):
         self.assertNotIn("tasmota>esphome:M1:second-run", ids)
         self.assertIn("esphome>tasmota:E1:hangup-continue", ids)
 
+    def test_runs_left_by_1_2_0_are_carried_on(self):
+        ids = {sc["id"] for sc in fs.scenarios()}
+        for step in ("C2", "C3", "D1", "D4", "E1", "E2", "E3", "F2", "F4", "G1", "H1"):
+            self.assertIn(f"sonoff>tasmota:{step}:legacy-v1.2.0", ids)
+        self.assertIn("tasmota>esphome:start:legacy-v1.2.0", ids)
+        self.assertIn("tasmota>sonoff:start:legacy-v1.2.0", ids)
+        # G1 over that release's startup firmware, unproven, cut off part way.
+        self.assertIn("sonoff>tasmota:F4:legacy-v1.2.0+G1off", ids)
+        self.assertTrue(fs.needs_cloud({"route": "tasmota>esphome", "step": "start", "fault": "legacy"}))
+
+    def test_a_legacy_run_goes_without_firmware_and_the_next_with_it(self):
+        with tempfile.TemporaryDirectory() as tree:
+            (Path(tree) / "tools").mkdir()
+            (Path(tree) / fs.LEGACY_TOOL).touch()
+            sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "D4", "fault": "legacy",
+                                  "arg": "v1.2.0", "at": 40}, "/dev/null")
+            with mock.patch.object(fs.subprocess, "call", return_value=0) as call:
+                sc.run_tool("tasmota", code=tree)
+                sc.run_tool("tasmota", code=fs.REPO)
+            old, new = (c.args[0] for c in call.call_args_list)
+            self.assertIn(f"--code={tree}", old)
+            self.assertNotIn("--firmware", old)
+            self.assertEqual(new[-2:], ["--firmware", "tasmota"])
+
     def test_a_step_with_a_start_of_its_own_needs_no_length(self):
         # F4rs is in STARTS only: its length comes from there.
         sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "F4rs", "fault": "plugoff",
@@ -104,6 +129,9 @@ class ScenarioTests(unittest.TestCase):
 
     def test_every_step_has_a_length_or_a_start_of_its_own(self):
         for sc in fs.scenarios():
+            if sc["fault"] == "legacy":
+                self.assertTrue(sc["step"] == "start" or sc["step"] in fs.LEGACY_STEPS[sc["arg"].partition("+")[0]], sc["id"])
+                continue
             if sc["step"] == "C2":
                 continue
             steps = fs.ROUTES[sc["route"]][2]

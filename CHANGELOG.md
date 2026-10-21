@@ -260,6 +260,23 @@ it after the S60 have gone:
   say. ESPHome's `wifi.configure` put back what was there before - nothing, on
   a first boot - and saved that, leaving a plug with no network until it was
   switched off and on. They now start with the details, and keep trying.
+- A run begun with 1.2.0 and stopped after its checks of the plug (E1), then
+  carried on with this version, stopped at the next step every time: this
+  version makes its own set of files for the plug, which those checks were
+  not made with. The checks are now made again first, as the memory layout's
+  rewrite already did.
+- A run begun with 1.2.0 and stopped once the memory layout was being
+  rewritten (E3) or after, then carried on with this version, stopped every
+  time at a step 1.2.0 did not have: putting ESPHome's bootloader on (D5),
+  which can only come before that rewrite. Such a run now leaves it out: the
+  plug keeps Sonoff's bootloader, as 1.2.0 left every plug, and the final
+  check does not look for ESPHome's. It goes on when the plug next changes
+  firmware. Swapping 1.2.0's temporary startup firmware for the official one
+  (G1) then asked for the Wi-Fi details the plug was converted with, to rebuild
+  and check it - which no details could, as that firmware is not this
+  version's. For such a run it is now written over without that check, once
+  the plug shows the official memory layout and runs official Tasmota, which
+  never starts from there; the final check reads the official one back.
 
 ## 1.2.0
 

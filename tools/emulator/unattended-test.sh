@@ -13,6 +13,10 @@
 #                                                   converted earlier, on this computer
 #   tools/emulator/unattended-test.sh --stub-cloud  convert against the local cloud stub, with
 #                                                   no eWeLink account and no .env (emu.sh --stub-cloud)
+#   tools/emulator/unattended-test.sh --code=DIR    the tool in DIR - an earlier release
+#                                                   (fault_suite.legacy_tree) - over the same
+#                                                   captures, as updating a checkout would; it
+#                                                   stays there until another --code
 #   tools/emulator/unattended-test.sh -- --new   anything after -- goes to the run itself
 #
 # Needs .env with the eWeLink account the dump's plug is in. It starts the
@@ -28,7 +32,7 @@ case "$ROOT" in /mnt/[a-z]/*) STATE=$HOME/.local/share/autoflash-emu/state ;; es
 NAME=autoflash-emu PORT=8080
 PLUG=192.168.60.50
 
-emu_args=(--detach) keep=0 stub=0 run_args=() from="" save="" plug_mac=""
+emu_args=(--detach) keep=0 stub=0 run_args=() from="" save="" plug_mac="" code=""
 while [ $# -gt 0 ]; do
     case "$1" in
     --fresh|--pcap|--rebuild|--no-firewall) emu_args+=("$1") ;;
@@ -40,8 +44,9 @@ while [ $# -gt 0 ]; do
     --keep) keep=1 ;;
     --from=*) from=${1#--from=} ;;
     --save=*) save=${1#--save=} ;;
+    --code=*) code=$(cd "${1#--code=}" && pwd) ;;
     --) shift; run_args=("$@"); break ;;
-    *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
     shift
 done
@@ -110,6 +115,19 @@ keep_plug() {
 }
 [ "$keep" = 1 ] || trap 'keep_plug; docker stop "$NAME" >/dev/null 2>&1 || true' EXIT
 
+# Another tool over the same captures (--code), as emu.sh copies this checkout's.
+# Not tools/emulator: the emulator's own (its cloud stub, started from there)
+# stays this checkout's, whatever tool it runs.
+if [ -n "$code" ]; then
+    rsync -a --delete --exclude /captures --exclude /.venv --exclude /.python --exclude /.git \
+          --exclude /.env --exclude __pycache__/ --exclude /tools/emulator/ "$code/" "$STATE/work/"
+fi
+# A release from before the AUTOFLASH_ names reads the emulator's settings
+# under its own (S60_).
+legacy_env=()
+[ -f "$STATE/work/tools/s60_autoflash.py" ] && legacy_env=(-e S60_EMULATOR_URL="http://localhost:$PORT"
+                                                         -e S60_EMULATOR_SUDO_PASSWORD=autoflash)
+
 as_you=(docker exec -u "$(id -u):$(id -g)" -w /work)
 waited=0
 until "${as_you[@]}" "$NAME" tmux has-session -t autoflash >/dev/null 2>&1; do
@@ -157,7 +175,7 @@ stub_env=()
 # (one older than this project's 1.1.0); and the emulated plug's passwords,
 # for one given one to test with, as this script's environment has them.
 "${as_you[@]}" -e AUTOFLASH_EMULATOR_URL="http://localhost:$PORT" -e AUTOFLASH_EMULATOR_SUDO_PASSWORD=autoflash \
-    "${stub_env[@]}" -e AUTOFLASH_WIFI_SSID=PICSimLabWifi -e AUTOFLASH_EMULATOR_COUNTDOWN="${AUTOFLASH_EMULATOR_COUNTDOWN:-}" \
+    "${stub_env[@]}" "${legacy_env[@]}" -e AUTOFLASH_WIFI_SSID=PICSimLabWifi -e AUTOFLASH_EMULATOR_COUNTDOWN="${AUTOFLASH_EMULATOR_COUNTDOWN:-}" \
     -e AUTOFLASH_EMULATOR_NO_AT_SAVE="${AUTOFLASH_EMULATOR_NO_AT_SAVE:-}" \
     -e AUTOFLASH_TASMOTA_PASSWORD="${AUTOFLASH_TASMOTA_PASSWORD:-}" -e AUTOFLASH_ESPHOME_OTA_PASSWORD="${AUTOFLASH_ESPHOME_OTA_PASSWORD:-}" \
     -e AUTOFLASH_ESPHOME_WEB_USER="${AUTOFLASH_ESPHOME_WEB_USER:-}" -e AUTOFLASH_ESPHOME_WEB_PASSWORD="${AUTOFLASH_ESPHOME_WEB_PASSWORD:-}" \

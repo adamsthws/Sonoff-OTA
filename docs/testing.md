@@ -49,7 +49,7 @@ person converting it again would have.
 ## The fault suite
 
 `tools/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,316 scenarios:
+every direction - 1,330 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
@@ -89,6 +89,17 @@ every direction - 1,316 scenarios:
   - F4's Berry driver refused, so F4 falls back to two restarts
     (`nohook-run`), and a power cut or crash at F4's reset itself, at 10, 50
     and 90% of it (step `F4rs`).
+- **Runs left by an earlier release** (`legacy-v1.2.0`): release 1.2.0 itself
+  - its tagged files, with only `tools/emulator/legacy/v1.2.0.patch` on top,
+  which points it at the cloud stub - converting a plug fresh from Sonoff,
+  killed at 40% of each of its steps; then this checkout's tool over the same
+  captures, as a person who updated their checkout would run it. And a plug
+  1.2.0 converted to Tasmota, then taken to ESPHome or back to Sonoff (step
+  `start`). And 1.2.0 killed at F4, then the plug switched off part way
+  through G1 of the run after (`legacy-v1.2.0+G1off`): G1 writes over 1.2.0's
+  startup firmware without checking it, which it cannot rebuild, and the next
+  run must carry on after the sectors already written. `unattended-test.sh
+  --code=DIR` runs the tool from another tree.
 - **When:** at 40% of the step's usual time; at the riskiest steps also at 10%
   and 90%, and two faults running.
 

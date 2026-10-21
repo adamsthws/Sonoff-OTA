@@ -211,7 +211,11 @@ def composite_scenarios():
         erases a Tasmota's settings; seven-advised (D1): Tasmota cannot join
         the home Wi-Fi, and that is done when the run advises it.
     nohook-run (F4): Tasmota will not take F4's name and template at the save.
-    F4rs: a power cut or crash at F4's reset, at 10, 50 and 90% of it."""
+    F4rs: a power cut or crash at F4's reset, at 10, 50 and 90% of it.
+    legacy-v1.2.0: a run of release 1.2.0 (legacy_tree) killed at 40% of
+        each of its steps, then this checkout's tool, over the same captures,
+        as a person updating their checkout would; and (step "start") a plug
+        1.2.0 converted to Tasmota, then taken to ESPHome or back to Sonoff."""
     def one(route, step, fault, arg, at=40):
         return dict(id=sid(route, step, fault, arg, at), route=route, step=step, fault=fault, arg=arg, at=at)
 
@@ -228,10 +232,47 @@ def composite_scenarios():
         for at, fault, arg in ((10, "plugoff", 1), (50, "plugoff", 1), (90, "plugoff", 1),
                                (50, "plugoff", 5), (50, "crash", 1)):
             yield one(route, "F4rs", fault, arg, at)
+    for tag, steps in LEGACY_STEPS.items():
+        for step in steps:
+            yield one("sonoff>tasmota", step, "legacy", tag)
+        # Killed at F4, past its commit; then the plug switched off part way
+        # through G1 of the run after, writing over that release's startup firmware.
+        yield one("sonoff>tasmota", "F4", "legacy", f"{tag}+G1off")
+        for route in ("tasmota>esphome", "tasmota>sonoff"):
+            yield one(route, "start", "legacy", tag)
+
+
+# The releases whose runs this checkout must carry on: each one's steps (from
+# Sonoff to Tasmota, its only way) and their usual lengths on the emulator.
+LEGACY_STEPS = {"v1.2.0": {"C2": 20, "C3": 14, "D1": 18, "D4": 31, "E1": 2, "E2": 29, "E3": 5,
+                           "F2": 35, "F4": 31, "G1": 33, "H1": 2}}
+LEGACY = EMU / "legacy"
+LEGACY_TOOL = "tools/s60_autoflash.py"  # its name until 2.0.0
+LEGACY_NAMED = {"G1", "H1"}  # killed past its F4: the plug keeps the name that release gave it
+_legacy_lock = threading.Lock()
+
+
+def legacy_tree(tag):
+    """The tool as release `tag` shipped, to run in the emulator: its tagged
+    files, and only tools/emulator/legacy/<tag>.patch on top - which points it
+    at the cloud stub, as this checkout's AUTOFLASH_EWELINK_API_BASE does."""
+    tree = LEGACY / tag
+    with _legacy_lock:
+        if not (tree / ".complete").exists():
+            shutil.rmtree(tree, ignore_errors=True)
+            tree.mkdir(parents=True)
+            archive = subprocess.run(["git", "-C", str(REPO), "archive", tag], capture_output=True,
+                                     check=True).stdout
+            subprocess.run(["tar", "-x", "-C", str(tree)], input=archive, check=True)
+            subprocess.run(["patch", "-s", "-p1", "-d", str(tree), "-i",
+                            str(REPO / f"tools/emulator/legacy/{tag}.patch")], check=True)
+            (tree / ".complete").write_text(f"{tag}\n")
+    return tree
 
 
 def needs_cloud(sc):
-    return sc["route"].startswith("sonoff>") and sc["step"] in CLOUD_STEPS
+    # A legacy run starts from Sonoff, at C2, whatever step it stops at.
+    return sc["fault"] == "legacy" or (sc["route"].startswith("sonoff>") and sc["step"] in CLOUD_STEPS)
 
 
 # -- the cloud: one plug at a time ----------------------------------------------
@@ -586,7 +627,10 @@ class Scenario:
     def ex(self, *args, timeout=60):
         return sh("docker", "exec", name(self.n), *args, timeout=timeout)
 
-    def run_tool(self, target, extra=(), source=None, fresh=False):
+    def run_tool(self, target, extra=(), source=None, fresh=False, code=None):
+        """A run to `target`: of this checkout's tool, or of the one in `code`
+        (legacy_tree) - which stays in place for the runs after, until another
+        `code`. A release before 2.0.0 had no --firmware: Tasmota only."""
         args = [str(REPO / "tools/emulator/unattended-test.sh"), f"--instance={self.n}",
                 f"--plug={MAC}", "--keep"]
         if STUB_CLOUD:
@@ -595,7 +639,10 @@ class Scenario:
             args.append("--fresh")
         if source:
             args.append(f"--from={saved(source)}")
-        args += ["--", "--firmware", target, *extra]
+        if code:
+            args.append(f"--code={code}")
+        legacy = code is not None and (Path(code) / LEGACY_TOOL).exists()
+        args += ["--", *([] if legacy else ["--firmware", target]), *extra]
         env = dict(os.environ)
         if (self.sc["fault"], self.sc["arg"]) == ("ctrlc", "countdown"):
             env["AUTOFLASH_EMULATOR_COUNTDOWN"] = "30"
@@ -625,8 +672,9 @@ class Scenario:
         logs = run_logs(self.state)
         return logs[-1][2].count("=== run started") if logs else 0
 
-    def wait_for_step(self, since, headers, stop):
-        pattern = re.compile(STARTS.get(self.sc["step"], (rf"\] {self.sc['step']}  ",))[0])
+    def wait_for_step(self, since, headers, stop, step=None):
+        step = step or self.sc["step"]
+        pattern = re.compile(STARTS.get(step, (rf"\] {step}  ",))[0])
         while not stop.is_set():
             text = self.current_run(since, headers)
             if text and pattern.search(text):
@@ -634,19 +682,21 @@ class Scenario:
             time.sleep(0.3)
         return False
 
-    def inject(self, since, headers, delay, stop, fault, arg, first=True):
-        if not self.wait_for_step(since, headers, stop):
+    def inject(self, since, headers, delay, stop, fault, arg, first=True, step=None):
+        """The fault, `delay` seconds into the step under test - or `step`."""
+        at = step or self.sc["step"]
+        if not self.wait_for_step(since, headers, stop, at):
             return
         time.sleep(delay)
         if stop.is_set():
             return
-        step = STEP_OF.get(self.sc["step"], self.sc["step"])
+        step = STEP_OF.get(at, at)
         text = self.current_run(since, headers) or ""
         if re.search(rf"\] {step} done", text):
             self.notes["mistimed"] = True  # the step was over before the fault
         if first:
             self.fired = time.time()
-        self.say(f"FAULT {fault} {arg} at {self.sc['step']} +{delay:.1f}s")
+        self.say(f"FAULT {fault} {arg} at {at} +{delay:.1f}s")
         self.fault(fault, arg, since, headers)
         self.say("FAULT done")
 
@@ -662,6 +712,8 @@ class Scenario:
             self.ex(p, "off"); time.sleep(arg); self.ex(p, "on")
         elif fault == "crash":
             self.signal("KILL", *HELPERS, TOOL)
+        elif fault == "legacy":
+            self.signal("KILL", *HELPERS, LEGACY_TOOL)
         elif fault == "cancel":
             self.signal("INT"); time.sleep(1); self.signal("INT")
         elif fault == "ctrlc" and arg == "once":
@@ -975,7 +1027,7 @@ class Scenario:
 
     def go(self):
         monitor = PlugMonitor(self)
-        if self.sc.get("step") == "C2" and not NO_CLOUD and not STUB_CLOUD:
+        if (self.sc.get("step") == "C2" or self.sc["fault"] == "legacy") and not NO_CLOUD and not STUB_CLOUD:
             # The turn before the run, not beside it: A1 looks the plug up in
             # eWeLink within seconds of starting, and finds it offline if it
             # is still waiting for its turn then.
@@ -1001,6 +1053,8 @@ class Scenario:
     def go_watched(self):
         sc = self.sc
         route, step = sc["route"], sc["step"]
+        if sc["fault"] == "legacy":
+            return self.go_legacy()
         if step == "C2":
             source, self.target, steps = None, C2_ROUTES[route], {"C2": 20}
         else:
@@ -1031,6 +1085,46 @@ class Scenario:
             time.sleep(arg)
         target = OTHER.get(self.target, self.target) if (fault, arg) == ("cancel", "switch") else self.target
         extra = ["--new"] if (fault, arg) == ("cancel", "new") else []
+        return self.again(results, target, extra, delay, first_fault)
+
+    def go_legacy(self):
+        """An earlier release's run (sc["arg"]) on a plug fresh from Sonoff,
+        killed at 40% of the step under test - or, at "start", let convert it
+        to Tasmota - then this checkout's tool again and again, as a person
+        would, until the plug is converted (to the route's target)."""
+        sc = self.sc
+        step, self.target = sc["step"], sc["route"].split(">")[1]
+        # "+G1off": the plug switched off, too, part way through G1 of the
+        # first run after - G1 then writing over that release's startup
+        # firmware, unproven (step_restore), and carrying on after a cut.
+        tag, _, then = sc["arg"].partition("+")
+        later = ("G1", "plugoff", 1, 0.6 * 33) if then == "G1off" else None
+        old = legacy_tree(tag)
+        stop = threading.Event()
+        if step != "start":
+            self.step_length = LEGACY_STEPS[tag][step]
+            threading.Thread(target=self.inject, args=(time.time(), None, 0.4 * self.step_length, stop,
+                                                       "legacy", sc["arg"]), daemon=True).start()
+        results = [(self.run_tool("tasmota", fresh=True, code=old), None)]
+        results[-1] = (results[-1][0], self.screen_result())
+        stop.set()
+        if step == "start":
+            if "Converted" not in results[-1][1]:
+                return self.finish(results, "OLD-RUN-FAILED")
+            # Its starting point, not the end: the conversion under test is next.
+            results[-1] = (results[-1][0], f"on Tasmota, by {sc['arg']}")
+        elif self.fired is None:
+            return self.finish(results, "NOT-FIRED")
+        return self.again(results, self.target, [], code=REPO, later=later)
+
+    def again(self, results, target, extra, delay=None, first_fault=None, code=None, later=None):
+        """The tool run again, as a person would - switching the plug off and
+        on, or joining its own network, where the run says to - until the plug
+        is converted, or MAX_RUNS runs in all. `code`: the first of them from
+        there (run_tool), and the rest after it. `later`: (step, fault, arg,
+        delay), a fault in the first of them too (noted as later_fired)."""
+        sc = self.sc
+        fault, arg = sc["fault"], sc["arg"]
         while "Converted" not in results[-1][1] and len(results) < MAX_RUNS:
             said = re.sub(r"\s+", " ", Path(self.log).read_text(errors="replace").split("--- ")[-1])
             if "switch the plug off and on" in said or "switch it off and on" in said:
@@ -1047,10 +1141,18 @@ class Scenario:
                 # The same fault again, in the run that recovers from the first.
                 threading.Thread(target=self.inject, args=(time.time(), self.headers_now(), delay, stop2,
                                                            *first_fault, False), daemon=True).start()
-            results.append((self.run_tool(target, extra), None))
+            if later and len(results) == 1:
+                step, later_fault, later_arg, later_delay = later
+
+                def later_inject(since=time.time(), headers=self.headers_now()):
+                    self.inject(since, headers, later_delay, stop2, later_fault, later_arg, False, step)
+                    if not stop2.is_set():
+                        self.notes["later_fired"] = f"{later_fault}-{later_arg} at {step}"
+                threading.Thread(target=later_inject, daemon=True).start()
+            results.append((self.run_tool(target, extra, code=code), None))
             results[-1] = (results[-1][0], self.screen_result())
             stop2.set()
-            extra = []
+            extra, code = [], None
             said = re.sub(r"\s+", " ", Path(self.log).read_text(errors="replace").split("--- ")[-1])
             if (fault, arg) == ("cancel", "switch") and "cannot switch to" in said:
                 # Refused, as it should be: started again for the other one, as it says.
@@ -1104,6 +1206,18 @@ class Scenario:
         names, networks = self.names_seen()
         self.notes["names"], self.notes["networks"] = names, networks
         unknown, final = name_problems(names, networks, getattr(self, "target_final", self.target))
+        if fault == "legacy" and sc["step"] in LEGACY_NAMED and final and re.match(r"^tasmota-[0-9A-F]{6}-\d{4}$", final):
+            final = None  # set up by that release's F4, under Tasmota's own name, as it left every plug
+        if fault == "legacy" and "+" in arg:
+            # Whether the restore after the cut carried on after sectors it had
+            # written, or the cut came before it wrote any (the plug says).
+            uart = self.state / "logs/uart.log"
+            with open(uart, "rb") as log:
+                log.seek(getattr(self, "uart_from", 0))
+                found = re.findall(rb"AUTOFLASH RESTORE: carrying on after (\d+) sectors", log.read())
+            self.notes["restore_carried_on_after"] = int(found[-1]) if found else 0
+            if not self.notes.get("later_fired") and not special:
+                special = "NOT-FIRED"
         if not special:
             if self.notes.get("mistimed"):
                 special = "MISTIMED"
@@ -1184,8 +1298,12 @@ def name_problems(names, networks, target):
     allowed = {"espressif", f"autoflash-recovery-{two}", f"tasmota-{three}", f"esphome-{three}", f"ESP_{ap}",
                f"Sonoff-Setup-{two}", f"sonoff-s60-{three}", "s60-ota-bridge", f"sonoff-s60-mover-{three}",
                f"S60-OTA-Bridge-{two}"}
-    tasmotas_own = re.compile(rf"^tasmota-{three.upper()}-\d{{4}}$")  # its settings erased
-    unknown = [n for n in dict.fromkeys(names + networks) if n not in allowed and not tasmotas_own.match(n)]
+    # Tasmota's own (its settings erased, or set up by 1.2.0), and 1.2.0's
+    # Safeboot's, four decimal digits of no fixed rule - and official Tasmota's
+    # after that Safeboot, until 1.2.0's F4: its saved name had a format in it
+    # (s60-recovery-%04d), which Tasmota takes for its own (artifacts/README.md).
+    numbered = re.compile(rf"^((tasmota-{three.upper()}|s60-recovery)-|x)\d{{4}}$")
+    unknown = [n for n in dict.fromkeys(names + networks) if n not in allowed and not numbered.match(n)]
     converted = {"tasmota": f"tasmota-{three}", "esphome": f"esphome-{three}", "sonoff": "espressif"}.get(target)
     final = names[-1] if names and converted and names[-1] != converted else None
     return unknown, final
