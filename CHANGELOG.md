@@ -84,6 +84,11 @@ it after the S60 have gone:
   was lost on the way back (a weak signal), joined your Wi-Fi by itself -
   and the try again waited a quarter of an hour for the installer, gone. It
   now finds Tasmota there, on your network or its own, and carries on.
+- Tasmota given the Wi-Fi on its setup network that took the details and
+  restarted onto your Wi-Fi before saying so was sent them again, and the run
+  then waited a quarter of an hour for you to join its network - gone. A
+  network gone after no word is now taken as the plug on your Wi-Fi, and it
+  is looked for there.
 - An ESPHome plug whose API is encrypted, asked for its Wi-Fi without the
   key, could be taken for one without the tool's Wi-Fi action, where it
   answered and hung up before the tool's next write; the run then asked for

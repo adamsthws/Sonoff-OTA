@@ -1274,6 +1274,13 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
                 tell(f"    The plug could not connect to '{ssid}' with those details. Type them")
                 tell("    again - the network's name exactly as it appears, and its password:")
                 ssid, password = ask_credentials()
+            elif setup_network_gone(ctx, network):
+                # No word, as it took them: tested, saved and restarted onto the
+                # Wi-Fi before its answer was asked for, its network gone with
+                # it (seen in the fault suite). Sent again, the run would wait
+                # for this computer to join a network that is no more.
+                outcome = "gone"
+                break
             else:
                 tell(f"    No word from the plug; sending them again (attempt {attempt + 1} "
                      f"of {SETUP_SEND_ATTEMPTS}).")
@@ -1286,6 +1293,9 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
                 ctx.set_plug_ip(address)
         elif outcome == "rejected":
             tell(f"    The plug could not connect to '{ssid}' with the bundle's details.")
+        elif outcome == "gone":
+            tell(f"    No word from the plug, but its network has gone: it has most likely")
+            tell(f"    joined '{ssid}' with them. It is looked for there.")
         else:
             tell("    The plug did not say whether it connected. If it does not turn up")
             tell("    on your Wi-Fi, it is still waiting on its setup network: run this")
@@ -1302,6 +1312,25 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
     ])
     return locate_plug(ctx, timeout=600.0)
 
+
+
+# How long the plug's setup network must stay gone, nothing answering on it,
+# to be taken as gone - not a moment's drop as it tests the Wi-Fi.
+SETUP_GONE_AFTER = 15.0
+
+
+def setup_network_gone(ctx: Context, network: str) -> bool:
+    """Whether the plug's setup network has gone: nothing answering on it for
+    SETUP_GONE_AFTER, and not listed by a scan that sees any network (one that
+    sees none cannot say)."""
+    started = time.monotonic()
+    while time.monotonic() - started < SETUP_GONE_AFTER:
+        if setup_network.port_open(timeout=2.0):
+            return False
+        time.sleep(2.0)
+    visible = prompts.scan_wifi_ssids(timeout=10.0)
+    names = (network,) if network.split()[0] == network else setup_networks(ctx)
+    return bool(visible) and not any(name.startswith(names) for name in visible)
 
 
 # Tasmota's own name, from its defaults (tasmota.ino): what its settings

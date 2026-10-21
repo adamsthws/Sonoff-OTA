@@ -508,7 +508,7 @@ class FallbackScreenTests(OutputTestCase):
 
 
 
-    def send(self, outcomes, unattended=False):
+    def send(self, outcomes, unattended=False, gone=False):
         import tools.autoflash_cli as af
         from tools.autoflash import prompts, setup_network
         polls = iter([None, "192.168.0.77"])
@@ -531,6 +531,7 @@ class FallbackScreenTests(OutputTestCase):
                  mock.patch.object(af, "ask_credentials", return_value=("Home-New", "pw")) as asked, \
                  mock.patch.object(prompts, "UNATTENDED", unattended), \
                  mock.patch.object(af, "name_with_the_wifi"), \
+                 mock.patch.object(af, "setup_network_gone", return_value=gone), \
                  mock.patch.object(af.time, "sleep"):
                 af.configure_plug_wifi(ctx, "tasmota-5A3C1F-7340")
                 self.asked = asked.called
@@ -544,6 +545,16 @@ class FallbackScreenTests(OutputTestCase):
         self.assertEqual(sent, ["Home-2G"] * 3)
         self.assertIn("sending them again (attempt 3 of 3)", screen)
         self.assertIn("restarting onto it", screen)
+
+    def test_no_word_and_its_network_gone_it_is_looked_for_at_home(self):
+        # Seen in the fault suite: the plug took them, saved them and restarted
+        # onto the Wi-Fi before its answer was asked for. Sent again, the run
+        # waited a quarter of an hour for this computer to join a network gone.
+        sent, screen = self.send([("unknown", None)], gone=True)
+        self.assertEqual(sent, ["Home-2G"])
+        self.assertIn("its network has gone", screen)
+        self.assertNotIn("sending them again", screen)
+        self.assertIn("Back to your usual Wi-Fi", screen)
 
     def test_rejected_details_are_asked_for_again(self):
         sent, _ = self.send([("rejected", None), ("saved", "192.168.0.77")])

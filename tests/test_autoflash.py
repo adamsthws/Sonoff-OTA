@@ -3221,6 +3221,39 @@ class NamedWithTheWifiTests(unittest.TestCase):
             self.assertEqual(self.run_it(name), [], name)
 
 
+class SetupNetworkGoneTests(unittest.TestCase):
+    """Whether the plug's setup network has gone, after the Wi-Fi was sent."""
+
+    def gone(self, answering, visible, network="tasmota-ABCDEF-1234"):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        clock = iter(range(0, 1000, 2))
+        ctx = SimpleNamespace(state=SimpleNamespace(input={"plug_mac": "12:34:56:ab:cd:ef"}.get))
+        with mock.patch.object(autoflash.setup_network, "port_open", return_value=answering), \
+             mock.patch.object(autoflash.prompts, "scan_wifi_ssids", return_value=visible), \
+             mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(autoflash.time, "sleep"):
+            return autoflash.setup_network_gone(ctx, network)
+
+    def test_nothing_answering_and_not_listed_is_gone(self):
+        self.assertTrue(self.gone(False, ["Home"]))
+
+    def test_still_answering_is_not(self):
+        self.assertFalse(self.gone(True, ["Home"]))
+
+    def test_still_listed_is_not(self):
+        self.assertFalse(self.gone(False, ["Home", "tasmota-ABCDEF-1234"]))
+
+    def test_a_scan_that_sees_nothing_cannot_say(self):
+        self.assertFalse(self.gone(False, []))
+
+    def test_given_as_a_hint_any_of_its_names_counts(self):
+        hint = "tasmota-abcdef, tasmota-ABCDEF-NNNN, or ESP_ABCDF0"
+        self.assertFalse(self.gone(False, ["ESP_ABCDF0"], network=hint))
+        self.assertTrue(self.gone(False, ["Home"], network=hint))
+
+
 class AtNextSaveTests(unittest.TestCase):
     """The Berry driver that puts commands in as Tasmota saves before a restart."""
 
