@@ -28,10 +28,11 @@ case "$ROOT" in /mnt/[a-z]/*) STATE=$HOME/.local/share/autoflash-emu/state ;; es
 NAME=autoflash-emu PORT=8080
 PLUG=192.168.60.50
 
-emu_args=(--detach) keep=0 stub=0 run_args=() from="" save=""
+emu_args=(--detach) keep=0 stub=0 run_args=() from="" save="" plug_mac=""
 while [ $# -gt 0 ]; do
     case "$1" in
-    --fresh|--pcap|--rebuild|--no-firewall|--plug=*) emu_args+=("$1") ;;
+    --fresh|--pcap|--rebuild|--no-firewall) emu_args+=("$1") ;;
+    --plug=*) emu_args+=("$1"); plug_mac=$(echo "${1#--plug=}" | tr 'A-F-' 'a-f:') ;;
     --stub-cloud) stub=1 ;;
     --instance=[1-9]|--instance=[12][0-9]|--instance=30)  # another emulator beside the first: see emu.sh
         n=${1#--instance=}; emu_args+=("$1")
@@ -72,6 +73,13 @@ if [ -n "$from" ]; then
     cp "$SAVED/$from/flash.bin" "$STATE/flash.bin"
     echo "$kept_for" > "$STATE/.flash-mode"
     rm -rf "$STATE/work/captures" && cp -a "$SAVED/$from/captures" "$STATE/work/captures"
+    # The kept flash is the asked-for plug's now: emu.sh, seeing another plug
+    # than ran here last, would put it by as the last one's and bring back
+    # that plug's own - the run would not start from the kept plug at all.
+    if [ -n "$plug_mac" ]; then
+        printf '%s\n%s\n' "$SAVED/$from" "$plug_mac" > "$STATE/plug"
+        rm -f "$STATE/plugs/${plug_mac//:/-}.bin" "$STATE/plugs/${plug_mac//:/-}.mode"
+    fi
 fi
 
 # One left running (--keep) is carried on with as it is - the plug, its network
