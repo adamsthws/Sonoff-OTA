@@ -496,6 +496,7 @@ class FallbackScreenTests(OutputTestCase):
             with mock.patch.object(af.hostsys, "wifi_menu_hint", return_value="the Wi-Fi menu"), \
                  mock.patch.object(setup_network, "wait_for_port", return_value=True), \
                  mock.patch.object(setup_network, "send_wifi", return_value=("saved", "192.168.0.77")), \
+                 mock.patch.object(af, "name_with_the_wifi"), \
                  mock.patch.object(af.time, "sleep"):
                 af.configure_plug_wifi(ctx, "tasmota-5A3C1F-7340")
         screen, _ = self.run_with(io.StringIO(), False, body)
@@ -529,6 +530,7 @@ class FallbackScreenTests(OutputTestCase):
                  mock.patch.object(setup_network, "send_wifi", side_effect=send_wifi), \
                  mock.patch.object(af, "ask_credentials", return_value=("Home-New", "pw")) as asked, \
                  mock.patch.object(prompts, "UNATTENDED", unattended), \
+                 mock.patch.object(af, "name_with_the_wifi"), \
                  mock.patch.object(af.time, "sleep"):
                 af.configure_plug_wifi(ctx, "tasmota-5A3C1F-7340")
                 self.asked = asked.called

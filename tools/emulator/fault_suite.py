@@ -81,18 +81,20 @@ HELPERS = ("serve_safeboot_migration.py", "serve_tasmota_ota.py")
 
 # Each direction: the saved plug it starts from, its target, and the steps that
 # write to or wait on the plug, with how long each usually takes (emulator).
+# Each step's usual length in seconds, from passing runs: a fault lands at a
+# share of it. F4 is 10 s from 2026-10-21 (one restart; it was 31 s with two).
 ROUTES = {
     "tasmota>esphome": ("suite-tasmota", "esphome", {"L1": 40, "M1": 8, "I2": 5}),
     "tasmota>sonoff": ("suite-tasmota", "sonoff",
                        {"L1": 40, "X1": 12, "X2": 25, "D4": 31, "D5": 2, "R1": 57, "R2": 2}),
     "esphome>tasmota": ("suite-esphome", "tasmota",
                         {"X1": 12, "X2": 25, "D4": 31, "D5": 2, "E1": 2, "E2": 29, "E3": 5,
-                         "F2": 35, "F4": 31, "G1": 33, "H1": 2}),
+                         "F2": 35, "F4": 10, "G1": 33, "H1": 2}),
     "esphome>sonoff": ("suite-esphome", "sonoff",
                        {"X1": 12, "X2": 25, "D4": 31, "D5": 2, "R1": 57, "R2": 2}),
     "sonoff>tasmota": ("suite-stockC2-tasmota", "tasmota",
                        {"C3": 14, "C3fb": 14, "D1": 18, "D4": 31, "D5": 2, "E1": 2, "E2": 29,
-                        "E3": 5, "F2": 35, "F4": 31, "G1": 33, "H1": 2}),
+                        "E3": 5, "F2": 35, "F4": 10, "G1": 33, "H1": 2}),
     "sonoff>esphome": ("suite-stockC2-esphome", "esphome",
                        {"C3": 14, "C3fb": 14, "D1": 18, "D4": 31, "D5": 2, "I1": 36, "I2": 5}),
 }

@@ -213,6 +213,15 @@ it after the S60 have gone:
   `Sonoff-Setup-CDEF`; the run still knows those. The names a person sees
   still say what plug it is: Tasmota's template (Sonoff S60TPG) and ESPHome's
   friendly name (Sonoff S60). ESPHome is 1.2.0 for it.
+- Setting Tasmota up at the end (F4) restarts the plug once, where it
+  restarted it twice: the name and the template go in as the plug saves the
+  defaults its reset rebuilt, so it comes back converted, and never as
+  Tasmota's own `tasmota-ABCDEF-1234` for a moment in between. Should that
+  not take, they go in after the reset, as before.
+- A Tasmota whose settings were erased part way - switched off and on 7
+  times, as the run can advise - comes back under the run's name for it
+  (`autoflash-recovery-CDEF`) once it is given the Wi-Fi on its setup
+  network, where it kept Tasmota's own until the next firmware.
 - The tool calls itself Autoflash, not the S60 conversion tool - in
   `--version`, and to the system it keeps awake - as it is to convert more
   than one kind of plug. Its firewall rule is called `Autoflash` (it was

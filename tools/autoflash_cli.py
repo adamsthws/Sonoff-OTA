@@ -1256,6 +1256,7 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
     wait_until_joined(network)
     outcome = "manual"
     if credentials is not None:
+        name_with_the_wifi(ctx)
         ssid, password = credentials
         for attempt in range(1, SETUP_SEND_ATTEMPTS + 1):
             tell(f"    Sending the Wi-Fi details for '{ssid}'. The plug tests them first -")
@@ -1301,6 +1302,36 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
     ])
     return locate_plug(ctx, timeout=600.0)
 
+
+
+# Tasmota's own name, from its defaults (tasmota.ino): what its settings
+# erased - the 7x power-cycle reset - leave it with.
+TASMOTA_DEFAULT_NAME_RE = re.compile(r"^tasmota-[0-9A-F]{6}-\d{4}$")
+
+
+def name_with_the_wifi(ctx: Context) -> None:
+    """A Tasmota on its setup network that has lost its name - its settings
+    erased, as switching it off and on 7 times does - named again as it
+    saves the Wi-Fi it is given: the name this run gives a Tasmota there
+    (autoflash-recovery-CDEF part way through, tasmota-abcdef once F4 has
+    named it), in the restart onto the Wi-Fi, which costs no other.  One
+    with a name of its own keeps it."""
+    if not ctx.state.input("plug_mac"):
+        return
+    plug = Device(setup_network.SETUP_HOST, timeout=8.0)
+    try:
+        # The name it goes by: Hostname gives the setting, which for the
+        # default is the format it is made from (%s-%04d).
+        status = plug.command("Status 5")
+    except (DeviceError, OSError):
+        return
+    net = status.get("StatusNET") if isinstance(status, dict) else None
+    current = net.get("Hostname") if isinstance(net, dict) else None
+    if not (isinstance(current, str) and TASMOTA_DEFAULT_NAME_RE.match(current)):
+        return
+    name = final_name(ctx, "tasmota") if ctx.state.is_done("F4") else our_setup_network(ctx)
+    if plug.at_next_save([f"Hostname {name}"]):
+        say(f"    It lost its name with its settings ({current}): it is {name} again once it has the Wi-Fi.")
 
 
 # -------------------------------------------------------------------- steps
@@ -3332,11 +3363,29 @@ def step_configure(ctx: Context) -> dict[str, Any]:
     # never expecting to save them).  Reset 4 rebuilds every setting from this
     # firmware's own defaults and keeps the Wi-Fi.  Harmless when Tasmota
     # started from defaults anyway.
+    #
+    # Its own defaults name it Tasmota's way (tasmota-ABCDEF-1234), and a name
+    # sent with the reset goes before it (Tasmota resets once its commands are
+    # done) and is lost.  So the name and the template are put in as the reset
+    # restart saves the rebuilt defaults: the plug comes back as converted,
+    # under no other name, in that one restart.
+    # (SaveData 1 is a default the reset puts back, and a command that saves
+    # cannot go in there: see at_next_save.)
+    hooked = device.at_next_save([*([f"Hostname {hostname}"] if hostname else []),
+                                  f"Template {template}", "Module 0"],
+                                 timeout=SLOW_COMMAND)
     booted, uptime = device.started_at(), device.uptime_seconds()
     device.command("Reset 4", timeout=SLOW_COMMAND)
-    say("Settings reset to Tasmota's defaults, keeping the Wi-Fi; the plug restarts")
+    say("Settings reset to Tasmota's defaults, keeping the Wi-Fi"
+        + (", with the plug's template and name" if hooked else "") + "; the plug restarts")
     back_after_reset(ctx, booted, uptime)
     device = ctx.device
+    if hooked and template_in_place(device, template, hostname):
+        say(f"Template applied as {json.loads(template)['NAME']}"
+            + (f", and named {hostname}" if hostname else ""))
+        return {"template": "applied", "wifi_route": route, "restarts": 1}
+    # Not taken - a power cut before the save, say, or a Tasmota whose Berry
+    # would not have it: put in after the reset, at the cost of a restart.
     booted, uptime = device.started_at(), device.uptime_seconds()
     device.command("SaveData 1", timeout=SLOW_COMMAND)
     device.command(f"Template {template}", timeout=SLOW_COMMAND)
@@ -3349,7 +3398,7 @@ def step_configure(ctx: Context) -> dict[str, Any]:
     device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
     # Restarted is not yet answering: the next step asks the plug at once.
     device.wait_reachable(timeout=120)
-    return {"template": "applied", "wifi_route": route}
+    return {"template": "applied", "wifi_route": route, "restarts": 2}
 
 
 def back_after_reset(ctx: Context, booted: str | None, uptime: int | None) -> None:

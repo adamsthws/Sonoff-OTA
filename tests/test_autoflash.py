@@ -3076,9 +3076,11 @@ class ConfigureStepTests(unittest.TestCase):
         from unittest import mock
         import tools.autoflash_cli as autoflash
         sent = []
+        # A Tasmota that does not take the name and template at the reset's save.
         device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
                                  uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
-                                 command=lambda c, timeout=None: sent.append(c), is_safeboot=lambda: False)
+                                 command=lambda c, timeout=None: sent.append(c), is_safeboot=lambda: False,
+                                 at_next_save=lambda commands, timeout=None: False)
         state = SimpleNamespace(input=lambda key: {"product_model": "S60TPF"}.get(key))
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device, state=state)
         with mock.patch.object(autoflash, "say") as said:
@@ -3098,13 +3100,49 @@ class ConfigureStepTests(unittest.TestCase):
         sent = []
         device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
                                  uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
-                                 command=lambda c, timeout=None: sent.append(c), is_safeboot=lambda: False)
+                                 command=lambda c, timeout=None: sent.append(c), is_safeboot=lambda: False,
+                                 at_next_save=lambda commands, timeout=None: False)
         inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
                               state=SimpleNamespace(input=inputs.get))
         with mock.patch.object(autoflash, "say"):
-            autoflash.step_configure(ctx)
+            result = autoflash.step_configure(ctx)
         self.assertEqual(sent[-1], "Backlog Hostname tasmota-abcdef; Module 0")
+        self.assertEqual(result["restarts"], 2)
+
+    def test_named_and_templated_as_the_reset_saves_in_its_one_restart(self):
+        # Reset 4 rebuilds Tasmota's defaults, named its own way; the name and
+        # template go in as that restart saves them (a Berry driver for
+        # save_before_restart), so it never comes back as tasmota-ABCDEF-1234
+        # and needs no restart of its own for them.
+        import json
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        template = autoflash.kinds.SONOFF_S60.tasmota_template("S60TPF")
+        hooked, sent, reset = [], [], []
+        settled = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
+                   "SaveData": {"SaveData": "ON"}, "Hostname": {"Hostname": "tasmota-abcdef"}}
+
+        def command(c, timeout=None):
+            sent.append(c)
+            if c == "Reset 4":
+                reset.append(c)
+            return settled.get(c) if reset else {"Hostname": {"Hostname": "autoflash-recovery-CDEF"}}.get(c)
+
+        device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
+                                 uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
+                                 command=command, is_safeboot=lambda: False,
+                                 at_next_save=lambda commands, timeout=None: hooked.append(commands) or True)
+        inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
+                              state=SimpleNamespace(input=inputs.get))
+        with mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "back_after_reset") as back:
+            result = autoflash.step_configure(ctx)
+        self.assertEqual(hooked, [["Hostname tasmota-abcdef", f"Template {template}", "Module 0"]])
+        self.assertEqual([c for c in sent if " " in c], ["Reset 4"])  # nothing after it
+        back.assert_called_once()
+        self.assertEqual(result["restarts"], 1)
 
 
     def test_tried_again_once_the_settings_are_in_place_it_resets_nothing(self):
@@ -3125,7 +3163,7 @@ class ConfigureStepTests(unittest.TestCase):
 
         device = SimpleNamespace(wait_reachable=lambda **_: None, command=command, is_safeboot=lambda: False,
                                  started_at=lambda: "t", uptime_seconds=lambda: 10,
-                                 wait_for_reboot=lambda **_: 1.0)
+                                 wait_for_reboot=lambda **_: 1.0, at_next_save=lambda commands, timeout=None: False)
         inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
                               state=SimpleNamespace(input=inputs.get))
@@ -3139,6 +3177,91 @@ class ConfigureStepTests(unittest.TestCase):
         with mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "back_after_reset"):
             autoflash.step_configure(ctx)
         self.assertIn("Reset 4", sent)
+
+
+class NamedWithTheWifiTests(unittest.TestCase):
+    """A Tasmota whose settings were erased (switched off and on 7 times) is
+    named again as it saves the Wi-Fi given on its setup network."""
+
+    def run_it(self, current, done=()):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        hooked = []
+
+        class Plug:
+            def __init__(self, host, timeout=None):
+                self.host = host
+
+            def command(self, c, timeout=None):
+                # As Tasmota answers on its setup network: Hostname would give
+                # the setting (%s-%04d for its default), Status 5 the name.
+                return {"StatusNET": {"Hostname": current}} if c == "Status 5" else None
+
+            def at_next_save(self, commands, timeout=None):
+                hooked.append((self.host, commands))
+                return True
+
+        inputs = {"plug_mac": "12:34:56:ab:cd:ef"}
+        ctx = SimpleNamespace(state=SimpleNamespace(input=inputs.get, is_done=lambda step: step in done))
+        with mock.patch.object(autoflash, "Device", Plug), mock.patch.object(autoflash, "say"):
+            autoflash.name_with_the_wifi(ctx)
+        return hooked
+
+    def test_part_way_through_it_is_the_runs_name_for_it_again(self):
+        self.assertEqual(self.run_it("tasmota-ABCDEF-1234"),
+                         [("192.168.4.1", ["Hostname autoflash-recovery-CDEF"])])
+
+    def test_once_converted_it_is_its_converted_name_again(self):
+        self.assertEqual(self.run_it("tasmota-ABCDEF-1234", done=("F4",)),
+                         [("192.168.4.1", ["Hostname tasmota-abcdef"])])
+
+    def test_a_name_it_still_has_is_left_alone(self):
+        for name in ("autoflash-recovery-CDEF", "tasmota-abcdef", "kitchen-plug"):
+            self.assertEqual(self.run_it(name), [], name)
+
+
+class AtNextSaveTests(unittest.TestCase):
+    """The Berry driver that puts commands in as Tasmota saves before a restart."""
+
+    def test_the_commands_go_in_a_driver_for_save_before_restart(self):
+        from tools.autoflash.device import Device
+        plug = Device("192.0.2.1")
+        sent = []
+        plug.command = lambda c, timeout=None: sent.append(c) or {"Br": "nil" if len(sent) == 1 else "AutoflashAtSave"}
+        self.assertTrue(plug.at_next_save(["Hostname x", 'Template {"NAME":"S60"}']))
+        self.assertEqual(sent[1], "Br classname(autoflash_at_save)")
+        self.assertTrue(sent[0].startswith("Br import global class AutoflashAtSave"))
+        self.assertIn("def save_before_restart()", sent[0])
+        self.assertIn("""['Hostname x','Template {"NAME":"S60"}']""", sent[0])
+
+    def test_a_firmware_without_berry_says_no(self):
+        from tools.autoflash.device import Device
+        plug = Device("192.0.2.1")
+        plug.command = lambda c, timeout=None: {"Command": "Unknown"}
+        self.assertFalse(plug.at_next_save(["Hostname x"]))
+        # And Berry that would not take it: its error, not the class, comes back.
+        plug.command = lambda c, timeout=None: {"Br": "[syntax_error] input:1: strict: ..."}
+        self.assertFalse(plug.at_next_save(["Hostname x"]))
+
+    def test_a_quote_cannot_reach_the_berry(self):
+        from tools.autoflash.device import Device
+        with self.assertRaises(ValueError):
+            Device("192.0.2.1").at_next_save(["Hostname it's"])
+
+    def test_it_runs_once_and_takes_no_command_that_saves(self):
+        # SaveData saves the settings itself (SettingsSaveAll), which calls
+        # the driver again: in the emulator, again and again until Tasmota's
+        # stack overflowed and it restarted unsaved, its settings lost.
+        from tools.autoflash.device import Device
+        plug = Device("192.0.2.1")
+        sent = []
+        plug.command = lambda c, timeout=None: sent.append(c) or {"Br": "AutoflashAtSave"}
+        plug.at_next_save(["Hostname x"])
+        self.assertIn("if self.done return end self.done=true", sent[0])
+        for command in ("SaveData 1", "Backlog Hostname x; Module 0", "Restart 1", "Reset 4"):
+            with self.assertRaises(ValueError):
+                plug.at_next_save([command])
 
 
 class PromoteTests(unittest.TestCase):

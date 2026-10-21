@@ -320,6 +320,48 @@ class Device:
                 ConnectionError, http.client.HTTPException):
             return False
 
+    # The driver's class, by which Tasmota says it has it.
+    AT_NEXT_SAVE_CLASS = "AutoflashAtSave"
+
+    def at_next_save(self, commands: list[str], timeout: float | None = None) -> bool:
+        """Have Tasmota run `commands` at its next restart, as it saves its
+        settings: a Berry driver for save_before_restart, which every restart
+        calls just before the save (settings.ino SettingsSaveAll).  So a name
+        or template goes in with a restart the plug makes anyway - after
+        Reset 4 has rebuilt the defaults, or once the Wi-Fi given through its
+        setup page has connected - and costs none of its own.  Kept in memory
+        only: gone with that restart, and one given again replaces it.
+
+        It runs once: a command that saves the settings itself (SaveData
+        does, SettingsSaveAll) would call it again, and again - in the
+        emulator, until Tasmota's stack overflowed and it restarted before
+        the save, its settings lost.  No such command is given it either.
+
+        True once Tasmota took the driver; False from a firmware without
+        Berry (the startup firmware) or one that refused it."""
+        if any("'" in c or "\\" in c for c in commands):
+            raise ValueError("a command for at_next_save cannot hold a quote or backslash")
+        if any(c.split()[0].lower() in ("savedata", "backlog", "restart", "reset") for c in commands):
+            raise ValueError("a command for at_next_save cannot save, queue or restart")
+        listed = ",".join(f"'{c}'" for c in commands)
+        code = (
+            "import global "
+            f"class {self.AT_NEXT_SAVE_CLASS} var c, done def init(c) self.c=c end "
+            "def save_before_restart() if self.done return end self.done=true "
+            "for x:self.c tasmota.cmd(x) end end end "
+            "if global.contains('autoflash_at_save') tasmota.remove_driver(global.autoflash_at_save) end "
+            f"global.autoflash_at_save={self.AT_NEXT_SAVE_CLASS}([{listed}]) "
+            "tasmota.add_driver(global.autoflash_at_save)"
+        )
+        try:
+            # Statements answer nothing (Berry's strict mode refuses a value
+            # after them): whether the driver is in is asked after.
+            self.berry(code, timeout=timeout)
+            result = self.berry("classname(autoflash_at_save)", timeout=timeout)
+        except (DeviceError, OSError, http.client.HTTPException):
+            return False  # the restart then goes as without it
+        return isinstance(result, dict) and result.get("Br") == self.AT_NEXT_SAVE_CLASS
+
     def berry_value(self, code: str, name: str, timeout: float = 120.0) -> str:
         """Run `code` (which must assign the global `name`), then read it back."""
         self.berry(code, timeout=timeout)
