@@ -398,13 +398,20 @@ class _Api:
         return True
 
     def send(self, *messages: tuple[int, bytes]) -> None:
-        """Each (kind, payload) as a message of its own, in one write."""
+        """Each (kind, payload) as a message of its own, in one write.  A write
+        the plug has already hung up on is left to the read that follows: what
+        it said before hanging up ("Bad indicator byte" to a plain hello, from
+        an encrypted API) is still there to read."""
         if self.ciphers is None:
-            self.sock.sendall(b"".join(_frame(kind, payload) for kind, payload in messages))
+            data = b"".join(_frame(kind, payload) for kind, payload in messages)
         else:
-            self.sock.sendall(b"".join(noise.frame(self.ciphers[0].encrypt(
+            data = b"".join(noise.frame(self.ciphers[0].encrypt(
                 kind.to_bytes(2, "big") + len(payload).to_bytes(2, "big") + payload))
-                for kind, payload in messages))
+                for kind, payload in messages)
+        try:
+            self.sock.sendall(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _read(self, size: int) -> bytes:
         self.sock.settimeout(max(0.1, self.deadline - time.monotonic()))

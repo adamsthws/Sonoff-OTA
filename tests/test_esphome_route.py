@@ -555,6 +555,21 @@ class EncryptedApiTests(unittest.TestCase):
         self.assertTrue(locked.exception.wrong)
         self.assertIsNone(af.esphome.api_signal("127.0.0.1", self.serve(), timeout=3.0))  # just none
 
+    def test_locked_even_when_it_hangs_up_before_the_question(self):
+        # A plug quicker than the tool: it answers the plain hello and hangs up
+        # before the next write, which is refused - its answer is still read.
+        import time
+        send = af.esphome._Api.send
+
+        def later(api, *messages):
+            if messages[0][0] != af.esphome._HELLO:
+                time.sleep(0.3)
+            send(api, *messages)
+
+        with mock.patch.object(af.esphome._Api, "send", later), \
+             self.assertRaises(af.esphome.ApiLocked):
+            af.esphome.api_wifi_details("127.0.0.1", self.serve(), timeout=3.0)
+
     def test_a_key_given_for_a_plain_api_is_not_used(self):
         port = self.serve(plain_first=True)
         self.assertEqual(af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0, key=self.KEY),

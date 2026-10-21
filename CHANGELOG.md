@@ -75,6 +75,10 @@ it after the S60 have gone:
   own network - is read again wherever the installer is once you have joined
   that, where before both tries went to its address on the home network and
   timed out, and an unattended run carried on without a backup.
+- An ESPHome plug whose API is encrypted, asked for its Wi-Fi without the
+  key, could be taken for one without the tool's Wi-Fi action, where it
+  answered and hung up before the tool's next write; the run then asked for
+  the Wi-Fi password rather than for the key. Its answer is now read.
 - A run started again (`--new`) after the memory layout was rebuilt for
   Tasmota, before official Tasmota was set up, took the plug for one on its
   way from ESPHome and sent it round steps that need Sonoff's layout, which
