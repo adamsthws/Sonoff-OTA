@@ -730,6 +730,7 @@ class Scenario:
         joined = None
         wanted = None  # (log, the name told) while the run asks for a join
         gone_since = None
+        silent = 0  # looks in a row the plug has not answered on its network
         while not stop.is_set():
             joined = joined or getattr(self, "joined", None)
             on_air = self.ex("cat", "/run/autoflash-emu/softap").stdout.strip()
@@ -743,6 +744,18 @@ class Scenario:
                     self.say(f"PERSON: {joined} gone; this computer back on the home network by itself")
                     joined = self.joined = None
                     gone_since = None
+            if joined and on_air and wanted:
+                # Dropped off a network that came back by the same name - the
+                # plug restarted on it (the installer into Tasmota, say), too
+                # quickly to be seen gone: joined again while the run asks.
+                gateway = self.ex("cat", "/run/autoflash-emu/gateway").stdout.strip() or "192.168.4.1"
+                silent = 0 if self.ex("ping", "-c1", "-W1", gateway).returncode == 0 else silent + 1
+                if silent >= 5:  # about 15 s: not a moment's drop as Tasmota tests the details
+                    self.say(f"PERSON: dropped off {joined}; joining it again")
+                    joined = self.joined = None
+                    silent = 0
+            else:
+                silent = 0
             for _, log, text in run_logs(self.state):
                 if log.stat().st_mtime < self.started:
                     continue
