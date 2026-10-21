@@ -96,9 +96,11 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bsign=[0-9a-fA-F]+"), "sign=<signature>"),
     (re.compile(r"[\w.%+-]+@[\w-]+(?:\.[\w-]+)+"), "<email>"),
     (re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"), "<mac>"),
-    # An eWeLink device id, and Tasmota's default name, which ends with the MAC's.
+    # An eWeLink device id; and a converted plug's name, which ends with the
+    # MAC's (tasmota-abcdef, esphome-abcdef), and Tasmota's default one.
     (re.compile(r"\b100[0-9a-f]{7}\b"), "<device-id>"),
     (re.compile(r"\btasmota-[0-9A-Fa-f]{6}-\d{4}\b"), "<device-name>"),
+    (re.compile(r"\b(?:tasmota|esphome)-[0-9a-f]{6}\b"), "<device-name>"),
     (re.compile(r"(\[sudo\] password for )\S+?(:)"), r"\1<user>\2"),
 ]
 _IPV4 = re.compile(r"(?<![\w.-])\d{1,3}(?:\.\d{1,3}){3}(?![\w.(-])")

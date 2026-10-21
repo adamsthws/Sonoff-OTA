@@ -31,14 +31,14 @@ from . import imprint, noise
 ROOT = Path(__file__).resolve().parents[2]
 # The published image, the ESPHome made for the Sonoff S60 (kinds.SONOFF_S60),
 # pinned: a changed file is refused, never used unseen.
-IMAGE = ROOT / "artifacts" / "esphome-sonoff-s60-imprintable-1.1.0.bin"
-IMAGE_SHA256 = "eb5c2f6922fb913c05c08324f48ce1e4bf519c7b5b4da7bc59797c72352cce0a"
-IMAGE_SIZE = 955_408
+IMAGE = ROOT / "artifacts" / "esphome-sonoff-s60-imprintable-1.2.0.bin"
+IMAGE_SHA256 = "bf9863ca68811d871e52e02bf0cdec63571f1baba087b271107a2c45766f45d4"
+IMAGE_SIZE = 955_376
 # ESPHome's bootloader, from the same build, put in place of Sonoff's: Sonoff's
 # (ESP-IDF 4.4) starts ESPHome but cannot roll back an update that fails to
 # start ("Bootloader too old for OTA rollback").  It is all that sits before
 # the partition table at 0x8000, and the one part the plug cannot start without.
-BOOTLOADER = ROOT / "artifacts" / "esphome-sonoff-s60-bootloader-1.1.0.bin"
+BOOTLOADER = ROOT / "artifacts" / "esphome-sonoff-s60-bootloader-1.2.0.bin"
 BOOTLOADER_SHA256 = "3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433"
 BOOTLOADER_SIZE = 21_088
 BOOTLOADER_ROOM = 0x8000
@@ -276,7 +276,7 @@ def sensor_signal(host: str) -> int | None:
 
 # ESPHome's native API, only as far as the run needs it: its configuration as
 # it prints it, which gives the Wi-Fi signal, for an ESPHome without the signal
-# sensor; and our s60_wifi action.  Spoken plainly, as an ESPHome without an
+# sensor; and our Wi-Fi action.  Spoken plainly, as an ESPHome without an
 # API encryption key speaks it (ours), or encrypted with the key
 # (tools/autoflash/noise.py): each message then in a frame of its own, its
 # type and length sealed with it.
@@ -511,16 +511,16 @@ def api_wifi(host: str, port: int = API_PORT, timeout: float = 8.0,
     return None
 
 
-# Our ESPHome's action that gives the Wi-Fi it is on (ESPHome/sonoff_s60.yaml,
-# from 1.1.0), and the API messages that list and call it.
-WIFI_ACTION = "s60_wifi"
+# Our ESPHome's action that gives the Wi-Fi it is on (ESPHome/sonoff_s60.yaml):
+# its name from 1.2.0, and 1.1.0's; and the API messages that list and call it.
+WIFI_ACTIONS = ("autoflash_wifi", "s60_wifi")
 _LIST, _LISTED, _ACTION, _CALL, _ANSWER = 11, 19, 41, 42, 131
 
 
 def api_wifi_details(host: str, port: int = API_PORT, timeout: float = 8.0,
                      key: bytes | None = None) -> tuple[str, str] | None:
     """The Wi-Fi the plug is on, name and password, from ESPHome itself - its
-    s60_wifi action, which ours has from 1.1.0. None from an ESPHome without
+    Wi-Fi action, which ours has from 1.1.0. None from an ESPHome without
     it; ApiLocked from one whose API is encrypted and `key` is not its key."""
     try:
         api = _Api(host, port, timeout, key)
@@ -532,7 +532,7 @@ def api_wifi_details(host: str, port: int = API_PORT, timeout: float = 8.0,
         for kind, payload in api.messages():
             if kind == _ACTION:
                 action = _fields(payload)
-                if action.get(1) == WIFI_ACTION.encode() and isinstance(action.get(2), int):
+                if action.get(1) in {name.encode() for name in WIFI_ACTIONS} and isinstance(action.get(2), int):
                     key = action[2]
             elif kind == _LISTED:
                 if key is None:

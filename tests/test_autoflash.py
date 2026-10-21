@@ -3067,6 +3067,22 @@ class ConfigureStepTests(unittest.TestCase):
         self.assertEqual(result["wifi_route"], "joined by itself")
         self.assertIn("joined your Wi-Fi by itself", " ".join(str(c.args[0]) for c in said.call_args_list))
 
+    def test_it_is_named_as_every_converted_tasmota_with_one_restart(self):
+        # tasmota-abcdef, whatever the plug: its own network takes the name too.
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        sent = []
+        device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
+                                 uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
+                                 command=lambda c, timeout=None: sent.append(c), is_safeboot=lambda: False)
+        inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
+                              state=SimpleNamespace(input=inputs.get))
+        with mock.patch.object(autoflash, "say"):
+            autoflash.step_configure(ctx)
+        self.assertEqual(sent[-1], "Backlog Hostname tasmota-abcdef; Module 0")
+
 
     def test_tried_again_once_the_settings_are_in_place_it_resets_nothing(self):
         # A busy plug took the template but answered too slowly: resetting
@@ -3077,20 +3093,29 @@ class ConfigureStepTests(unittest.TestCase):
         import tools.autoflash_cli as autoflash
         template = autoflash.kinds.SONOFF_S60.tasmota_template("S60TPF")
         answers = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
-                   "SaveData": {"SaveData": "ON"}}
+                   "SaveData": {"SaveData": "ON"}, "Hostname": {"Hostname": "tasmota-abcdef"}}
         sent = []
 
         def command(c, timeout=None):
             sent.append(c)
             return answers.get(c)
 
-        device = SimpleNamespace(wait_reachable=lambda **_: None, command=command, is_safeboot=lambda: False)
-        state = SimpleNamespace(input=lambda key: {"product_model": "S60TPF"}.get(key))
-        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device, state=state)
+        device = SimpleNamespace(wait_reachable=lambda **_: None, command=command, is_safeboot=lambda: False,
+                                 started_at=lambda: "t", uptime_seconds=lambda: 10,
+                                 wait_for_reboot=lambda **_: 1.0)
+        inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
+                              state=SimpleNamespace(input=inputs.get))
         with mock.patch.object(autoflash, "say"):
             result = autoflash.step_configure(ctx)
         self.assertNotIn("Reset 4", sent)
         self.assertEqual(result["template"], "applied")
+        # One set up before it was named so (an earlier version) is done again.
+        answers["Hostname"] = {"Hostname": "tasmota-ABCDEF-1234"}
+        sent.clear()
+        with mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "back_after_reset"):
+            autoflash.step_configure(ctx)
+        self.assertIn("Reset 4", sent)
 
 
 class PromoteTests(unittest.TestCase):

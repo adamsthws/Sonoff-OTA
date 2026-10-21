@@ -7,12 +7,15 @@
 # Assistant can adopt the plug from it (dashboard_import) and build it there.
 
 esphome:
-  name: sonoff-s60
+  # Named as every ESPHome the conversion installs is, whatever the plug:
+  # esphome- and the last three bytes of its MAC (esphome-abcdef), its own
+  # network too. The friendly name says what plug it is.
+  name: esphome
   friendly_name: Sonoff S60
   name_add_mac_suffix: true
   project:
     name: adamsthws.sonoff-s60
-    version: "1.1.0"
+    version: "1.2.0"
   on_boot:
     # Tasmota holds the relay and LED pins through a software restart, and
     # the install ends with one: release them before anything drives them,
@@ -29,27 +32,22 @@ esphome:
             // Written by the conversion tool: each a marker, then filler, and
             // each must appear exactly once in the image. Read through volatile
             // pointers, so the compiler cannot fold in this build-time text.
-            static const char ssid[] = "S60-IMPRINT-SSID>.................................";
-            static const char password[] = "S60-IMPRINT-PASS>................................................................";
+            static const char ssid[] = "AUTOFLASH-IMPRINT-SSID>.................................";
+            static const char password[] = "AUTOFLASH-IMPRINT-PASS>................................................................";
             const char *volatile at_ssid = ssid;
             const char *volatile at_password = password;
             id(imprinted_ssid) = at_ssid;
             id(imprinted_password) = at_password;
-            if (!id(imprinted_ssid).empty() && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0) {
+            if (!id(imprinted_ssid).empty() && id(imprinted_ssid).rfind("AUTOFLASH-IMPRINT-", 0) != 0) {
               wifi::WiFiAP sta;
               sta.set_ssid(id(imprinted_ssid));
               sta.set_password(id(imprinted_password));
               wifi::global_wifi_component->set_sta(sta);
             }
-            // Every setup network of the conversion has one name: Sonoff-Setup-
-            // and the last two bytes of the plug's Wi-Fi MAC (Sonoff-Setup-CDEF),
-            // open.
-            uint8_t mac[6];
-            get_mac_address_raw(mac);
-            char name[20];
-            snprintf(name, sizeof(name), "Sonoff-Setup-%02X%02X", mac[4], mac[5]);
+            // Its own network has its name (esphome-abcdef), open, as
+            // Tasmota's has its own.
             wifi::WiFiAP ap;
-            ap.set_ssid(name);
+            ap.set_ssid(App.get_name());
             wifi::global_wifi_component->set_ap(ap);
     # After Wi-Fi is set up: on the image's details (nothing saved before),
     # saved, so they stay. Not wifi.configure, which - when its first try takes
@@ -58,7 +56,7 @@ esphome:
     - priority: -100
       then:
         - lambda: |-
-            if (!id(imprinted_ssid).empty() && id(imprinted_ssid).rfind("S60-IMPRINT-", 0) != 0 &&
+            if (!id(imprinted_ssid).empty() && id(imprinted_ssid).rfind("AUTOFLASH-IMPRINT-", 0) != 0 &&
                 wifi::global_wifi_component->get_sta().get_ssid() == id(imprinted_ssid)) {
               wifi::global_wifi_component->save_wifi_sta(id(imprinted_ssid), id(imprinted_password));
             }
@@ -116,7 +114,7 @@ api:
     # the network, while the API has no encryption key, as Tasmota's settings
     # backup gives them too. Give the API a key to close it; the tool then
     # asks for the details instead.
-    - action: s60_wifi
+    - action: autoflash_wifi
       supports_response: only
       then:
         - api.respond:

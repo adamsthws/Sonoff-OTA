@@ -195,7 +195,7 @@ For **ESPHome**, after the bootloader, steps 8 and 9 are instead:
    note that says which half to start, and restart. Until that moment it
    still starts Tasmota. The memory layout itself is not changed.
 9. **Check ESPHome is running** and has joined your Wi-Fi. If it cannot, it
-   puts up its own network, named like `Sonoff-Setup-XXXX`, where its page
+   puts up its own network, named like `esphome-abcdef`, where its page
    asks for your Wi-Fi.
 
 It then switches the relay off and on again through ESPHome to check it, and

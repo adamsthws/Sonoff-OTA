@@ -15,9 +15,9 @@ and the plug keeps Sonoff's.
 1. Edit `sonoff_s60.yaml`, and raise its `project` `version`.
 2. Build it: `esphome compile sonoff_s60.yaml` (ESPHome 2026.9.1 built the current
    image).
-3. Publish `.esphome/build/sonoff-s60/build/firmware.ota.bin` as
+3. Publish `.esphome/build/esphome/build/firmware.ota.bin` as
    `artifacts/esphome-sonoff-s60-imprintable-<version>.bin`, and
-   `.esphome/build/sonoff-s60/build/bootloader/bootloader.bin` from the same
+   `.esphome/build/esphome/build/bootloader/bootloader.bin` from the same
    build as `artifacts/esphome-sonoff-s60-bootloader-<version>.bin` (the
    install puts it in place of Sonoff's). Update their rows in
    `artifacts/README.md`, their lines in `SHA256SUMS`, and the pins in
@@ -35,7 +35,7 @@ no such sensor (one built before 1.1.0, or from a config without it), the tool
 asks the native API for the configuration dump instead, which prints the
 signal - unless the API has an encryption key, when it is not read there.
 
-The `s60_wifi` action gives the tool the plug's Wi-Fi name and password when
+The `autoflash_wifi` action (`s60_wifi` up to 1.1.0) gives the tool the plug's Wi-Fi name and password when
 the plug leaves ESPHome: the next firmware needs them written in, and ESPHome
 says neither otherwise. Keep its name. Anything that can use the API can call
 it - anything on the home network, while the API has no encryption key - just
@@ -46,8 +46,10 @@ backup, if this computer has it, or asks for them.
 An update password added later (`password:` under `ota:`) is asked for when
 the tool takes the plug off ESPHome, or given with `--esphome-ota-password`
 or as `AUTOFLASH_ESPHOME_OTA_PASSWORD`.
-Updates made only with the API key (`encryption:` under `ota:`) are not ones
-the tool can make: it asks for that to be removed first.
+An API encryption key (`encryption:` under `api:`) is asked for, or given with
+`--esphome-api-key` or as `AUTOFLASH_ESPHOME_API_KEY`: the tool then reads the
+plug through the encrypted API, and sends its update encrypted where the plug
+takes that - as it must where `encryption:` is under `ota:`.
 
 The last `on_boot` lambda also saves the Wi-Fi in use under the one fixed key
 ESPHome looks in when a build has no network of its own at start-up. A build
@@ -57,8 +59,14 @@ with no Wi-Fi in it, such as Home Assistant's ESPHome builder makes when it
 adopts the plug, would otherwise find nothing saved, and raise its own network
 rather than join yours. Keep it.
 
-Keep the two `S60-IMPRINT-` placeholders as they are: the tool finds and fills
-them, and refuses an image in which either appears more than once.
+Keep the two `AUTOFLASH-IMPRINT-` placeholders as they are (`S60-IMPRINT-` up
+to 1.1.0): the tool finds and fills them, and refuses an image in which either
+appears more than once.
+
+The plug is named `esphome` and ESPHome's MAC suffix (`esphome-abcdef`), as
+every ESPHome the conversion installs is, whatever the plug, and its own
+network has that name too; the friendly name says what plug it is. Up to 1.1.0
+it was `sonoff-s60-abcdef`, its network `Sonoff-Setup-CDEF`.
 
 [`prototype/FINDINGS.md`](prototype/FINDINGS.md) records how this route was
 worked out and tested.

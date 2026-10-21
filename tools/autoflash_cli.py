@@ -135,6 +135,8 @@ ISSUES_URL = "https://github.com/adamsthws/Sonoff-OTA/issues/new"
 KOFI_URL = "https://ko-fi.com/adamsthws"
 DONATE_URL = "https://www.paypal.me/adamsthws"
 TASMOTA_AP_PREFIX = "tasmota-"
+# The final ESPHome's own name, and its network's (ESPHome/sonoff_s60.yaml).
+ESPHOME_PREFIX = "esphome-"
 
 
 def _mac_tail(mac: str, add: int = 0) -> str:
@@ -143,16 +145,26 @@ def _mac_tail(mac: str, add: int = 0) -> str:
     return f"{value & 0xFFFFFF:06X}"
 
 
+def final_name(ctx: "Context", firmware: str) -> str | None:
+    """The name official Tasmota or ESPHome has once converted, for every kind
+    of plug: the firmware's and the last three bytes of the plug's MAC
+    (tasmota-abcdef, esphome-abcdef) - its own network's too.  None when the
+    MAC is not known."""
+    mac = ctx.state.input("plug_mac")
+    return f"{firmware}-{_mac_tail(mac).lower()}" if mac else None
+
+
 def setup_networks(ctx: "Context") -> tuple[str, ...]:
     """What a Tasmota's own setup network on this plug can be called, to look for.
 
-    Tasmota raises one only without Wi-Fi details: started from its defaults,
-    so named as it names itself, from the plug's MAC (tasmota-ABCDEF-1234).
-    One the run named (autoflash-recovery-CDEF) has the details, and only
-    retries them - and that name is the installer's network's, not looked for
-    here: still up for a moment as the installer restarts into Tasmota, it
-    was taken for Tasmota's (seen in the fault suite).  Tasmota has also been
-    seen broadcasting ESP-IDF's default name instead: ESP_ and the MAC of its
+    Tasmota raises one only without Wi-Fi details, named after itself:
+    tasmota-abcdef once set up (F4 names it), tasmota-ABCDEF-1234 when it
+    started from its defaults - Tasmota's own name, from the plug's MAC.  One
+    the run named autoflash-recovery-CDEF has the details, and only retries
+    them - and that name is the installer's network's, not looked for here:
+    still up for a moment as the installer restarts into Tasmota, it was
+    taken for Tasmota's (seen in the fault suite).  Tasmota has also been seen
+    broadcasting ESP-IDF's default name instead: ESP_ and the MAC of its
     hotspot, one more than the plug's (ESP_ABCDF0).  Knowing the MAC, only
     this plug's are matched, never a neighbour's Tasmota; without it, any
     Tasmota's.
@@ -160,15 +172,15 @@ def setup_networks(ctx: "Context") -> tuple[str, ...]:
     mac = ctx.state.input("plug_mac")
     if not mac:
         return (TASMOTA_AP_PREFIX,)
-    return (f"{TASMOTA_AP_PREFIX}{_mac_tail(mac)}-", f"ESP_{_mac_tail(mac, 1)}")
+    return (final_name(ctx, "tasmota"), f"{TASMOTA_AP_PREFIX}{_mac_tail(mac)}-", f"ESP_{_mac_tail(mac, 1)}")
 
 
 def setup_network_hint(ctx: "Context") -> str:
     """The setup network's name as a person should look for it in a list."""
     mac = ctx.state.input("plug_mac")
     if not mac:
-        return "tasmota-XXXXXX-NNNN"
-    return f"tasmota-{_mac_tail(mac)}-NNNN, or ESP_{_mac_tail(mac, 1)}"
+        return "tasmota-xxxxxx or tasmota-XXXXXX-NNNN"
+    return f"{final_name(ctx, 'tasmota')}, tasmota-{_mac_tail(mac)}-NNNN, or ESP_{_mac_tail(mac, 1)}"
 
 
 def note_setup_network(ctx: "Context", network: str) -> None:
@@ -214,11 +226,12 @@ def mover_networks(ctx: "Context") -> tuple[str, ...]:
 
 
 def esphome_networks(ctx: "Context") -> tuple[str, ...]:
-    """ESPHome's own network, once installed: the one the ESPHome made for this
-    kind of plug raises, and its name in an earlier build."""
+    """ESPHome's own network, once installed - its name (esphome-abcdef) -
+    and the names an earlier build of this kind of plug's gave it."""
     kind = kinds.of_run(ctx.state)
     mac = ctx.state.input("plug_mac")
-    return (named(ctx, kind.esphome_setup_prefix) if mac else kind.esphome_setup_prefix,
+    return (final_name(ctx, "esphome") or ESPHOME_PREFIX,
+            named(ctx, kind.esphome_legacy_setup_prefix) if mac else kind.esphome_legacy_setup_prefix,
             kind.esphome_legacy_prefix)
 
 
@@ -229,7 +242,7 @@ def mover_network_hint(ctx: "Context") -> str:
 
 def esphome_network_hint(ctx: "Context") -> str:
     """ESPHome's own network."""
-    return named(ctx, kinds.of_run(ctx.state).esphome_setup_prefix)
+    return final_name(ctx, "esphome") or f"{ESPHOME_PREFIX}xxxxxx"
 
 
 class Abort(RuntimeError):
@@ -599,7 +612,7 @@ class Context:
         From D1 the plug runs Tasmota connected to the home network, so the
         details are read from there rather than typed - and they are known to
         work, which typed ones are not until F2 tries them.  ESPHome gives
-        them too, from 1.1.0 (its s60_wifi action); from an ESPHome or mover
+        them too, from 1.1.0 (its Wi-Fi action); from an ESPHome or mover
         that does not, they come from the plug's Sonoff backup, when this
         computer has one and the plug is on that network still.  Asking is the
         fallback, with `why` saying what it is for; `--wifi` forces it.
@@ -3290,7 +3303,8 @@ def step_configure(ctx: Context) -> dict[str, Any]:
         device = ctx.device
         device.wait_reachable(timeout=300)
     template = kinds.of_run(ctx.state).tasmota_template(ctx.state.input("product_model"))
-    if template_in_place(device, template):
+    hostname = final_name(ctx, "tasmota")
+    if template_in_place(device, template, hostname):
         # Tried again after the plug took the template but its answer was slow
         # (a busy plug): resetting again would only restart it again.
         say("The plug's template and settings are in place already.")
@@ -3308,8 +3322,12 @@ def step_configure(ctx: Context) -> dict[str, Any]:
     booted, uptime = device.started_at(), device.uptime_seconds()
     device.command("SaveData 1", timeout=SLOW_COMMAND)
     device.command(f"Template {template}", timeout=SLOW_COMMAND)
-    device.command("Module 0", timeout=SLOW_COMMAND)
-    say(f"Template applied as {json.loads(template)['NAME']}; the plug restarts")
+    # Named as every converted Tasmota is (tasmota-abcdef), and its own network
+    # with it; one restart for both, as each would restart the plug alone.
+    device.command(f"Backlog Hostname {hostname}; Module 0" if hostname else "Module 0",
+                   timeout=SLOW_COMMAND)
+    say(f"Template applied as {json.loads(template)['NAME']}"
+        + (f", and named {hostname}" if hostname else "") + "; the plug restarts")
     device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
     # Restarted is not yet answering: the next step asks the plug at once.
     device.wait_reachable(timeout=120)
@@ -3347,19 +3365,21 @@ def back_after_reset(ctx: Context, booted: str | None, uptime: int | None) -> No
 SLOW_COMMAND = 30.0
 
 
-def template_in_place(device: Device, template: str) -> bool:
-    """Whether F4 has done its work already: the plug's template in use, and
-    settings saved."""
+def template_in_place(device: Device, template: str, hostname: str | None = None) -> bool:
+    """Whether F4 has done its work already: the plug's template in use,
+    settings saved, and its name `hostname` (when known)."""
     try:
         current = device.command("Template", timeout=SLOW_COMMAND)
         module = device.command("Module", timeout=SLOW_COMMAND)
         saving = device.command("SaveData", timeout=SLOW_COMMAND)
+        named = device.command("Hostname", timeout=SLOW_COMMAND) if hostname else {"Hostname": None}
     except (DeviceError, OSError):
         return False
     name = json.loads(template)["NAME"]
     return (isinstance(current, dict) and current.get("NAME") == name
             and isinstance(module, dict) and "0" in (module.get("Module") or {})
-            and isinstance(saving, dict) and saving.get("SaveData") in ("ON", "1", 1))
+            and isinstance(saving, dict) and saving.get("SaveData") in ("ON", "1", 1)
+            and isinstance(named, dict) and named.get("Hostname") == hostname)
 
 
 

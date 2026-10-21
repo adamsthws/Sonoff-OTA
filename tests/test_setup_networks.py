@@ -24,9 +24,13 @@ class SetupNetworkTestCase(unittest.TestCase):
 
 class NamesTests(SetupNetworkTestCase):
     def test_this_plugs_names_are_known_from_its_mac(self):
-        # Tasmota's own name, and ESP-IDF's default - the hotspot's MAC, one more.
-        self.assertEqual(af.setup_networks(self.ctx()), ("tasmota-ABCDEF-", "ESP_ABCDF0"))
-        self.assertEqual(af.setup_network_hint(self.ctx()), "tasmota-ABCDEF-NNNN, or ESP_ABCDF0")
+        # Converted: its name, whatever the plug. Started from its defaults:
+        # Tasmota's own name. And ESP-IDF's default - the hotspot's MAC, one more.
+        self.assertEqual(af.setup_networks(self.ctx()), ("tasmota-abcdef", "tasmota-ABCDEF-", "ESP_ABCDF0"))
+        self.assertEqual(af.setup_network_hint(self.ctx()),
+                         "tasmota-abcdef, tasmota-ABCDEF-NNNN, or ESP_ABCDF0")
+        self.assertEqual(af.final_name(self.ctx(), "tasmota"), "tasmota-abcdef")
+        self.assertEqual(af.final_name(self.ctx(), "esphome"), "esphome-abcdef")
         # Every firmware of this project's part way through: one name, from
         # the last two bytes of the plug's own MAC.
         self.assertEqual(af.our_setup_network(self.ctx()), "autoflash-recovery-CDEF")
@@ -37,20 +41,22 @@ class NamesTests(SetupNetworkTestCase):
                          ("autoflash-recovery-CDEF", "Sonoff-Setup-CDEF", "S60-OTA-Bridge"))
         self.assertEqual(af.mover_networks(self.ctx()),
                          ("autoflash-recovery-CDEF", "Sonoff-Setup-CDEF", "sonoff-s60-mover-"))
-        # ESPHome keeps its own, the plug's, once installed.
-        self.assertEqual(af.esphome_network_hint(self.ctx()), "Sonoff-Setup-CDEF")
-        self.assertEqual(af.esphome_networks(self.ctx()), ("Sonoff-Setup-CDEF", "sonoff-s60-"))
+        # ESPHome's has its name, as Tasmota's; and the names 1.1.0's and
+        # earlier builds' had.
+        self.assertEqual(af.esphome_network_hint(self.ctx()), "esphome-abcdef")
+        self.assertEqual(af.esphome_networks(self.ctx()),
+                         ("esphome-abcdef", "Sonoff-Setup-CDEF", "sonoff-s60-"))
 
     def test_one_more_carries_into_the_next_byte(self):
-        self.assertEqual(af.setup_networks(self.ctx("12-34-56-AB-FF-FF"))[1], "ESP_AC0000")
+        self.assertEqual(af.setup_networks(self.ctx("12-34-56-AB-FF-FF"))[2], "ESP_AC0000")
 
     def test_without_the_mac_any_plugs_will_do(self):
         self.assertEqual(af.setup_networks(self.ctx(mac=None)), ("tasmota-",))
-        self.assertEqual(af.setup_network_hint(self.ctx(mac=None)), "tasmota-XXXXXX-NNNN")
-        self.assertEqual(af.esphome_network_hint(self.ctx(mac=None)), "Sonoff-Setup-XXXX")
+        self.assertEqual(af.setup_network_hint(self.ctx(mac=None)), "tasmota-xxxxxx or tasmota-XXXXXX-NNNN")
+        self.assertEqual(af.esphome_network_hint(self.ctx(mac=None)), "esphome-xxxxxx")
         self.assertEqual(af.bridge_networks(self.ctx(mac=None)),
                          ("autoflash-recovery-", "Sonoff-Setup-", "S60-OTA-Bridge"))
-        self.assertEqual(af.esphome_networks(self.ctx(mac=None)), ("Sonoff-Setup-", "sonoff-s60-"))
+        self.assertEqual(af.esphome_networks(self.ctx(mac=None)), ("esphome-", "Sonoff-Setup-", "sonoff-s60-"))
 
 
 class SearchTests(SetupNetworkTestCase):

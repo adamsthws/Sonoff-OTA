@@ -197,9 +197,14 @@ it after the S60 have gone:
   list, and for the installer's and the mover's own networks - and for
   Tasmota's, installed through the installer's own network, where it was
   Tasmota's default (`tasmota-ABCDEF-1234`). Every such network is open: the
-  installer's had a password to type (`S60-OTA-Bridge-XXXX`). ESPHome's own,
-  once installed, is
-  `Sonoff-Setup-CDEF`; official Tasmota keeps Tasmota's names.
+  installer's had a password to type (`S60-OTA-Bridge-XXXX`).
+- A converted plug is named for its firmware and the last six characters of
+  its hardware address - `tasmota-abcdef` or `esphome-abcdef` - whatever kind
+  of plug it is, and its own network has that name too. Tasmota was
+  `tasmota-ABCDEF-1234`, and ESPHome `sonoff-s60-abcdef` with its network
+  `Sonoff-Setup-CDEF`; the run still knows those. The names a person sees
+  still say what plug it is: Tasmota's template (Sonoff S60TPG) and ESPHome's
+  friendly name (Sonoff S60). ESPHome is 1.2.0 for it.
 - The tool calls itself Autoflash, not the S60 conversion tool - in
   `--version`, and to the system it keeps awake - as it is to convert more
   than one kind of plug. Its firewall rule is called `Autoflash` (it was

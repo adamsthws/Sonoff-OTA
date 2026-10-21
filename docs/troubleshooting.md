@@ -182,16 +182,16 @@ or Tasmota not yet set up - the plug goes by `autoflash-recovery-` and the
 last four characters of its hardware address, such as
 `autoflash-recovery-CDEF`, in your router's list, and the installer's and the
 mover's own networks are called that too - as is Tasmota's, when it was
-installed through the installer's own network. ESPHome, once installed, calls its
-own `Sonoff-Setup-` and the same four characters, such as `Sonoff-Setup-CDEF`.
-Tasmota names its own after the plug, `tasmota-` and six characters, such as
-`tasmota-ABCDEF-1234`;
-sometimes it shows up instead as `ESP_` and six characters one higher, such as
-`ESP_ABCDF0` - the same network, and the tool looks for both. All of them are
-open, with no password, and the plug's page on them is at
-`http://192.168.4.1`. (A plug an earlier release left part way may show the
-name it gave: `Sonoff-Setup-XXXX` for its installer or mover, or
-`S60-OTA-Bridge-XXXX` for an older installer, with the password
+installed through the installer's own network. Once converted, the plug is named
+for its firmware and the last six characters of its hardware address -
+`tasmota-abcdef` or `esphome-abcdef` - and so is its own network. A Tasmota
+that started from its own defaults names it after itself instead, such as
+`tasmota-ABCDEF-1234`; sometimes it shows up as `ESP_` and six characters one
+higher, such as `ESP_ABCDF0` - the same network, and the tool looks for both.
+All of them are open, with no password, and the plug's page on them is at
+`http://192.168.4.1`. (A plug an earlier release left part way, or converted,
+may show the name it gave: `Sonoff-Setup-XXXX` for its installer, mover or
+ESPHome, or `S60-OTA-Bridge-XXXX` for an older installer, with the password
 `s60-ota-bridge`. The tool looks for those too, and gives the password when it
 sees one.)
 
@@ -364,13 +364,13 @@ process that cannot be fixed by running the tool again.
 After a new router or a changed Wi-Fi password, the plug cannot join any more.
 
 - **ESPHome** opens its own network by itself after a minute and a half
-  without your Wi-Fi (`Sonoff-Setup-` and four characters). Join it, and its page
+  without your Wi-Fi (its name, such as `esphome-abcdef`). Join it, and its page
   asks for your Wi-Fi. It keeps trying your Wi-Fi meanwhile, so after a router
   restart it simply rejoins.
 - **Tasmota** keeps trying your Wi-Fi and never opens a network by itself, so
   a router restart cannot leave it waiting on one. Press its button 6 times
-  quickly: it opens its setup network for 3 minutes (`tasmota-` and the plug's
-  name, or `ESP_` and six characters). Join it, browse to `http://192.168.4.1`
+  quickly: it opens its setup network for 3 minutes (its name, such as
+  `tasmota-abcdef`, or `ESP_` and six characters). Join it, browse to `http://192.168.4.1`
   and choose your Wi-Fi.
 
 ## Checking a finished plug at any time

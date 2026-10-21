@@ -30,8 +30,8 @@ __pycache__/
 !artifacts/tasmota-settings-template-15.6.0.0.bin
 !artifacts/autoflash-recovery-safeboot-imprintable.bin
 !artifacts/tasmota32c3-bluetooth.bin
-!artifacts/esphome-sonoff-s60-bootloader-1.1.0.bin
-!artifacts/esphome-sonoff-s60-imprintable-1.1.0.bin
+!artifacts/esphome-sonoff-s60-bootloader-1.2.0.bin
+!artifacts/esphome-sonoff-s60-imprintable-1.2.0.bin
 !artifacts/autoflash-mover-1.1.0.bin
 !artifacts/sonoff-s60-partition-table.bin
 

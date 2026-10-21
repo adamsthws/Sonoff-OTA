@@ -7,7 +7,8 @@ a person calls it.  The firmware published for a kind is pinned where it is
 used, each file named for the kind it is for: its installer
 (autoflash_cli.BRIDGE_OTA, wrapped for its updater), its ESPHome and the
 bootloader built with it (esphome.IMAGE, esphome.BOOTLOADER), and its maker's
-partition table (esphome.SONOFF_TABLE).
+partition table (esphome.SONOFF_TABLE).  The final firmware's network names
+are the same for every kind: tasmota-abcdef and esphome-abcdef.
 
 A run keeps the kind it converts (its "plug_kind"): from the eWeLink account
 (A1), from what the stock firmware says it is (A2), or from a converted
@@ -45,11 +46,11 @@ class Kind:
     wrapper_model: str
     # Its wiring, as a Tasmota template gives it.
     tasmota_gpio: tuple[int, ...]
-    # Its ESPHome's friendly name; the network that raises of its own, which
-    # ends in the last two bytes of the plug's MAC; and that network's name
-    # in an earlier build.
+    # Its ESPHome's friendly name (the image made for it is named as every
+    # final ESPHome is, esphome-abcdef), and the names its own network had in
+    # earlier builds: the first with the last two bytes of the plug's MAC.
     esphome_name: str
-    esphome_setup_prefix: str
+    esphome_legacy_setup_prefix: str
     esphome_legacy_prefix: str
 
     def product_of(self, product_model: str | None) -> str:
@@ -93,10 +94,10 @@ SONOFF_S60 = Kind(
     # Relay GPIO4, status LED GPIO5, power meter GPIO7, button GPIO9.  The UK
     # S60TPG and the European S60TPF publish the same pins.
     tasmota_gpio=(1, 1, 1, 1, 224, 544, 1, 3104, 1, 32, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1),
-    # ESPHome/sonoff_s60.yaml; one built from it before its network took this
-    # name raised sonoff-s60- and the MAC's last three bytes.
+    # ESPHome/sonoff_s60.yaml. 1.1.0 raised Sonoff-Setup-CDEF; builds before
+    # that sonoff-s60- and the MAC's last three bytes.
     esphome_name="Sonoff S60",
-    esphome_setup_prefix="Sonoff-Setup-",
+    esphome_legacy_setup_prefix="Sonoff-Setup-",
     esphome_legacy_prefix="sonoff-s60-",
 )
 

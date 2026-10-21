@@ -174,7 +174,7 @@ class CheckStepTests(RouteTestCase):
     def test_waiting_in_vain_points_at_the_wifi(self):
         with mock.patch.object(af.esphome, "is_esphome", return_value=False), \
                 mock.patch.object(af.time, "sleep"):
-            with self.assertRaisesRegex(af.Abort, "Sonoff-Setup-XXXX"):
+            with self.assertRaisesRegex(af.Abort, "esphome-xxxxxx"):
                 af.step_esphome_check(self.ctx(firmware="esphome"), wait=0.05)
 
     def test_on_its_own_network_it_is_set_up_through_that(self):
@@ -357,7 +357,7 @@ class ApiSignalTests(unittest.TestCase):
 
 
 class WifiActionTests(unittest.TestCase):
-    """Our ESPHome gives the Wi-Fi it is on through its s60_wifi action: listed,
+    """Our ESPHome gives the Wi-Fi it is on through its Wi-Fi action: listed,
     then called, its answer the details as JSON."""
 
     def serve(self, *steps):
@@ -409,10 +409,12 @@ class WifiActionTests(unittest.TestCase):
         return b"\x0d" + struct.pack("<I", key)  # the action named by its key
 
     def test_the_action_gives_the_name_and_password(self):
-        # Answered only once it is called by the key it was listed with.
-        port = self.serve((self.LIST, self.listed((b"other", 7), (b"s60_wifi", 0xCAFEF00D))),
-                          (self.call(0xCAFEF00D), self.answer(True, b'{"ssid":"Home-2G","password":"pw"}')))
-        self.assertEqual(af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0), ("Home-2G", "pw"))
+        # Answered only once it is called by the key it was listed with - by
+        # its name from 1.2.0, or 1.1.0's.
+        for name in (b"autoflash_wifi", b"s60_wifi"):
+            port = self.serve((self.LIST, self.listed((b"other", 7), (name, 0xCAFEF00D))),
+                              (self.call(0xCAFEF00D), self.answer(True, b'{"ssid":"Home-2G","password":"pw"}')))
+            self.assertEqual(af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0), ("Home-2G", "pw"), name)
 
     def test_an_esphome_without_the_action_gives_nothing(self):
         port = self.serve((self.LIST, self.listed((b"other", 7))))

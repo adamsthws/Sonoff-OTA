@@ -31,14 +31,14 @@ configuration, patch, documentation and helper are retained together under
 ESPHome's firmware code is distributed under the GNU General Public License
 v3.0.
 
-`artifacts/esphome-sonoff-s60-imprintable-1.1.0.bin` and
+`artifacts/esphome-sonoff-s60-imprintable-1.2.0.bin` and
 `artifacts/autoflash-mover-1.1.0.bin` are built with ESPHome 2026.9.1
 and ESP-IDF 5.5.5 from this project's configs,
 [`ESPHome/sonoff_s60.yaml`](ESPHome/sonoff_s60.yaml) and
 [`ESPHome/autoflash_mover.yaml`](ESPHome/autoflash_mover.yaml), with
 `esphome compile`. The corresponding source is the
 [ESPHome 2026.9.1 release](https://github.com/esphome/esphome/tree/2026.9.1)
-and these configs. `artifacts/esphome-sonoff-s60-bootloader-1.1.0.bin` is the
+and these configs. `artifacts/esphome-sonoff-s60-bootloader-1.2.0.bin` is the
 ESP-IDF bootloader from the same build. How they are built and published is in
 [`artifacts/README.md`](artifacts/README.md).
 
