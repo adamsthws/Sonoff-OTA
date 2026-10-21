@@ -49,25 +49,29 @@ person converting it again would have.
 ## The fault suite
 
 `tools/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,481 scenarios:
+every direction - 1,316 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
 - **Steps:** each step that writes to the plug or waits on it.
 - **Faults:**
-  - the network gone (the router off) for 1, 5, 15, 30, 60, 120 or 180 s, or
+  - the network gone (the router off) for 5, 15, 30, 60, 120 or 180 s, or
     weak - one packet in ten lost - for a minute;
   - the plug's power off for 1, 5, 30 or 180 s;
   - the computer crashing - the tool and what it serves killed outright -
-    and started again 1, 60 or 180 s later; asleep for 2 or 10 minutes; or
-    switched off for 30 s or 2 minutes, and its run started again;
-  - Ctrl-C once, twice apart, or at the question it asks; Ctrl-C twice, then
-    carrying on, starting again from the beginning (`--new`), or choosing the
-    other firmware; the terminal window closed;
+    and started again 1 or 180 s later (and 60 s, where the plug raises a
+    network of its own); asleep for 10 minutes (and 2, at the riskiest steps
+    and where the plug raises a network of its own); or switched off for 30 s
+    or 2 minutes, and its run started again;
+  - Ctrl-C once; Ctrl-C twice, then carrying on, starting again from the
+    beginning (`--new`), or choosing the other firmware; the terminal window
+    closed;
   - a packet changed on its way, its checksum made good, so that only the
     tool's and the plug's own checks can tell;
-  - a second run started while the first works, which must be refused
-    without disturbing it;
+  - the tool's own handling, the same at every step, so tried at the riskiest
+    steps and where each firmware is first written from (C2, L1, X1): a second
+    run started while the first works, which must be refused without
+    disturbing it; Ctrl-C twice apart, or at the question it asks;
   - the disk filling during the backup;
   - the plug falling back to its own setup network, and the person joining
     it before being asked: the run must find the plug there and carry on by

@@ -72,6 +72,26 @@ class ScenarioTests(unittest.TestCase):
                        "sonoff>tasmota:F4:nohook-run", "esphome>tasmota:F4rs@90:plugoff-1"):
             self.assertIn(wanted, ids)
 
+    def test_each_length_only_where_it_leads_somewhere_of_its_own(self):
+        ids = {sc["id"] for sc in fs.scenarios()}
+        self.assertFalse([i for i in ids if i.endswith(":outage-1")])
+        self.assertIn("tasmota>sonoff:D4:outage-15", ids)
+        # A rerun 60 s after a crash: only where a fallback network may come up.
+        self.assertIn("tasmota>esphome:L1:crash-60", ids)
+        self.assertIn("sonoff>tasmota:C3fb:crash-60", ids)
+        self.assertIn("sonoff>esphome:C2:crash-60", ids)
+        self.assertNotIn("tasmota>sonoff:D4:crash-60", ids)
+
+    def test_the_tools_own_handling_at_the_riskiest_steps(self):
+        ids = {sc["id"] for sc in fs.scenarios()}
+        for fault in ("second-run", "ctrlc-countdown", "ctrlc-apart", "sleep-120"):
+            self.assertIn(f"esphome>tasmota:F4:{fault}", ids)
+            self.assertIn(f"sonoff>tasmota:C2:{fault}", ids)
+            self.assertNotIn(f"esphome>tasmota:E1:{fault}", ids)
+        self.assertIn("tasmota>esphome:M1:sleep-120", ids)
+        self.assertNotIn("tasmota>esphome:M1:second-run", ids)
+        self.assertIn("esphome>tasmota:E1:hangup-continue", ids)
+
     def test_a_step_with_a_start_of_its_own_needs_no_length(self):
         # F4rs is in STARTS only: its length comes from there.
         sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "F4rs", "fault": "plugoff",

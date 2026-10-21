@@ -126,13 +126,18 @@ STARTS = {"C3": (r"Backing up the plug's Sonoff firmware", 12), "C3fb": (r"\] C3
           "F4rs": (r"Settings reset to Tasmota's defaults", 3)}
 STEP_OF = {"C3fb": "C3", "F4rs": "F4"}  # the tool's own name for a step
 
-CORE = ([("outage", s) for s in (1, 5, 15, 30, 60, 120, 180)]
+# Each length where it can lead somewhere the others do not (2026-10-21): an
+# outage of 5 s is within every timeout of the tool's (8 s and up) and takes
+# the plug off the Wi-Fi, so it covers 1 s; 15 s outlasts the 8-10 s ones but
+# not the 15-20 s ones. A crash's rerun after 1 s finds the step still going,
+# after 180 s finished and any fallback network up; after 60 s - finished, no
+# fallback yet - is a place of its own only where there is one (FALLBACK_STEPS).
+CORE = ([("outage", s) for s in (5, 15, 30, 60, 120, 180)]
         + [("plugoff", s) for s in (1, 5, 30, 180)]
-        + [("crash", s) for s in (1, 60, 180)]
+        + [("crash", s) for s in (1, 180)]
         + [("cancel", "continue"), ("cancel", "new"), ("ctrlc", "once")])
-NEW = [("hangup", "continue"), ("sleep", 120), ("sleep", 600), ("weak", 60),
-       ("pcoff", 30), ("pcoff", 120), ("corrupt", "once"), ("ctrlc", "countdown"),
-       ("ctrlc", "apart"), ("second", "run")]
+NEW = [("hangup", "continue"), ("sleep", 600), ("weak", 60),
+       ("pcoff", 30), ("pcoff", 120), ("corrupt", "once")]
 # Where a firmware raises its own network when it loses the home one: the
 # installer (C3, D1: after 45 s), the mover and ESPHome (L1, M1, X1, I2: after
 # 1.5 to 2 minutes). There the person joins it before being asked, and the run
@@ -140,6 +145,12 @@ NEW = [("hangup", "continue"), ("sleep", 120), ("sleep", 600), ("weak", 60),
 FALLBACK_STEPS = {"C3", "D1", "L1", "M1", "X1", "I2"}
 # Faults at 10% and 90% of the riskiest steps, and two in a row there.
 CRITICAL = {"D4", "E3", "F2", "F4", "R1", "X2"}
+# The tool's own handling - a second run refused, Ctrl-C twice apart or at its
+# question - is the same at every step: tried at the riskiest, and where each
+# firmware is first written from (C2, L1, X1). A 2-minute sleep, too, but also
+# wherever a fallback network may come up during it.
+OWN_HANDLING = [("second", "run"), ("ctrlc", "countdown"), ("ctrlc", "apart")]
+OWN_HANDLING_STEPS = CRITICAL | {"C2", "L1", "X1"}
 TIMING_FAULTS = [("plugoff", 1), ("outage", 30), ("crash", 1)]
 DOUBLE_FAULTS = [("double", "plugoff-1"), ("double", "outage-30")]
 
@@ -148,12 +159,25 @@ def sid(route, step, fault, arg, at=40):
     return f"{route}:{step}{'' if at == 40 else f'@{at}'}:{fault}-{arg}"
 
 
+def step_faults(step):
+    """The one-moment faults tried at `step` (40% of the way through)."""
+    faults = list(CORE)
+    if STEP_OF.get(step, step) in FALLBACK_STEPS or step == "C2":
+        faults += [("crash", 60)]
+    if step == "C3fb":
+        return faults
+    faults += NEW
+    if step in OWN_HANDLING_STEPS:
+        faults += OWN_HANDLING
+    if step in OWN_HANDLING_STEPS or step in FALLBACK_STEPS:
+        faults += [("sleep", 120)]
+    return faults
+
+
 def scenarios():
     for route, (_, target, steps) in ROUTES.items():
         for step in steps:
-            faults = CORE + NEW + ([("cancel", "switch")] if target in OTHER else [])
-            if step in ("C3fb",):
-                faults = CORE
+            faults = step_faults(step) + ([("cancel", "switch")] if target in OTHER and step != "C3fb" else [])
             for fault, arg in faults:
                 yield dict(id=sid(route, step, fault, arg), route=route, step=step, fault=fault, arg=arg, at=40)
             if step in CRITICAL:
@@ -170,7 +194,7 @@ def scenarios():
                 yield dict(id=sid(route, step, "fallback", 150), route=route, step=step,
                            fault="fallback", arg=150, at=40)
     for route, target in C2_ROUTES.items():
-        for fault, arg in CORE + NEW + [("cancel", "switch"), ("token", "login")]:
+        for fault, arg in step_faults("C2") + [("cancel", "switch"), ("token", "login")]:
             yield dict(id=sid(route, "C2", fault, arg), route=route, step="C2", fault=fault, arg=arg, at=40)
     yield from composite_scenarios()
 
