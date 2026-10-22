@@ -21,6 +21,7 @@ the section below before changing the number.
   screen, so the run seemed to wait for a key; one pressed then was taken as
   the next question's answer, an Enter as its default. The look now says so,
   and a key pressed while nothing is asking is dropped.
+- The firmware question gives the firmwares by name alone.
 
 ## 2.0.0
 

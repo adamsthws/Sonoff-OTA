@@ -4474,28 +4474,18 @@ def settle_route(ctx: Context) -> tuple[str, str]:
     return firmware, source
 
 
-# What each firmware is, in the words the choice is made in.
-FIRMWARE_BLURBS = {
-    "tasmota": ["Tasmota has its own web page for settings, and works with Home Assistant",
-                "and many other systems."],
-    "esphome": ["ESPHome is made for Home Assistant, and is set up and customised from",
-                "there."],
-    "sonoff": ["Sonoff's own firmware puts the plug back in the eWeLink app, with the",
-               "settings it had."],
-}
-
-
 def ask_firmware(source: str, choices: list[str]) -> str:
+    """The firmware to install: the choices by name alone, with a word only on
+    what is particular to this plug - part way, on Tasmota's safeboot, or with
+    no backup to go back to Sonoff's firmware from."""
     output.transient_begin()
     body = (["This plug was left part way through a conversion; it can go on to any",
-             "of these from where it is.", ""] if source in ("midway", "committed", "installer") else
+             "of these from where it is."] if source in ("midway", "committed", "installer") else
             ["Its Tasmota goes back on first, with its settings; choosing Tasmota",
-             "stops there. Or it can go on to either of the others.", ""] if source == "safeboot" else [])
-    for name in choices:
-        body += FIRMWARE_BLURBS[name]
+             "stops there. Or it can go on to either of the others."] if source == "safeboot" else [])
     if source != "sonoff" and "sonoff" not in choices:
-        body += ["", "Going back to Sonoff's own firmware needs the backup this tool takes",
-                 "when it first converts a plug, and there is none for this one here."]
+        body += [""] * bool(body) + ["Going back to Sonoff's own firmware needs the backup this tool takes",
+                                     "when it first converts a plug, and there is none for this one here."]
     section("Choose the plug's new firmware", body)
     labels = {"tasmota": "Tasmota", "esphome": "ESPHome",
               "sonoff": "Sonoff's own firmware (back to eWeLink, from its backup)"}
