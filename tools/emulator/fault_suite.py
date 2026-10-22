@@ -219,10 +219,11 @@ def composite_scenarios():
         the home Wi-Fi, and that is done when the run advises it.
     nohook-run (F4): Tasmota will not take F4's name and template at the save.
     F4rs: a power cut or crash at F4's reset, at 10, 50 and 90% of it.
-    legacy-v1.2.0: a run of release 1.2.0 (legacy_tree) killed at 40% of
-        each of its steps, then this checkout's tool, over the same captures,
-        as a person updating their checkout would; and (step "start") a plug
-        1.2.0 converted to Tasmota, then taken to ESPHome or back to Sonoff.
+    legacy-v1.2.0, legacy-v2.0.2 (LEGACY_STEPS): a run of that release
+        (legacy_tree) killed at 40% of each of its steps from Sonoff, then
+        this checkout's tool, over the same captures, as a person updating
+        their checkout would - its bundle and pins that release's; and (step
+        "start") a plug that release converted, then taken on by this one.
     blips-3, lossy-phase (BLIP_STEPS): two 3 s outages from 10% to 90% of a
         Berry phase, or one packet in ten lost for all of it: converted with
         no step tried again, or FAIL-RETRIED.
@@ -247,14 +248,16 @@ def composite_scenarios():
         for at, fault, arg in ((10, "plugoff", 1), (50, "plugoff", 1), (90, "plugoff", 1),
                                (50, "plugoff", 5), (50, "crash", 1)):
             yield one(route, "F4rs", fault, arg, at)
-    for tag, steps in LEGACY_STEPS.items():
-        for step in steps:
-            yield one("sonoff>tasmota", step, "legacy", tag)
-        # Killed at F4, past its commit; then the plug switched off part way
-        # through G1 of the run after, writing over that release's startup firmware.
-        yield one("sonoff>tasmota", "F4", "legacy", f"{tag}+G1off")
-        for route in ("tasmota>esphome", "tasmota>sonoff"):
+    for tag, routes in LEGACY_STEPS.items():
+        for route, steps in routes.items():
+            for step in steps:
+                yield one(route, step, "legacy", tag)
+        for route in LEGACY_STARTS[tag]:
             yield one(route, "start", "legacy", tag)
+    # Killed at F4, past its commit; then the plug switched off part way
+    # through G1 of the run after, writing over 1.2.0's startup firmware,
+    # which it cannot rebuild.
+    yield one("sonoff>tasmota", "F4", "legacy", "v1.2.0+G1off")
     for route in ("tasmota>tasmota", "tasmota>esphome", "tasmota>sonoff"):
         yield one(route, "start", "lostapp", "factory")
     for route in ("tasmota>tasmota", "tasmota>esphome"):
@@ -274,10 +277,25 @@ BLIP_STEPS = (("sonoff>tasmota", "E2"), ("esphome>tasmota", "G1"), ("sonoff>esph
               ("tasmota>esphome", "L1"), ("tasmota>sonoff", "R1"))
 
 
-# The releases whose runs this checkout must carry on: each one's steps (from
-# Sonoff to Tasmota, its only way) and their usual lengths on the emulator.
-LEGACY_STEPS = {"v1.2.0": {"C2": 20, "C3": 14, "D1": 18, "D4": 31, "E1": 2, "E2": 29, "E3": 5,
-                           "F2": 35, "F4": 31, "G1": 33, "H1": 2}}
+# The releases whose runs this checkout must carry on: each one's steps from
+# Sonoff, by route, and their usual lengths on the emulator then.  1.2.0 is
+# the last before 2.0.0's renames; the latest release is the one people have
+# when the firmware the tool installs changes (docs/updating-firmware.md),
+# its runs pinned to the firmware before.
+LEGACY_STEPS = {
+    "v1.2.0": {"sonoff>tasmota": {"C2": 20, "C3": 14, "D1": 18, "D4": 31, "E1": 2, "E2": 29,
+                                  "E3": 5, "F2": 35, "F4": 31, "G1": 33, "H1": 2}},
+    "v2.0.2": {"sonoff>tasmota": {"C2": 20, "C3": 14, "D1": 18, "D4": 31, "D5": 2, "E1": 2,
+                                  "E2": 17, "E3": 5, "F2": 35, "F4": 10, "G1": 21, "H1": 2},
+               "sonoff>esphome": {"C2": 20, "C3": 14, "D1": 18, "D4": 31, "D5": 2, "I1": 30,
+                                  "I2": 5}},
+}
+# Plugs each release converted, then taken on by this checkout ("start").
+# Before 2.0.0 the tool installed only Tasmota.
+LEGACY_STARTS = {
+    "v1.2.0": ("tasmota>esphome", "tasmota>sonoff"),
+    "v2.0.2": ("tasmota>esphome", "tasmota>sonoff", "esphome>tasmota", "esphome>sonoff"),
+}
 LEGACY = EMU / "legacy"
 LEGACY_TOOL = "tools/s60_autoflash.py"  # its name until 2.0.0
 # What a run says when an error it did not expect stops it (autoflash_cli._main).
@@ -288,8 +306,9 @@ _legacy_lock = threading.Lock()
 
 def legacy_tree(tag):
     """The tool as release `tag` shipped, to run in the emulator: its tagged
-    files, and only tools/emulator/legacy/<tag>.patch on top - which points it
-    at the cloud stub, as this checkout's AUTOFLASH_EWELINK_API_BASE does."""
+    files, and only tools/emulator/legacy/<tag>.patch on top, where it has
+    one - 1.2.0's points it at the cloud stub, as AUTOFLASH_EWELINK_API_BASE
+    has done since 2.0.0."""
     tree = LEGACY / tag
     with _legacy_lock:
         if not (tree / ".complete").exists():
@@ -298,8 +317,9 @@ def legacy_tree(tag):
             archive = subprocess.run(["git", "-C", str(REPO), "archive", tag], capture_output=True,
                                      check=True).stdout
             subprocess.run(["tar", "-x", "-C", str(tree)], input=archive, check=True)
-            subprocess.run(["patch", "-s", "-p1", "-d", str(tree), "-i",
-                            str(REPO / f"tools/emulator/legacy/{tag}.patch")], check=True)
+            patch = REPO / f"tools/emulator/legacy/{tag}.patch"
+            if patch.exists():
+                subprocess.run(["patch", "-s", "-p1", "-d", str(tree), "-i", str(patch)], check=True)
             (tree / ".complete").write_text(f"{tag}\n")
     return tree
 
@@ -779,7 +799,7 @@ class Scenario:
         elif fault == "crash":
             self.signal("KILL", *HELPERS, TOOL)
         elif fault == "legacy":
-            self.signal("KILL", *HELPERS, LEGACY_TOOL)
+            self.signal("KILL", *HELPERS, LEGACY_TOOL, TOOL)
         elif fault == "cancel":
             self.signal("INT"); time.sleep(1); self.signal("INT")
         elif fault == "ctrlc" and arg == "once":
@@ -1174,29 +1194,32 @@ class Scenario:
     def go_legacy(self):
         """An earlier release's run (sc["arg"]) on a plug fresh from Sonoff,
         killed at 40% of the step under test - or, at "start", let convert it
-        to Tasmota - then this checkout's tool again and again, as a person
-        would, until the plug is converted (to the route's target)."""
+        to the route's first firmware - then this checkout's tool again and
+        again, as a person would, until the plug is converted (to the route's
+        target)."""
         sc = self.sc
-        step, self.target = sc["step"], sc["route"].split(">")[1]
+        step, (source, self.target) = sc["step"], sc["route"].split(">")
         # "+G1off": the plug switched off, too, part way through G1 of the
         # first run after - G1 then writing over that release's startup
         # firmware, unproven (step_restore), and carrying on after a cut.
         tag, _, then = sc["arg"].partition("+")
-        later = ("G1", "plugoff", 1, 0.6 * 33) if then == "G1off" else None
+        steps = LEGACY_STEPS[tag].get(sc["route"], {})
+        later = ("G1", "plugoff", 1, 0.6 * steps["G1"]) if then == "G1off" else None
         old = legacy_tree(tag)
         stop = threading.Event()
         if step != "start":
-            self.step_length = LEGACY_STEPS[tag][step]
+            self.step_length = steps[step]
             threading.Thread(target=self.inject, args=(time.time(), None, 0.4 * self.step_length, stop,
                                                        "legacy", sc["arg"]), daemon=True).start()
-        results = [(self.run_tool("tasmota", fresh=True, code=old), None)]
+        first = source if step == "start" else self.target
+        results = [(self.run_tool(first, fresh=True, code=old), None)]
         results[-1] = (results[-1][0], self.screen_result())
         stop.set()
         if step == "start":
             if "Converted" not in results[-1][1]:
                 return self.finish(results, "OLD-RUN-FAILED")
             # Its starting point, not the end: the conversion under test is next.
-            results[-1] = (results[-1][0], f"on Tasmota, by {sc['arg']}")
+            results[-1] = (results[-1][0], f"on {dict(tasmota='Tasmota', esphome='ESPHome')[source]}, by {sc['arg']}")
         elif self.fired is None:
             return self.finish(results, "NOT-FIRED")
         return self.again(results, self.target, [], code=REPO, later=later)

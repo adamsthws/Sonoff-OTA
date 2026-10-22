@@ -125,6 +125,19 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn("sonoff>tasmota:F4:legacy-v1.2.0+G1off", ids)
         self.assertTrue(fs.needs_cloud({"route": "tasmota>esphome", "step": "start", "fault": "legacy"}))
 
+    def test_runs_left_by_the_release_before_a_firmware_update_are_carried_on(self):
+        # Its bundle pinned to the firmware the tool installed then
+        # (docs/updating-firmware.md): every step from Sonoff, both ways, and
+        # each kind of plug it converted.
+        ids = {sc["id"] for sc in fs.scenarios()}
+        for route, steps in (("sonoff>tasmota", fs.ROUTES["sonoff>tasmota"][2]),
+                             ("sonoff>esphome", fs.ROUTES["sonoff>esphome"][2])):
+            for step in set(steps) - {"C3fb"} | {"C2"}:
+                self.assertIn(f"{route}:{step}:legacy-v2.0.2", ids)
+        for route in ("tasmota>esphome", "tasmota>sonoff", "esphome>tasmota", "esphome>sonoff"):
+            self.assertIn(f"{route}:start:legacy-v2.0.2", ids)
+        self.assertNotIn("sonoff>tasmota:F4:legacy-v2.0.2+G1off", ids)
+
     def test_phases_must_ride_out_blips_by_themselves(self):
         # PR #5: one early blip used up a phase's 20 s of retrying, and a later
         # one failed on its first try - the step then tried again from the start.
@@ -187,7 +200,8 @@ class ScenarioTests(unittest.TestCase):
     def test_every_step_has_a_length_or_a_start_of_its_own(self):
         for sc in fs.scenarios():
             if sc["fault"] == "legacy":
-                self.assertTrue(sc["step"] == "start" or sc["step"] in fs.LEGACY_STEPS[sc["arg"].partition("+")[0]], sc["id"])
+                steps = fs.LEGACY_STEPS[sc["arg"].partition("+")[0]].get(sc["route"], {})
+                self.assertTrue(sc["step"] == "start" or sc["step"] in steps, sc["id"])
                 continue
             if sc["fault"] == "lostapp":
                 self.assertEqual(sc["step"], "start", sc["id"])

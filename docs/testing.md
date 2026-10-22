@@ -49,7 +49,7 @@ person converting it again would have.
 ## The fault suite
 
 `tools/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,345 scenarios:
+every direction - 1,368 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
@@ -98,7 +98,12 @@ every direction - 1,345 scenarios:
   `start`). And 1.2.0 killed at F4, then the plug switched off part way
   through G1 of the run after (`legacy-v1.2.0+G1off`): G1 writes over 1.2.0's
   startup firmware without checking it, which it cannot rebuild, and the next
-  run must carry on after the sectors already written. `unattended-test.sh
+  run must carry on after the sectors already written. And the same for the
+  release before the firmware the tool installs last changed (`legacy-v2.0.2`),
+  whose runs - their bundle pinned to the firmware before - this checkout
+  must finish with its own: killed at each of its steps, to Tasmota and to
+  ESPHome, and each kind of plug it converted, taken on from there
+  ([updating-firmware.md](updating-firmware.md)). `unattended-test.sh
   --code=DIR` runs the tool from another tree.
 - **A converted plug left on Tasmota's own safeboot** (`lostapp-factory`): an
   ESPHome factory image - bootloader, partition table and app, for a serial
