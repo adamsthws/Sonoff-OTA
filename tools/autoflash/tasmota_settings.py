@@ -40,15 +40,18 @@ HOSTNAME_MAX = 32                # TasmotaGlobal.hostname[33]
 
 # A template is only used with the firmware its layout was checked against.
 #
-# It is captured from a converted plug running the official release the bundle
-# pins (safeboot_migration.OFFICIAL_TASMOTA_COMMIT, Tasmota 15.6.0), and
-# installed into the Berry Tasmota D1 uploads (safeboot_migration
+# It was captured from a converted plug running official Tasmota 15.6.0
+# (safeboot_migration.INTERIM_TASMOTA_COMMIT, the release the interim firmware
+# is made from - not the one a converted plug ends on, which firmware.json
+# pins), and is installed into the Berry Tasmota D1 uploads (safeboot_migration
 # PINNED_ARTIFACTS["bluetooth"], 15.6.0.1 built from f5b34a2).  At those two
 # commits the record layout, text pool order and size, cfg_holder, CRC and the
 # load path are identical, and no SettingsDelta step lies between 15.6.0 and
 # 15.6.0.1.  Change either pin and these must be checked again: until then D1
 # gives Tasmota its Wi-Fi by hand, and tests/test_tasmota_settings.py fails
-# saying so.  See archive/docs/reference/automatic-wifi.md.
+# saying so.  See archive/docs/reference/automatic-wifi.md.  The official
+# release needs only CFG_HOLDER (above) to be its own, for it to take the
+# record the recovery Safeboot saves: tools/update_firmware.py checks it.
 TEMPLATE_SOURCE_COMMIT = "db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892"
 TEMPLATE_VERSION = 0x0F060000
 BERRY_FIRMWARE_SHA256 = "a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708"

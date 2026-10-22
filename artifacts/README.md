@@ -26,8 +26,10 @@ plug with `tools/capture_tasmota_template.py` and tested on one with
 `--verify`. Its Wi-Fi names, passwords, last access point, and addresses are
 blank or Tasmota's defaults; it holds nothing about any network. It is only
 used with the Berry Tasmota pinned above (15.6.0.1, same settings layout). If
-either Tasmota pin changes, re-check and re-capture it: see
-`tools/autoflash/tasmota_settings.py`.
+it, or the Tasmota the interim firmware is made from (15.6.0), changes,
+re-check and re-capture it: see `tools/autoflash/tasmota_settings.py`. The
+official release a converted plug ends on can change without it
+([`../docs/updating-firmware.md`](../docs/updating-firmware.md)).
 
 The imprintable Safeboot is built from the pinned Tasmota source with
 `repartition/recovery-safeboot/volatile-wifi-defaults.patch` and
@@ -111,8 +113,9 @@ network name and password, and the run writes the plug's Wi-Fi into them in
 memory (`tools/autoflash/imprint.py`). It has no OTA password, web login or API
 encryption key, as ESPHome's own ready-made images have none: the plug is open
 on the home network until its owner adds them, as official Tasmota is. To
-publish a new one, change the config and its `project` version, build it,
-and replace both files, their rows above and their lines in `SHA256SUMS`.
+publish a new one, change the config and build and publish it with
+`tools/update_firmware.py esphome`, which [`../docs/updating-firmware.md`](../docs/updating-firmware.md)
+describes, as for a new ESPHome release; then update the files' rows above.
 
 ESPHome 1.1.0 adds a Wi-Fi signal sensor, which the run reads before it
 changes the firmware of a plug on ESPHome, and an `s60_wifi` action that gives

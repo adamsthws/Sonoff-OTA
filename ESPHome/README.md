@@ -12,22 +12,18 @@ and the plug keeps Sonoff's.
 
 ## Changing it
 
-1. Edit `sonoff_s60.yaml`, and raise its `project` `version`.
-2. Build it: `esphome compile sonoff_s60.yaml` (ESPHome 2026.9.1 built the current
-   image).
-3. Publish `.esphome/build/esphome/build/firmware.ota.bin` as
-   `artifacts/esphome-sonoff-s60-imprintable-<version>.bin`, and
-   `.esphome/build/esphome/build/bootloader/bootloader.bin` from the same
-   build as `artifacts/esphome-sonoff-s60-bootloader-<version>.bin` (the
-   install puts it in place of Sonoff's). Update their rows in
-   `artifacts/README.md`, their lines in `SHA256SUMS`, and the pins in
-   `tools/autoflash/esphome.py`. `tests/test_published_artifacts.py` checks
-   the image can still be imprinted.
-4. Compare the new bootloader with the published one: it must be the same,
-   byte for byte, unless replacing it is the point. A different one is written
-   to every plug on its next route through D5 or L1, and a power cut in that
-   second leaves a plug that has to be opened. A change to the config's app
-   alone leaves it the same (1.1.0's is 1.0.0's).
+Edit `sonoff_s60.yaml`, then build and publish it with
+`python3 tools/update_firmware.py esphome`, as for a new ESPHome release
+([docs/updating-firmware.md](../docs/updating-firmware.md)): it raises the
+config's `project` `version`, builds it in ESPHome's own Docker image, checks
+the image can still be imprinted, and publishes it in `artifacts/`, with its
+lines in `SHA256SUMS` and `firmware.json`. ESPHome 2026.9.1 built the current
+image.
+
+It keeps the published bootloader unless told otherwise (`--new-bootloader`):
+a different one is written to every plug on its next route through D5 or L1,
+and a power cut in that second leaves a plug that has to be opened. A change
+to the config's app alone leaves it the same (1.1.0's is 1.0.0's).
 
 The `WiFi Signal` sensor is read by the tool, by that name, before it changes
 the firmware of a plug on ESPHome: keep the name. From a plug whose ESPHome has

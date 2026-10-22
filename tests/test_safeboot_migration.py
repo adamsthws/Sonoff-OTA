@@ -11,8 +11,6 @@ from pathlib import Path
 
 from tools.safeboot_migration import (
     MD5_MAGIC,
-    OFFICIAL_INSTALL_COMMIT,
-    OFFICIAL_TASMOTA_COMMIT,
     PARTITION_MAGIC,
     PINNED_ARTIFACTS,
     RECOVERY_MODE,
@@ -21,6 +19,7 @@ from tools.safeboot_migration import (
     SOURCE_TABLE_SHA256,
     TARGET_PARTITIONS,
     analyze_canonical_nvs,
+    official_release,
     parse_partition_sector,
     require_pinned_artifacts,
     sector_aligned_size,
@@ -270,10 +269,7 @@ class MigrationValidationTests(unittest.TestCase):
 
     def test_pinned_artifact_gate_rejects_manifest_substitution(self):
         manifest = {
-            "official_release": {
-                "install_commit": OFFICIAL_INSTALL_COMMIT,
-                "tasmota_commit": OFFICIAL_TASMOTA_COMMIT,
-            },
+            "official_release": official_release(),
             "artifacts": {
                 name: dict(expected) for name, expected in PINNED_ARTIFACTS.items()
             },

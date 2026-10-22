@@ -16,7 +16,7 @@ from pathlib import Path
 
 try:
     from tools.safeboot_migration import (
-        OFFICIAL_TASMOTA_COMMIT,
+        INTERIM_TASMOTA_COMMIT,
         RECOVERY_ARTIFACT,
         RECOVERY_MODE,
         RECOVERY_PATCH,
@@ -29,7 +29,7 @@ try:
     from tools.validate_recovery_safeboot import validate
 except ModuleNotFoundError:
     from safeboot_migration import (
-        OFFICIAL_TASMOTA_COMMIT,
+        INTERIM_TASMOTA_COMMIT,
         RECOVERY_ARTIFACT,
         RECOVERY_MODE,
         RECOVERY_PATCH,
@@ -136,7 +136,7 @@ def main() -> int:
     private_write(output / validation_name, validation_bytes)
     manifest["recovery_safeboot"] = {
         "artifact": RECOVERY_ARTIFACT,
-        "tasmota_commit": OFFICIAL_TASMOTA_COMMIT,
+        "tasmota_commit": INTERIM_TASMOTA_COMMIT,
         "patch_sha256": patch_hash,
         "credential_header_sha256": validation["credential_header_sha256"],
         "validation_file": validation_name,

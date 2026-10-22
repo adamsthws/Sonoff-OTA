@@ -114,8 +114,7 @@ def main() -> int:
     release = manifest["official_release"]
     print(
         "Official artifact set: "
-        f"tasmota/install@{release['install_commit']} "
-        f"(Tasmota@{release['tasmota_commit']})"
+        f"Tasmota {release['tag']} (Tasmota@{release['tasmota_commit']})"
     )
     print(f"Target table: {target['sha256']} (exact official layout)")
     if recovery_mode:
