@@ -4469,7 +4469,7 @@ def settle_route(ctx: Context) -> tuple[str, str]:
         firmware = ask_firmware(source, choices)
     ctx.state.set_input("source", source)
     ctx.state.set_input("firmware", firmware)
-    tell(f"Converting the plug from {detect.NAMES[source]} to {FIRMWARES[firmware]}."
+    say(f"Converting the plug from {detect.NAMES[source]} to {FIRMWARES[firmware]}."
          if source in ("tasmota", "esphome") else f"Converting the plug to {FIRMWARES[firmware]}.")
     return firmware, source
 
@@ -4523,7 +4523,9 @@ def find_current_firmware(ctx: Context) -> str:
             adopt_plug(ctx, detect.Found(given, running, hostsys.mac_of(given)))
             return past_the_commit(ctx, running)
         return "sonoff"
-    # On screen: the look takes 5-10 s, before any stage line and its clock.
+    # On screen while it looks - 5-10 s, before any stage line and its clock -
+    # and taken off again once it has looked.
+    output.transient_begin()
     tell("Looking for plugs already running Tasmota or ESPHome on your network...")
 
     # Plugs this computer has records of: their backups and their runs.
@@ -4550,6 +4552,7 @@ def find_current_firmware(ctx: Context) -> str:
         while not open_ones(found) and time.monotonic() - started < RESTART_GRACE:
             time.sleep(5)
             found = search()
+    output.transient_end()
     # A Tasmota with a web password, or an ESPHome with a web login, says
     # whether it is a plug this tool converts only once given it: offered,
     # and it asked for if chosen, when someone can type it.

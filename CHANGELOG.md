@@ -19,8 +19,9 @@ the section below before changing the number.
 - The look round the network for a converted plug, 5 to 10 seconds - longer
   when one this computer converted may be restarting - showed nothing on
   screen, so the run seemed to wait for a key; one pressed then was taken as
-  the next question's answer, an Enter as its default. The look now says so,
-  and a key pressed while nothing is asking is dropped.
+  the next question's answer, an Enter as its default. The look now says so
+  while it looks, then leaves the screen, and a key pressed while nothing is
+  asking is dropped.
 - The firmware question gives the firmwares by name alone.
 
 ## 2.0.0
