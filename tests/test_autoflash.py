@@ -1097,13 +1097,30 @@ class UnexpectedErrorTests(unittest.TestCase):
         return code, state, ended, logged, told
 
     def test_it_stops_the_step_with_a_message_and_the_traceback_in_the_log(self):
-        import http.client
-        code, state, ended, logged, told = self.run_step("E1", http.client.IncompleteRead(b""))
+        code, state, ended, logged, told = self.run_step("E1", KeyError("x"))
         self.assertEqual(code, 1)
         self.assertEqual(state.status("E1"), FAILED)
         ended.assert_called_once_with("stopped")
         self.assertIn("Traceback", logged.call_args.args[0])
-        self.assertIn("something unexpected went wrong: IncompleteRead", told.call_args.args[0])
+        self.assertIn("something unexpected went wrong: KeyError", told.call_args.args[0])
+
+    def test_a_request_the_network_dropped_is_no_surprise_and_is_tried_again(self):
+        # Seen in the fault suite: an outage reset H1's read of a region part
+        # way, and the run said "something unexpected went wrong" - then
+        # converted the plug on the next try.
+        import http.client
+        import tools.autoflash_cli as autoflash
+        for error in (ConnectionResetError(104, "Connection reset by peer"), http.client.IncompleteRead(b""),
+                      http.client.RemoteDisconnected("Remote end closed connection without response"),
+                      TimeoutError("timed out")):
+            code, state, ended, logged, told = self.run_step("H1", error)
+            self.assertEqual(code, 1)
+            self.assertEqual(state.status("H1"), FAILED)
+            self.assertIn("Traceback", logged.call_args.args[0])
+            message = told.call_args.args[0]
+            self.assertIn("the connection to the plug was lost", message)
+            self.assertNotIn("unexpected", message)
+            self.assertRegex(message, autoflash.TRANSIENT_RE)
 
     def test_a_step_that_writes_stays_attempted(self):
         # Whether the commit got as far as writing is for the next run to find

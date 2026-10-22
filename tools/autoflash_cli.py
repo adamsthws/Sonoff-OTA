@@ -14,6 +14,7 @@ interrupted run resumes where it stopped.
 from __future__ import annotations
 
 import argparse
+import http.client
 import ipaddress
 import json
 import os
@@ -5103,7 +5104,9 @@ def _execute(ctx: Context, step: str) -> int:
         tell(f"FAILED: {exc}")
         return 1
     except Exception as exc:  # noqa: BLE001 - recorded and explained, not a bare traceback
-        message = unexpected(exc)
+        # The plug or the network dropping a request part way - a reset, a
+        # reply cut off, no answer - is no surprise, and worth another go.
+        message = connection_lost(exc) if isinstance(exc, NETWORK_ERRORS) else unexpected(exc)
         # As above: whether it got as far as writing is for the plug to say.
         if step not in ATTEMPTED_EVIDENCE:
             ctx.state.mark(step, FAILED, error=message)
@@ -5149,7 +5152,7 @@ TRANSIENT_RE = re.compile(
     r"HTTP -1|timed out|timeout|sent nothing|did not answer|not answering|unreachable|"
     r"connection (refused|reset|aborted)|ConnectionError|IncompleteRead|URLError|"
     r"No route|stopped the \w+ without|did not complete within|Wi-Fi went down|"
-    r"closed the connection|Broken pipe",
+    r"closed the connection|Broken pipe|connection to the plug was lost",
     re.IGNORECASE,
 )
 # A router restart takes a minute or two.  The plug gives up on a step within
@@ -5558,6 +5561,18 @@ def tell_how_to_carry_on() -> None:
         tell(f"What happened, in full: {display_path(output.log_path())}")
     tell("Stuck? Start a discussion or open an issue:")
     output.show_links([(DISCUSSIONS_URL, "Start a discussion"), (ISSUES_URL, "Open an issue")])
+
+
+# The ways a request to the plug fails on the network, as the step's own
+# code did not catch them: a connection refused, reset or cut off, its reply
+# cut short or garbled, or no reply in time.
+NETWORK_ERRORS = (ConnectionError, TimeoutError, urllib.error.URLError, http.client.HTTPException)
+
+
+def connection_lost(exc: BaseException) -> str:
+    """A request the network or the plug dropped: in full in the log, in a line on screen."""
+    output.log_only(traceback.format_exc().rstrip())
+    return f"the connection to the plug was lost ({type(exc).__name__}: {exc})"
 
 
 def unexpected(exc: BaseException) -> str:

@@ -9,6 +9,13 @@ The version is set in one place, `tools/autoflash/__init__.py`. Merging a new
 one to `main` tags it and publishes a release with its notes from here, so add
 the section below before changing the number.
 
+## 2.0.2
+
+- The plug or the network dropping a request part way through a step - a
+  connection reset in a Wi-Fi outage, say - was put as "something unexpected
+  went wrong", though the step was tried again as for any other network
+  trouble. It now says the connection to the plug was lost.
+
 ## 2.0.1
 
 - A plug brought back from Tasmota's own safeboot finished its conversion,
