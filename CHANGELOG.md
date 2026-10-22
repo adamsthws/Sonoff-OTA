@@ -16,6 +16,11 @@ the section below before changing the number.
   report, which could not name where the plug started. A Tasmota there with
   a web password is now asked for it, where the run stopped, and the rest of
   the run treats the plug as the Tasmota it was.
+- The look round the network for a converted plug, 5 to 10 seconds - longer
+  when one this computer converted may be restarting - showed nothing on
+  screen, so the run seemed to wait for a key; one pressed then was taken as
+  the next question's answer, an Enter as its default. The look now says so,
+  and a key pressed while nothing is asking is dropped.
 
 ## 2.0.0
 

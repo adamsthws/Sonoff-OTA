@@ -4533,7 +4533,8 @@ def find_current_firmware(ctx: Context) -> str:
             adopt_plug(ctx, detect.Found(given, running, hostsys.mac_of(given)))
             return past_the_commit(ctx, running)
         return "sonoff"
-    say("Looking for plugs already running Tasmota or ESPHome on your network...")
+    # On screen: the look takes 5-10 s, before any stage line and its clock.
+    tell("Looking for plugs already running Tasmota or ESPHome on your network...")
 
     # Plugs this computer has records of: their backups and their runs.
     known = {name.replace("-", ":") for name in
@@ -4553,7 +4554,7 @@ def find_current_firmware(ctx: Context) -> str:
     if not open_ones(found) and converted_here(ctx):
         # A plug this computer converted, or left part way, may be restarting -
         # a run stopped and started again at once finds it mid-restart.
-        say("    None answered. One this computer converted may be restarting: looking "
+        tell("    None answered. One this computer converted may be restarting: looking "
             f"again for up to {RESTART_GRACE:.0f} seconds...")
         started = time.monotonic()
         while not open_ones(found) and time.monotonic() - started < RESTART_GRACE:

@@ -340,6 +340,39 @@ class AdvertSignalTests(unittest.TestCase):
         self.assertIsNone(af.advert_signal(self.ctx(None), self.report(), "192.168.0.50"))
 
 
+class TypedAheadTests(unittest.TestCase):
+    """A key pressed while nothing was asking - during the look round the
+    network, with nothing on screen - is not the next question's answer (seen
+    in the emulator: an Enter taken as an empty answer to "Which plug")."""
+
+    def test_dropped_on_a_terminal(self):
+        from tools.autoflash import prompts
+        with mock.patch.object(prompts.sys.stdin, "isatty", return_value=True), \
+             mock.patch.object(prompts.sys.stdin, "fileno", return_value=0), \
+             mock.patch.object(prompts.hostsys, "IS_WINDOWS", False), \
+             mock.patch("termios.tcflush") as flush:
+            prompts.discard_typed_ahead()
+        import termios
+        flush.assert_called_once_with(0, termios.TCIFLUSH)
+
+    def test_piped_answers_are_left_alone(self):
+        from tools.autoflash import prompts
+        with mock.patch.object(prompts.sys.stdin, "isatty", return_value=False), \
+             mock.patch("termios.tcflush") as flush:
+            prompts.discard_typed_ahead()
+        flush.assert_not_called()
+
+    def test_every_question_drops_it_first(self):
+        from tools.autoflash import prompts
+        order = []
+        with mock.patch.object(prompts, "discard_typed_ahead", side_effect=lambda: order.append("dropped")), \
+             mock.patch("builtins.input", side_effect=lambda _: order.append("asked") or "2"), \
+             mock.patch.object(prompts, "UNATTENDED", False), mock.patch.object(prompts, "_emit"), \
+             mock.patch.object(prompts.output, "answered"):
+            self.assertEqual(prompts.ask_choice("Which plug is this run for", ["a", "b"]), 1)
+        self.assertEqual(order, ["dropped", "asked"])
+
+
 class SecretPromptTests(unittest.TestCase):
     """Only the character just typed is ever readable, and never after Enter."""
 

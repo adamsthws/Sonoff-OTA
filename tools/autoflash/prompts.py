@@ -102,10 +102,30 @@ def _no_one_to_answer(question: str) -> NoOneToAnswer:
     return NoOneToAnswer(f"unattended: no answer for {question!r}")
 
 
+def discard_typed_ahead() -> None:
+    """Drop what was typed while nothing was asking: a key pressed during a
+    wait with nothing on screen (the look round the network, say) was taken
+    as the next question's answer - an Enter, its default.  Only a question
+    asked is answered.  On a terminal only: piped answers are left alone."""
+    try:
+        if not sys.stdin.isatty():
+            return
+        if hostsys.IS_WINDOWS:
+            import msvcrt
+            while msvcrt.kbhit():
+                msvcrt.getwch()
+            return
+        import termios
+        termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+    except (OSError, ValueError, ImportError):
+        pass  # no console to clear: nothing was typed into it either
+
+
 def _raw(question: str, default: str | None, private: str | None = None) -> str:
     if UNATTENDED:
         raise _no_one_to_answer(question)
     suffix = f" [{default}]" if default else ""
+    discard_typed_ahead()
     with interrupt.asking():  # nothing in flight at a question: Ctrl-C stops at once
         answer = input(output.question(f"{question}{suffix}", ": ")).strip()
     if private:
@@ -157,6 +177,7 @@ class SecretLine:
 
 
 def ask_secret(prompt: str, reveal_seconds: float = 1.0) -> str:
+    discard_typed_ahead()
     with interrupt.asking():
         return _ask_secret(prompt, reveal_seconds)
 
@@ -352,6 +373,7 @@ def _wait_for_key(prompt: str = "Press any key to continue, or q to quit...", *,
     """
     if UNATTENDED or not (sys.stdin.isatty() and sys.stdout.isatty()):
         return
+    discard_typed_ahead()
     sys.stdout.write(output.question(prompt))
     sys.stdout.flush()
     try:
@@ -516,6 +538,7 @@ def countdown_choice(question: str, options: Sequence[str], *,
 
     chosen = default
     deadline = time.monotonic() + seconds
+    discard_typed_ahead()  # an Enter typed before would take the default at once
     with interrupt.asking():
         try:
             if hostsys.IS_WINDOWS:
