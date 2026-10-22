@@ -1055,6 +1055,41 @@ def ensure_firewall(ctx: Context) -> None:
             say("as it was afterwards.")
 
 
+# What the sender says when the upgrade command never went out
+# (serve_tasmota_ota.NOT_SENT).
+BRIDGE_NOT_SENT = "The upgrade command was not sent"
+
+
+def bridge_failure_advice(ctx: Context, reported: list[str], started: bool) -> list[str]:
+    """What to do about a send of the installer that failed, by how far it got."""
+    if started:
+        return [
+            "The plug started downloading it from this computer, but stopped part",
+            "way - most likely its Wi-Fi dropped: a router restarting, or a weak",
+            "signal. It keeps its Sonoff firmware, so nothing is lost; run this",
+            "again once its Wi-Fi is steady.",
+        ]
+    if output.tool_said("offline in eWeLink"):
+        return [
+            "eWeLink does not see the plug, so the installer cannot be sent. It",
+            "keeps its Sonoff firmware, so nothing is lost: switch the plug off",
+            "and on, wait for it to show online in the eWeLink app, and run this",
+            "again.",
+        ]
+    if output.tool_said(BRIDGE_NOT_SENT):
+        # Seen against the real cloud: eWeLink's servers dropping connections,
+        # and the run blamed this computer's firewall for a plug never asked.
+        if any("refusing" in line.lower() for line in reported):
+            return ["Nothing was sent to the plug, so it keeps its Sonoff firmware."]
+        return [
+            "This computer's connection to eWeLink failed before the plug was told",
+            "to fetch the installer - eWeLink's servers, or this computer's",
+            "internet, having trouble. Nothing was sent, so the plug keeps its",
+            "Sonoff firmware: run this again in a few minutes.",
+        ]
+    return firewall_hint(ctx)
+
+
 def firewall_hint(ctx: Context) -> list[str]:
     """What to say when the plug never reached this computer."""
     plug_ip = ctx.state.input("plug_ip") or "PLUG_IP"
@@ -2251,20 +2286,9 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
         # Some of it served means the plug reached this computer: not the
         # firewall, but its Wi-Fi going part way (a router restarting, say).
         started = output.tool_said("Served /user") or output.tool_said("did not request every")
-        offline = output.tool_said("offline in eWeLink")
         section("The bridge was not delivered", [
             *(["The sender reported:", *(f"  {line}" for line in reported), ""] if reported else []),
-            *([
-                "The plug started downloading it from this computer, but stopped part",
-                "way - most likely its Wi-Fi dropped: a router restarting, or a weak",
-                "signal. It keeps its Sonoff firmware, so nothing is lost; run this",
-                "again once its Wi-Fi is steady.",
-            ] if started else [
-                "eWeLink does not see the plug, so the installer cannot be sent. It",
-                "keeps its Sonoff firmware, so nothing is lost: switch the plug off",
-                "and on, wait for it to show online in the eWeLink app, and run this",
-                "again.",
-            ] if offline else firewall_hint(ctx)),
+            *bridge_failure_advice(ctx, reported, started),
         ])
         raise Abort("bridge delivery stopped part way" if started else "bridge delivery failed")
     return {"seconds": round(time.monotonic() - started, 1)}

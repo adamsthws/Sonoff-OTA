@@ -214,6 +214,18 @@ def until_online(device: dict, look_again, *, sleep=time.sleep) -> dict:
     return device
 
 
+# Said when a send failed before the upgrade command went out: the plug was
+# never asked to fetch the installer, so it never came - which the run must
+# not blame on this computer's firewall (autoflash_cli.bridge_failure_advice).
+NOT_SENT = "The upgrade command was not sent: nothing reached the plug."
+
+
+def report_failure(exc: BaseException, sent: bool) -> None:
+    print(f"ERROR: {exc}", file=sys.stderr)
+    if not sent:
+        print(NOT_SENT, file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--listen-ip", required=True)
@@ -399,7 +411,7 @@ def main():
             print("\n  Interrupted before the firmware was fully delivered.", file=sys.stderr)
             run_error = "interrupted before the firmware was fully delivered"
     except (EwelinkError, WebSocketError, OSError, KeyError, json.JSONDecodeError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        report_failure(exc, sent)
         run_error = str(exc)
     finally:
         password = ""

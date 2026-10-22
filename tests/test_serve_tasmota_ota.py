@@ -115,6 +115,34 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual(len(looks), sender.OFFLINE_WAIT // 10)
 
 
+class FailureTests(unittest.TestCase):
+    """A failed send says whether the upgrade command went out."""
+
+    def said(self, sent):
+        import io
+        from unittest import mock
+        import tools.serve_tasmota_ota as sender
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            sender.report_failure(OSError("EOF occurred in violation of protocol"), sent)
+        return err.getvalue()
+
+    def test_before_the_command_it_says_nothing_reached_the_plug(self):
+        import tools.serve_tasmota_ota as sender
+        said = self.said(sent=False)
+        self.assertIn("ERROR: EOF occurred", said)
+        self.assertIn(sender.NOT_SENT, said)
+
+    def test_after_it_only_the_error(self):
+        import tools.serve_tasmota_ota as sender
+        self.assertNotIn(sender.NOT_SENT, self.said(sent=True))
+
+    def test_the_run_looks_for_what_it_says(self):
+        import tools.autoflash_cli as autoflash
+        import tools.serve_tasmota_ota as sender
+        self.assertTrue(sender.NOT_SENT.startswith(autoflash.BRIDGE_NOT_SENT))
+
+
 class DescribeCloudTests(unittest.TestCase):
     def test_offline_and_online(self):
         from tools.serve_tasmota_ota import describe_cloud

@@ -21,6 +21,11 @@ the section below before changing the number.
   minutes, stopped with "something unexpected went wrong". The plug is now
   given a minute to come back first, and a run that gives up on its network
   stops at that step, as any other.
+- A send of the installer that failed before the plug was told to fetch it -
+  eWeLink's servers dropping this computer's connection, say - was put down to
+  this computer's firewall keeping the plug out. It now says the connection to
+  eWeLink failed and nothing was sent, or, for a send refused, only that
+  nothing was sent.
 
 ## 2.0.1
 

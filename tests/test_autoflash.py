@@ -2040,6 +2040,38 @@ class BackOnSonoffTests(unittest.TestCase):
         self.assertIs(address, failed)
         self.assertEqual(sent, autoflash_cli.BRIDGE_SENDS)
 
+    def advice(self, said, reported=(), started=False):
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        with mock.patch.object(autoflash.output, "tool_said", side_effect=lambda text: any(text in s for s in said)), \
+             mock.patch.object(autoflash, "firewall_hint", return_value=["FIREWALL"]):
+            return " ".join(autoflash.bridge_failure_advice(SimpleNamespace(), list(reported), started))
+
+    def test_a_send_that_never_reached_ewelink_does_not_blame_the_firewall(self):
+        # Seen against the real cloud: eWeLink's servers dropping connections
+        # (SSL EOF), and the run said the firewall had kept the plug out - of
+        # a download it was never asked to make.
+        import tools.serve_tasmota_ota as sender
+        error = "ERROR: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol"
+        advice = self.advice([error, sender.NOT_SENT], reported=[error, sender.NOT_SENT])
+        self.assertNotIn("FIREWALL", advice)
+        self.assertIn("connection to eWeLink failed", advice)
+        self.assertIn("run this again", advice)
+
+    def test_a_send_refused_before_the_command_says_only_that_nothing_was_sent(self):
+        import tools.serve_tasmota_ota as sender
+        refused = "ERROR: Device reports 1.3.0, expected 1.2.0; refusing"
+        advice = self.advice([refused, sender.NOT_SENT], reported=[refused, sender.NOT_SENT])
+        self.assertEqual(advice, "Nothing was sent to the plug, so it keeps its Sonoff firmware.")
+
+    def test_a_command_sent_and_never_fetched_is_the_firewall(self):
+        self.assertEqual(self.advice(["Upgrade command sent with owner-controlled private-LAN URLs."]), "FIREWALL")
+
+    def test_offline_and_cut_off_sends_keep_their_own_advice(self):
+        self.assertIn("eWeLink does not see the plug", self.advice(["Device is offline in eWeLink; refusing"]))
+        self.assertIn("stopped part way", self.advice(["Served /user1.bin"], started=True))
+
     def test_a_failed_send_is_followed_by_the_next_though_the_plug_is_quiet(self):
         # Seen in the fault suite: a send refused (the plug offline in eWeLink),
         # then the plug not answering here for a moment - and the run asked the
