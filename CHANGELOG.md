@@ -9,6 +9,15 @@ The version is set in one place, `tools/autoflash/__init__.py`. Merging a new
 one to `main` tags it and publishes a release with its notes from here, so add
 the section below before changing the number.
 
+## 2.1.0
+
+- A converted plug ends on Tasmota
+  [16.0.0](https://github.com/arendst/Tasmota/releases/tag/v16.0.0), the
+  latest release, where it ended on 15.6.0. Its files now come from the
+  release's own page on GitHub. A run left part way by an earlier version
+  carries on by itself: with 16.0.0, or - if it had installed 15.6.0 already -
+  on 15.6.0, checked byte for byte as ever, which Tasmota's own page updates.
+
 ## 2.0.2
 
 - The steps that write firmware keep the plug busy for about 40% less time:

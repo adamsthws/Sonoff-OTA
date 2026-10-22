@@ -18,7 +18,20 @@ ROOT = Path(__file__).resolve().parents[1]
 LOCAL = ROOT / "captures" / "safeboot-recovery-migration"
 OFFICIAL = {name: LOCAL / name for name in
             ("tasmota32c3.factory.bin", "tasmota32c3-safeboot.bin", "tasmota32c3.bin")}
-HAVE_OFFICIAL = all(path.exists() for path in OFFICIAL.values())
+
+
+def _is_pinned(path: Path, name: str) -> bool:
+    import hashlib
+    from tools.safeboot_migration import PINNED_ARTIFACTS
+    return path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == PINNED_ARTIFACTS[name]["sha256"]
+
+
+# The files of the release pinned now: a bundle left by a run before the
+# firmware the tool installs changed holds the earlier one's, which a bundle
+# built now refuses - not a failure of the code under test.
+HAVE_OFFICIAL = all(_is_pinned(OFFICIAL[file], name) for name, file in
+                    (("factory", "tasmota32c3.factory.bin"), ("safeboot", "tasmota32c3-safeboot.bin"),
+                     ("app", "tasmota32c3.bin")))
 
 
 @unittest.skipUnless(HAVE_OFFICIAL, "needs the official release files from a real bundle")
