@@ -95,20 +95,23 @@ HELPERS = ("serve_safeboot_migration.py", "serve_tasmota_ota.py")
 # write to or wait on the plug, with how long each usually takes (emulator).
 # Each step's usual length in seconds, from passing runs: a fault lands at a
 # share of it. F4 is 10 s from 2026-10-21 (one restart; it was 31 s with two).
+# The steps that write firmware are shorter from 2.0.2 - each block checked on
+# the plug, not sent back: E2, G1 and L1 by 12 s, R1 (two images) by 25 s - so
+# a fault at 90% of the old lengths landed in the step after.
 ROUTES = {
-    "tasmota>esphome": ("suite-tasmota", "esphome", {"L1": 40, "M1": 8, "I2": 5}),
+    "tasmota>esphome": ("suite-tasmota", "esphome", {"L1": 23, "M1": 8, "I2": 5}),
     "tasmota>sonoff": ("suite-tasmota", "sonoff",
-                       {"L1": 40, "X1": 12, "X2": 25, "D4": 31, "D5": 2, "R1": 57, "R2": 2}),
+                       {"L1": 23, "X1": 12, "X2": 25, "D4": 31, "D5": 2, "R1": 32, "R2": 2}),
     "esphome>tasmota": ("suite-esphome", "tasmota",
-                        {"X1": 12, "X2": 25, "D4": 31, "D5": 2, "E1": 2, "E2": 29, "E3": 5,
-                         "F2": 35, "F4": 10, "G1": 33, "H1": 2}),
+                        {"X1": 12, "X2": 25, "D4": 31, "D5": 2, "E1": 2, "E2": 17, "E3": 5,
+                         "F2": 35, "F4": 10, "G1": 21, "H1": 2}),
     "esphome>sonoff": ("suite-esphome", "sonoff",
-                       {"X1": 12, "X2": 25, "D4": 31, "D5": 2, "R1": 57, "R2": 2}),
+                       {"X1": 12, "X2": 25, "D4": 31, "D5": 2, "R1": 32, "R2": 2}),
     "sonoff>tasmota": ("suite-stockC2-tasmota", "tasmota",
-                       {"C3": 14, "C3fb": 14, "D1": 18, "D4": 31, "D5": 2, "E1": 2, "E2": 29,
-                        "E3": 5, "F2": 35, "F4": 10, "G1": 33, "H1": 2}),
+                       {"C3": 14, "C3fb": 14, "D1": 18, "D4": 31, "D5": 2, "E1": 2, "E2": 17,
+                        "E3": 5, "F2": 35, "F4": 10, "G1": 21, "H1": 2}),
     "sonoff>esphome": ("suite-stockC2-esphome", "esphome",
-                       {"C3": 14, "C3fb": 14, "D1": 18, "D4": 31, "D5": 2, "I1": 36, "I2": 5}),
+                       {"C3": 14, "C3fb": 14, "D1": 18, "D4": 31, "D5": 2, "I1": 30, "I2": 5}),
 }
 # Past D1 a stock route needs the cloud no more: it starts from a plug saved
 # there (prep), on the interim Tasmota, so any machine can run it.
@@ -261,11 +264,12 @@ def composite_scenarios():
         yield one(route, step, "lossy", "phase", at=10)
 
 
-# The steps that run a Berry phase on the plug (stage, restore, plan) long
-# enough for two blips more than its 20 s of retrying apart, each on one way
-# it is taken: a phase must ride out blips and a weak signal by itself, never
-# needing the step tried again (PR #5: one early blip used up the retrying,
-# and a later one failed on its first try).
+# The steps that run a Berry phase on the plug (stage, restore, plan), each on
+# one way it is taken: a phase must ride out blips and a weak signal by
+# itself, never needing the step tried again (PR #5: one early blip used up
+# the retrying, and a later one failed on its first try). In I1 and R1 the
+# two blips are more than its 20 s of retrying apart; from 2.0.2, E2, G1 and
+# L1 are too short for that.
 BLIP_STEPS = (("sonoff>tasmota", "E2"), ("esphome>tasmota", "G1"), ("sonoff>esphome", "I1"),
               ("tasmota>esphome", "L1"), ("tasmota>sonoff", "R1"))
 

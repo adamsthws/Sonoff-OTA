@@ -412,7 +412,10 @@ class MigrationValidationTests(unittest.TestCase):
                 rendered,
             )
             self.assertIn("staged Safeboot sector padding is not erased", rendered)
-            send_chunks(state, "staged", fixture.safeboot)
+            # Nothing it writes is sent back: its report hashes the region.
+            self.assertNotIn("/capture/staged", rendered)
+            with self.assertRaisesRegex(ValueError, "unavailable"):
+                send_chunks(state, "staged", fixture.safeboot)
             report = (
                 f"session={state.session}\nstatus=PASS\ncurrent_ota=1\n"
                 f"table_sha256={SOURCE_TABLE_SHA256}\nnvs_sha256={nvs_hash}\n"
@@ -420,10 +423,8 @@ class MigrationValidationTests(unittest.TestCase):
                 f"staged_size={len(fixture.safeboot)}\n"
             ).encode()
             state.receive_report("stage", report)
-            self.assertEqual(
-                (fixture.evidence_dir / "staged-safeboot-readback.bin").read_bytes(),
-                fixture.safeboot,
-            )
+            self.assertEqual((state.complete, state.result_status), (True, "PASS"))
+            self.assertFalse((fixture.evidence_dir / "staged-safeboot-readback.bin").exists())
 
     def test_commit_is_not_self_executing_and_uses_safe_restart(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -501,7 +502,7 @@ class MigrationValidationTests(unittest.TestCase):
             self.assertIn(sha256_bytes(recovery), rendered)
             self.assertIn(state.arm_token, rendered)
 
-            send_chunks(state, "restored", fixture.safeboot)
+            self.assertNotIn("/capture/restored", rendered)
             report = (
                 f"session={state.session}\nstatus=PASS\ncurrent_ota=0\n"
                 f"target_table_sha256={sha256_bytes(fixture.target_table)}\n"
@@ -510,10 +511,7 @@ class MigrationValidationTests(unittest.TestCase):
                 f"official_safeboot_size={len(fixture.safeboot)}\n"
             ).encode()
             state.receive_report("restore", report)
-            self.assertEqual(
-                (fixture.evidence_dir / "official-safeboot-readback.bin").read_bytes(),
-                fixture.safeboot,
-            )
+            self.assertEqual((state.complete, state.result_status), (True, "PASS"))
 
     def factory(self, official, recovery, official_sectors):
         """The factory partition as a restore cut off after `official_sectors` leaves it."""
@@ -937,6 +935,31 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class ChunkBodyTests(unittest.TestCase):
+    """Each chunk goes to the plug with its SHA-256, which the plug checks
+    before writing it - asking again for one damaged on its way."""
+
+    def test_the_hash_follows_the_hex(self):
+        import hashlib
+        from tools.serve_safeboot_migration import chunk_body
+        chunk = bytes(range(256)) * 16
+        body = chunk_body(chunk).decode("ascii")
+        self.assertEqual(body[:-64], chunk.hex())
+        self.assertEqual(body[-64:], hashlib.sha256(chunk).hexdigest())
+
+    def test_every_phase_that_fetches_chunks_checks_them_and_asks_again(self):
+        for phase in ("stage", "restore", "plan"):
+            source = (Path(__file__).resolve().parents[1] / f"repartition/berry/{phase}.be.tmpl").read_text()
+            fetch = source[source.index("def fetch_chunk"):]
+            fetch = fetch[:fetch.index("\nend\n")]
+            with self.subTest(phase=phase):
+                self.assertIn("expected_length * 2 + 64", source)
+                self.assertIn("digest(data) != sent", source)
+                # A damaged chunk is a failed try, inside the retry loop.
+                self.assertLess(fetch.index("chunk_data(reply[1]"), fetch.index("window.over()"))
+                self.assertIn("came damaged", fetch)
+
+
 class PlanPhaseTests(unittest.TestCase):
     """The plan phase: whatever tools/autoflash/plans.py planned, carried out by
     one Berry program, every write read back and compared byte for byte."""
@@ -979,7 +1002,6 @@ class PlanPhaseTests(unittest.TestCase):
             # Run again once its table is written, it must not copy the old
             # settings back over what the plug has saved since.
             self.assertIn("if !table_written copy_region(step) end", rendered)
-            send_chunks(state, "table", esphome_files.sonoff_table())
             state.receive_report("plan", self.report(state))
             self.assertEqual((state.complete, state.result_status), (True, "PASS"))
             evidence = json.loads((fixture.evidence_dir / "plan-sonoff_layout-report.json").read_text())
@@ -996,7 +1018,6 @@ class PlanPhaseTests(unittest.TestCase):
                 state.plan_chunk("esphome", 3)
             with self.assertRaises(ValueError):
                 state.plan_chunk("nothing", 0)
-            send_chunks(state, "esphome", self.IMAGE)
             # As Berry writes them: hashes in capitals.
             state.receive_report("plan", self.report(state, step0=state.plan.expected()["step0"].upper()))
             self.assertEqual((state.complete, state.result_status), (True, "PASS"))
@@ -1007,20 +1028,28 @@ class PlanPhaseTests(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in fixture.evidence_dir.iterdir()),
                              ["plan-esphome-report.json"])
 
-    def test_a_read_back_that_differs_by_one_byte_is_refused(self):
+    def test_nothing_it_writes_is_sent_back(self):
+        # Each write's hash, read back on the plug, is in its report; the
+        # bytes no longer cross the network a second time.
+        with tempfile.TemporaryDirectory() as directory:
+            state = self.state(MigrationFixture(Path(directory)))
+            self.assertNotIn("/capture/", state.render_berry().decode())
+            with self.assertRaisesRegex(ValueError, "unavailable"):
+                send_chunks(state, "esphome", self.IMAGE)
+
+    def test_a_write_reported_one_byte_off_is_refused(self):
+        import hashlib
         with tempfile.TemporaryDirectory() as directory:
             state = self.state(MigrationFixture(Path(directory)))
             wrong = bytearray(self.IMAGE)
             wrong[5000] ^= 1
-            send_chunks(state, "esphome", bytes(wrong))
-            with self.assertRaisesRegex(ValueError, "byte-for-byte"):
-                state.receive_report("plan", self.report(state))
+            with self.assertRaises(ValueError):
+                state.receive_report("plan", self.report(state, step0=hashlib.sha256(wrong).hexdigest()))
             self.assertFalse(state.complete)
 
     def test_a_report_that_differs_from_the_plan_is_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             state = self.state(MigrationFixture(Path(directory)))
-            send_chunks(state, "esphome", self.IMAGE)
             with self.assertRaises(ValueError):
                 state.receive_report("plan", self.report(state, step1="kept"))
             with self.assertRaises(ValueError):

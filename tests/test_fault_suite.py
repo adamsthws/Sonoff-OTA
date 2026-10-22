@@ -132,8 +132,11 @@ class ScenarioTests(unittest.TestCase):
         for route, step in fs.BLIP_STEPS:
             self.assertIn(f"{route}:{step}@10:blips-3", ids)
             self.assertIn(f"{route}:{step}@10:lossy-phase", ids)
-            # Two blips 80% of the step apart: more than the phase's 20 s.
-            self.assertGreater(0.8 * fs.ROUTES[route][2][step], 20, step)
+        # Two blips 80% of the step apart: more than a phase's 20 s of retrying
+        # in the longer ones, which PR #5's window, counted from the first
+        # failure, ran out of; E2, G1 and L1 are shorter than that from 2.0.2.
+        apart = {step: 0.8 * fs.ROUTES[route][2][step] for route, step in fs.BLIP_STEPS}
+        self.assertGreaterEqual(sum(gap > 20 for gap in apart.values()), 2, apart)
 
     def test_how_busy_each_phase_kept_the_plug(self):
         import json, os, time

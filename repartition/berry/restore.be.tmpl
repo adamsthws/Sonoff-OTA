@@ -54,6 +54,13 @@ def report_failure(exception, message)
   end
 end
 
+# The SHA-256 of some bytes.
+def digest(data)
+  var hash = crypto.SHA256()
+  hash.update(data)
+  return hash.out()
+end
+
 def sha_region(address, length)
   var hash = crypto.SHA256()
   var offset = 0
@@ -150,16 +157,41 @@ def get_body(path)
   return [-1, nil]
 end
 
+# The chunk as hex, then its SHA-256 (this computer's): checked here before
+# it is written, so a chunk damaged on its way is asked for again, alone, and
+# nothing is sent back - the phase's report hashes the whole region at the end.
+def chunk_data(encoded, expected_length)
+  if size(encoded) != expected_length * 2 + 64 return nil end
+  var data
+  var sent
+  try
+    data = bytes(encoded[0 .. expected_length * 2 - 1])
+    sent = bytes(encoded[expected_length * 2 ..])
+  except ..
+    return nil
+  end
+  if size(data) != expected_length || digest(data) != sent return nil end
+  return data
+end
+
 def fetch_chunk(index, expected_length)
   var path = format("/chunk/safeboot/%i", index)
   var reply = [-1, nil]
+  var data = nil
   var attempt = 0
+  var damaged = 0
   var window = retry_window()
   while true
     if tasmota.wifi("up")  # no request with the Wi-Fi down: it can crash Tasmota (#18831)
       reply = get_body(path)
       attempt += 1
-      if reply[0] >= 0 break end
+      if reply[0] == 200
+        data = chunk_data(reply[1], expected_length)
+        if data != nil break end
+        damaged += 1
+      elif reply[0] >= 0
+        break  # an answer, not a dropped request: said below
+      end
     end
     if window.over() break end
     pause(1000)
@@ -169,10 +201,7 @@ def fetch_chunk(index, expected_length)
   guard(attempt > 0 && (reply[0] >= 0 || tasmota.wifi("up")),
         "the plug's Wi-Fi went down and was not back within 20 seconds")
   guard(reply[0] == 200, format("GET %s returned HTTP %i after %i attempts", path, reply[0], attempt))
-  var encoded = reply[1]
-  guard(size(encoded) == expected_length * 2, "official Safeboot chunk body length differs")
-  var data = bytes(encoded)
-  guard(size(data) == expected_length, "official Safeboot chunk hex is invalid")
+  guard(data != nil, format("official Safeboot chunk %i came damaged %i times in %i attempts", index, damaged, attempt))
   return data
 end
 
@@ -285,17 +314,14 @@ def run_restore(provided_token)
     while offset < official_length
       var count = official_length - offset
       if count > 4096 count = 4096 end
-      var readback
-      if index < start
-        readback = flash.read(0x10000 + offset, count)  # official already; the computer checks it
-      else
+      # Before `start`, official already: the whole region's hash below checks it.
+      if index >= start
         var data = fetch_chunk(index, count)
         if count < 4096 flash.erase(0x10000 + offset, 0x1000) end
         flash.write(0x10000 + offset, data)
-        readback = flash.read(0x10000 + offset, count)
+        var readback = flash.read(0x10000 + offset, count)
         guard(readback == data, format("official Safeboot read-back differs at 0x%X", 0x10000 + offset))
       end
-      post_text(format("/capture/restored/%i", index), readback.tohex())
       offset += count
       index += 1
       if index % 16 == 0 print(format("AUTOFLASH RESTORE: %i/%i bytes", offset, official_length)) end

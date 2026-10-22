@@ -460,16 +460,12 @@ class MigrationState:
         return data[index * SECTOR_SIZE : (index + 1) * SECTOR_SIZE]
 
     def receive_capture(self, kind: str, index: int, body: bytes) -> None:
-        if self.phase == "plan":
-            allowed = {name: len(data) for name, data in self.plan.blobs.items()}
-        else:
-            allowed = {
-                "preflight": {"table": TABLE_SIZE, "nvs": CANONICAL_NVS_SIZE, "otadata": OTADATA_SIZE},
-                "stage": {"staged": len(self.safeboot)},
-                "commit": {},
-                "restore": {"restored": len(self.official_safeboot),
-                            "factory-sha": FACTORY_SECTORS * 32},
-            }[self.phase]
+        # Only what this computer does not have: the plug's own regions, and
+        # where a restore cut off part way had got to.
+        allowed = {
+            "preflight": {"table": TABLE_SIZE, "nvs": CANONICAL_NVS_SIZE, "otadata": OTADATA_SIZE},
+            "restore": {"factory-sha": FACTORY_SECTORS * 32},
+        }.get(self.phase, {})
         if kind not in allowed:
             raise ValueError(f"capture {kind!r} is unavailable in {self.phase}")
         total = allowed[kind]
@@ -623,9 +619,6 @@ class MigrationState:
         self.result_status = "PASS"
 
     def _finish_stage(self, report: dict[str, str]) -> None:
-        staged = self.assembled_capture("staged", len(self.safeboot))
-        if staged != self.safeboot:
-            raise ValueError("host read-back differs byte-for-byte from pinned Safeboot")
         expected = {
             "status": "PASS",
             "current_ota": "1",
@@ -635,8 +628,6 @@ class MigrationState:
             "staged_size": str(len(self.safeboot)),
         }
         require_report_fields(report, expected)
-        if self.sensitive_captures:
-            atomic_write(self.evidence_dir / "staged-safeboot-readback.bin", staged)
         evidence = self._base_evidence("stage", "PASS")
         evidence.update(expected)
         atomic_json(self.evidence_dir / "stage-report.json", evidence)
@@ -672,11 +663,6 @@ class MigrationState:
             "official_safeboot_size": str(len(self.official_safeboot)),
         }
         require_report_fields(report, expected)
-        if status == "PASS":
-            restored = self.assembled_capture("restored", len(self.official_safeboot))
-            if restored != self.official_safeboot:
-                raise ValueError("host read-back differs byte-for-byte from official Safeboot")
-            atomic_write(self.evidence_dir / "official-safeboot-readback.bin", restored)
         evidence = self._base_evidence("restore", status)
         evidence.update(expected)
         atomic_json(self.evidence_dir / "restore-report.json", evidence)
@@ -686,19 +672,7 @@ class MigrationState:
 
     def _finish_plan(self, report: dict[str, str]) -> None:
         plan = self.plan
-        for step in plan.steps:
-            if not hasattr(step, "blob"):
-                continue
-            start, length = plan.span(step)
-            data = plan.blobs[step.blob][start:start + length]
-            first = start // SECTOR_SIZE
-            chunks = self.captures.get(step.blob, {})
-            count = (length + SECTOR_SIZE - 1) // SECTOR_SIZE
-            missing = [first + n for n in range(count) if first + n not in chunks]
-            if missing:
-                raise ValueError(f"capture {step.blob} is incomplete; missing chunks {missing[:8]}")
-            if b"".join(chunks[first + n] for n in range(count))[:length] != data:
-                raise ValueError(f"host read-back differs byte-for-byte from {step.blob}")
+        # Each write's hash, as the plug read it back, is in the report.
         expected = {"status": "PASS", "plan": plan.name, **plan.expected()}
         # Berry writes its hashes in capitals.
         report = {key: value.lower() if key.startswith("step") else value
@@ -713,6 +687,14 @@ class MigrationState:
         atomic_json(self.evidence_dir / self.report_name, evidence)
         self.complete = True
         self.result_status = "PASS"
+
+
+def chunk_body(chunk: bytes) -> bytes:
+    """A chunk as the plug takes it: its hex, then its SHA-256's. The plug
+    checks the one against the other before writing, and asks again for a
+    chunk damaged on its way; nothing it wrote is sent back, as each phase's
+    report hashes the whole region it wrote."""
+    return (chunk.hex() + hashlib.sha256(chunk).hexdigest()).encode("ascii")
 
 
 class MigrationHandler(http.server.BaseHTTPRequestHandler):
@@ -759,11 +741,10 @@ class MigrationHandler(http.server.BaseHTTPRequestHandler):
                 return 200, state.render_berry(), "text/plain; charset=utf-8"
             match = re.fullmatch(r"/chunk/safeboot/([0-9]+)", path)
             if match:
-                return 200, state.safeboot_chunk(int(match.group(1))).hex().encode("ascii"), "text/plain"
+                return 200, chunk_body(state.safeboot_chunk(int(match.group(1)))), "text/plain"
             match = re.fullmatch(r"/chunk/([a-z_]+)/([0-9]+)", path)
             if match and state.phase == "plan":
-                chunk = state.plan_chunk(match.group(1), int(match.group(2)))
-                return 200, chunk.hex().encode("ascii"), "text/plain"
+                return 200, chunk_body(state.plan_chunk(match.group(1), int(match.group(2)))), "text/plain"
             if path == "/restore-from" and state.phase == "restore":
                 return 200, str(state.restore_from()).encode("ascii"), "text/plain"
             if path == "/target-table" and state.phase == "commit":
@@ -905,8 +886,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--no-sensitive-captures", action="store_true",
-        help="keep only hashes of the plug's NVS and of the staged recovery image, "
-        "not the bytes - they can hold credentials",
+        help="keep only a hash of the plug's NVS, not its bytes - they can hold credentials",
     )
     parser.add_argument(
         RECOVERY_UNPROVEN_FLAG, action="store_true",

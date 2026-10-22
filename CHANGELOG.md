@@ -11,6 +11,13 @@ the section below before changing the number.
 
 ## 2.0.2
 
+- The steps that write firmware keep the plug busy for about 40% less time:
+  18 seconds where they took 30, on the emulator. Every block written was
+  read back and sent to this computer to compare, doubling what crossed the
+  network while the plug could answer nothing else. Each block now comes
+  with its hash, checked on the plug before it is written - a block damaged
+  on its way is asked for again, alone - and each step's report still
+  hashes everything it wrote, which this computer checks.
 - A step's 20 seconds of retries on the plug were counted from its first
   failure and never begun again, so after one short Wi-Fi drop a later one
   found them spent, and the step stopped ("returned HTTP -1 after 1
