@@ -9,6 +9,14 @@ The version is set in one place, `tools/autoflash/__init__.py`. Merging a new
 one to `main` tags it and publishes a release with its notes from here, so add
 the section below before changing the number.
 
+## 2.0.1
+
+- A plug brought back from Tasmota's own safeboot finished its conversion,
+  then the run stopped with "something unexpected went wrong" instead of its
+  report, which could not name where the plug started. A Tasmota there with
+  a web password is now asked for it, where the run stopped, and the rest of
+  the run treats the plug as the Tasmota it was.
+
 ## 2.0.0
 
 ESPHome, as well as Tasmota: the run asks at the start which the plug should

@@ -3294,6 +3294,8 @@ def step_tasmota_back(ctx: Context) -> dict[str, Any]:
         if ctx.dry_run:
             say("[dry-run] would start Tasmota again, or upload official Tasmota")
             return {}
+        if ctx.device.wants_password() is True:  # it keeps Tasmota's settings, and so its password
+            ask_web_password(ctx, ctx.device.host)
         if tasmota_started_again(ctx):
             how, outcome = "started again", "rejoined the network"
         else:
@@ -3302,14 +3304,14 @@ def step_tasmota_back(ctx: Context) -> dict[str, Any]:
             raise Abort(f"official Tasmota is back on the plug, but {outcome}: it lost its settings. "
                         "Set it up there - its Wi-Fi, and the plug's template - then run this again")
     found = None
-    for _ in range(3):
+    for _ in range(4):
         try:
             found = detect.tasmota(ctx.device.host, timeout=10, password=ctx.web_password)
             break
         except detect.Unreadable:  # just started, too busy to say its template
             time.sleep(5)
         except detect.Locked:
-            raise Abort(str(NeedsPassword(ctx.device.host, bool(ctx.web_password)))) from None
+            ask_web_password(ctx, ctx.device.host)
     if not found or found[0] != "tasmota":
         raise Abort("official Tasmota is back on the plug, with its settings, but it is not set up as "
                     "a plug this tool converts (no template for one). It runs as it did before")
@@ -3822,6 +3824,11 @@ def plug_runs_tasmota(state: RunState) -> bool:
     """Whether the plug runs a Tasmota at this point of its run: everywhere but
     on a route from ESPHome before X2, and after the plug has left Tasmota."""
     source = run_source(state)
+    if source == "safeboot":
+        # Its safeboot says nothing of the Wi-Fi; from T1 it is a Tasmota's run.
+        if not state.is_done("T1"):
+            return False
+        source = "tasmota"
     if source not in ("tasmota", "esphome"):
         return True
     if source == "tasmota" and not state.is_done("L1"):
@@ -4235,7 +4242,7 @@ def step_esphome_check(ctx: Context, wait: float = 180.0) -> dict[str, Any]:
     if ctx.dry_run:
         say("[dry-run] would wait for ESPHome to answer")
         return {"dry_run": True}
-    as_update = run_source(ctx.state) == "tasmota"
+    as_update = run_source(ctx.state) in ("tasmota", "safeboot")  # through the mover (M1)
     say("Waiting for the plug to start ESPHome and join your Wi-Fi...")
     started = time.monotonic()
     first_seen = None
@@ -4899,8 +4906,11 @@ def unlock_tasmota(ctx: Context) -> None:
     step asks the plug for anything: on a run from Tasmota, until the plug
     leaves it (L1) - every firmware after that is one this tool put on.  A
     run carried on was not asked yet, nor one given the wrong password."""
-    if run_source(ctx.state) != "tasmota" or ctx.state.is_done("L1"):
+    source = run_source(ctx.state)
+    if source not in ("tasmota", "safeboot") or ctx.state.is_done("L1"):
         return
+    if source == "safeboot" and not ctx.state.is_done("T1"):
+        return  # its safeboot first: T1 asks for it there
     host = ctx.state.input("plug_ip")
     if host and ctx.device.wants_password() is True:
         ask_web_password(ctx, host)
@@ -5812,6 +5822,12 @@ def stage_timings(ctx: Context, key: str) -> str:
     return ", ".join(timings) or "not recorded"  # a run from before they were
 
 
+# What a run's starting point is called in its report: one for each of SOURCES.
+CONVERTED_FROM = {"sonoff": "Sonoff", "tasmota": "Tasmota", "esphome": "ESPHome",
+                  "midway": "unfinished conversion", "committed": "unfinished conversion",
+                  "installer": "unfinished conversion", "safeboot": "Tasmota's safeboot"}
+
+
 def report_fields(ctx: Context, seconds: float, resumed: bool,
                   hardware: dict[str, str] | None = None,
                   result: str = "converted") -> list[tuple[str, str]]:
@@ -5843,10 +5859,7 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     fields = [
         ("Result", result),
         ("Firmware", FIRMWARES[run_firmware(ctx.state)]),
-        ("Converted from", {"sonoff": "Sonoff", "tasmota": "Tasmota", "esphome": "ESPHome",
-                            "midway": "unfinished conversion",
-                            "committed": "unfinished conversion",
-                            "installer": "unfinished conversion"}[run_source(ctx.state)]),
+        ("Converted from", CONVERTED_FROM[run_source(ctx.state)]),
         ("Tool version", __version__),
         ("Plug model", model or "__"),
         ("Plug type / region", kind.region(model) or "__"),

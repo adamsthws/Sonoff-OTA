@@ -2020,6 +2020,30 @@ class BackOnSonoffTests(unittest.TestCase):
         self.assertEqual((sent, waited), (0, 1))
 
 
+class FromTasmotasSafebootTests(unittest.TestCase):
+    """A run from Tasmota's safeboot is a run from Tasmota once T1 has put it
+    back (seen on the emulator: its report stopped at KeyError: 'safeboot')."""
+
+    def state(self, done=()):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        state.set_input("source", "safeboot")
+        for step in done:
+            state.mark(step, "done")
+        return state
+
+    def test_every_starting_point_is_named_in_the_report(self):
+        import tools.autoflash_cli as autoflash
+        self.assertEqual(set(autoflash.CONVERTED_FROM), set(autoflash.SOURCES))
+
+    def test_tasmota_runs_from_t1_until_it_is_left(self):
+        import tools.autoflash_cli as autoflash
+        self.assertFalse(autoflash.plug_runs_tasmota(self.state()))           # its safeboot
+        self.assertTrue(autoflash.plug_runs_tasmota(self.state(["T1"])))      # Tasmota back
+        self.assertFalse(autoflash.plug_runs_tasmota(self.state(["T1", "L1"])))  # on the mover
+
+
 class TasmotaBackTests(unittest.TestCase):
     """T1: a plug on Tasmota's own safeboot, its Tasmota missing, given
     official Tasmota back - its settings kept - before going on."""
