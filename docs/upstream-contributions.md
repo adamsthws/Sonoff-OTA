@@ -28,7 +28,7 @@ several other HTTP clients, and following it led to a few more bugs nearby.
 - [HTTP clients that waited for ever](#http-clients-that-waited-for-ever) -
   Tasmota, arduino-esp32, ESPEasy, LibreTiny
 - [Firmware updates that never gave up](#firmware-updates-that-never-gave-up) -
-  arduino-esp32, ESP-IDF
+  arduino-esp32, ESP-IDF, Tasmota
 - [A build failure, followed to its root](#a-build-failure-followed-to-its-root) -
   LibreTiny, SCons
 - [The emulator's Wi-Fi](#the-emulators-wi-fi) - QEMU (lcgamboa's fork)
@@ -70,7 +70,7 @@ maintainer exposed it in [#25145](https://github.com/arendst/Tasmota/pull/25145)
 
 ## Firmware updates that never gave up
 
-With the HTTP clients done, we checked the two other ways ESP32 firmware
+With the HTTP clients done, we checked the other ways ESP32 firmware
 commonly downloads an update:
 
 - **arduino-esp32's `HTTPUpdate`** did give up, but only after 300 empty reads,
@@ -81,6 +81,10 @@ commonly downloads an update:
   retrying after 35 minutes. ESP-IDF retries timeouts on purpose, so the fix
   changes only the one-call wrapper, leaving step-by-step callers free to
   retry.
+- **Tasmota's own OTA** (`Upgrade`) uses its copy of arduino-esp32's updater,
+  with the same miscount: a stalled attempt blocked for 40 min 31 s on the
+  emulator, and Tasmota tries 4 times, so about 2 h 40 min in safeboot. With
+  the fix, each attempt gives up after about 33 s.
 
 Testing that led to one more ESP-IDF bug: telling `esp_https_ota()` to write
 into the same partition it downloads to crashed it on a NULL pointer.
@@ -88,6 +92,7 @@ into the same partition it downloads to crashed it on a NULL pointer.
 | Project | Pull request | What it fixes |
 |---|---|---|
 | arduino-esp32 | [#12991](https://github.com/espressif/arduino-esp32/pull/12991) | A stalled `HTTPUpdate` blocked for about 40 minutes, not the 30 s its code intended |
+| Tasmota | [#25177](https://github.com/arendst/Tasmota/pull/25177) | The same in Tasmota's own OTA, attempted 4 times: about 2 h 40 min |
 | ESP-IDF | [#19246](https://github.com/espressif/esp-idf/pull/19246) | `esp_https_ota()` retried a stalled download for ever |
 | ESP-IDF | [#19243](https://github.com/espressif/esp-idf/pull/19243) | `esp_https_ota()` crashed when the staging and final partitions were the same |
 
