@@ -1605,6 +1605,11 @@ def wifi_from_backup(ctx: "Context") -> tuple[str, str] | None:
     return None
 
 
+# How many times the Wi-Fi details are asked of a plug the network keeps from
+# answering, before the person is asked for them.
+WIFI_READ_TRIES = 3
+
+
 def read_wifi_from_plug(ctx: "Context") -> tuple[str, str] | None:
     """The Wi-Fi details the plug is connected with, or None if they cannot be read.
 
@@ -1616,23 +1621,35 @@ def read_wifi_from_plug(ctx: "Context") -> tuple[str, str] | None:
     def unreadable(reason: str) -> None:
         tell(f"    The Wi-Fi details could not be read off the plug: {reason}.")
 
-    try:
-        device = ctx.device
-        status = device.command("Status 11")
-        wifi = status.get("StatusSTS", {}).get("Wifi", {}) if isinstance(status, dict) else {}
-        connected = wifi.get("SSId")
-        if not connected:
-            return unreadable("it did not say which network it is on")
-        record = tasmota_settings.decode_backup(device.download_settings())
-        if tasmota_settings.problems(record):
-            return unreadable("its settings backup is not in the expected format")
-        ssid = tasmota_settings.text(record, tasmota_settings.SET_STASSID1)
-        password = tasmota_settings.text(record, tasmota_settings.SET_STAPWD1)
-        output.private(connected, "wifi-name")
-        output.private(ssid, "wifi-name")
-        output.private(password, "wifi-password")
-    except (Abort, DeviceError, ValueError, OSError) as exc:
-        return unreadable(f"it did not answer as Tasmota ({exc})")
+    for attempt in range(1, WIFI_READ_TRIES + 1):
+        try:
+            device = ctx.device
+            status = device.command("Status 11")
+            wifi = status.get("StatusSTS", {}).get("Wifi", {}) if isinstance(status, dict) else {}
+            connected = wifi.get("SSId")
+            if not connected:
+                return unreadable("it did not say which network it is on")
+            record = tasmota_settings.decode_backup(device.download_settings())
+            if tasmota_settings.problems(record):
+                return unreadable("its settings backup is not in the expected format")
+            ssid = tasmota_settings.text(record, tasmota_settings.SET_STASSID1)
+            password = tasmota_settings.text(record, tasmota_settings.SET_STAPWD1)
+            output.private(connected, "wifi-name")
+            output.private(ssid, "wifi-name")
+            output.private(password, "wifi-password")
+            break
+        except NETWORK_ERRORS as exc:
+            # Seen in the fault suite: a plug not answering for a moment, a
+            # Wi-Fi blip, and the person was asked to type what the plug
+            # holds. Asked again once it answers, before they are.
+            if attempt == WIFI_READ_TRIES:
+                return unreadable(f"it did not answer as Tasmota ({exc})")
+            try:
+                ctx.device.wait_reachable(timeout=60.0)
+            except DeviceError:
+                pass
+        except (Abort, DeviceError, ValueError, OSError) as exc:
+            return unreadable(f"it did not answer as Tasmota ({exc})")
     if ssid != connected:
         return unreadable(f"it is on '{connected}', not the network in its first slot")
     if not password:

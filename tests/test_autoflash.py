@@ -3159,6 +3159,29 @@ class WifiFromPlugTests(unittest.TestCase):
                 pass  # it goes on to the asking path, which needs a real bundle
         read.assert_not_called()
 
+    def test_a_plug_the_network_keeps_from_answering_is_asked_again(self):
+        # Seen in the fault suite: a Wi-Fi blip as G1 began, and the run
+        # asked the person to type the Wi-Fi details the plug holds.
+        import urllib.error
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        for drops, expected in ((1, ("Home-2G", "a good password")), (5, None)):
+            ctx = self.ctx()
+            answers = ctx.device.command
+            left = [drops]
+
+            def command(name, **kwargs):
+                if left[0]:
+                    left[0] -= 1
+                    raise urllib.error.URLError("timed out")
+                return answers(name, **kwargs)
+
+            ctx.device.command = command
+            ctx.device.wait_reachable = mock.Mock()
+            with mock.patch.object(autoflash, "say"):
+                self.assertEqual(autoflash.read_wifi_from_plug(ctx), expected, drops)
+            self.assertEqual(ctx.device.wait_reachable.call_count, min(drops, autoflash.WIFI_READ_TRIES - 1))
+
     def test_each_reason_for_not_reading_them_is_said(self):
         from unittest import mock
         import tools.autoflash_cli as autoflash

@@ -30,6 +30,9 @@ the section below before changing the number.
   checks the plug runs official Tasmota; a Wi-Fi blip as it asked stopped the
   step, as if the check had failed. The plug is now asked again once it
   answers.
+- A Tasmota plug that did not answer for a moment when the run read its
+  Wi-Fi details - a Wi-Fi blip, say - had you asked to type them. It is now
+  asked again once it answers, before you are.
 
 ## 2.0.1
 
