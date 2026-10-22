@@ -26,6 +26,10 @@ the section below before changing the number.
   this computer's firewall keeping the plug out. It now says the connection to
   eWeLink failed and nothing was sent, or, for a send refused, only that
   nothing was sent.
+- Swapping the temporary startup firmware for the official one (G1) first
+  checks the plug runs official Tasmota; a Wi-Fi blip as it asked stopped the
+  step, as if the check had failed. The plug is now asked again once it
+  answers.
 
 ## 2.0.1
 

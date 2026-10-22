@@ -2270,6 +2270,34 @@ class BegunByAnEarlierVersionTests(unittest.TestCase):
         self.assertEqual(self.restored(unproven=True),
                          (False, False, ["--i-confirm-normal-app-is-stable", "--recovery-unproven"]))
 
+    def gate(self, checks):
+        """G1's check that the plug runs official Tasmota, given what each ask of
+        the plug gives: (whether it passed, and how many times it was asked)."""
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        ctx = self.ctx()
+        ctx.device = mock.Mock()
+        runner = mock.Mock(run=mock.Mock(return_value=(0, "")))
+        ctx.phase_runner = lambda with_recovery=True: runner
+        with mock.patch.object(autoflash, "conversion_wifi"), mock.patch.object(autoflash, "say"):
+            autoflash.step_restore(ctx)
+        gate = runner.run.call_args.kwargs["confirm"]
+        with mock.patch.object(autoflash, "verify_app", side_effect=checks) as asked, \
+             mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"):
+            return gate("restore"), asked.call_count
+
+    def test_g1s_check_dropped_by_the_network_is_asked_again(self):
+        # Seen in the fault suite: a blip as G1 asked stopped the step, saying
+        # swapping the startup firmware was only safe under official Tasmota.
+        reset = ConnectionResetError(104, "Connection reset by peer")
+        self.assertEqual(self.gate([reset, (True, "")]), (True, 2))
+        self.assertEqual(self.gate([reset] * 5), (False, 3))
+
+    def test_g1s_check_refused_stops_at_once(self):
+        import tools.autoflash_cli as autoflash
+        self.assertEqual(self.gate([(False, "app0 on the plug no longer matches the pinned image")]), (False, 1))
+        self.assertEqual(self.gate([autoflash.DeviceError("no Berry console")]), (False, 1))
+
     def verified(self, kept):
         from unittest import mock
         import tools.autoflash_cli as autoflash

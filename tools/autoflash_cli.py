@@ -3662,6 +3662,11 @@ def conversion_wifi(ctx: Context) -> None:
     ctx.remember_wifi(ssid, password, image)
 
 
+# How many times G1 asks the plug whether it runs official Tasmota, when the
+# network drops the asking.
+RESTORE_CHECK_TRIES = 3
+
+
 def step_restore(ctx: Context) -> dict[str, Any]:
     """G - replace the private recovery Safeboot with official bytes.
 
@@ -3683,10 +3688,23 @@ def step_restore(ctx: Context) -> dict[str, Any]:
     def gate(_: str) -> bool:
         say("Swapping the temporary startup firmware - the one with your Wi-Fi")
         say("details in it - for the official one. The plug keeps running throughout.")
-        try:
-            matches, problem = verify_app(ctx)
-        except (DeviceError, OSError, ValueError) as exc:
-            matches, problem = False, f"the check could not run: {exc}"
+        for attempt in range(1, RESTORE_CHECK_TRIES + 1):
+            try:
+                matches, problem = verify_app(ctx)
+                break
+            except NETWORK_ERRORS as exc:
+                # Seen in the fault suite: a Wi-Fi blip as it asked stopped the
+                # step, as if the plug had failed the check. Asked again once
+                # the plug answers.
+                matches, problem = False, f"the check could not run: {exc}"
+                if attempt < RESTORE_CHECK_TRIES:
+                    try:
+                        ctx.device.wait_reachable(timeout=30.0)
+                    except DeviceError:
+                        pass
+            except (DeviceError, OSError, ValueError) as exc:
+                matches, problem = False, f"the check could not run: {exc}"
+                break
         if matches:
             say("  Checked first: the plug is running the official Tasmota, unmodified.")
             return True
