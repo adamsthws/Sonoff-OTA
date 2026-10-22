@@ -15,6 +15,12 @@ the section below before changing the number.
   connection reset in a Wi-Fi outage, say - was put as "something unexpected
   went wrong", though the step was tried again as for any other network
   trouble. It now says the connection to the plug was lost.
+- A plug the run had just restarted onto your Wi-Fi could be taken, as it
+  started up, for one that had lost its settings, and the run asked you to
+  join a network of the plug's that had gone a moment later - then, after 15
+  minutes, stopped with "something unexpected went wrong". The plug is now
+  given a minute to come back first, and a run that gives up on its network
+  stops at that step, as any other.
 
 ## 2.0.1
 

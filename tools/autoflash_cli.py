@@ -5076,10 +5076,12 @@ def _execute(ctx: Context, step: str) -> int:
     title, handler = STEP_INDEX[step]
     begin_stage(step)
     say(f"{step}  {title}")
-    set_up_if_erased(ctx, step)
-    if step in DESTRUCTIVE_STEPS:
-        ctx.state.mark(step, ATTEMPTED)
     try:
+        # Its errors are the step's: seen in the fault suite, an Abort from
+        # it crashed the run.
+        set_up_if_erased(ctx, step)
+        if step in DESTRUCTIVE_STEPS:
+            ctx.state.mark(step, ATTEMPTED)
         captured = handler(ctx)
     except QuitRun:
         output.stage_end("stopped")
@@ -5221,6 +5223,21 @@ PLUG_BACK_HINT_AFTER = 45.0
 # startup firmware).
 ERASED_CHECK_STEPS = {"D4", "D5", "E1", "E2", "E3", "I1", "G1", "H1"}
 ERASED_LOOK_EVERY = 30.0
+# Well over the time a Tasmota restarting onto the Wi-Fi takes to answer there.
+ERASED_SETTLE = 60.0
+
+
+def answers_within(device: Device, seconds: float) -> bool:
+    """Whether the plug answers within `seconds`, asked every few."""
+    started = time.monotonic()
+    while (elapsed := time.monotonic() - started) < seconds:
+        output.progress(f"waiting for the plug, in case it is starting up... {elapsed:.0f}s")
+        if device.answers(timeout=3.0):
+            output.progress_clear()
+            return True
+        time.sleep(2.0)
+    output.progress_clear()
+    return False
 
 
 def set_up_if_erased(ctx: Context, step: str) -> bool:
@@ -5235,6 +5252,17 @@ def set_up_if_erased(ctx: Context, step: str) -> bool:
     if step not in ERASED_CHECK_STEPS or not ctx.state.input("plug_mac"):
         return False
     if ctx.state.input("plug_ip") and ctx.device.answers(timeout=3.0):
+        return False
+    network = find_ssid(setup_networks(ctx), timeout=10)
+    if not network:
+        return False
+    # A Tasmota starting up shows a network for a moment - ESP_ and its
+    # access-point MAC - before it is on the Wi-Fi.  Seen in the fault suite:
+    # one D1 had just restarted onto the Wi-Fi was taken for one that lost its
+    # settings, and the run waited 15 minutes for a network gone at once.  So
+    # it is given the time to start; not answering then, with its network
+    # still there, it has lost them.
+    if ctx.state.input("plug_ip") and answers_within(ctx.device, ERASED_SETTLE):
         return False
     network = find_ssid(setup_networks(ctx), timeout=10)
     if not network:

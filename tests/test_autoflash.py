@@ -1104,6 +1104,18 @@ class UnexpectedErrorTests(unittest.TestCase):
         self.assertIn("Traceback", logged.call_args.args[0])
         self.assertIn("something unexpected went wrong: KeyError", told.call_args.args[0])
 
+    def test_the_look_for_a_plug_that_lost_its_settings_stops_the_step_not_the_run(self):
+        # Seen in the fault suite: not joined to the plug's network in time,
+        # its Abort crashed the run, put as "something unexpected went wrong".
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        gave_up = autoflash.Abort("this computer did not join tasmota-ABCDEF-1234 within 15 minutes")
+        with mock.patch.object(autoflash, "set_up_if_erased", side_effect=gave_up):
+            code, state, ended, _, told = self.run_step("D4", gave_up)
+        self.assertEqual(code, 1)
+        ended.assert_called_once_with("stopped")
+        self.assertEqual(told.call_args.args[0], f"FAILED: {gave_up}")
+
     def test_a_request_the_network_dropped_is_no_surprise_and_is_tried_again(self):
         # Seen in the fault suite: an outage reset H1's read of a region part
         # way, and the run said "something unexpected went wrong" - then
@@ -3519,16 +3531,42 @@ class ErasedTasmotaTests(unittest.TestCase):
         import tools.autoflash_cli as autoflash
         done = {"D1", "F4"} if f4_done else {"D1"}
         inputs = {"plug_mac": "12:34:56:ab:cd:ef", "plug_ip": "192.168.1.51", "product_model": "S60TPG"}
-        device = SimpleNamespace(answers=lambda timeout=None: answers, wait_reachable=lambda timeout=None: None)
+        # Answers in turn, the last for every ask after; a network in turn likewise.
+        replies = list(answers) if isinstance(answers, list) else [answers]
+        device = SimpleNamespace(answers=lambda timeout=None: replies.pop(0) if len(replies) > 1 else replies[0],
+                                 wait_reachable=lambda timeout=None: None)
         ctx = SimpleNamespace(device=device, state=SimpleNamespace(
             input=inputs.get, is_done=lambda s: s in done, capture=lambda *a: None))
-        with mock.patch.object(autoflash, "find_ssid", return_value=network) as looked, \
+        clock = iter(range(0, 10_000, 5))
+        with mock.patch.object(autoflash, "find_ssid", side_effect=network if isinstance(network, list)
+                               else lambda *a, **k: network) as looked, \
              mock.patch.object(autoflash, "configure_plug_wifi") as by_hand, \
              mock.patch.object(autoflash, "template_in_place", return_value=in_place), \
              mock.patch.object(autoflash, "step_configure") as configured, \
-             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash.output, "progress_clear"):
+             mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(autoflash.time, "sleep"), \
+             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash.output, "progress"), \
+             mock.patch.object(autoflash.output, "progress_clear"):
             result = autoflash.set_up_if_erased(ctx, step)
         return result, looked, by_hand, configured
+
+    def test_one_just_starting_up_is_left_alone(self):
+        # Seen in the fault suite: D1 had just restarted the plug onto the
+        # Wi-Fi, and the network it showed for a moment as it started
+        # (ESP_ and its access-point MAC) was taken for its setup network.
+        result, looked, by_hand, _ = self.run_it(answers=[False, False, False, True], network="ESP_ABCDF0")
+        self.assertFalse(result)
+        by_hand.assert_not_called()
+
+    def test_one_whose_network_went_as_it_started_is_left_alone(self):
+        result, looked, by_hand, _ = self.run_it(network=["ESP_ABCDF0", None])
+        self.assertFalse(result)
+        self.assertEqual(looked.call_count, 2)
+        by_hand.assert_not_called()
+
+    def test_it_is_set_up_through_the_network_it_settled_on(self):
+        _, _, by_hand, _ = self.run_it(network=["ESP_ABCDF0", "tasmota-ABCDEF-1234"])
+        self.assertEqual(by_hand.call_args.args[1], "tasmota-ABCDEF-1234")
 
     def test_one_answering_is_left_alone(self):
         result, looked, by_hand, _ = self.run_it(answers=True)
@@ -3572,6 +3610,7 @@ class ErasedTasmotaTests(unittest.TestCase):
         with mock.patch.object(autoflash, "find_ssid", return_value="tasmota-ABCDEF-1234"), \
              mock.patch.object(autoflash, "configure_plug_wifi") as by_hand, \
              mock.patch.object(autoflash, "template_in_place", return_value=True), \
+             mock.patch.object(autoflash, "ERASED_SETTLE", 0.0), \
              mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash.output, "progress_clear"):
             self.assertTrue(autoflash.set_up_if_erased(ctx, "G1"))
         by_hand.assert_called_once()
