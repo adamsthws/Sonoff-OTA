@@ -218,7 +218,13 @@ def command_tasmota(args: argparse.Namespace) -> int:
     print(f"  CFG_HOLDER {holder}, as the recovery Safeboot's record has it")
 
     pins = load_pins()
-    previous = pins["tasmota"]["version"]
+    old = pins["tasmota"]
+    previous = old["version"]
+    # The release before is kept, by its files: a run that installed it, left
+    # part way, finishes on it (safeboot_migration.earlier_release).
+    earlier = [entry for entry in old.get("earlier", []) if entry["version"] != version]
+    if previous != version:
+        earlier.insert(0, {key: old[key] for key in ("version", "tag", "commit", "files")})
     pins["tasmota"] = {
         "version": version,
         "tag": tag,
@@ -226,6 +232,7 @@ def command_tasmota(args: argparse.Namespace) -> int:
         "cfg_holder": holder,
         "files": {key: {"name": TASMOTA_FILES[key], "size": len(data), "sha256": sha256_bytes(data)}
                   for key, data in files.items()},
+        "earlier": earlier,
     }
     if args.dry_run:
         print("\nChecked; firmware.json left as it was (--dry-run).")

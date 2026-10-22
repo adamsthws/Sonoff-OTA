@@ -26,6 +26,16 @@ class TasmotaPinTests(unittest.TestCase):
                              f"https://github.com/arendst/Tasmota/releases/download/{tasmota['tag']}/{name}")
             self.assertEqual(PINNED_ARTIFACTS[key]["sha256"], tasmota["files"][key]["sha256"])
 
+    def test_each_earlier_release_is_kept_by_its_files(self):
+        current = {(f["size"], f["sha256"]) for f in PINS["tasmota"]["files"].values()}
+        versions = [entry["version"] for entry in PINS["tasmota"].get("earlier", [])]
+        self.assertNotIn(PINS["tasmota"]["version"], versions)
+        self.assertEqual(len(versions), len(set(versions)))
+        for entry in PINS["tasmota"].get("earlier", []):
+            self.assertEqual(set(entry["files"]), set(uf.TASMOTA_FILES), entry["version"])
+            for file in entry["files"].values():
+                self.assertNotIn((file["size"], file["sha256"]), current, entry["version"])
+
     def test_the_release_takes_the_record_the_recovery_safeboot_saves(self):
         self.assertEqual(PINS["tasmota"]["cfg_holder"], tasmota_settings.CFG_HOLDER)
 

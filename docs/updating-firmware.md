@@ -178,4 +178,10 @@ to `main` publishes the release (`.github/workflows/release.yml`). Runs left
 part way by the release before carry on with the new firmware by themselves:
 the bundle is built again for the new pins - at A5, or as a run carried on
 past A5 starts - and a step whose checks were made with the old bundle does
-them again.
+them again. One that had installed the official app already (F2) finishes
+with its bundle - or, if this version must build that again (1.2.0's, from
+another startup firmware), one of the same release - on the release it
+began with, read back against that
+release's files as any other, and says so: `firmware.json` keeps each
+release pinned before (`earlier`) by its files, and `update_firmware.py
+tasmota` adds the one it replaces.

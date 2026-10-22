@@ -99,13 +99,15 @@ FIRMWARE = json.loads(
 OFFICIAL_TASMOTA_VERSION = FIRMWARE["tasmota"]["version"]
 OFFICIAL_TASMOTA_TAG = FIRMWARE["tasmota"]["tag"]
 OFFICIAL_TASMOTA_COMMIT = FIRMWARE["tasmota"]["commit"]
-OFFICIAL_RELEASE_BASE = (
-    f"https://github.com/arendst/Tasmota/releases/download/{OFFICIAL_TASMOTA_TAG}"
-)
-OFFICIAL_URLS = {
-    name: f"{OFFICIAL_RELEASE_BASE}/{file['name']}"
-    for name, file in FIRMWARE["tasmota"]["files"].items()
-}
+
+
+def release_urls(release: dict[str, Any]) -> dict[str, str]:
+    """Where each file of an official release (firmware.json's, now or before) is."""
+    base = f"https://github.com/arendst/Tasmota/releases/download/{release['tag']}"
+    return {name: f"{base}/{file['name']}" for name, file in release["files"].items()}
+
+
+OFFICIAL_URLS = release_urls(FIRMWARE["tasmota"])
 # The Tasmota the interim firmware is made from, which need not follow the
 # official release: the recovery Safeboot is built from this source with this
 # project's patches, and the settings template D1 gives the Berry build below
@@ -280,23 +282,46 @@ def interim_table(source: bytes | None = None) -> bytes:
     return bytes(table)
 
 
-def official_release() -> dict[str, str]:
-    """The official release a bundle is made for, as its manifest names it."""
-    return {"tag": OFFICIAL_TASMOTA_TAG, "tasmota_commit": OFFICIAL_TASMOTA_COMMIT}
+def official_release(release: dict[str, Any] | None = None) -> dict[str, str]:
+    """The official release a bundle is made for, as its manifest names it:
+    the one pinned now, or `release`, one pinned before."""
+    release = release or FIRMWARE["tasmota"]
+    return {"tag": release["tag"], "tasmota_commit": release["commit"]}
 
 
-def require_pinned_artifacts(manifest: dict[str, Any]) -> None:
-    """Refuse substitution of the frozen Bluetooth/official firmware set."""
+def earlier_release(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    """The official release the tool installed before this one whose files a
+    bundle holds (firmware.json keeps each, by its files' hashes): a run that
+    installed it finishes with that bundle, its app and Safeboot a pair."""
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return None
+    for earlier in FIRMWARE["tasmota"].get("earlier", []):
+        if all(isinstance(artifacts.get(name), dict)
+               and (artifacts[name].get("size"), artifacts[name].get("sha256")) == (file["size"], file["sha256"])
+               for name, file in earlier["files"].items()):
+            return earlier
+    return None
+
+
+def require_pinned_artifacts(manifest: dict[str, Any], current_only: bool = False) -> None:
+    """Refuse substitution of the frozen Bluetooth/official firmware set: the
+    official release pinned now, or (unless `current_only`) one pinned before."""
     release = manifest.get("official_release")
-    expected_release = official_release()
-    if release != expected_release:
-        raise ValueError(
-            "manifest official-release identity differs from the reviewed frozen set"
-        )
+    pinned = PINNED_ARTIFACTS
+    if release != official_release():
+        earlier = None if current_only else earlier_release(manifest)
+        if earlier is None:
+            raise ValueError(
+                "manifest official-release identity differs from the reviewed frozen set"
+            )
+        pinned = {"bluetooth": PINNED_ARTIFACTS["bluetooth"],
+                  **{name: {"size": file["size"], "sha256": file["sha256"]}
+                     for name, file in earlier["files"].items()}}
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, dict):
         raise ValueError("manifest has no artifact map")
-    for name, expected in PINNED_ARTIFACTS.items():
+    for name, expected in pinned.items():
         record = artifacts.get(name)
         if not isinstance(record, dict):
             raise ValueError(f"manifest has no pinned {name} artifact")

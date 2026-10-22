@@ -1898,10 +1898,56 @@ class StartChoiceTests(unittest.TestCase):
         ctx = self.ctx()
         ctx.state.mark("A5", autoflash.DONE, result={})
         stale = ValueError("manifest official-release identity differs from the reviewed frozen set")
-        with mock.patch.object(autoflash, "validate_bundle", side_effect=stale), \
+        with mock.patch.object(autoflash, "validate_bundle", side_effect=stale) as validate, \
              mock.patch.object(autoflash, "make_bundle") as rebuild:
             autoflash.bundle_of_this_version(ctx)
         rebuild.assert_called_once_with(ctx, problem=str(stale))
+        self.assertTrue(validate.call_args.kwargs["current_only"])
+
+    def test_a_run_carried_on_past_f2_keeps_a_bundle_of_a_release_pinned_before(self):
+        # The plug runs the app that bundle holds: G1's Safeboot and H1's
+        # check must be that release's too.
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        ctx = self.ctx()
+        for step in ("A5", "F2"):
+            ctx.state.mark(step, autoflash.DONE, result={})
+        with mock.patch.object(autoflash, "validate_bundle", return_value={}) as validate, \
+             mock.patch.object(autoflash, "make_bundle") as rebuild:
+            autoflash.bundle_of_this_version(ctx)
+        self.assertFalse(validate.call_args.kwargs["current_only"])
+        rebuild.assert_not_called()
+
+    def test_a_bundle_built_again_past_f2_is_of_the_release_on_the_plug(self):
+        # 1.2.0's bundle, of the release pinned before, was made from another
+        # startup firmware: built again of the release pinned now, H1 found
+        # the plug's Safeboot and app differing (the fault suite's
+        # legacy-v1.2.0 at H1).
+        import json
+        import tempfile
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        from tools.safeboot_migration import FIRMWARE
+        earlier = FIRMWARE["tasmota"]["earlier"][0]
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "manifest.json"
+            manifest.write_text(json.dumps({"schema": 1, "artifacts": {
+                name: {"size": file["size"], "sha256": file["sha256"]}
+                for name, file in earlier["files"].items()}}))
+            ctx = self.ctx()
+            ctx.manifest_path = manifest
+            ctx.state.mark("A5", autoflash.DONE, result={})
+            self.assertIsNone(autoflash.release_on_the_plug(ctx))
+            ctx.state.mark("F2", autoflash.DONE, result={})
+            self.assertEqual(autoflash.release_on_the_plug(ctx), earlier)
+            with mock.patch.object(autoflash, "build_bundle") as build, \
+                 mock.patch.object(autoflash, "validate_bundle"), mock.patch.object(autoflash, "say"):
+                autoflash.make_bundle(ctx, problem="built from a different startup firmware")
+            self.assertEqual(build.call_args.kwargs["release"], earlier)
+            manifest.write_text(json.dumps({"schema": 1, "artifacts": {
+                name: {"size": file["size"], "sha256": file["sha256"]}
+                for name, file in FIRMWARE["tasmota"]["files"].items()}}))
+            self.assertIsNone(autoflash.release_on_the_plug(ctx))
 
     def test_a_run_carried_on_keeps_a_bundle_this_version_can_use(self):
         from unittest import mock
@@ -3411,7 +3457,8 @@ class WifiFallbackTests(unittest.TestCase):
         from unittest import mock
         import tools.autoflash_cli as autoflash
         ctx = SimpleNamespace(args=SimpleNamespace(wifi=False), manifest_path=Path("unused"),
-                              state=SimpleNamespace(set_input=lambda *_: None, input=lambda *_: None),
+                              state=SimpleNamespace(set_input=lambda *_: None, input=lambda *_: None,
+                                                    is_done=lambda _: False),
                               _wifi=None, _recovery=None, esphome_api_locked=False)
         ctx.remember_wifi = lambda ssid, password, image: autoflash.Context.remember_wifi(
             ctx, ssid, password, image)

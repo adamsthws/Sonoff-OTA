@@ -80,11 +80,14 @@ from tools.prepare_imprinted_bundle import (  # noqa: E402
 from tools.query_ota import ota_endpoints  # noqa: E402
 from tools.safeboot_migration import (  # noqa: E402
     APP0_OFFSET,
+    OFFICIAL_TASMOTA_VERSION,
     PINNED_ARTIFACTS,
     SAFEBOOT_OFFSET,
     TABLE_OFFSET,
     TABLE_SIZE,
+    earlier_release,
     load_manifest,
+    official_release,
     sha256_bytes,
 )
 
@@ -692,7 +695,8 @@ class Context:
                 # A bundle this checkout can no longer use: build it again.
                 say(f"    {first}; preparing the firmware bundle again...")
                 try:
-                    _, image = build_bundle(ssid, password, self.manifest_path.parent)
+                    _, image = build_bundle(ssid, password, self.manifest_path.parent,
+                                            release=release_on_the_plug(self))
                 except BundleError as exc:
                     raise Abort(f"the bundle could not be prepared: {exc}") from exc
         self.remember_wifi(ssid, password, image)
@@ -1480,7 +1484,7 @@ def step_prerequisites(ctx: Context) -> dict[str, Any]:
 def step_check(ctx: Context) -> dict[str, Any]:
     """A5 - offline preconditions, building the bundle if there is none.  Touches no plug."""
     try:
-        manifest = validate_bundle(ctx.manifest_path)
+        manifest = validate_bundle(ctx.manifest_path, current_only=True)
     except ValueError as exc:
         if ctx.manifest_path != (ROOT / DEFAULT_MANIFEST).resolve():
             raise Abort(f"the bundle at {ctx.manifest_path} cannot be used: {exc}") from exc
@@ -1521,25 +1525,43 @@ def make_bundle(ctx: Context, problem: str | None) -> dict[str, Any]:
         "temporary firmware, which has to rejoin your Wi-Fi by itself.",
     ])
     try:
-        build_bundle(output=ctx.manifest_path.parent)
+        build_bundle(output=ctx.manifest_path.parent, release=release_on_the_plug(ctx))
     except BundleError as exc:
         raise Abort(f"the bundle could not be prepared: {exc}") from exc
     say("Bundle ready.")
     return validate_bundle(ctx.manifest_path)
 
 
+def release_on_the_plug(ctx: Context) -> dict[str, Any] | None:
+    """The official release pinned before whose app a run past F2 put on the
+    plug, as the bundle that installed it holds it; None for the one pinned
+    now, or before F2. A bundle built again must be of that release: its
+    Safeboot is G1's, its files are H1's check. One 1.2.0 made, from another
+    startup firmware, is built again (the fault suite's legacy-v1.2.0 at H1)."""
+    if not ctx.state.is_done("F2"):
+        return None
+    try:
+        return earlier_release(load_manifest(ctx.manifest_path))
+    except (ValueError, OSError):
+        return None
+
+
 def bundle_of_this_version(ctx: Context) -> None:
     """A run carried on past A5 has its bundle checked, as A5 checks it, and
     built again if this version cannot use it: one an earlier version made
     before the firmware the tool installs changed, which every phase server
-    refuses (docs/updating-firmware.md). Nothing on the plug depends on it -
-    the startup firmware it pins is the published one with the same Wi-Fi,
-    written in again when next needed (adopt_wifi), and a step whose checks
-    were made with the old one does them again (of_this_bundle)."""
+    refuses (docs/updating-firmware.md). Until F2, nothing on the plug depends
+    on it - the startup firmware it pins is the published one with the same
+    Wi-Fi, written in again when next needed (adopt_wifi), and a step whose
+    checks were made with the old one does them again (of_this_bundle). From
+    F2 the plug runs the official app the bundle holds, and the Safeboot G1
+    writes, and H1's check, must be that release's: a bundle of a release
+    pinned before is kept, or built again of it (release_on_the_plug), and
+    the plug ends on it."""
     if not ctx.state.is_done("A5") or ctx.manifest_path != (ROOT / DEFAULT_MANIFEST).resolve():
         return
     try:
-        validate_bundle(ctx.manifest_path)
+        validate_bundle(ctx.manifest_path, current_only=not ctx.state.is_done("F2"))
     except (ValueError, OSError) as exc:
         make_bundle(ctx, problem=str(exc))
 
@@ -3788,6 +3810,12 @@ def step_verify(ctx: Context) -> dict[str, Any]:
         raise Abort("device does not match the pinned artifacts")
     say("")
     say(f"All {'four' if len(expected) == 4 else 'three'} regions match the pinned artifacts.")
+    earlier = earlier_release(manifest) if manifest.get("official_release") != official_release() else None
+    if earlier is not None:
+        # Begun by an earlier version, which installed that release at F2.
+        tell(f"  The plug has Tasmota {earlier['version']}, the release this conversion began with.")
+        tell(f"  Its own page (Firmware Upgrade) takes it to {OFFICIAL_TASMOTA_VERSION}, the latest.")
+        results["release"] = earlier["version"]
     return results
 
 
