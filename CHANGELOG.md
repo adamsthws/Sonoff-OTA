@@ -33,6 +33,9 @@ the section below before changing the number.
 - A Tasmota plug that did not answer for a moment when the run read its
   Wi-Fi details - a Wi-Fi blip, say - had you asked to type them. It is now
   asked again once it answers, before you are.
+- The command that starts a step on the plug, lost to a Wi-Fi blip before it
+  reached the plug, left the step waiting for a plug that never began, then
+  failing. It is now sent again once the plug answers.
 
 ## 2.0.1
 

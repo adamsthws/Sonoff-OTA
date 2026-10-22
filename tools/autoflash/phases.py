@@ -9,11 +9,13 @@ renders, and the host server remains the sole judge of PASS.
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import subprocess
 import threading
 import time
+import urllib.error
 from pathlib import Path
 from typing import Callable
 
@@ -129,6 +131,9 @@ FETCH_RE = re.compile(r'"GET /berry/')
 # with nothing more to send.  Without that, only the server's own two-minute
 # silence limit ends the wait.
 SILENCE_CHECK = 20.0
+# How many times the command that starts a phase is sent, when it does not
+# reach the plug at all.
+START_TRIES = 3
 # A backstop only: a phase keeps the plug busy for about a minute at most,
 # retrying included; the server's silence limit is two minutes.
 EXEC_TIMEOUT = 300.0
@@ -150,6 +155,9 @@ def short_loader(url: str, assign_to: str | None = None) -> str:
 
 
 class PhaseRunner:
+    _started_at: float | None = None
+    _resending = False  # the start, not delivered, waiting to go again
+
     def _require_fetch(self, process, captured: list[str], reader, phase: str) -> None:
         """Stop within seconds, not half an hour, when the plug cannot reach us."""
         waited = 0.0
@@ -190,7 +198,6 @@ class PhaseRunner:
         # How long the last phase kept the plug busy: from telling it to start
         # to its last request.  Busy for 70-90s, a real S60TPG stops answering.
         self.busy_seconds: float | None = None
-        self._started_at: float | None = None
 
     def _blocks(self, phase: str, plan: "Plan | None" = None) -> int | None:
         """How many 4 KiB blocks of firmware a phase copies, for progress."""
@@ -384,11 +391,42 @@ class PhaseRunner:
         self._started_at = time.monotonic()
 
         def fire() -> None:
-            try:
-                self.device.berry_fire(code, timeout=60.0)
-            except Exception as exc:  # noqa: BLE001 - the server's evidence decides
-                self.log(f"    Starting it on the plug: {exc}")
+            for attempt in range(1, START_TRIES + 1):
+                try:
+                    self.device.berry(code, timeout=60.0)
+                    return
+                except urllib.error.HTTPError:
+                    return  # it answered: the server's evidence decides
+                except urllib.error.URLError as exc:
+                    # Not connected, or the request not sent (device._exchange):
+                    # it never reached the plug, so sending it again cannot
+                    # start the phase twice. Seen in the fault suite: a Wi-Fi
+                    # blip as it went, and the plug never started.
+                    if attempt == START_TRIES:
+                        self.log(f"    Starting it on the plug: {exc}")
+                        return
+                    self._resending = True
+                    try:
+                        if not self._plug_back(30.0):
+                            return
+                    finally:
+                        self._resending = False
+                    self._started_at = time.monotonic()
+                except (TimeoutError, ConnectionError, http.client.HTTPException):
+                    return  # sent, its reply lost or still to come: the server's evidence decides
+                except Exception as exc:  # noqa: BLE001 - the server's evidence decides
+                    self.log(f"    Starting it on the plug: {exc}")
+                    return
         threading.Thread(target=fire, daemon=True).start()
+
+    def _plug_back(self, seconds: float) -> bool:
+        """Whether the plug answers within `seconds`."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if self._plug_answers():
+                return True
+            time.sleep(1.0)
+        return False
 
     def _plug_answers(self) -> bool:
         try:
@@ -407,7 +445,14 @@ class PhaseRunner:
             now = time.monotonic()
             if now - started > exec_timeout:
                 raise PhaseError(f"{phase} did not complete within {exec_timeout / 60:.0f} minutes")
-            if now - get_heard() >= SILENCE_CHECK and now - checked >= SILENCE_CHECK:
+            # Quiet since the plug last reached this computer, or since the
+            # start last went - not while a start that never reached the plug
+            # waits to go again: seen in the fault suite, a blip took the
+            # plug off its Wi-Fi for 18 s, and this check failed the step
+            # just before the start went again.
+            quiet_since = max(get_heard(), self._started_at or 0.0)
+            if (not self._resending and now - quiet_since >= SILENCE_CHECK
+                    and now - checked >= SILENCE_CHECK):
                 checked = now
                 if self._plug_answers() and process.poll() is None:
                     raise PhaseError(

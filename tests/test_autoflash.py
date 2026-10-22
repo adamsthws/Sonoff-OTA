@@ -90,6 +90,33 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(found.group("name"), "autoflash_commit")
         self.assertEqual(found.group("token"), "d2_fjQTqh4KzfHDFSefx")
 
+    def started(self, *outcomes):
+        """How many times the start was sent, the plug answering each time."""
+        from unittest import mock
+        device = mock.Mock(berry=mock.Mock(side_effect=list(outcomes)), answers=mock.Mock(return_value=True))
+        runner = PhaseRunner(repo_root=Path("."), manifest=Path("m.json"), evidence_dir=Path("live"),
+                             listen_ip="192.168.1.141", device=device, log=lambda _: None)
+        run_now = lambda target, daemon: mock.Mock(start=target)
+        with mock.patch("tools.autoflash.phases.threading.Thread", side_effect=run_now):
+            runner._start('autoflash_restore("token")')
+        return device.berry.call_count
+
+    def test_a_start_that_never_reached_the_plug_is_sent_again(self):
+        # Seen in the fault suite: a Wi-Fi blip as G1's start went, and the
+        # plug never began - the step failed, to go through on the next try.
+        import urllib.error
+        dropped = urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+        self.assertEqual(self.started(dropped, None), 2)
+        self.assertEqual(self.started(dropped, dropped, dropped, None), 3)
+
+    def test_a_start_that_may_have_arrived_is_never_sent_twice(self):
+        import io
+        import socket
+        import urllib.error
+        for outcome in (socket.timeout("timed out"), ConnectionResetError(104, "reset"),
+                        urllib.error.HTTPError("u", 401, "no", {}, io.BytesIO())):
+            self.assertEqual(self.started(outcome, None), 1, outcome)
+
     def test_armed_phase_refuses_to_run_without_a_confirmation_callback(self):
         runner = PhaseRunner(
             repo_root=Path("."),
@@ -830,6 +857,30 @@ class PhaseWaitTests(unittest.TestCase):
         self.assertEqual(code, 0)
         runner._plug_answers.assert_not_called()
 
+    def test_no_verdict_while_a_start_that_never_arrived_waits_to_go_again(self):
+        # Seen in the fault suite: a blip took the plug off its Wi-Fi for 18 s
+        # as the start went; this check failed the step just before it went again.
+        from unittest import mock
+        from tools.autoflash import phases
+        runner = phases.PhaseRunner.__new__(phases.PhaseRunner)
+        runner._resending = True
+        runner._plug_answers = mock.Mock(return_value=True)
+        clock = iter(range(1000, 100_000, 2))
+        with mock.patch.object(phases.time, "monotonic", side_effect=lambda: next(clock)):
+            self.assertEqual(runner._wait("restore", self.Server(exits_after=30), 540.0, lambda: 0), 0)
+        runner._plug_answers.assert_not_called()
+
+    def test_quiet_is_counted_from_the_start_when_it_went_later(self):
+        from unittest import mock
+        from tools.autoflash import phases
+        runner = phases.PhaseRunner.__new__(phases.PhaseRunner)
+        runner._started_at = 1_000_000.0  # sent again just now: not quiet yet
+        runner._plug_answers = mock.Mock(return_value=True)
+        clock = iter(range(1000, 1060, 2))
+        with mock.patch.object(phases.time, "monotonic", side_effect=lambda: next(clock)):
+            self.assertEqual(runner._wait("restore", self.Server(exits_after=25), 540.0, lambda: 0), 0)
+        runner._plug_answers.assert_not_called()
+
     def test_the_backstop_still_ends_it(self):
         from tools.autoflash.phases import PhaseError
         with self.assertRaisesRegex(PhaseError, "did not complete within 1 minutes"):
@@ -843,11 +894,11 @@ class PhaseWaitTests(unittest.TestCase):
         from tools.autoflash.phases import PhaseRunner
         runner = PhaseRunner.__new__(PhaseRunner)
         release = threading.Event()
-        runner.device = mock.Mock(berry_fire=mock.Mock(side_effect=lambda *a, **k: release.wait(5)))
+        runner.device = mock.Mock(berry=mock.Mock(side_effect=lambda *a, **k: release.wait(5)))
         runner.log = mock.Mock()
         runner._start('autoflash_commit("x")')
         release.set()
-        runner.device.berry_fire.assert_called_once()
+        runner.device.berry.assert_called_once()
 
 
 class RetryTests(unittest.TestCase):
