@@ -61,6 +61,28 @@ class SavedPlugTests(unittest.TestCase):
         self.assertEqual(self.saved_as(None, MAC), "stub-suite-tasmota")
 
 
+class ScaledBatchTests(unittest.TestCase):
+    def allowed_with(self, text):
+        with tempfile.TemporaryDirectory() as out:
+            if text is not None:
+                (Path(out) / "workers").write_text(text)
+            with mock.patch.object(fs, "OUT", Path(out)):
+                return fs.allowed(4)
+
+    def test_the_number_in_the_file_while_it_is_there(self):
+        self.assertEqual(self.allowed_with("6\n"), 6)
+        self.assertEqual(self.allowed_with("0"), 0)
+
+    def test_how_many_it_began_with_otherwise(self):
+        self.assertEqual(self.allowed_with(None), 4)
+        self.assertEqual(self.allowed_with("lots"), 4)
+
+    def test_a_worker_held_back_stops_once_nothing_is_left(self):
+        todo = fs.queue.Queue()
+        with mock.patch.object(fs.time, "sleep", side_effect=AssertionError("waited")):
+            fs.worker(5, todo, None, room=lambda n: False)
+
+
 class ScenarioTests(unittest.TestCase):
     def test_every_scenario_has_its_own_id(self):
         ids = [sc["id"] for sc in fs.scenarios()]

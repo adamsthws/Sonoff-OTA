@@ -33,6 +33,9 @@ How many at once, from the environment:
                        of the last four fail with the cloud to blame
     AUTOFLASH_CLOUD_COOL_DOWN  seconds between two plugs' turns at the cloud (5)
     AUTOFLASH_ANY_WORKERS    emulators for the rest, after those
+    AUTOFLASH_MOST_WORKERS   start up to this many of those instead, of which the
+                       number in <AUTOFLASH_SUITE_DIR>/workers take scenarios
+                       when that file is there: a batch scaled while it runs
     AUTOFLASH_NO_CLOUD=1     a machine whose plugs never reach the internet: only
                        the scenarios that do not need it
     AUTOFLASH_SUITE_DIR      where results go (captures/emulation/suite; with
@@ -1483,10 +1486,23 @@ def latest():
     return rows
 
 
-def worker(n, todo, lock, cloud=False):
+def allowed(default):
+    """How many of a batch's emulators may take a scenario now: the number in
+    OUT/workers when it holds one, so a running batch can be scaled to what
+    its machine has room for; else how many the batch began with."""
+    try:
+        return int((OUT / "workers").read_text())
+    except (OSError, ValueError):
+        return default
+
+
+def worker(n, todo, lock, cloud=False, room=None):
     while True:
-        # A cloud worker beyond how many the tuner allows now waits its turn.
+        # A cloud worker beyond how many the tuner allows now waits its turn,
+        # and one beyond OUT/workers until it is raised or nothing is left.
         while cloud and n > TUNER.workers:
+            time.sleep(10)
+        while room and not room(n) and not todo.empty():
             time.sleep(10)
         try:
             sc = todo.get_nowait()
@@ -1544,7 +1560,9 @@ def batch(ids_file=None):
     lock = threading.Lock()
     threads = [] if STUB_CLOUD else [threading.Thread(target=worker, args=(n, cloud, lock, True))
                                      for n in range(1, max(nc, TUNER.most) + 1)]
-    threads += [threading.Thread(target=worker, args=(n, anywhere, lock)) for n in range(first, first + na)]
+    most = max(na, int(os.environ.get("AUTOFLASH_MOST_WORKERS", na)))
+    threads += [threading.Thread(target=worker, args=(n, anywhere, lock, False, lambda n: n - first < allowed(na)))
+                for n in range(first, first + most)]
     for t in threads:
         t.start()
         time.sleep(20)  # staggered: start-ups are the busiest moment

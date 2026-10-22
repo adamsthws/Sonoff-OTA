@@ -184,7 +184,10 @@ D1) run on any machine with Docker: copy the repository and the saved plugs
 **How many at once.** Each emulator converting takes about half a CPU core
 and 120 MB. Past one per core the plugs slow down enough for their timeouts to
 fail where nothing is wrong, so the load is kept at or under the number of
-cores.
+cores. A batch can be scaled while it runs: started with
+`AUTOFLASH_MOST_WORKERS` above its workers, only the number written in
+`workers` in its results directory take a scenario - raised, more start; lowered,
+the last ones stop once their scenario ends.
 
 **The cloud, one plug at a time.** Every emulated plug is a copy of the same
 real one, and eWeLink keeps one connection per plug, so two online at once
