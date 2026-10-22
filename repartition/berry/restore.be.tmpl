@@ -82,11 +82,15 @@ end
 # answering for good, after 70-90 seconds busy (a real S60TPG).  A phase takes
 # under a minute, so retrying stops well short of that.  A router restart takes
 # longer: this computer runs the step again once the plug is back.
-var retry_until = nil
+var retry_spent = 0   # ms spent retrying in this phase, all failures together
 class retry_window
+  var since
   def over()
-    if retry_until == nil retry_until = tasmota.millis(20000) end
-    return tasmota.time_reached(retry_until)
+    if self.since == nil self.since = tasmota.millis() end
+    return retry_spent + tasmota.millis() - self.since >= 20000
+  end
+  def done()   # call after each request's retry loop
+    if self.since != nil retry_spent += tasmota.millis() - self.since end
   end
 end
 
@@ -160,6 +164,7 @@ def fetch_chunk(index, expected_length)
     if window.over() break end
     pause(1000)
   end
+  window.done()
   # Given up with the Wi-Fi still down: that is the reason, whatever was tried first.
   guard(attempt > 0 && (reply[0] >= 0 || tasmota.wifi("up")),
         "the plug's Wi-Fi went down and was not back within 20 seconds")
@@ -187,6 +192,7 @@ def post_text(path, body)
     if window.over() break end
     pause(1000)
   end
+  window.done()
   # Given up with the Wi-Fi still down: that is the reason, whatever was tried first.
   guard(attempt > 0 && (status >= 0 || tasmota.wifi("up")),
         "the plug's Wi-Fi went down and was not back within 20 seconds")
@@ -229,6 +235,7 @@ def fetch_text(path)
     if window.over() break end
     pause(1000)
   end
+  window.done()
   # Given up with the Wi-Fi still down: that is the reason, whatever was tried first.
   guard(attempt > 0 && (reply[0] >= 0 || tasmota.wifi("up")),
         "the plug's Wi-Fi went down and was not back within 20 seconds")

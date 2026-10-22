@@ -787,9 +787,10 @@ class MigrationValidationTests(unittest.TestCase):
                 # 20s of retrying in all, for the whole phase: busy for 70-90s,
                 # a real S60TPG stops answering for good (its energy meter's
                 # readings pile up).  The tool waits out a router restart.
-                self.assertIn("retry_until = tasmota.millis(20000)", source, phase)
+                self.assertIn("retry_spent + tasmota.millis() - self.since >= 20000", source, phase)
                 self.assertNotIn("tasmota.millis(300000)", source, phase)
                 self.assertIn("window.over()", source, phase)
+                self.assertIn("window.done()", source, phase)
                 # Not set_timeouts(): a connect timeout above the default 2s left
                 # the emulated plug's web server dead once a phase gave up
                 # (the HTTP timeout alone did not); the default 2s is enough.
