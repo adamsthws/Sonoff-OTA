@@ -221,24 +221,65 @@ laptop or phone would join it ([emulator.md](emulator.md)).
 
 ### Results
 
-On 18-19 October 2026 the suite ran every scenario on the code as of 19
-October, on four machines at once: the cloud scenarios on one, the rest on
-three others. Every failure was looked into, the cause fixed - in the tool,
-the installer, or the suite itself - and the scenario run again. The latest
-result of each:
+On 22 October 2026 the suite ran every scenario on 2.0.1, against the cloud
+stub, on four machines at once - 22 emulators, about five hours. Every
+failure was looked into, the cause fixed, and the scenario run again on the
+fixed code. The latest result of each:
 
-| Direction | Scenarios | Passed | Nothing to corrupt |
-|---|---:|---:|---:|
-| Sonoff to Tasmota | 389 | 389 | - |
-| Sonoff to ESPHome | 226 | 226 | - |
-| Tasmota to ESPHome | 87 | 87 | - |
-| Tasmota to Sonoff | 215 | 214 | 1 |
-| ESPHome to Tasmota | 349 | 349 | - |
-| ESPHome to Sonoff | 187 | 186 | 1 |
-| **All** | **1,453** | **1,451** | **2** |
+| Direction | Scenarios | Passed | A phase's retries spent | Nothing to corrupt |
+|---|---:|---:|---:|---:|
+| Sonoff to Tasmota | 369 | 368 | 1 | - |
+| Sonoff to ESPHome | 206 | 204 | 2 | - |
+| Tasmota to ESPHome | 83 | 82 | 1 | - |
+| Tasmota to Sonoff | 199 | 198 | - | 1 |
+| ESPHome to Tasmota | 318 | 317 | 1 | - |
+| ESPHome to Sonoff | 168 | 167 | - | 1 |
+| Tasmota to Tasmota | 2 | 2 | - | - |
+| **All** | **1,345** | **1,338** | **5** | **2** |
 
-The two not passed are a packet changed during R2, the check that Sonoff's
-firmware is back: it carries no data to change.
+Five had the Wi-Fi drop more than once in one Berry phase: the phase's 20
+seconds of retries are counted from its first failure and never begun again,
+so a later drop found them spent and the phase stopped. The run tried the
+step again, and each plug converted; but a phase should ride out short drops
+by itself. [#5](https://github.com/adamsthws/Sonoff-OTA/pull/5) fixed it: the
+retries now count only time spent failing. With it, 38 scenarios of drops,
+packet loss and a weak signal at every phase that moves data, run three times
+over, all passed but one, whose drops came just before its phase began - as
+G1 checked the plug, then as it was started. Those are fixed too (below). The
+two with nothing to corrupt are a packet changed during R2, the check that
+Sonoff's firmware is back: it carries no data to change.
+
+The longest one phase kept the plug busy was 86 seconds (L1, on a weak
+signal). A real S60TPG once stopped answering after 70-90 seconds busy, while
+an S60TPF converted after two minutes: so how long is recorded and reported,
+not judged.
+
+Then a few against the real eWeLink, on a day when some of its EU servers for
+plugs turned connections away - four of six in the morning, one by midday:
+fresh conversions to each firmware, and two faults at C2. Sonoff to ESPHome
+converted (2 min 45 s), and Sonoff to Tasmota on its third run after an
+outage at C2; a fresh Sonoff to Tasmota never got the installer to the plug,
+in four tries, as the plug's connection to eWeLink, or this computer's, kept
+failing. The run put some of that down to this computer's firewall (fixed,
+below).
+
+**2.0.2.** Its steps that write firmware check each block on the plug rather
+than sending it back, so they are shorter (below), and every fault the suite
+times by them was retimed. Before release, 301 scenarios were run on it, on
+the four machines in about an hour: every one at E2, G1, I1, L1 and R1, where
+the change is, and samples at D5, H1 and C3 for the other fixes. All passed,
+the retimed ones once their faults were placed by the new lengths, and the one
+whose 1.2.0 run - which the scenario stops at G1 - first stopped by itself
+before it got there, at its F4, when run again.
+
+Between them, those steps kept the plug busy 18 seconds where they took 31,
+over two runs of 52 scenarios of drops, loss, a weak signal and corrupted
+packets at each. The longest any phase kept it busy was 78 seconds, on a
+weak signal for a minute of it.
+
+Before the stub, on 18-19 October, the suite ran 1,453 scenarios on the code
+as of 19 October, the cloud ones against the real eWeLink: all passed but the
+same two with nothing to corrupt.
 
 ### Still open
 
@@ -255,12 +296,43 @@ firmware is back: it carries no data to change.
 - **More than one emulator per core.** Then the emulated plug can slow down
   enough to fail where nothing is wrong - once leaving it unable to reach this
   computer until it restarted - so the suite is run at one per core or fewer.
+  On 22 October it happened once at one per core, on a VM whose host was
+  busy: after a fault at E2, the plug's own requests to this computer stalled
+  at G1 and none got through for four runs, while it still answered. Run
+  again, it passed.
+- **A Tasmota that stopped.** Once, the interim Tasmota, testing the Wi-Fi
+  details sent on its setup network, said "Connect failed with AP timeout"
+  with the router on, then printed nothing and answered nothing for a quarter
+  of an hour - not even restarting when its setup network's three minutes
+  were up. Run again, it passed; not yet explained.
 - **Real plugs.** The faults have been tried on the emulator only.
 
 ### What it has found
 
-Each fixed, with a test, and the scenario run again. In the October 18-19
-regression:
+Each fixed, with a test, and the scenario run again. On 22 October:
+
+- A request the plug or the network dropped part way through a step - a
+  connection reset in an outage, a reply cut off by a power cut, none in time
+  - was put as "something unexpected went wrong", though the step was then
+  tried again as for any network trouble: 32 scenarios, 23 of them at the
+  final check (H1), the rest during the backup (C3) or F4. It now says the
+  connection to the plug was lost.
+- A plug D1 had just restarted onto the Wi-Fi was taken, as it started up,
+  for one that had lost its settings: the network a Tasmota shows for a
+  moment at start-up was taken for its setup network, and the run waited 15
+  minutes for it to be joined, then crashed: 6 scenarios. The plug is now
+  given a minute first, and that look's errors stop only its step.
+- Against the real eWeLink, a send of the installer that failed before the
+  plug was told to fetch it - eWeLink dropping this computer's connection -
+  was put down to this computer's firewall. It now says what happened.
+- Wi-Fi drops just before a phase began, rather than during it: G1's check
+  that the plug runs official Tasmota stopped the step as if it had failed;
+  the command that starts a phase, lost before it reached the plug, left the
+  run waiting on a plug that never began; and reading the Wi-Fi details off
+  the plug, timed out once, had the person asked to type them. Each is now
+  asked or sent again once the plug answers.
+
+In the October 18-19 regression:
 
 - The installer waited for ever on an upload its computer stopped sending -
   a laptop closed, say - answering nothing until it was switched off and on.
