@@ -273,6 +273,8 @@ LEGACY_STEPS = {"v1.2.0": {"C2": 20, "C3": 14, "D1": 18, "D4": 31, "E1": 2, "E2"
                            "F2": 35, "F4": 31, "G1": 33, "H1": 2}}
 LEGACY = EMU / "legacy"
 LEGACY_TOOL = "tools/s60_autoflash.py"  # its name until 2.0.0
+# What a run says when an error it did not expect stops it (autoflash_cli._main).
+UNEXPECTED = "something unexpected went wrong"
 LEGACY_NAMED = {"G1", "H1"}  # killed past its F4: the plug keeps the name that release gave it
 _legacy_lock = threading.Lock()
 
@@ -1366,6 +1368,11 @@ class Scenario:
         if not special:
             if self.notes.get("mistimed"):
                 special = "MISTIMED"
+            elif any(UNEXPECTED in t for m, _, t in run_logs(self.state) if m >= self.started):
+                # A run stopped by an error the tool did not see coming - a bug,
+                # whatever the fault - though the next run may convert the plug
+                # (seen: a report that could not be made, KeyError: 'safeboot').
+                special = "FAIL-UNEXPECTED"
             elif fault == "corrupt" and not self.notes.get("corrupted_packets"):
                 special = "NO-TRAFFIC"
             elif fault == "lostapp" and (arg == "switched") == ("Official Tasmota (app0) uploaded" in "".join(

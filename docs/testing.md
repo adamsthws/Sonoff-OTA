@@ -131,7 +131,9 @@ the run left no firewall rule or helper behind. It is **BAD-NAME** when the
 plug went by a name it never should (the names are made from its MAC:
 [device-names.md](device-names.md)), on the home network or as a network of
 its own, or did not end under its converted name; every name it had is kept
-with the result.
+with the result. It is **FAIL-UNEXPECTED** when a run stopped with
+"something unexpected went wrong" - an error the tool did not see coming, a
+bug whatever the fault - even if the next run converts the plug.
 
 The emulated computer's list of networks keeps one the plug put out for a
 minute after it has gone or been renamed, as a real computer's does (the
