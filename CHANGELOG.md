@@ -11,6 +11,11 @@ the section below before changing the number.
 
 ## 2.0.2
 
+- A step's 20 seconds of retries on the plug were counted from its first
+  failure and never begun again, so after one short Wi-Fi drop a later one
+  found them spent, and the step stopped ("returned HTTP -1 after 1
+  attempts"). They now count only the time spent failing
+  ([#5](https://github.com/adamsthws/Sonoff-OTA/pull/5)).
 - The plug or the network dropping a request part way through a step - a
   connection reset in a Wi-Fi outage, say - was put as "something unexpected
   went wrong", though the step was tried again as for any other network
