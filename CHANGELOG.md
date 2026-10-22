@@ -17,6 +17,13 @@ the section below before changing the number.
   release's own page on GitHub. A run left part way by an earlier version
   carries on by itself: with 16.0.0, or - if it had installed 15.6.0 already -
   on 15.6.0, checked byte for byte as ever, which Tasmota's own page updates.
+- ESPHome for the S60 is 1.3.0: the same config, built with ESPHome
+  [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0),
+  the latest release, where 1.2.0 was built with 2026.9.1. Its bootloader is
+  unchanged, so a plug on ESPHome already is not given a new one.
+- The firmware the tool installs is moved to each new Tasmota and ESPHome
+  release one way, written down in
+  [docs/updating-firmware.md](docs/updating-firmware.md).
 
 ## 2.0.2
 

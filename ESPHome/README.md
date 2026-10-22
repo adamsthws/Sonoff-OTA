@@ -17,7 +17,7 @@ Edit `sonoff_s60.yaml`, then build and publish it with
 ([docs/updating-firmware.md](../docs/updating-firmware.md)): it raises the
 config's `project` `version`, builds it in ESPHome's own Docker image, checks
 the image can still be imprinted, and publishes it in `artifacts/`, with its
-lines in `SHA256SUMS` and `firmware.json`. ESPHome 2026.9.1 built the current
+lines in `SHA256SUMS` and `firmware.json`. ESPHome 2026.10.0 built the current
 image.
 
 It keeps the published bootloader unless told otherwise (`--new-bootloader`):

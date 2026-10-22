@@ -10,8 +10,8 @@ directory, never here.
 | `tasmota32c3-bluetooth.bin` | Berry-capable Tasmota used temporarily on the original partition layout | `a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708` |
 | `autoflash-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `ece36fd964c1443ef9fb74af87a0a257501c9e5ecfb1fb7a1c3aff1744bc29fd` |
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
-| `esphome-sonoff-s60-bootloader-1.2.0.bin` | ESPHome's bootloader, from the same build: it replaces Sonoff's when ESPHome is installed, so ESPHome can roll back an update that fails to start | `3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433` |
-| `esphome-sonoff-s60-imprintable-1.2.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `bf9863ca68811d871e52e02bf0cdec63571f1baba087b271107a2c45766f45d4` |
+| `esphome-sonoff-s60-bootloader-1.2.0.bin` | ESPHome's bootloader, from the build of 1.2.0: it replaces Sonoff's when ESPHome is installed, so ESPHome can roll back an update that fails to start | `3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433` |
+| `esphome-sonoff-s60-imprintable-1.3.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `bc66c0b619e01fa4fd6cd0b72322fbda08168af9df661680b2e5861bd6e28d66` |
 | `autoflash-mover-1.1.0.bin` | A small ESPHome the run uses for a minute or two when leaving Tasmota: it fits in front of Tasmota in Sonoff's layout, and takes the next firmware as an ordinary ESPHome update; two minutes away from the home Wi-Fi, it raises its own network, whose page takes new Wi-Fi details. Wi-Fi placeholders, like the image above | `f6e131e1599c886d742c151c3ba3f84a285bba462b438c36b611d577e01ad243` |
 | `sonoff-s60-partition-table.bin` | Sonoff's partition table, read from a stock plug: the one every conversion starts from, which the Tasmota route's preflight requires byte for byte. Written back when a plug leaves Tasmota's layout. Holds no secrets | `f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf` |
 
@@ -101,10 +101,13 @@ is in the Git history: `git log --all -- artifacts/s60-ota-bridge-v3-1.2.1.ota`
 finds the last commit that has it.
 
 The ESPHome image is built from [`../ESPHome/sonoff_s60.yaml`](../ESPHome/sonoff_s60.yaml)
-(its `project` version is the one in the file name) with ESPHome 2026.9.1 and
-ESP-IDF 5.5.5, as `esphome compile sonoff_s60.yaml`; `firmware.ota.bin` is the file
-published, and `bootloader/bootloader.bin` from the same build is the bootloader. The mover is
-[`../ESPHome/autoflash_mover.yaml`](../ESPHome/autoflash_mover.yaml), built the same way: it drives no pins, so it
+(its `project` version is the one in the file name) with ESPHome 2026.10.0 and
+ESP-IDF 5.5.6, as `esphome compile sonoff_s60.yaml`, in ESPHome's own Docker
+image for that release (`firmware.json` pins it by digest);
+`firmware.ota.bin` is the file published. The bootloader is
+`bootloader/bootloader.bin` from the build of 1.2.0, with ESPHome 2026.9.1 and
+ESP-IDF 5.5.5. The mover is
+[`../ESPHome/autoflash_mover.yaml`](../ESPHome/autoflash_mover.yaml), built the same way, with ESPHome 2026.9.1: it drives no pins, so it
 is the same for any plug with an ESP32-C3 and 4 MB of flash, and from 1.1.0 it
 goes by `autoflash-recovery-XXXX` as the bridge does (1.0.0 was
 `sonoff-s60-mover-xxxxxx` on the home network, and raised `Sonoff-Setup-XXXX`).
@@ -136,3 +139,13 @@ Its friendly name, Sonoff S60, still says what plug it is. Its Wi-Fi action is
 bootloader is 1.1.0's, byte for byte, as is its every other behaviour. 1.1.0
 is in the Git history:
 `git log --all -- artifacts/esphome-sonoff-s60-imprintable-1.1.0.bin`.
+
+ESPHome 1.3.0 is 1.2.0's config built with ESPHome 2026.10.0 (ESP-IDF 5.5.6)
+where 1.2.0 was built with 2026.9.1 (ESP-IDF 5.5.5): the config is unchanged
+but for its version. The bootloader that build makes is ESP-IDF 5.5.6's,
+which differs from 5.5.5's in nothing an S60 uses (its changes are for other
+chips, secure boot and flash encryption), so the published one - 1.2.0's,
+which starts 1.3.0 - is kept, and no plug is given a new one. The ESP-IDF
+5.5.5 bootloader built again from 1.2.0's config with ESPHome 2026.9.1 came
+out the same, byte for byte. 1.2.0 is in the Git history:
+`git log --all -- artifacts/esphome-sonoff-s60-imprintable-1.2.0.bin`.
