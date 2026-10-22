@@ -1528,6 +1528,22 @@ def make_bundle(ctx: Context, problem: str | None) -> dict[str, Any]:
     return validate_bundle(ctx.manifest_path)
 
 
+def bundle_of_this_version(ctx: Context) -> None:
+    """A run carried on past A5 has its bundle checked, as A5 checks it, and
+    built again if this version cannot use it: one an earlier version made
+    before the firmware the tool installs changed, which every phase server
+    refuses (docs/updating-firmware.md). Nothing on the plug depends on it -
+    the startup firmware it pins is the published one with the same Wi-Fi,
+    written in again when next needed (adopt_wifi), and a step whose checks
+    were made with the old one does them again (of_this_bundle)."""
+    if not ctx.state.is_done("A5") or ctx.manifest_path != (ROOT / DEFAULT_MANIFEST).resolve():
+        return
+    try:
+        validate_bundle(ctx.manifest_path)
+    except (ValueError, OSError) as exc:
+        make_bundle(ctx, problem=str(exc))
+
+
 def sonoff_backup_wifi(flash: bytes) -> tuple[str, str] | None:
     """The Wi-Fi Sonoff's firmware was set up with, from a backup of it: the
     name and password in its frame_params (an open network has none)."""
@@ -5745,6 +5761,12 @@ def run_steps(ctx: Context) -> int:
     ctx.state.set_input("stopped_by", None)
     resumed = any(ctx.state.is_done(step) for step, _, _ in STEPS)
     ctx.run_started, ctx.run_resumed = started, resumed
+    if resumed:
+        try:
+            bundle_of_this_version(ctx)
+        except Abort as refused:
+            tell(f"Stopped before anything was done: {refused}.")
+            return 2
     wait_while_plug_busy(ctx)
     for step, title, _ in STEPS:
         if ctx.state.is_done(step):

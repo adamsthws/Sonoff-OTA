@@ -176,5 +176,6 @@ before the release: an emulator does not show real flash, radios or timings
 Raise the version in `tools/autoflash/__init__.py` to the changelog's; merging
 to `main` publishes the release (`.github/workflows/release.yml`). Runs left
 part way by the release before carry on with the new firmware by themselves:
-the bundle is rebuilt for the new pins at A5, and a step whose report names
-the old bundle is done again.
+the bundle is built again for the new pins - at A5, or as a run carried on
+past A5 starts - and a step whose checks were made with the old bundle does
+them again.

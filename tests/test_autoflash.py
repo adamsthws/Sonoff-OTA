@@ -1889,6 +1889,30 @@ class StartChoiceTests(unittest.TestCase):
         menu.assert_not_called()
         rebuild.assert_not_called()
 
+    def test_a_run_carried_on_has_a_bundle_this_version_cannot_use_built_again(self):
+        # A run of 2.0.2 left part way, carried on after the firmware the tool
+        # installs changed: its bundle names the old release, which every
+        # phase server refuses (the fault suite's legacy-v2.0.2, at D5 and G1).
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        ctx = self.ctx()
+        ctx.state.mark("A5", autoflash.DONE, result={})
+        stale = ValueError("manifest official-release identity differs from the reviewed frozen set")
+        with mock.patch.object(autoflash, "validate_bundle", side_effect=stale), \
+             mock.patch.object(autoflash, "make_bundle") as rebuild:
+            autoflash.bundle_of_this_version(ctx)
+        rebuild.assert_called_once_with(ctx, problem=str(stale))
+
+    def test_a_run_carried_on_keeps_a_bundle_this_version_can_use(self):
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        ctx = self.ctx()
+        ctx.state.mark("A5", autoflash.DONE, result={})
+        with mock.patch.object(autoflash, "validate_bundle", return_value={}), \
+             mock.patch.object(autoflash, "make_bundle") as rebuild:
+            autoflash.bundle_of_this_version(ctx)
+        rebuild.assert_not_called()
+
     def test_a5_builds_a_missing_bundle_without_asking_for_wifi(self):
         # A first run: the bundle is built with no Wi-Fi; E1 adds it, read off the plug.
         from unittest import mock
