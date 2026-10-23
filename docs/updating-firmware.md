@@ -74,7 +74,9 @@ closed, and the next week's run makes it again.
 
 The same run checks the pinned Tasmota release is still published - each
 conversion downloads its files - and opens an issue if it has gone, taking its
-series' newest release at once where there is one.
+series' newest release at once where there is one. It also opens one once
+nothing has reached `main` for 50 days: GitHub switches a public repository's
+schedules off after 60 days with no activity, this one with them.
 
 By hand, from the Actions tab: `tasmota` or `esphome` takes a given release
 whether settled or not, and `dry_run` makes and tests the update and opens

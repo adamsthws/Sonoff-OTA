@@ -88,6 +88,21 @@ jobs:
           takes its series' newest release at once if there is one; otherwise pin another by hand \
           (docs/updating-firmware.md)."
           fi
+      - name: An issue if this check is about to be switched off
+        if: ${{ !inputs.dry_run }}
+        run: |
+          # GitHub switches a public repository's schedules off after 60 days
+          # with no activity, and this check with them: said at 50.
+          days=$(( ($(date +%s) - $(git log -1 --format=%ct)) / 86400 ))
+          [ "$days" -ge 50 ] || exit 0
+          title="The weekly firmware check stops soon: nothing has reached main for 50 days"
+          if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[].number')" ]; then
+              gh issue create --title "$title" --body "The last commit on main is $days days old. GitHub \
+          switches off a public repository's scheduled workflows after 60 days with no activity, and \
+          this one - which moves the firmware to each settled release - would stop without a word. \
+          Any commit to main resets it; once switched off, it is switched on again from the Actions tab \
+          (Firmware update, Enable workflow)."
+          fi
 
   update:
     needs: due
