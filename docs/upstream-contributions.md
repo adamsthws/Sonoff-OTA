@@ -87,7 +87,11 @@ commonly downloads an update:
   the fix, each attempt gives up after about 33 s.
 
 Testing that led to one more ESP-IDF bug: telling `esp_https_ota()` to write
-into the same partition it downloads to crashed it on a NULL pointer.
+into the same partition it downloads to crashed it on a NULL pointer. And
+testing Tasmota's OTA showed its web server stuck for minutes after a long
+download: requests that had given up while the device was busy were then
+answered one by one, each piece of the page waiting 10 s on a client that no
+longer answered. The cause was in arduino-esp32's `NetworkClient`.
 
 | Project | Pull request | What it fixes |
 |---|---|---|
@@ -95,6 +99,7 @@ into the same partition it downloads to crashed it on a NULL pointer.
 | Tasmota | [#25177](https://github.com/arendst/Tasmota/pull/25177) | The same in Tasmota's own OTA, attempted 4 times: about 2 h 40 min |
 | ESP-IDF | [#19246](https://github.com/espressif/esp-idf/pull/19246) | `esp_https_ota()` retried a stalled download for ever |
 | ESP-IDF | [#19243](https://github.com/espressif/esp-idf/pull/19243) | `esp_https_ota()` crashed when the staging and final partitions were the same |
+| arduino-esp32 | [#13015](https://github.com/espressif/arduino-esp32/pull/13015) | A write that gave up left the connection open, so a page sent to a client that had stopped answering held the device 10 s per piece |
 
 **Related:** the endless retry had been reported before, in ESP-IDF issue
 [#6364](https://github.com/espressif/esp-idf/issues/6364), which was closed
@@ -120,17 +125,20 @@ test.
 
 The [emulator](emulator.md) runs on [lcgamboa's QEMU fork](https://github.com/lcgamboa/qemu),
 the one QEMU that emulates the ESP32-C3's Wi-Fi. Making an emulated plug behave
-on its network as a real one does took three changes to that Wi-Fi emulation,
-each found because a conversion went wrong on the emulator where it would not
-on a plug. They are kept in this repository as patches, and offered back:
+on its network as a real one does took four changes to that Wi-Fi emulation,
+and one to its pins, each found because something went wrong on the emulator
+where it would not on a plug. They are kept in this repository as patches, and
+offered back:
 
 | Project | Pull request | What it fixes |
 |---|---|---|
 | QEMU (lcgamboa) | [#13](https://github.com/lcgamboa/qemu/pull/13) | A received frame was written into a buffer the guest's driver had taken back, corrupting its heap - a crash when the guest stopped its Wi-Fi |
 | QEMU (lcgamboa) | [#14](https://github.com/lcgamboa/qemu/pull/14) | On a tap or bridged network, the guest's frames carried the emulated access point's address, not its own: the host could not tell it apart, nor give it an address by its MAC |
 | QEMU (lcgamboa) | [#15](https://github.com/lcgamboa/qemu/pull/15) | The host could not join a network the guest raised itself - Tasmota's or ESPHome's setup network - nor could the guest stay a station while it did |
+| QEMU (lcgamboa) | [#16](https://github.com/lcgamboa/qemu/pull/16) | The signal strength reached the firmware 96 too high: Tasmota reported its Wi-Fi at +71 to +78 dBm |
+| QEMU (lcgamboa) | [#17](https://github.com/lcgamboa/qemu/pull/17) | Run on its own, every input pin read low, so Tasmota saw its button held and reset itself; the levels can now be set |
 
-The last one let the emulator test what a person does when a plug falls back
+#15 let the emulator test what a person does when a plug falls back
 to its own setup network: join it, and let the conversion carry on through it.
 
 ## Smaller fixes found along the way
