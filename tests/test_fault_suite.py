@@ -187,6 +187,19 @@ class ScenarioTests(unittest.TestCase):
             self.assertNotIn("--firmware", old)
             self.assertEqual(new[-2:], ["--firmware", "tasmota"])
 
+    def test_the_cut_in_the_g1_after_a_legacy_run_lands_in_this_checkouts_g1(self):
+        # Timed by 1.2.0's G1 (33 s), it came after this one's (21 s from
+        # 2.0.2) had finished: MISTIMED.
+        sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "F4", "fault": "legacy",
+                              "arg": "v1.2.0+G1off", "at": 40}, "/dev/null")
+        sc.fired = "legacy"
+        with mock.patch.object(fs, "legacy_tree"), mock.patch.object(sc, "run_tool"), \
+             mock.patch.object(sc, "screen_result", return_value="Stopped"), \
+             mock.patch.object(fs.threading, "Thread"), mock.patch.object(sc, "again") as again:
+            sc.go_legacy()
+        self.assertEqual(again.call_args.kwargs["later"],
+                         ("G1", "plugoff", 1, 0.6 * fs.ROUTES["sonoff>tasmota"][2]["G1"]))
+
     def test_a_step_with_a_start_of_its_own_needs_no_length(self):
         # F4rs is in STARTS only: its length comes from there.
         sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "F4rs", "fault": "plugoff",

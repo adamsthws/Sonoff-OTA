@@ -1202,9 +1202,10 @@ class Scenario:
         # "+G1off": the plug switched off, too, part way through G1 of the
         # first run after - G1 then writing over that release's startup
         # firmware, unproven (step_restore), and carrying on after a cut.
+        # That G1 is this checkout's, and as long as its.
         tag, _, then = sc["arg"].partition("+")
         steps = LEGACY_STEPS[tag].get(sc["route"], {})
-        later = ("G1", "plugoff", 1, 0.6 * steps["G1"]) if then == "G1off" else None
+        later = ("G1", "plugoff", 1, 0.6 * ROUTES[sc["route"]][2]["G1"]) if then == "G1off" else None
         old = legacy_tree(tag)
         stop = threading.Event()
         if step != "start":
