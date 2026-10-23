@@ -23,7 +23,9 @@ join)
         echo "Joined $HOME_SSID (this computer is 192.168.60.1)."
         exit 0
     fi
-    if ! nmcli -t -f SSID device wifi list | grep -qxF -- "$name"; then
+    # Not grep -q: it stops at the first match, nmcli dies writing the rest,
+    # and pipefail takes that for "not visible".
+    if ! nmcli -t -f SSID device wifi list | grep -xF -- "$name" >/dev/null; then
         echo "No network called '$name' is visible. Visible now:" >&2
         nmcli -t -f SSID device wifi list | sed 's/^/    /' >&2
         exit 1
