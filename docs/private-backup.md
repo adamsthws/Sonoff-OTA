@@ -16,7 +16,9 @@ repository - not its history, a clone, a fork or a release - so
 
 The backup directory as a conversion filed it,
 `captures/plugs/<MAC>/sonoff-backup/` - `flash.bin`, `efuse.bin`, `report.json`,
-`README.txt` - in a tar with a manifest of each file's size and SHA-256,
+`README.txt` - and the plug's record beside it (`plug.json`: its eWeLink
+device and model, which the emulator's cloud stub gives as eWeLink would), in
+a tar with a manifest of each file's size and SHA-256,
 compressed with xz (4.2 MB to 1.0 MB: a flash image is mostly empty) and then
 encrypted with AES-256-GCM. Encryption comes last because encrypted data does
 not compress. The sealed file is one line, `AUTOFLASH-SEALED-BACKUP 1`, a
@@ -65,6 +67,19 @@ scopes once:
 gh auth refresh -h github.com -s write:packages,read:packages
 ```
 
+## The emulator restores it by itself
+
+When the emulator finds no Sonoff backup in `captures/plugs/`
+(`tools/emulator/choose_plug.py`), it runs `restore`: the sealed backup is
+fetched, opened and filed in `captures/plugs/<MAC>/sonoff-backup/`, its plug's
+record beside it, as a conversion files one. A copy there already is used as
+it is, and one that differs from the sealed backup is never written over: the
+emulator stops and says so. A test copy asked for with `--plug` is then made
+from it (`copy_plug.py`), so the fault suite, `public_plugs.py make` and every
+other emulator run start from an empty `captures/`. On the maintainer's
+computer that makes `captures/` a working copy, safe to delete
+([technical-details.md](technical-details.md#what-captures-holds)).
+
 ## Commands
 
 ```sh
@@ -74,6 +89,7 @@ python3 tools/private_backup.py verify sonoff-backup.sealed "$B"   # opens to ex
 python3 tools/private_backup.py upload sonoff-backup.sealed        # into the package, then checks it is private
 python3 tools/private_backup.py check-private                      # at any time
 python3 tools/private_backup.py fetch sonoff-backup.sealed         # back out of it
+python3 tools/private_backup.py restore                            # filed where the emulator looks
 python3 tools/private_backup.py unseal sonoff-backup.sealed OUT    # the backup, into a new directory OUT
 ```
 
@@ -100,9 +116,9 @@ three say so:
 
 On any computer with this repository, Docker and the GitHub CLI logged in as
 the maintainer (with `read:packages`): put the key from the password manager in
-`.env` as `AUTOFLASH_BACKUP_KEY`, then `fetch` and `unseal` into
-`captures/plugs/<MAC>/sonoff-backup/`, where the emulator looks for it. Its
-`flash.bin` must have SHA-256 `4b6e3393…9f9bcc40`, as every copy has.
+`.env` as `AUTOFLASH_BACKUP_KEY`; the emulator restores the backup itself on
+its first run, or `restore` does. Its `flash.bin` must have SHA-256
+`4b6e3393…9f9bcc40`, as every copy has.
 
 ## On GitHub's side, one day
 

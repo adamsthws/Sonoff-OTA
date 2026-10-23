@@ -148,6 +148,29 @@ be read by your user only, `cleanup` keeps them, and they never belong in
 an issue or a discussion. Delete them if you do not want them, or convert
 with `--no-backup` to keep none. Reading the flash takes under a minute.
 
+### What captures/ holds
+
+`captures/` is ignored by Git: what the tool and its tests keep on this
+computer. **Your Sonoff backups are the one thing in it that cannot be made
+again** - keep a copy of `captures/plugs/` somewhere safe; everything else is
+remade as needed:
+
+| In `captures/` | What it is | Made again by |
+|---|---|---|
+| `plugs/<MAC>/sonoff-backup/`, `plug.json` | your plug's Sonoff firmware and settings, and its record | nothing: **back it up** |
+| `plugs/<MAC>/runs/`, `unattended/` | each run's state and log, and recordings of unattended runs | the next run |
+| `safeboot-recovery-migration/` | the firmware bundle | the next run (A5) |
+| `settings.json`, `.autoflash-current`, `.safety-locks/` | the eWeLink email offered next time, the run in progress, the locks' state | the next run |
+| `esphome-build/` | ESP-IDF and its tools, for `update_firmware.py esphome` | its next build |
+| `emulation/state*/` | each emulator's plug and computer | the emulator, from the backup |
+| `emulation/saved/` | plugs kept part way (`--save`), the fault suite's and the public ones | `fault_suite.py prep`, `public_plugs.py make` |
+| `emulation/suite*/`, `emulation/public-plugs/` | the fault suite's results and logs, the public plugs' | their next run; what they found is in [testing.md](testing.md) |
+| `emulation/legacy/`, `emulation/cache/`, `emulation/stub-cloud/` | earlier releases' trees, the QEMU fork's source, the cloud stub's own CA | the suite, `emu.sh` (a new CA means the saved stub plugs are made again) |
+
+The maintainer's own backup is sealed in a private package, and the emulator
+restores it when it is not here ([private-backup.md](private-backup.md)): in
+the maintainer's checkout nothing in `captures/` needs backing up.
+
 ### What crosses the network
 
 Not written to disk is not the same as never exposed. The password crosses

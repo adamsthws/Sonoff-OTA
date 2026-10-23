@@ -16,6 +16,9 @@ not in its history, not in a clone, not in a release (docs/private-backup.md).
         whether SEALED opens to exactly BACKUP_DIR, writing nothing
     python3 tools/private_backup.py unseal SEALED OUT_DIR
         the backup again, into a new directory, every file checked
+    python3 tools/private_backup.py restore
+        fetched and unsealed into captures/plugs/<MAC>/, where the emulator
+        looks - unless it is there already, as it was sealed
     python3 tools/private_backup.py upload SEALED
         into the private package, then shown to be private
     python3 tools/private_backup.py fetch SEALED
@@ -53,7 +56,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tools.autoflash import credentials  # noqa: E402
+from tools.autoflash import credentials, plugs  # noqa: E402
 
 KEY_NAME = "AUTOFLASH_BACKUP_KEY"
 OWNER, PACKAGE, TAG = "adamsthws", "autoflash-private", "sonoff-backup"
@@ -74,6 +77,9 @@ PUBLIC_CONTROL = ("oras-project/oras", "v1.2.3")
 MAGIC = b"AUTOFLASH-SEALED-BACKUP 1\n"
 NONCE_SIZE, KEY_SIZE = 12, 32
 MANIFEST = "MANIFEST.json"
+# The plug's own record, beside its backup directory (its eWeLink device and
+# model, which the emulator's cloud stub gives as eWeLink would): sealed with it.
+PLUG_RECORD = "plug.json"
 
 
 class SealError(RuntimeError):
@@ -120,10 +126,26 @@ def command_key(_args: argparse.Namespace) -> int:
 # -- sealing -----------------------------------------------------------------
 
 def backup_files(directory: Path) -> dict[str, bytes]:
+    """A backup directory's files, and its plug's record beside it."""
     files = {path.name: path.read_bytes() for path in sorted(directory.iterdir()) if path.is_file()}
     if "flash.bin" not in files or "efuse.bin" not in files:
         raise SealError(f"{directory} is not a Sonoff backup: no flash.bin and efuse.bin")
+    if PLUG_RECORD in files:
+        raise SealError(f"{directory} holds a {PLUG_RECORD} of its own")
+    record = directory.parent / PLUG_RECORD
+    if record.is_file():
+        files[PLUG_RECORD] = record.read_bytes()
     return files
+
+
+def write_backup(files: dict[str, bytes], directory: Path) -> None:
+    """Into a new directory, each file read-only as a backup is kept; the
+    plug's record beside it."""
+    directory.mkdir(parents=True, mode=0o700)
+    for name, data in files.items():
+        path = directory.parent / name if name == PLUG_RECORD else directory / name
+        path.write_bytes(data)
+        path.chmod(0o600 if name == PLUG_RECORD else 0o400)
 
 
 def packed(files: dict[str, bytes]) -> bytes:
@@ -207,6 +229,7 @@ def command_unseal(args: argparse.Namespace) -> int:
     if args.out.exists():
         raise SealError(f"{args.out} is there already: unsealing never writes over anything")
     files = opened(args.sealed.read_bytes(), key())
+    files.pop(PLUG_RECORD, None)  # a backup directory of its own: not beside anything
     args.out.mkdir(parents=True, mode=0o700)
     for name, data in files.items():
         path = args.out / name
@@ -254,14 +277,41 @@ def command_upload(args: argparse.Namespace) -> int:
 def command_fetch(args: argparse.Namespace) -> int:
     if args.sealed.exists():
         raise SealError(f"{args.sealed} is there already")
+    data = fetched()
+    args.sealed.write_bytes(data)
+    print(f"Fetched {REFERENCE} into {args.sealed}: {len(data):,} bytes, "
+          f"SHA-256 {hashlib.sha256(data).hexdigest()}")
+    return 0
+
+
+def fetched() -> bytes:
     with tempfile.TemporaryDirectory() as tmp:
         oras("pull", REFERENCE, workdir=Path(tmp))
-        fetched = (Path(tmp) / SEALED_NAME).read_bytes()
-    if not fetched.startswith(MAGIC):
+        data = (Path(tmp) / SEALED_NAME).read_bytes()
+    if not data.startswith(MAGIC):
         raise SealError("what came down is not a sealed backup")
-    args.sealed.write_bytes(fetched)
-    print(f"Fetched {REFERENCE} into {args.sealed}: {len(fetched):,} bytes, "
-          f"SHA-256 {hashlib.sha256(fetched).hexdigest()}")
+    return data
+
+
+def restore() -> str:
+    """The sealed backup, fetched and unsealed into captures/plugs/<MAC>/, unless
+    it is there already exactly as sealed; never written over. Its MAC."""
+    files = opened(fetched(), key())
+    mac = plugs.mac_from_efuse(files["efuse.bin"])
+    directory = plugs.PLUGS / plugs.folder_name(mac) / "sonoff-backup"
+    if directory.exists():
+        here = backup_files(directory)
+        if {name: data for name, data in here.items() if name != PLUG_RECORD} != \
+                {name: data for name, data in files.items() if name != PLUG_RECORD}:
+            raise SealError(f"{directory} is there and is not the sealed backup: left as it is")
+        return mac
+    write_backup(files, directory)
+    return mac
+
+
+def command_restore(_args: argparse.Namespace) -> int:
+    mac = restore()
+    print(f"The sealed backup of {mac} is in {plugs.PLUGS / plugs.folder_name(mac)}, as it was sealed.")
     return 0
 
 
@@ -335,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
         for path in paths:
             sub.add_argument(path, type=Path)
         sub.set_defaults(run=run)
+    commands.add_parser("restore").set_defaults(run=command_restore)
     commands.add_parser("check-private").set_defaults(run=command_check_private)
     commands.add_parser("secret").set_defaults(run=command_secret)
     args = parser.parse_args(argv)

@@ -25,7 +25,12 @@ another regional version's power meter.
   `captures/emulation/`, is offered too. Each plug's emulated flash is kept
   in `captures/emulation/state/` between runs, so switching plugs and back
   carries on where each was; `--fresh` puts the chosen one back to its
-  backup.
+  backup. With none here, the maintainer's sealed backup is fetched from its
+  private package and filed here first, and a test copy `--plug` asks for
+  that is not here yet is made from it (`copy_plug.py`): given its key and a
+  login that can read the package, a checkout with an empty `captures/` runs
+  the emulator ([private-backup.md](private-backup.md)).
+  `AUTOFLASH_NO_RESTORE=1` says not to.
 - **The NVS partition generator** in the repository's `.venv`:
 
   ```sh

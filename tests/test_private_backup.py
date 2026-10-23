@@ -130,6 +130,39 @@ class CommandTests(unittest.TestCase):
             self.assertIn(pb.KEY_NAME, credentials.load(env))
         self.assertIn("backup-key", [call.args[1] for call in private.call_args_list])
 
+    def restore_into(self, captures):
+        sealed = pb.seal(pb.backup_files(self.backup), pb.key())
+        return mock.patch.multiple(pb, fetched=mock.Mock(return_value=sealed)), \
+            mock.patch.object(pb.plugs, "PLUGS", captures / "plugs")
+
+    def test_restore_files_the_backup_where_the_emulator_looks(self):
+        (self.tmp / "plug.json").write_text('{"model": "S60TPG"}')
+        efuse = bytearray(1024)
+        efuse[0x18:0x1E] = bytes.fromhex("123456abcdef")[::-1]
+        (self.backup / "efuse.bin").write_bytes(bytes(efuse))
+        fetch, where = self.restore_into(self.tmp / "captures")
+        with fetch, where:
+            self.assertEqual(pb.restore(), "12:34:56:ab:cd:ef")
+            filed = self.tmp / "captures/plugs/12-34-56-ab-cd-ef"
+            self.assertEqual((filed / "sonoff-backup/flash.bin").read_bytes(), SealTests.FILES["flash.bin"])
+            self.assertEqual((filed / "plug.json").read_text(), '{"model": "S60TPG"}')
+            self.assertFalse((filed / "sonoff-backup/flash.bin").stat().st_mode & stat.S_IWUSR)
+            self.assertEqual(pb.restore(), "12:34:56:ab:cd:ef")  # there already, as sealed: left alone
+
+    def test_restore_never_writes_over_a_backup_that_differs(self):
+        efuse = bytearray(1024)
+        efuse[0x18:0x1E] = bytes.fromhex("123456abcdef")[::-1]
+        (self.backup / "efuse.bin").write_bytes(bytes(efuse))
+        fetch, where = self.restore_into(self.tmp / "captures")
+        other = self.tmp / "captures/plugs/12-34-56-ab-cd-ef/sonoff-backup"
+        other.mkdir(parents=True)
+        (other / "flash.bin").write_bytes(b"another")
+        (other / "efuse.bin").write_bytes(bytes(efuse))
+        with fetch, where:
+            with self.assertRaisesRegex(pb.SealError, "not the sealed backup"):
+                pb.restore()
+        self.assertEqual((other / "flash.bin").read_bytes(), b"another")
+
     def test_the_emulator_never_hands_the_key_to_a_run(self):
         script = (pb.ROOT / "tools/emulator/unattended-test.sh").read_text()
         self.assertIn("BACKUP_KEY\\)' \"$ROOT/.env\"", script)
