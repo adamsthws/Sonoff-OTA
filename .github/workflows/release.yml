@@ -2,6 +2,11 @@
 # The version comes from tools/autoflash/__init__.py and the notes from
 # CHANGELOG.md (tools/release_notes.py), so a release is: add the notes,
 # change the number, merge.
+#
+# Only once the unit tests, the final firmware on the emulator, the lint and
+# the leak scan pass on that commit. The release carries the firmware files
+# the tool installs and SHA256SUMS; with the repository's immutable releases,
+# GitHub signs an attestation of them and of the tag (`gh release verify`).
 name: Release
 
 on:
@@ -11,26 +16,74 @@ on:
   # workflow's own token does not start another workflow.
   workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
+
+concurrency:
+  group: release
 
 jobs:
-  release:
+  version:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Tag and release the version in the code, if it is new
+      - name: The version in the code, if it is not released yet
+        id: version
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(python3 tools/release_notes.py --version)
-          tag="v$version"
+          tag="v$(python3 tools/release_notes.py --version)"
           if gh release view "$tag" >/dev/null 2>&1; then
               echo "$tag is already released"
-              exit 0
+          else
+              echo "tag=$tag" >> "$GITHUB_OUTPUT"
           fi
-          python3 tools/release_notes.py "$version" > notes.md
-          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md
+
+  tests:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/emulator-check.yml
+
+  lint:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/lint.yml
+
+  leak-scan:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/leak-scan.yml
+
+  release:
+    needs: [version, tests, lint, leak-scan]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write   # the tag and the release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tag and release it, with the firmware it installs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          python3 tools/release_notes.py "${TAG#v}" > notes.md
+          # The files SHA256SUMS pins that the tool sends (archive/ is history).
+          mapfile -t files < <(awk '$2 ~ /^artifacts\// { print $2 }' SHA256SUMS)
+          sha256sum --check --strict SHA256SUMS
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md \
+              SHA256SUMS "${files[@]}"

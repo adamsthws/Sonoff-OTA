@@ -1,0 +1,8 @@
+# zizmor (tools/lint.py).
+rules:
+  # GitHub's new self-repository syntax (uses: $/...) is not yet known to
+  # actionlint, which refuses it. The workflows call each other only as whole
+  # jobs, which GitHub reads from the same commit, not from a checkout a step
+  # could have changed. Take it once actionlint accepts it.
+  self-repository:
+    disable: true

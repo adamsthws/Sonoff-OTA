@@ -7,7 +7,12 @@ removes an option.
 
 The version is set in one place, `tools/autoflash/__init__.py`. Merging a new
 one to `main` tags it and publishes a release with its notes from here, so add
-the section below before changing the number.
+the section below before changing the number. The release waits for the unit
+tests, the final firmware on the emulator, the lint and the leak scan to pass
+on that commit, and carries the firmware files the tool installs with
+`SHA256SUMS`; GitHub signs an attestation of the release, its tag and files,
+which `gh release verify vX.Y.Z` and `gh release verify-asset vX.Y.Z FILE`
+check.
 
 ## 2.1.0
 
