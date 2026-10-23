@@ -51,6 +51,7 @@ for the headers. A body that keeps arriving, however slowly, still completes.
 | arduino-esp32 | [#12990](https://github.com/espressif/arduino-esp32/pull/12990) | `HTTPClient` waited for ever for the rest of a body, and polled without pause between TLS packets |
 | ESPEasy | [#5649](https://github.com/letscontrolit/ESPEasy/pull/5649) | Its copy of `HttpClientLight` had the same unbounded wait |
 | LibreTiny | [#420](https://github.com/libretiny-eu/libretiny/pull/420) | Its `HTTPClient` had the same unbounded wait |
+| Tasmota | [#25180](https://github.com/arendst/Tasmota/pull/25180) | A read timeout over 65.5 s wrapped round: `webclient.set_timeouts(80000)` gave up after 14.5 s |
 
 The details differed enough that each needed its own work:
 
@@ -63,6 +64,8 @@ The details differed enough that each needed its own work:
   and a race the maintainer spotted in review.
 - **ESPEasy and LibreTiny** carry the original loop, so the fix carried over
   almost as it was.
+- **ESPEasy's review** found its timeout kept in 16 bits, so one longer than
+  65.5 s wrapped round. Tasmota's clients had the same, fixed in #25180.
 
 **Related:** Berry's `webclient` had a `connected()` method that was written
 but never exposed to scripts, which came up while fixing #25141; Tasmota's
