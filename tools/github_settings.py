@@ -5,9 +5,11 @@
     python3 tools/github_settings.py apply    set them
 
 Through gh, logged in as an admin of the repository. `apply` changes only
-what differs, and requires the checks before main (the second ruleset) only
-once each has run on main: a check required before its workflow is there
-would hold every pull request back, the firmware-update workflow's too.
+what differs, and of the checks before main (the second ruleset) requires
+only those that have run on main, saying which are left: a check required
+before its workflow is there - a new job, or one renamed - would hold every
+pull request back, the firmware-update workflow's too. Run it again once
+they have run.
 """
 
 from __future__ import annotations
@@ -52,7 +54,21 @@ TOGGLES = ["private-vulnerability-reporting", "immutable-releases"]
 MAIN = {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}
 # The checks main requires: jobs of the unit tests and emulator, leak-scan
 # and lint workflows.
-REQUIRED_CHECKS = ["unit", "unit (Python 3.10)", "emulator", "scan", "lint"]
+REQUIRED_CHECKS = ["unit (Python 3.12)", "unit (Python 3.10)", "emulator", "scan", "lint"]
+
+
+def checks_ruleset(names: list[str]) -> dict[str, Any]:
+    return {
+        "target": "branch", "enforcement": "active", "conditions": MAIN,
+        "bypass_actors": [{"actor_id": ADMIN_ROLE, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+        "rules": [{"type": "required_status_checks", "parameters": {
+            "strict_required_status_checks_policy": False,
+            "do_not_enforce_on_create": False,
+            "required_status_checks": [{"context": name, "integration_id": GITHUB_ACTIONS} for name in names],
+        }}],
+    }
+
+
 RULESETS: dict[str, dict[str, Any]] = {
     # For everyone, admins too: main is never deleted or rewritten, and every
     # commit on it is signed (GitHub signs the merges it makes).
@@ -63,16 +79,7 @@ RULESETS: dict[str, dict[str, Any]] = {
     # What reaches main through a pull request has passed the checks. An admin
     # may push to main directly, as releases are made; the release workflow
     # runs the same checks before it releases.
-    "Checks before main": {
-        "target": "branch", "enforcement": "active", "conditions": MAIN,
-        "bypass_actors": [{"actor_id": ADMIN_ROLE, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
-        "rules": [{"type": "required_status_checks", "parameters": {
-            "strict_required_status_checks_policy": False,
-            "do_not_enforce_on_create": False,
-            "required_status_checks": [{"context": name, "integration_id": GITHUB_ACTIONS}
-                                       for name in REQUIRED_CHECKS],
-        }}],
-    },
+    "Checks before main": checks_ruleset(REQUIRED_CHECKS),
 }
 
 
@@ -162,12 +169,19 @@ def main(argv: list[str] | None = None) -> int:
         if not args:
             print("python3 tools/github_settings.py apply sets them.")
             return 1
-        not_run = None
         for what, _, (method, path, body) in found:
             if what == "ruleset 'Checks before main'":
-                not_run = not_run if not_run is not None else sorted(set(REQUIRED_CHECKS) - checks_run_on_main())
-                if not_run:
-                    print(f"  {what}: left for now - not yet run on main: {', '.join(not_run)}")
+                run = checks_run_on_main()
+                ready = [name for name in REQUIRED_CHECKS if name in run]
+                if not ready:
+                    print(f"  {what}: left for now - none has run on main yet")
+                    continue
+                if ready != REQUIRED_CHECKS:
+                    body = {"name": "Checks before main", **checks_ruleset(ready)}
+                    not_run = [name for name in REQUIRED_CHECKS if name not in run]
+                    api(path, method, body)
+                    print(f"  {what}: set, but for {', '.join(not_run)}, not yet run on main: "
+                          "apply again once they have")
                     continue
             api(path, method, body)
             print(f"  {what}: set")

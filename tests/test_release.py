@@ -40,3 +40,14 @@ class VersionTests(unittest.TestCase):
                              capture_output=True, text=True, check=True).stdout
         self.assertEqual(out.strip(), f"Autoflash {__version__}")
         self.assertTrue(re.search(r"\d+\.\d+\.\d+", out))
+
+
+class PortablePythonTests(unittest.TestCase):
+    def test_the_unit_tests_run_on_the_python_the_start_scripts_install(self):
+        def versions(path, pattern):
+            return set(re.findall(pattern, (ROOT / path).read_text(encoding="utf-8")))
+        installed = versions("start.sh", r"portable Python (3\.\d+\.\d+)") | \
+            versions("tools/windows-python.ps1", r"portable Python (3\.\d+\.\d+)")
+        tested = versions(".github/workflows/emulator-check.yml", r'python-version: "(3\.\d+\.\d+)"')
+        self.assertEqual(len(installed), 1, installed)
+        self.assertEqual(tested, installed)

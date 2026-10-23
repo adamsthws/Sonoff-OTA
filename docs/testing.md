@@ -20,8 +20,11 @@ route to take, what to ask, when to try again, what counts as done - with the
 plug and the network stood in for; and the parts that have to be exact - the
 plans the plug carries out, the update protocols, image checks and pins, what
 is kept and what never is. Every bug found below has a test that fails without
-its fix. The `emulator-check` workflow runs them on Python 3.12 and, beside
-it, on 3.10, the oldest the tool runs on (Ubuntu 22.04's).
+its fix. The `emulator-check` workflow runs them on Python 3.12.10 - the
+portable Python the start scripts install, which most conversions run on -
+and, beside it, on 3.10, the oldest the tool runs on: a Mac's own Python may
+be older than 3.12, and so may one already installed where the portable one
+cannot be had.
 
 ## Linters
 

@@ -22,16 +22,26 @@ permissions:
   contents: read
 
 jobs:
+  # On the portable Python start.sh and tools/windows-python.ps1 install where
+  # there is no other - what most conversions run on (tests/test_release.py
+  # keeps the two the same).
   unit:
+    name: unit (Python 3.12)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: python
+        with:
+          python-version: "3.12.10"
       - name: Unit tests
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
         run: |
-          python3 -m venv .venv
+          "$PYTHON" -m venv .venv
           .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
           status=0
           PYTHONUNBUFFERED=1 .venv/bin/python -m coverage run --source=tools \
@@ -59,9 +69,10 @@ jobs:
           path: unit.txt
           retention-days: 30
 
-  # The same on the oldest Python the tool runs on: start.sh takes any 3.10 or
-  # newer it finds, and 3.10 is Ubuntu 22.04's. Beside the job above, so no
-  # longer to wait for.
+  # The same on the oldest Python the tool runs on, 3.10: what a Mac's own
+  # Python may be, or one already installed where the portable Python cannot
+  # be had (start.sh, windows-python.ps1). Beside the job above, so no longer
+  # to wait for.
   unit-oldest-python:
     name: unit (Python 3.10)
     runs-on: ubuntu-24.04

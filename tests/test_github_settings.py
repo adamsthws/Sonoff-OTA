@@ -69,17 +69,37 @@ class GitHubSettingsTests(unittest.TestCase):
         self.assertIn("ruleset 'Checks before main': is missing", out)
         self.assertEqual(fake.sent, [])
 
-    def test_checks_are_not_required_before_each_has_run_on_main(self):
+    def test_only_checks_that_have_run_on_main_are_required(self):
         fake = FakeGitHub(checks_on_main=["unit", "emulator", "scan"])
         code, out = run(fake, "apply")
         self.assertEqual(code, 0)
-        self.assertIn("not yet run on main: lint, unit (Python 3.10)", out)
-        self.assertNotIn("POST", [method for method, _, _ in fake.sent])
+        self.assertIn("set, but for unit (Python 3.12), unit (Python 3.10), lint, not yet run on main", out)
+        checks = fake.rulesets[8]["rules"][0]["parameters"]["required_status_checks"]
+        self.assertEqual([check["context"] for check in checks], ["emulator", "scan"])
         # Everything else is set, signed commits on main among it.
         protect = fake.rulesets[7]
         self.assertIn({"type": "required_signatures"}, protect["rules"])
         self.assertIn(("PUT", "/immutable-releases", None), fake.sent)
         self.assertIn(("PATCH", "/code-scanning/default-setup", gs.CODE_SCANNING), fake.sent)
+        # Asked again: still not as written, until they have run.
+        code, out = run(fake)
+        self.assertIn("ruleset 'Checks before main': differs", out)
+
+    def test_a_renamed_check_is_no_longer_required_before_its_new_name_has_run(self):
+        fake = FakeGitHub(checks_on_main=["unit", "unit (Python 3.10)", "emulator", "scan", "lint"])
+        fake.rulesets[8] = {"id": 8, "name": "Checks before main",
+                            **gs.checks_ruleset(["unit", "unit (Python 3.10)", "emulator", "scan", "lint"])}
+        run(fake, "apply")
+        checks = [c["context"] for c in fake.rulesets[8]["rules"][0]["parameters"]["required_status_checks"]]
+        self.assertEqual(checks, ["unit (Python 3.10)", "emulator", "scan", "lint"])
+        fake.checks_on_main.append("unit (Python 3.12)")
+        run(fake, "apply")
+        checks = [c["context"] for c in fake.rulesets[8]["rules"][0]["parameters"]["required_status_checks"]]
+        self.assertEqual(checks, gs.REQUIRED_CHECKS)
+
+    def test_no_checks_are_required_before_any_has_run_on_main(self):
+        code, out = run(FakeGitHub(), "apply")
+        self.assertIn("ruleset 'Checks before main': left for now - none has run on main yet", out)
 
     def test_checks_are_required_once_each_has_run_on_main(self):
         fake = FakeGitHub(checks_on_main=[*gs.REQUIRED_CHECKS, "CodeQL"])
