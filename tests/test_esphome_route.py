@@ -334,7 +334,7 @@ class ApiSignalTests(unittest.TestCase):
         self.assertEqual(af.esphome.api_signal("127.0.0.1", port), -61)
 
     def test_the_dump_names_the_network_with_the_signal(self):
-        dump = self.log("[C][wifi:1297]:   SSID: 'Home-2G'\n  BSSID: 10:01:00:C4:0A:56\n"
+        dump = self.log("[C][wifi:1297]:   SSID: 'Home-2G'\n  BSSID: 02:00:00:C4:0A:56\n"
                         "  Signal strength: -61 dB ▂▄▆_".encode())
         port = self.serve(dump)
         self.assertEqual(af.esphome.api_wifi("127.0.0.1", port), {"signal": -61, "ssid": "Home-2G"})

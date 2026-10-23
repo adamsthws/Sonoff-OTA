@@ -2597,7 +2597,7 @@ class AdoptPlugTests(unittest.TestCase):
         inputs = {}
         ctx = SimpleNamespace(state=SimpleNamespace(set_input=inputs.__setitem__, input=inputs.get),
                               set_plug_ip=lambda ip: inputs.__setitem__("plug_ip", ip))
-        found = autoflash_cli.detect.Found("192.168.0.37", "tasmota", None, "tasmota-ABCDEF-1234",
+        found = autoflash_cli.detect.Found("192.168.0.137", "tasmota", None, "tasmota-ABCDEF-1234",
                                            "sonoff-s60")
         with mock.patch.object(autoflash_cli.hostsys, "mac_of", return_value=None), \
              mock.patch.object(autoflash_cli, "say"):
@@ -4605,7 +4605,7 @@ class TasmotaWebPasswordTests(unittest.TestCase):
                       mock.patch.object(autoflash, "adopt_plug"),
                       mock.patch.object(autoflash, "converted_here", return_value=False),
                       mock.patch.object(autoflash.plugs, "PLUGS", Path("/nonexistent/plugs")),
-                      mock.patch.object(autoflash.hostsys, "local_ip_towards", return_value="192.168.0.10"),
+                      mock.patch.object(autoflash.hostsys, "local_ip_towards", return_value="192.168.0.110"),
                       mock.patch.object(autoflash.hostsys, "mac_of", return_value="12:34:56:ab:cd:ef"),
                       # A question no test expects fails it, rather than waiting on a keyboard.
                       mock.patch.object(autoflash, "ask_choice", side_effect=AssertionError("asked")),
@@ -4630,7 +4630,7 @@ class TasmotaWebPasswordTests(unittest.TestCase):
         return SimpleNamespace(state=state, web_password=None, esphome_login=None)
 
     def test_a_plug_given_by_address_is_asked_for_it_then_found(self):
-        ctx = self.ctx(plug_ip="192.168.0.37")
+        ctx = self.ctx(plug_ip="192.168.0.137")
         answers = {None: "locked", "s3cret-71": "tasmota"}
         with mock.patch.object(self.af.detect, "identify",
                                side_effect=lambda host, password=None, **_: answers[password]), \
@@ -4648,7 +4648,7 @@ class TasmotaWebPasswordTests(unittest.TestCase):
                 mock.patch.object(self.af.detect, "identify", return_value="locked"), \
                 mock.patch.object(self.af, "ask_secret") as asked:
             with self.assertRaisesRegex(self.af.Abort, "web password.*--web-password.*AUTOFLASH_TASMOTA_PASSWORD"):
-                self.af.find_current_firmware(self.ctx(plug_ip="192.168.0.37"))
+                self.af.find_current_firmware(self.ctx(plug_ip="192.168.0.137"))
         asked.assert_not_called()
 
     def test_asked_again_until_it_takes_one_or_the_run_is_stopped(self):
@@ -4656,11 +4656,11 @@ class TasmotaWebPasswordTests(unittest.TestCase):
                 mock.patch.object(self.af, "ask_choice", side_effect=[0, 0, self.af.QuitRun("quit")]), \
                 mock.patch.object(self.af, "ask_secret", return_value="not-it-9") as asked:
             with self.assertRaises(self.af.QuitRun):
-                self.af.find_current_firmware(self.ctx(plug_ip="192.168.0.37"))
+                self.af.find_current_firmware(self.ctx(plug_ip="192.168.0.137"))
         self.assertEqual(asked.call_count, 2)
 
     def test_trying_again_once_it_is_cleared_goes_on_without_one(self):
-        ctx = self.ctx(plug_ip="192.168.0.37")
+        ctx = self.ctx(plug_ip="192.168.0.137")
 
         choices = []
 
@@ -4693,14 +4693,14 @@ class TasmotaWebPasswordTests(unittest.TestCase):
         self.assertEqual((chosen.host, chosen.firmware), ("192.168.0.42", "tasmota"))
 
     def test_unattended_one_found_locked_is_left_out_and_named(self):
-        found = [self.af.detect.Found("192.168.0.37", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF"),
+        found = [self.af.detect.Found("192.168.0.137", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF"),
                  self.af.detect.Found("192.168.0.42", "locked", "aa:bb:cc:dd:ee:ff")]
         with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
                 mock.patch.object(self.af.detect, "converted_plugs", return_value=found), \
                 mock.patch.object(self.af, "ask_choice") as menu:
             self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
         menu.assert_not_called()  # the one S60 that answered is the plug, as before
-        self.assertEqual(self.af.adopt_plug.call_args.args[1].host, "192.168.0.37")
+        self.assertEqual(self.af.adopt_plug.call_args.args[1].host, "192.168.0.137")
         told = " ".join(str(call.args[0]) for call in self.af.tell.call_args_list)
         self.assertIn("192.168.0.42", told)
         self.assertIn("--web-password", told)
@@ -4722,7 +4722,7 @@ class TasmotaWebPasswordTests(unittest.TestCase):
                 self.assertEqual(self.af.find_current_firmware(self.ctx()), "sonoff")
 
     def test_a_run_carried_on_from_tasmota_is_asked_before_any_step(self):
-        ctx = self.ctx(plug_ip="192.168.0.37", source="tasmota")
+        ctx = self.ctx(plug_ip="192.168.0.137", source="tasmota")
         ctx.device = mock.Mock(wants_password=mock.Mock(return_value=True))
         with mock.patch.object(self.af, "ask_choice", return_value=0), \
                 mock.patch.object(self.af, "ask_secret", return_value="s3cret-71"):
@@ -4730,7 +4730,7 @@ class TasmotaWebPasswordTests(unittest.TestCase):
         self.assertEqual(ctx.web_password, "s3cret-71")
         # Past L1 the plug runs only firmware this tool put on; from ESPHome, none of the plug's Tasmota.
         for inputs in ({"source": "tasmota", "done": ("L1",)}, {"source": "esphome"}, {}):
-            ctx = self.ctx(plug_ip="192.168.0.37", **inputs)
+            ctx = self.ctx(plug_ip="192.168.0.137", **inputs)
             ctx.device = mock.Mock()
             self.af.unlock_tasmota(ctx)
             ctx.device.wants_password.assert_not_called()
@@ -4758,7 +4758,7 @@ class EsphomeWebLoginTests(unittest.TestCase):
                       mock.patch.object(autoflash, "adopt_plug"),
                       mock.patch.object(autoflash, "converted_here", return_value=False),
                       mock.patch.object(autoflash.plugs, "PLUGS", Path("/nonexistent/plugs")),
-                      mock.patch.object(autoflash.hostsys, "local_ip_towards", return_value="192.168.0.10"),
+                      mock.patch.object(autoflash.hostsys, "local_ip_towards", return_value="192.168.0.110"),
                       mock.patch.object(autoflash.hostsys, "mac_of", return_value="12:34:56:ab:cd:ef"),
                       # A question no test expects fails it, rather than waiting on a keyboard.
                       mock.patch.object(autoflash, "ask_choice", side_effect=AssertionError("asked")),
@@ -4831,7 +4831,7 @@ class EsphomeWebLoginTests(unittest.TestCase):
         self.assertEqual((chosen.host, chosen.firmware), ("192.168.0.42", "esphome"))
 
     def test_unattended_one_found_with_a_login_is_left_out_and_named(self):
-        found = [self.af.detect.Found("192.168.0.37", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF"),
+        found = [self.af.detect.Found("192.168.0.137", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF"),
                  self.af.detect.Found("192.168.0.42", "esphome-login", "aa:bb:cc:dd:ee:ff")]
         with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
                 mock.patch.object(self.af.detect, "converted_plugs", return_value=found):

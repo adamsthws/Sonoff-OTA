@@ -21,7 +21,7 @@ class PrivacyTestCase(unittest.TestCase):
 class ScrubTests(PrivacyTestCase):
     def test_what_identifies_someone_is_replaced(self):
         cases = {
-            "--email someone@gmail.com --listen-ip 192.168.0.10": "--email <email> --listen-ip 192.168.0.10",
+            "--email someone@gmail.com --listen-ip 192.168.0.110": "--email <email> --listen-ip 192.168.0.110",
             '"GET /user1.bin?deviceid=1001234abc&ts=4708736&sign=fafd2f9d3bcc HTTP/1.1"':
                 '"GET /user1.bin?deviceid=<device-id>&ts=4708736&sign=<signature> HTTP/1.1"',
             "Tasmota is at 192.168.0.50 as tasmota-1A2B3C-4567.": "Tasmota is at 192.168.0.50 as <device-name>.",

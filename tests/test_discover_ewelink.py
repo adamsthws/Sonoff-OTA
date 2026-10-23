@@ -78,10 +78,10 @@ def addresses(route, others=()):
 
 class SweepTests(unittest.TestCase):
     def test_every_other_address_on_this_computers_slash_24(self):
-        with addresses("192.168.0.10"):
+        with addresses("192.168.0.110"):
             targets = sweep_targets()
         self.assertEqual(len(targets), 253)
-        self.assertNotIn("192.168.0.10", targets)
+        self.assertNotIn("192.168.0.110", targets)
         self.assertIn("192.168.0.50", targets)
         self.assertNotIn("192.168.0.255", targets)
 
