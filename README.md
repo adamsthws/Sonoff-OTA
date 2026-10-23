@@ -1,7 +1,7 @@
 # Sonoff S60 → Tasmota or ESPHome, OTA
 ***Flash it, don't smash it.***
 
-[![Installs Tasmota](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.tasmota.version&label=installs%20Tasmota&color=blue)](docs/updating-firmware.md) [![Installs ESPHome built with](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.esphome.image.esphome&label=installs%20ESPHome%20built%20with&color=blue)](docs/updating-firmware.md)
+[![Installs Tasmota](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.tasmota.version&label=installs%20Tasmota&color=blue)](docs/updating-firmware.md) [![Installs ESPHome](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.esphome.image.esphome&label=installs%20ESPHome&color=blue)](docs/updating-firmware.md)
 
 <br>
 <br>
