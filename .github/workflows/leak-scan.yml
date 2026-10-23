@@ -1,0 +1,32 @@
+# The leak scan (tools/leak_scan.py) on every push and pull request: what
+# the hooks stop on a maintainer's computer, by its shape alone here - a MAC
+# address that could be a real device's, a private key, a token - since the
+# values only a maintainer's computer knows are not here. For a pull request
+# from a fork, or a push past --no-verify.
+name: Leak scan
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: What it adds
+        env:
+          BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          AFTER: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ] \
+                  && git cat-file -e "$BEFORE" 2>/dev/null; then
+              python3 tools/leak_scan.py range "$BEFORE..$AFTER"
+          fi
+      - name: The repository as it stands
+        run: python3 tools/leak_scan.py tree

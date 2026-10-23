@@ -45,3 +45,6 @@ REPARTITION_LOCK.owner-authorized*
 # Accidental/temporary files from development.
 0
 *.bak
+
+# tools/leak_scan.py: your own values to keep out of Git.
+.leak-scan.local

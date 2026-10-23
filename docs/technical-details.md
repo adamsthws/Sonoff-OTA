@@ -171,6 +171,41 @@ The maintainer's own backup is sealed in a private package, and the emulator
 restores it when it is not here ([private-backup.md](private-backup.md)): in
 the maintainer's checkout nothing in `captures/` needs backing up.
 
+### Keeping secrets out of Git
+
+`tools/leak_scan.py` stops a commit or a push that would put a secret or a
+real identifier into the repository. Set it up once in a clone:
+
+```sh
+python3 tools/leak_scan.py install
+```
+
+which points Git at the hooks in `.githooks/`: before each commit it looks at
+what is staged, then at the commit's message, and before each push at every
+commit the push would send - so a commit made with `--no-verify` is still
+caught on its way out. It finds two kinds of thing:
+
+- **Your own, by value** - only this computer knows them: every value in
+  `.env`; the eWeLink account and each plug's eWeLink id and name; each plug's
+  MAC (from `captures/plugs/`: its folder, its record, its backup's eFuses), in
+  any form, and as raw bytes in any file; the Sonoff settings in each backup
+  that say which plug, account or network it is (its eWeLink keys, the Wi-Fi it
+  was set up on); the addresses real runs - not the emulator's - found plugs
+  and this computer at; and each line of `.leak-scan.local`, a file Git
+  ignores, for anything else of yours (a router's name, a public address).
+- **Anyone's, by shape**: a MAC address that could be a real device's - one
+  not locally administered, so not `12:34:56:...` or `aa:bb:...`, and not a
+  made-up example listed in `.leak-scan-allow` - a private key, or a GitHub,
+  AWS, Google or Slack token.
+
+It says where each finding is and what kind, never the value. Take it out, or
+for something meant to be there - a new made-up example MAC, say, which
+belongs in `.leak-scan-allow` - `git commit --no-verify` lets it through. The
+repository's `leak-scan` workflow runs the shape checks on every push and
+pull request, and GitHub's own secret scanning and push protection, on for
+the repository, refuse pushes with known kinds of token. In examples, use
+`12:34:56:ab:cd:ef`, and addresses that are nobody's.
+
 ### What crosses the network
 
 Not written to disk is not the same as never exposed. The password crosses
