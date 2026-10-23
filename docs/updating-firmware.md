@@ -189,8 +189,9 @@ plugs ([emulator.md](emulator.md#public-plugs)) - one after E3 on the way to
 Tasmota, one after D5 on the way to ESPHome - are taken to their final
 firmware (F2 to H1, and I1 and I2), and the plugs that makes are then taken
 each to the other (L1 to I2, and X1 to H1): every step that writes, starts,
-checks or runs code on the final firmware, in about five minutes on two
-emulators. The plugs hold nothing of Sonoff's, so no cloud is needed, real or
+checks or runs code on the final firmware, in four or five minutes on two
+emulators - one for each way, each going on to its second run as soon as its
+first is done. The plugs hold nothing of Sonoff's, so no cloud is needed, real or
 stub, nor an account:
 
 ```sh

@@ -60,11 +60,12 @@ LOGS = ROOT / "captures/emulation/public-plugs"
 UNATTENDED = ROOT / "tools/emulator/unattended-test.sh"
 # Where each way stops before its final firmware, and what it is made into.
 STARTS = {"tasmota": ("E3", "public-pre-final-tasmota"), "esphome": ("D5", "public-pre-final-esphome")}
-# The test: the final firmware installed, then each plug taken to the other.
-TEST = [
-    [("public-pre-final-tasmota", "tasmota", "public-on-tasmota"),
-     ("public-pre-final-esphome", "esphome", "public-on-esphome")],
-    [("public-on-tasmota", "esphome", None), ("public-on-esphome", "tasmota", None)],
+# The test: two ways, one on each emulator, each a final firmware installed,
+# then that plug taken to the other. A way goes on as soon as its own first
+# run is done: neither waits for the other.
+WAYS = [
+    [("public-pre-final-tasmota", "tasmota", "public-on-tasmota"), ("public-on-tasmota", "esphome", None)],
+    [("public-pre-final-esphome", "esphome", "public-on-esphome"), ("public-on-esphome", "tasmota", None)],
 ]
 
 
@@ -162,17 +163,23 @@ def command_test(args: argparse.Namespace) -> int:
         if not mode.is_file() or mode.read_text().strip() != "public":
             print(f"No public plug {start}: make them (public_plugs.py make) or fetch them", file=sys.stderr)
             return 1
-    failed = 0
     started = time.time()
-    for stage in TEST:
-        jobs = [lambda i=instance, s=source, f=firmware, k=keep: run(
-                    i, s, f, k, LOGS / f"test-{s}-to-{f}.log")
-                for (source, firmware, keep), instance in zip(stage, args.instances)]
-        for (source, firmware, _), (ok, said) in zip(stage, side_by_side(jobs)):
-            print(f"{'PASS' if ok else 'FAIL'}  {source} to {firmware}: {said}", flush=True)
-            failed += not ok
-        if failed:
-            break  # the second needs the first's plugs
+    said_lock = threading.Lock()
+
+    def way(instance: int, runs: list) -> int:
+        for n, (source, firmware, keep) in enumerate(runs):
+            ok, said = run(instance, source, firmware, keep, LOGS / f"test-{source}-to-{firmware}.log")
+            with said_lock:
+                print(f"{'PASS' if ok else 'FAIL'}  {source} to {firmware}: {said}", flush=True)
+                if not ok:
+                    for later, to, _ in runs[n + 1:]:  # each starts from the plug the one before made
+                        print(f"SKIP  {later} to {to}: the run before it failed", flush=True)
+            if not ok:
+                return 1
+        return 0
+
+    failed = sum(side_by_side([lambda i=instance, w=runs: way(i, w)
+                               for runs, instance in zip(WAYS, args.instances)]))
     print(f"{'All passed' if not failed else f'{failed} failed'} in {int(time.time() - started)} s; logs in {LOGS}")
     return 1 if failed else 0
 
