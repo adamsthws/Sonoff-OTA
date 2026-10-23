@@ -697,7 +697,9 @@ class ReportTests(OutputTestCase):
         import tools.autoflash_cli as af
         from tools.autoflash.state import DONE
         # Values other tests made private ("wrong", as a password) are not this run's.
-        self.enterContext(mock.patch.dict(af.output._private, {}, clear=True))
+        patcher = mock.patch.dict(af.output._private, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         ctx = self.ctx()
         ctx.last_failure = ""
         for step, _, _ in af.STEPS[:9]:
@@ -719,7 +721,9 @@ class ReportTests(OutputTestCase):
         # stopped at the commit.
         import tools.autoflash_cli as af
         from tools.autoflash.state import DONE
-        self.enterContext(mock.patch.dict(af.output._private, {}, clear=True))
+        patcher = mock.patch.dict(af.output._private, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         ctx = self.ctx()
         for step, _, _ in af.STEPS:
             if step == "E3":

@@ -47,6 +47,40 @@ jobs:
           path: unit.txt
           retention-days: 30
 
+  # The same on the oldest Python the tool runs on: start.sh takes any 3.10 or
+  # newer it finds, and 3.10 is Ubuntu 22.04's. Beside the job above, so no
+  # longer to wait for.
+  unit-oldest-python:
+    name: unit (Python 3.10)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: python
+        with:
+          python-version: "3.10"
+      - name: Unit tests
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: |
+          "$PYTHON" -m venv .venv
+          .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
+          status=0
+          PYTHONUNBUFFERED=1 .venv/bin/python -m unittest discover -s tests > unit.txt 2>&1 || status=$?
+          awk '/^(FAIL|ERROR): /{show=1} /^Ran [0-9]+ tests/{show=1} show' unit.txt | tail -400
+          grep -E "^(Ran [0-9]+ tests|OK|FAILED)" unit.txt >> "$GITHUB_STEP_SUMMARY" || true
+          exit $status
+      - name: Keep the unit tests' output
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-tests-python-3.10
+          path: unit.txt
+          retention-days: 30
+
   emulator:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
