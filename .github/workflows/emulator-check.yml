@@ -96,6 +96,9 @@ jobs:
   emulator:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read   # whether the emulator-image workflow is building the image
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -105,7 +108,32 @@ jobs:
           command -v rsync >/dev/null || sudo apt-get install -y -q rsync
           python3 -m venv .venv
           .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
-          echo "Emulator image: ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/autoflash-emu:$(tools/emulator/image.sh tag)"
+      - name: The emulator image, once the emulator-image workflow has published it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # A push that changes what the image is built from starts the
+          # emulator-image workflow beside this one: wait for the image it
+          # publishes rather than build the same one here, as emu.sh does when
+          # none is published. The one waited for is the one emu.sh pulls.
+          published="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/autoflash-emu"
+          echo "AUTOFLASH_EMU_PUBLISHED=$published" >> "$GITHUB_ENV"
+          image="$published:$(tools/emulator/image.sh tag)"
+          echo "Emulator image: $image"
+          for _ in $(seq 60); do
+              if docker manifest inspect "$image" >/dev/null 2>&1; then
+                  echo "Published."; exit 0
+              fi
+              building=$(gh run list --workflow emulator-image.yml --commit "$COMMIT" --json status \
+                  --jq '[.[] | select(.status != "completed")] | length')
+              if [ "$building" = 0 ]; then
+                  echo "Not published, nor being built: emu.sh builds it here."; exit 0
+              fi
+              echo "The emulator-image workflow is building it: waiting..."
+              sleep 20
+          done
+          echo "Still not published after 20 minutes: emu.sh builds it here."
       - name: The public plugs
         run: .venv/bin/python -I tools/emulator/public_plugs.py fetch
       - name: The final firmware, from them

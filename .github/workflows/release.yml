@@ -50,6 +50,7 @@ jobs:
     if: needs.version.outputs.tag != ''
     permissions:
       contents: read
+      actions: read   # its emulator job looks for the emulator-image workflow's run
     uses: ./.github/workflows/emulator-check.yml
 
   lint:
