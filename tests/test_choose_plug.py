@@ -79,7 +79,8 @@ class RestoreTests(unittest.TestCase):
             self.assertEqual(cp.restored(None), [])
 
     def test_restoring_can_be_turned_off(self):
-        import os, tempfile
+        import os
+        import tempfile
         from unittest import mock
         from tools.emulator import choose_plug as cp
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"AUTOFLASH_NO_RESTORE": "1"}), \

@@ -302,7 +302,9 @@ def command_install() -> int:
     git("config", "core.hooksPath", ".githooks")
     for hook in (ROOT / ".githooks").iterdir():
         hook.chmod(0o755)
-    print("This clone's hooks are .githooks/ now: each commit, its message and each push are scanned.")
+    print("This clone's hooks are .githooks/ now: each commit, its message and each push are scanned,\n"
+          "and each commit linted (tools/lint.py) by the linters in .venv:\n"
+          "    .venv/bin/python -m pip install --require-hashes -r requirements/lint.txt")
     return 0
 
 

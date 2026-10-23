@@ -204,7 +204,7 @@ def scenarios():
             if step in FALLBACK_STEPS:
                 yield dict(id=sid(route, step, "fallback", 150), route=route, step=step,
                            fault="fallback", arg=150, at=40)
-    for route, target in C2_ROUTES.items():
+    for route in C2_ROUTES:
         for fault, arg in step_faults("C2") + [("cancel", "switch"), ("token", "login")]:
             yield dict(id=sid(route, "C2", fault, arg), route=route, step="C2", fault=fault, arg=arg, at=40)
     yield from composite_scenarios()
@@ -457,7 +457,7 @@ class Tuner:
     def note(self, text):
         line = f"{time.strftime('%T')} TUNER {text} (workers {self.workers}, pause {self.cool_down:.0f}s)"
         print(line, flush=True)
-        with open(OUT / "tuning.log", "a") as f:
+        with open(OUT / "tuning.log", "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
     def finished(self, row, log, started):
@@ -475,7 +475,7 @@ class Tuner:
                 # Sonoff's firmware stays away from eWeLink after one, which
                 # would read as the cloud's fault.
                 try:
-                    text = Path(log).read_text(errors="replace")
+                    text = Path(log).read_text(encoding="utf-8", errors="replace")
                     ok = not self.TROUBLE.search(text) or bool(self.NOT_THE_CLOUD.search(text))
                 except OSError:
                     pass
@@ -651,7 +651,7 @@ class PlugMonitor:
                     ended = now_ended
                 elif now_ended > ended:
                     break
-                with open(uart, errors="replace") as f:
+                with open(uart, encoding="utf-8", errors="replace") as f:
                     f.seek(pos); boots = f.read(); pos = f.tell()
                 if any(m.lastgroup != "sonoff" for m in BOOTS.finditer(boots)):
                     break
@@ -717,7 +717,7 @@ class Scenario:
         return text[self.earlier_release_wrote.get(log, 0):]
 
     def say(self, text):
-        with open(self.log, "a") as f:
+        with open(self.log, "a", encoding="utf-8") as f:
             f.write(f"{time.strftime('%T')} {text}\n")
 
     def ex(self, *args, timeout=60):
@@ -744,7 +744,7 @@ class Scenario:
             env["AUTOFLASH_EMULATOR_COUNTDOWN"] = "30"
         if self.sc["fault"] == "nohook":
             env["AUTOFLASH_EMULATOR_NO_AT_SAVE"] = "1"
-        with open(self.log, "a") as out:
+        with open(self.log, "a", encoding="utf-8") as out:
             out.write(f"--- {' '.join(args[1:])}\n")
             out.flush()
             try:
@@ -1013,7 +1013,7 @@ class Scenario:
                     pass
 
     def screen_result(self):
-        text = Path(self.log).read_text(errors="replace")
+        text = Path(self.log).read_text(encoding="utf-8", errors="replace")
         runs = text.split("--- ")[-1]
         clean = re.sub(r"\x1b\[[0-9;]*m", "", runs)
         if "there is nothing to convert" in clean:
@@ -1310,7 +1310,7 @@ class Scenario:
         sc = self.sc
         fault, arg = sc["fault"], sc["arg"]
         while "Converted" not in results[-1][1] and len(results) < MAX_RUNS:
-            said = re.sub(r"\s+", " ", Path(self.log).read_text(errors="replace").split("--- ")[-1])
+            said = re.sub(r"\s+", " ", Path(self.log).read_text(encoding="utf-8", errors="replace").split("--- ")[-1])
             if "switch the plug off and on" in said or "switch it off and on" in said:
                 self.say("following the run's advice: the plug switched off and on")
                 self.ex(PLUG_CMD, "restart")
@@ -1341,7 +1341,7 @@ class Scenario:
             results[-1] = (results[-1][0], self.screen_result())
             stop2.set()
             extra, code = [], None
-            said = re.sub(r"\s+", " ", Path(self.log).read_text(errors="replace").split("--- ")[-1])
+            said = re.sub(r"\s+", " ", Path(self.log).read_text(encoding="utf-8", errors="replace").split("--- ")[-1])
             if (fault, arg) == ("cancel", "switch") and "cannot switch to" in said:
                 # Refused, as it should be: started again for the other one, as it says.
                 self.notes["switch_refused"] = True
@@ -1473,11 +1473,11 @@ class Scenario:
                "results": [r for _, r in results], "codes": [c for c, _ in results],
                "notes": self.notes, "leftovers": left, "log": str(self.log),
                "finished": time.strftime("%Y-%m-%d %H:%M:%S"), "host": os.uname().nodename}
-        with open(RESULTS, "a") as f:
+        with open(RESULTS, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         if verdict != "PASS":
             # This scenario's own screens: the run's log goes back further.
-            if STRANDED.search(re.sub(r"\s+", " ", Path(self.log).read_text(errors="replace"))):
+            if STRANDED.search(re.sub(r"\s+", " ", Path(self.log).read_text(encoding="utf-8", errors="replace"))):
                 try:
                     self.probe()
                 except Exception as exc:  # noqa: BLE001 - a look, never the verdict
@@ -1556,7 +1556,7 @@ def worker(n, todo, lock, cloud=False, room=None):
         skip = OUT / "skip.txt"
         if skip.exists() and sc["id"] in skip.read_text().split():
             continue
-        while int(re.search(r"MemAvailable:\s+(\d+)", Path("/proc/meminfo").read_text()).group(1)) < 350_000:
+        while int(re.search(r"MemAvailable:\s+(\d+)", Path("/proc/meminfo").read_text(encoding="utf-8")).group(1)) < 350_000:
             time.sleep(10)
         log = LOGS / (key(sc["id"]) + ".log")
         log.unlink(missing_ok=True)
@@ -1566,7 +1566,7 @@ def worker(n, todo, lock, cloud=False, room=None):
         except Exception as exc:  # noqa: BLE001
             row = {**sc, "instance": n, "verdict": "HARNESS-ERROR", "error": repr(exc), "trace": traceback.format_exc(),
                    "finished": time.strftime("%Y-%m-%d %H:%M:%S")}
-            with open(RESULTS, "a") as f:
+            with open(RESULTS, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + "\n")
             sh("docker", "stop", name(n), timeout=120)
         with lock:
@@ -1582,7 +1582,7 @@ def batch(ids_file=None):
     known = {sc["id"]: sc for sc in scenarios()}
     done = {i for i, row in latest().items() if row["verdict"] in ("PASS", "EMULATOR-LIMIT", "NO-TRAFFIC")}
     cloud, anywhere = queue.Queue(), queue.Queue()
-    ids = Path(ids_file).read_text().split() if ids_file else list(known)
+    ids = Path(ids_file).read_text(encoding="utf-8").split() if ids_file else list(known)
     for i in ids:
         if i in done:
             continue
@@ -1642,7 +1642,7 @@ def prep():
         if stop_after:
             threading.Thread(target=stopped_after, args=(stop_after, sc, since), daemon=True).start()
         stub = ["--stub-cloud"] if STUB_CLOUD else []
-        with open(log, "w") as out:
+        with open(log, "w", encoding="utf-8") as out:
             subprocess.call([unattended, f"--instance={n}", f"--plug={MAC}", f"--save={saved(save)}",
                              *stub, *args], stdout=out, stderr=subprocess.STDOUT)
         monitor.stop.set()

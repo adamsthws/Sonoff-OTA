@@ -1,0 +1,6 @@
+# The linters tools/lint.py runs, for the hooks and the lint workflow.
+# requirements/lint.txt pins each, with its hashes, from this (Dependabot
+# keeps it current):
+#
+#     pip-compile --generate-hashes --allow-unsafe requirements/lint.in
+ruff

@@ -22,6 +22,26 @@ plans the plug carries out, the update protocols, image checks and pins, what
 is kept and what never is. Every bug found below has a test that fails without
 its fix.
 
+## Linters
+
+```sh
+.venv/bin/python -m pip install --require-hashes -r requirements/lint.txt   # once
+python3 tools/lint.py all
+```
+
+Before the tests, what is likely wrong in the code as written. The
+pre-commit hook (`python3 tools/leak_scan.py install` sets it up) runs them on
+the files a commit changes, and the `lint` workflow on every file:
+
+| Linter | On | Looks for |
+|---|---|---|
+| [ruff](https://docs.astral.sh/ruff/) | Python (`ruff.toml`) | undefined or unused names, likely bugs, a text file opened without `encoding=`, syntax newer than Python 3.10 |
+
+The linters come from `requirements/lint.txt`, pinned with their hashes. A
+commit on a computer without one is not stopped - the hook says it skipped
+it, and the workflow runs it - and `git commit --no-verify` skips them all.
+`archive/` is not linted: it is kept as it was.
+
 ## The emulator
 
 A conversion with nobody at the keyboard ([unattended.md](unattended.md)):

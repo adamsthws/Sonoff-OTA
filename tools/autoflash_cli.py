@@ -1336,7 +1336,7 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
         elif outcome == "rejected":
             tell(f"    The plug could not connect to '{ssid}' with the bundle's details.")
         elif outcome == "gone":
-            tell(f"    No word from the plug, but its network has gone: it has most likely")
+            tell("    No word from the plug, but its network has gone: it has most likely")
             tell(f"    joined '{ssid}' with them. It is looked for there.")
         else:
             tell("    The plug did not say whether it connected. If it does not turn up")
@@ -1441,7 +1441,7 @@ def upload_or_prompt_by_hand(ctx: "Context", path: Path, what: str, exc: Excepti
     output.transient_begin()
     tell(f"    Automatic upload failed: {exc}")
     say("")
-    tell(f"    Upload it by hand instead - the file is identical:")
+    tell("    Upload it by hand instead - the file is identical:")
     tell(f"        open http://{device.host}/  ->  Firmware Upgrade  ->  choose file")
     tell(f"        {path}")
     if not confirm(f"{what} uploaded through the web UI?"):
@@ -4081,7 +4081,7 @@ def set_up_through_own_network(ctx: Context, what: str, check: Callable[[str], A
         except Abort:
             if round_ == 2 or prompts.UNATTENDED:
                 raise Abort(f"{what} did not join '{ssid}' with the details sent through its own "
-                            "network. Check the network's name and password, then run this again")
+                            "network. Check the network's name and password, then run this again") from None
         tell(f"    {what} did not join '{ssid}' with those details: most likely your Wi-Fi's name")
         tell("    or password changed since the plug last joined it.")
         output.transient_begin()
@@ -4953,7 +4953,7 @@ def check_esphome_key(ctx: Context, host: str) -> None:
         if prompts.UNATTENDED:
             raise Abort(f"{esphome_ota.WrongKey()}: {ESPHOME_KEY_HINT}")
         secret, value = secret_or_retry("ESPHome's API encryption key", [
-            f"The API encryption key given (--esphome-api-key, or AUTOFLASH_ESPHOME_API_KEY)",
+            "The API encryption key given (--esphome-api-key, or AUTOFLASH_ESPHOME_API_KEY)",
             f"is not the one ESPHome on the plug at {host} has: its YAML config has it, after",
             "key: under api: encryption:. Type that one; or go on without it, when the",
             "plug's Wi-Fi details and its update can be had another way.",
@@ -5750,7 +5750,7 @@ def stop_here_after_ctrl_c(step: str) -> bool:
     interrupt.clear()
     output.transient_begin()
     section("You pressed Ctrl-C", [
-        f"The stage that was under way is done, and everything is recorded, so",
+        "The stage that was under way is done, and everything is recorded, so",
         "stopping here is safe: running this again picks up where it left off.",
     ])
     choice = prompts.countdown_choice("Stop the run here", [

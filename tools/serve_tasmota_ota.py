@@ -26,7 +26,7 @@ try:
     from tools.autoflash.prompts import ask_secret
     from tools.analyze_vendor_ota import analyze
     from tools.build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE
-    from tools.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
+    from tools.get_device_key import APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
     from tools.probe_ota_command import WS_DISPATCH, nonce
     from tools.query_ota import ota_identity
     from tools.websocket_minimal import WebSocket, WebSocketError
@@ -35,7 +35,7 @@ except ModuleNotFoundError:
     from autoflash.prompts import ask_secret
     from analyze_vendor_ota import analyze
     from build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE
-    from get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
+    from get_device_key import APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
     from probe_ota_command import WS_DISPATCH, nonce
     from query_ota import ota_identity
     from websocket_minimal import WebSocket, WebSocketError

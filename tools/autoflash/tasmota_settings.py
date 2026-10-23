@@ -16,6 +16,10 @@ Algorithms: settings.ino (GetCfgCrc32, SettingsUpdateText, SettingsBufferXor).
 from __future__ import annotations
 
 import struct
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 SIZE = 4096
 CFG_HOLDER = 4617                # my_user_config.h

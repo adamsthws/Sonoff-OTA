@@ -17,10 +17,13 @@ import threading
 import time
 import urllib.error
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from . import hostsys, interrupt, output
 from .device import Device
+
+if TYPE_CHECKING:
+    from .plans import Plan
 
 ARMED_PHASES = {"commit", "restore"}
 CLOSURE_NAME = {"commit": "autoflash_commit", "restore": "autoflash_restore"}

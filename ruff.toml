@@ -1,0 +1,24 @@
+# ruff (tools/lint.py): what is likely a bug, not style - no formatting,
+# no import order.
+target-version = "py310"   # the oldest Python the tool runs on
+extend-exclude = ["archive"]
+
+[lint]
+select = [
+    "F",        # pyflakes: undefined and unused names, broken f-strings
+    "E4", "E7", "E9",  # imports, statements, syntax
+    "B",        # bugbear: likely bugs
+    "PLW1514",  # a text file opened without encoding=: Windows reads it as cp1252
+]
+ignore = [
+    "E702",     # several statements on a line, with semicolons
+    "E731",     # a lambda given a name
+    "B905",     # zip() without strict=
+]
+# PLW1514 is still in preview: only it, as it is named above.
+preview = true
+explicit-preview-rules = true
+
+[lint.per-file-ignores]
+# Tests define functions in loops to call in the same pass.
+"tests/**" = ["B023"]

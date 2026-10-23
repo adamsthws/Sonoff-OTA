@@ -162,7 +162,9 @@ class ScenarioTests(unittest.TestCase):
         self.assertGreaterEqual(sum(gap > 20 for gap in apart.values()), 2, apart)
 
     def test_how_busy_each_phase_kept_the_plug(self):
-        import json, os, time
+        import json
+        import os
+        import time
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
             for name, captures, age in (("new", {"E2.plug_busy_seconds": 31.2, "G1.plug_busy_seconds": 12,

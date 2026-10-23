@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""The linters, on what a commit holds or on every tracked file.
+
+    python3 tools/lint.py staged     the files a commit changes (the pre-commit hook)
+    python3 tools/lint.py all        every tracked file (the lint workflow)
+    python3 tools/lint.py FILE...    those files
+
+Each linter is handed the files of its kind:
+
+    ruff          Python (ruff.toml)
+
+They come from requirements/lint.txt, in the repository's .venv:
+
+    .venv/bin/python -m pip install --require-hashes -r requirements/lint.txt
+
+A linter that is not installed is skipped, with a warning, on a commit - the
+lint workflow runs them all - and fails `all`. On a commit, a file is linted as
+it is on disk: staged in part, its unstaged part is linted too.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+ROOT = Path(__file__).resolve().parents[1]
+# Where the hook's Python is, and the repository's .venv: the linters it installs.
+TOOL_DIRS = [Path(sys.executable).parent, ROOT / ".venv" / "bin", ROOT / ".venv" / "Scripts"]
+
+
+@dataclass(frozen=True)
+class Linter:
+    name: str
+    wants: Callable[[Path], bool]       # whether it lints this file
+    command: Callable[[list[str]], list[str]]
+    needs: str                          # the program it runs
+    install: str = "requirements/lint.txt"
+
+
+def python(path: Path) -> bool:
+    return path.suffix == ".py" and path.parts[0] != "archive"   # archive/ is kept as it was
+
+
+LINTERS = [
+    Linter("ruff", python, lambda files: ["ruff", "check", "--quiet", "--force-exclude", *files], "ruff"),
+]
+
+
+def git(*args: str) -> list[str]:
+    out = subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True, text=True).stdout
+    return [line for line in out.split("\0") if line]
+
+
+def staged() -> list[str]:
+    return git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
+
+
+def tracked() -> list[str]:
+    return git("ls-files", "-z")
+
+
+def run(paths: list[str], strict: bool) -> int:
+    env = dict(os.environ, PATH=os.pathsep.join([*map(str, TOOL_DIRS), os.environ.get("PATH", "")]))
+    files = [Path(p) for p in paths if (ROOT / p).is_file()]
+    failed = []
+    for linter in LINTERS:
+        mine = [str(p) for p in files if linter.wants(p)]
+        if not mine:
+            continue
+        if not shutil.which(linter.needs, path=env["PATH"]):
+            print(f"lint: {linter.name} skipped, {linter.needs} not installed ({linter.install})",
+                  file=sys.stderr)
+            if strict:
+                failed.append(linter.name)
+            continue
+        if subprocess.run(linter.command(mine), cwd=ROOT, env=env).returncode:
+            failed.append(linter.name)
+    if failed:
+        print(f"lint: stopped by {', '.join(failed)} (python3 tools/lint.py FILE... runs them "
+              "again; git commit --no-verify skips them)", file=sys.stderr)
+    return 1 if failed else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args == ["staged"]:
+        return run(staged(), strict=False)
+    if args == ["all"]:
+        return run(tracked(), strict=True)
+    if not args or args[0].startswith("-"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    return run([os.path.relpath(Path(arg).resolve(), ROOT) for arg in args], strict=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

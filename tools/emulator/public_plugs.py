@@ -75,12 +75,12 @@ def run(instance: int, source: str, firmware: str, save: str | None, log: Path,
             *([f"--save={save}"] if save else []), "--", "--firmware", firmware]
     log.parent.mkdir(parents=True, exist_ok=True)
     started = time.time()
-    with open(log, "w") as out:
+    with open(log, "w", encoding="utf-8") as out:
         process = subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT)
         if stop_after:
             stop_at(instance, stop_after, started, process)
         code = process.wait()
-    text = log.read_text(errors="replace")
+    text = log.read_text(encoding="utf-8", errors="replace")
     result = re.findall(r"Result:\s+(.+)", text)
     if stop_after:
         return step_done(SAVED / save, stop_after), f"stopped after {stop_after}"

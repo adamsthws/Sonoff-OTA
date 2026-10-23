@@ -1,7 +1,6 @@
 """The Wi-Fi password and other secrets are never left on disk."""
 
 import json
-import os
 import socket
 import subprocess
 import sys
