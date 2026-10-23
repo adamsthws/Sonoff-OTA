@@ -100,7 +100,7 @@ jobs:
         run: |
           command -v rsync >/dev/null || sudo apt-get install -y -q rsync
           python3 -m venv .venv
-          .venv/bin/pip install -q esp-idf-nvs-partition-gen==0.3.0 cryptography==50.0.2
+          .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "${{ steps.branch.outputs.name }}"

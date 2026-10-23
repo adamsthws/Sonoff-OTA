@@ -30,7 +30,7 @@ jobs:
       - name: Unit tests
         run: |
           python3 -m venv .venv
-          .venv/bin/pip install -q esp-idf-nvs-partition-gen==0.3.0 cryptography==50.0.2
+          .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
           status=0
           PYTHONUNBUFFERED=1 .venv/bin/python -m unittest discover -s tests > unit.txt 2>&1 || status=$?
           # Each failure with its traceback, then the count; the whole is kept below.
@@ -54,7 +54,7 @@ jobs:
         run: |
           command -v rsync >/dev/null || sudo apt-get install -y -q rsync
           python3 -m venv .venv
-          .venv/bin/pip install -q esp-idf-nvs-partition-gen==0.3.0 cryptography==50.0.2
+          .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
           echo "Emulator image: ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/autoflash-emu:$(tools/emulator/image.sh tag)"
       - name: The public plugs
         run: .venv/bin/python -I tools/emulator/public_plugs.py fetch

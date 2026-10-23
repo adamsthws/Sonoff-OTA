@@ -19,5 +19,6 @@ systemctl enable docker >/dev/null 2>&1 || true
 # checkout's .venv is Windows' own, so it lives here instead.
 venv=$(getent passwd "$user" | cut -d: -f6)/.local/share/autoflash-emu/venv
 runuser -u "$user" -- python3 -m venv "$venv"
-runuser -u "$user" -- "$venv/bin/pip" install -q esp-idf-nvs-partition-gen
+runuser -u "$user" -- "$venv/bin/pip" install -q --require-hashes \
+    -r "$(cd "$(dirname "$0")/../.." && pwd)/requirements/ci.txt"
 echo "Set up for $user."

@@ -1,0 +1,8 @@
+# What the unit tests and the emulator's tools need beyond the standard
+# library; the conversion itself needs none of it. requirements/ci.txt pins
+# each, with its hashes, from this (Dependabot keeps it current), compiled on
+# Python 3.10 - the oldest the tool runs on - so it installs on that and newer:
+#
+#     pip-compile --generate-hashes --allow-unsafe requirements/ci.in
+esp-idf-nvs-partition-gen
+cryptography

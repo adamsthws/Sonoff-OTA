@@ -31,10 +31,11 @@ another regional version's power meter.
   login that can read the package, a checkout with an empty `captures/` runs
   the emulator ([private-backup.md](private-backup.md)).
   `AUTOFLASH_NO_RESTORE=1` says not to.
-- **The NVS partition generator** in the repository's `.venv`:
+- **The NVS partition generator** (and `cryptography`, for the cloud stub)
+  in the repository's `.venv`, as the workflows pin them:
 
   ```sh
-  .venv/bin/python -m pip install esp-idf-nvs-partition-gen
+  .venv/bin/python -m pip install --require-hashes -r requirements/ci.txt
   ```
 
 ### Hardware

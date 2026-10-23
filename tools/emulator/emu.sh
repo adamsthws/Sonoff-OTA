@@ -80,13 +80,13 @@ fi
 "$PY" -c 'import esp_idf_nvs_partition_gen' 2>/dev/null || {
     venv=$(dirname "$(dirname "$PY")")
     echo "The emulator needs ESP-IDF's NVS generator in $venv:" >&2
-    echo "    python3 -m venv $venv && $PY -m pip install esp-idf-nvs-partition-gen" >&2
+    echo "    python3 -m venv $venv && $PY -m pip install --require-hashes -r $ROOT/requirements/ci.txt" >&2
     exit 1
 }
 # The stub's CA and the trust swap are made with `cryptography`.
 [ "$stub" = 0 ] || "$PY" -c 'import cryptography' 2>/dev/null || {
     echo "--stub-cloud needs the cryptography package in $(dirname "$(dirname "$PY")"):" >&2
-    echo "    $PY -m pip install cryptography" >&2
+    echo "    $PY -m pip install --require-hashes -r $ROOT/requirements/ci.txt" >&2
     exit 1
 }
 if docker ps -q --filter "name=^$NAME$" | grep -q .; then
