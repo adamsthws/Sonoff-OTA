@@ -14,8 +14,10 @@ Each linter is handed the files of its kind:
                   with GH_TOKEN set, also against GitHub (a pinned commit is the
                   action's own, a version with a known advisory)
     PSScriptAnalyzer  PowerShell (PSScriptAnalyzerSettings.psd1), through pwsh
+    esphome config    the ESPHome configs firmware.json builds, in the ESPHome
+                      image it pins (Docker): what ESPHome itself would refuse
 
-All but the last come from requirements/lint.txt, in the repository's .venv:
+The first four come from requirements/lint.txt, in the repository's .venv:
 
     .venv/bin/python -m pip install --require-hashes -r requirements/lint.txt
 
@@ -30,6 +32,8 @@ it is on disk: staged in part, its unstaged part is linted too.
 
 from __future__ import annotations
 
+import functools
+import json
 import os
 import re
 import shutil
@@ -88,6 +92,23 @@ def has_psscriptanalyzer(path: str) -> bool:
                            "-Command", check], capture_output=True).returncode == 0
 
 
+@functools.cache
+def esphome_pins() -> dict:
+    return json.loads((ROOT / "firmware.json").read_text(encoding="utf-8"))["esphome"]
+
+
+def esphome_config(path: Path) -> bool:
+    return path.as_posix() in {build["config"] for build in esphome_pins().values()}
+
+
+def esphome_command(files: list[str]) -> list[str]:
+    # ESPHome's own image, as the next build would use it, on this checkout read-only.
+    user = ["-u", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []
+    return ["docker", "run", "--rm", *user, "-e", "HOME=/tmp", "--tmpfs", "/cache",
+            "-v", f"{ROOT}:/config:ro", "-w", "/config", esphome_pins()["image"]["builder"],
+            "-q", "config", *files]
+
+
 LINTERS = [
     Linter("ruff", python, lambda files: ["ruff", "check", "--quiet", "--force-exclude", *files], "ruff"),
     Linter("shellcheck", lambda path: shell(path) and CONTAINER not in path.parents,
@@ -101,6 +122,7 @@ LINTERS = [
     Linter("PSScriptAnalyzer", powershell,
            lambda files: ["pwsh", "-NoProfile", "-NonInteractive", "-File", "tools/lint_powershell.ps1", *files],
            "pwsh", "pwsh, then Install-Module PSScriptAnalyzer", has_psscriptanalyzer),
+    Linter("esphome config", esphome_config, esphome_command, "docker", "Docker"),
 ]
 
 
@@ -130,7 +152,12 @@ def run(paths: list[str], strict: bool) -> int:
             if strict:
                 failed.append(linter.name)
             continue
-        if subprocess.run(linter.command(mine), cwd=ROOT, env=env).returncode:
+        # What each says only when it finds something: esphome's summary and
+        # zizmor's "no findings" on every commit would bury what matters.
+        result = subprocess.run(linter.command(mine), cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, errors="replace")
+        if result.returncode:
+            print(result.stdout, end="", flush=True)
             failed.append(linter.name)
     if failed:
         print(f"lint: stopped by {', '.join(failed)} (python3 tools/lint.py FILE... runs them "
