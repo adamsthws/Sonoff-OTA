@@ -121,6 +121,7 @@ if [ -n "$from" ] || [[ " ${emu_args[*]} " == *" --fresh "* ]] || \
         [ -z "$(docker ps -q -f "name=^$NAME\$")" ]; then
     "$ROOT/tools/emulator/emu.sh" "${emu_args[@]}" >/dev/null
 fi
+# shellcheck disable=SC2329  # run by the exit trap below
 keep_plug() {
     [ -n "$save" ] || return 0
     docker exec "$NAME" /opt/autoflash-emu/bin/plug off >/dev/null 2>&1 || true

@@ -95,6 +95,7 @@ if docker ps -q --filter "name=^$NAME$" | grep -q .; then
 fi
 
 # -- which plug ------------------------------------------------------------------
+# shellcheck disable=SC2174  # each folder named is made 0700; its parents need not be
 mkdir -p -m 0700 "$STATE" "$STATE/logs" "$STATE/plugs"
 efuse_mac() {
     "$PY" -I -c 'import sys; d=open(sys.argv[1],"rb").read(); print(":".join(f"{b:02x}" for b in (d[0x18:0x1C]+d[0x1C:0x1E])[::-1]))' "$1"
@@ -185,7 +186,9 @@ fi
 # The image, labelled with a hash of what it is built from: the published one
 # with that hash, or built here (tools/emulator/image.sh). An image from an
 # older checkout never runs unseen. AUTOFLASH_EMU_NO_PULL=1 always builds.
-"$ROOT/tools/emulator/image.sh" ensure "$IMAGE" $([ "$rebuild" = 1 ] && echo --rebuild)
+ensure=(ensure "$IMAGE")
+[ "$rebuild" = 0 ] || ensure+=(--rebuild)
+"$ROOT/tools/emulator/image.sh" "${ensure[@]}"
 
 # -- the plug's flash and eFuses ---------------------------------------------
 if [ "$fresh" = 1 ]; then

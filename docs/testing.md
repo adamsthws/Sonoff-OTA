@@ -36,6 +36,7 @@ the files a commit changes, and the `lint` workflow on every file:
 | Linter | On | Looks for |
 |---|---|---|
 | [ruff](https://docs.astral.sh/ruff/) | Python (`ruff.toml`) | undefined or unused names, likely bugs, a text file opened without `encoding=`, syntax newer than Python 3.10 |
+| [shellcheck](https://www.shellcheck.net/) | shell scripts | unquoted expansions, mistakes in tests and traps, what `sh` does not have |
 
 The linters come from `requirements/lint.txt`, pinned with their hashes. A
 commit on a computer without one is not stopped - the hook says it skipped

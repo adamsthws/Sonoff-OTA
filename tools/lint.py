@@ -8,6 +8,7 @@
 Each linter is handed the files of its kind:
 
     ruff          Python (ruff.toml)
+    shellcheck    shell scripts: *.sh, and files starting #!/bin/sh or bash
 
 They come from requirements/lint.txt, in the repository's .venv:
 
@@ -21,6 +22,7 @@ it is on disk: staged in part, its unstaged part is linted too.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -42,12 +44,32 @@ class Linter:
     install: str = "requirements/lint.txt"
 
 
+SHEBANG = re.compile(rb"#!\s*(?:/usr/bin/env\s+|/usr/bin/|/bin/)(?:ba|da)?sh\b")
+# The container's scripts are hashed into the emulator image's tag (image.sh), so
+# what shellcheck cannot see of them is said here rather than in them: the env
+# file entrypoint.sh writes (SC1091), the variables udhcpc sets (SC2154).
+CONTAINER = Path("tools/emulator/container")
+
+
 def python(path: Path) -> bool:
     return path.suffix == ".py" and path.parts[0] != "archive"   # archive/ is kept as it was
 
 
+def shell(path: Path) -> bool:
+    if path.parts[0] == "archive":
+        return False
+    if path.suffix == ".sh":
+        return True
+    with open(ROOT / path, "rb") as file:
+        return bool(SHEBANG.match(file.read(80)))
+
+
 LINTERS = [
     Linter("ruff", python, lambda files: ["ruff", "check", "--quiet", "--force-exclude", *files], "ruff"),
+    Linter("shellcheck", lambda path: shell(path) and CONTAINER not in path.parents,
+           lambda files: ["shellcheck", *files], "shellcheck"),
+    Linter("shellcheck", lambda path: shell(path) and CONTAINER in path.parents,
+           lambda files: ["shellcheck", "--exclude=SC1091,SC2154", *files], "shellcheck"),
 ]
 
 

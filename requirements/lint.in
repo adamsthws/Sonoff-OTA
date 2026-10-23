@@ -4,3 +4,4 @@
 #
 #     pip-compile --generate-hashes --allow-unsafe requirements/lint.in
 ruff
+shellcheck-py
