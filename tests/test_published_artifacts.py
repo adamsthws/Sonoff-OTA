@@ -104,7 +104,8 @@ class PublishedESPHomeTests(unittest.TestCase):
         for key in ("password:", "encryption:", "auth:", "key:"):
             self.assertNotIn(key, config.replace("password: !lambda", ""), key)
         self.assertIn("package_import_url: github://adamsthws/Sonoff-OTA/ESPHome/sonoff_s60.yaml@main", config)
-        self.assertNotIn("includes:", config)  # adoption takes this one file
+        # Adoption takes this one file: system headers (<...>) only, no local files
+        self.assertNotRegex(config, r"includes:(?:\s*- <[^>\n]+>)*\s*- [^<\s]")
 
 
 class ESPHomeImageCheckTests(unittest.TestCase):
