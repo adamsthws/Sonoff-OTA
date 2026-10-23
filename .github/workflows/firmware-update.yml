@@ -51,7 +51,7 @@ jobs:
       tasmota: ${{ steps.due.outputs.tasmota }}
       esphome: ${{ steps.due.outputs.esphome }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: What is due
         id: due
         run: |
@@ -83,7 +83,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0   # the tags say which version is released
       - name: Not made already
@@ -183,7 +183,7 @@ jobs:
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Merge what has waited long enough, and release it

@@ -1,0 +1,35 @@
+# Dependabot: a pull request a week for each set below, once a release has
+# been out 7 days (cooldown) - time for a broken one to be pulled or fixed
+# first, as the firmware waits for a settled release (docs/updating-firmware.md).
+# Security updates are not held back: Dependabot opens those at once.
+#
+# The firmware is not here: the firmware-update workflow moves that.
+version: 2
+updates:
+  # The actions the workflows use, pinned to a commit with its version beside it.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: Workflows
+
+  # The test tools' Python packages (requirements/ci.in, compiled to ci.txt).
+  - package-ecosystem: pip
+    directory: /requirements
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      test-tools:
+        patterns: ["*"]
+    commit-message:
+      prefix: Test tools
