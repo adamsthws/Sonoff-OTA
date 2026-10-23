@@ -206,6 +206,19 @@ pull request, and GitHub's own secret scanning and push protection, on for
 the repository, refuse pushes with known kinds of token. In examples, use
 `12:34:56:ab:cd:ef`, and addresses that are nobody's.
 
+### The repository's settings
+
+What GitHub is set to do for the repository is written down, with why, in
+`tools/github_settings.py`: `main` never deleted or rewritten and every commit
+on it signed; a pull request merged only once the unit tests, the emulator,
+the lint and the leak scan pass (an admin may still push to `main`, which the
+release workflow tests before releasing); pull requests squashed; secret
+scanning, Dependabot's security updates, CodeQL and private vulnerability
+reporting on; and immutable releases, so a release's tag and files never
+change once published, and GitHub signs an attestation of them that
+`gh release verify` checks. As an admin, `python3 tools/github_settings.py`
+says what differs from that, and `... apply` sets it.
+
 ### What crosses the network
 
 Not written to disk is not the same as never exposed. The password crosses
