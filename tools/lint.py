@@ -13,10 +13,15 @@ Each linter is handed the files of its kind:
     zizmor        the workflows and dependabot.yml, for what an attacker could use;
                   with GH_TOKEN set, also against GitHub (a pinned commit is the
                   action's own, a version with a known advisory)
+    PSScriptAnalyzer  PowerShell (PSScriptAnalyzerSettings.psd1), through pwsh
 
-They come from requirements/lint.txt, in the repository's .venv:
+All but the last come from requirements/lint.txt, in the repository's .venv:
 
     .venv/bin/python -m pip install --require-hashes -r requirements/lint.txt
+
+PSScriptAnalyzer needs PowerShell 7.4.6 or newer (pwsh), and then:
+
+    pwsh -Command Install-Module PSScriptAnalyzer -Scope CurrentUser
 
 A linter that is not installed is skipped, with a warning, on a commit - the
 lint workflow runs them all - and fails `all`. On a commit, a file is linted as
@@ -46,6 +51,7 @@ class Linter:
     command: Callable[[list[str]], list[str]]
     needs: str                          # the program it runs
     install: str = "requirements/lint.txt"
+    ready: Callable[[str], bool] | None = None   # given PATH: more than `needs` there
 
 
 SHEBANG = re.compile(rb"#!\s*(?:/usr/bin/env\s+|/usr/bin/|/bin/)(?:ba|da)?sh\b")
@@ -72,6 +78,16 @@ def shell(path: Path) -> bool:
         return bool(SHEBANG.match(file.read(80)))
 
 
+def powershell(path: Path) -> bool:
+    return path.suffix == ".ps1" and path.parts[0] != "archive"
+
+
+def has_psscriptanalyzer(path: str) -> bool:
+    check = "exit [int](-not (Get-Module -ListAvailable PSScriptAnalyzer))"
+    return subprocess.run([shutil.which("pwsh", path=path) or "pwsh", "-NoProfile", "-NonInteractive",
+                           "-Command", check], capture_output=True).returncode == 0
+
+
 LINTERS = [
     Linter("ruff", python, lambda files: ["ruff", "check", "--quiet", "--force-exclude", *files], "ruff"),
     Linter("shellcheck", lambda path: shell(path) and CONTAINER not in path.parents,
@@ -82,6 +98,9 @@ LINTERS = [
     Linter("zizmor", lambda path: workflow(path) or path == Path(".github/dependabot.yml"),
            lambda files: ["zizmor", "--quiet", *([] if os.environ.get("GH_TOKEN") else ["--offline"]), *files],
            "zizmor"),
+    Linter("PSScriptAnalyzer", powershell,
+           lambda files: ["pwsh", "-NoProfile", "-NonInteractive", "-File", "tools/lint_powershell.ps1", *files],
+           "pwsh", "pwsh, then Install-Module PSScriptAnalyzer", has_psscriptanalyzer),
 ]
 
 
@@ -106,9 +125,8 @@ def run(paths: list[str], strict: bool) -> int:
         mine = [str(p) for p in files if linter.wants(p)]
         if not mine:
             continue
-        if not shutil.which(linter.needs, path=env["PATH"]):
-            print(f"lint: {linter.name} skipped, {linter.needs} not installed ({linter.install})",
-                  file=sys.stderr)
+        if not shutil.which(linter.needs, path=env["PATH"]) or (linter.ready and not linter.ready(env["PATH"])):
+            print(f"lint: {linter.name} skipped, not installed ({linter.install})", file=sys.stderr)
             if strict:
                 failed.append(linter.name)
             continue

@@ -114,7 +114,9 @@ function Test-PythonCandidate($candidate) {
     try {
         $out = & $candidate.Exe @($candidate.Arguments) -c $probe 2>$null
         if ($LASTEXITCODE -eq 0 -and $out) { return ([string]($out | Select-Object -Last 1)).Trim() }
-    } catch {}
+    } catch {
+        return $null   # one that will not even start is not one to use
+    }
     return $null
 }
 
