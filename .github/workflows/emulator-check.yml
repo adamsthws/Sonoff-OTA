@@ -1,0 +1,81 @@
+# The tool's unit tests, then the firmware a conversion ends on, run on the
+# emulator from the published public plugs (tools/emulator/public_plugs.py):
+# each final firmware installed, then each plug taken to the other. Nothing of
+# Sonoff's, no cloud and no secret: it runs on any runner, and a pull request
+# from a fork runs it as it is.
+name: Final firmware on the emulator
+
+on:
+  push:
+    paths:
+      - firmware.json
+      - artifacts/**
+      - ESPHome/**
+      - tools/**
+      - tests/**
+      - .github/workflows/emulator-check.yml
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -q esp-idf-nvs-partition-gen==0.3.0 cryptography==50.0.2
+          status=0
+          PYTHONUNBUFFERED=1 .venv/bin/python -m unittest discover -s tests > unit.txt 2>&1 || status=$?
+          # Each failure with its traceback, then the count; the whole is kept below.
+          awk '/^(FAIL|ERROR): /{show=1} /^Ran [0-9]+ tests/{show=1} show' unit.txt | tail -400
+          grep -E "^(Ran [0-9]+ tests|OK|FAILED)" unit.txt >> "$GITHUB_STEP_SUMMARY" || true
+          exit $status
+      - name: Keep the unit tests' output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-tests
+          path: unit.txt
+          retention-days: 30
+
+  emulator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: The emulator's tools
+        run: |
+          command -v rsync >/dev/null || sudo apt-get install -y -q rsync
+          python3 -m venv .venv
+          .venv/bin/pip install -q esp-idf-nvs-partition-gen==0.3.0 cryptography==50.0.2
+          echo "Emulator image: ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/autoflash-emu:$(tools/emulator/image.sh tag)"
+      - name: The public plugs
+        run: .venv/bin/python -I tools/emulator/public_plugs.py fetch
+      - name: The final firmware, from them
+        run: |
+          set -o pipefail
+          .venv/bin/python -I tools/emulator/public_plugs.py test | tee test.txt
+          {
+            echo "### The final firmware on the emulator"
+            echo
+            echo '```'
+            cat test.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-logs
+          path: |
+            captures/emulation/public-plugs/
+            captures/emulation/state-*/work/captures/plugs/*/runs/*/run.log
+          if-no-files-found: ignore
+          retention-days: 30

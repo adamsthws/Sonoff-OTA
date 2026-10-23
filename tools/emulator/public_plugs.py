@@ -15,13 +15,26 @@
         (L1 to I2, X1 to H1). No cloud, real or stub, no account and nothing
         of Sonoff's: docs/updating-firmware.md.
 
+    python -I tools/emulator/public_plugs.py publish --stock DIR
+        shown public again (sanitise_plug.prove, against the real backup),
+        then uploaded to the repository's emulator-public-plugs release; it
+        prints the PUBLISHED pin to put below
+    python -I tools/emulator/public_plugs.py fetch
+        the published ones (PUBLISHED), checked, into captures/: what a
+        checkout with no backup, such as a GitHub Actions runner, tests from
+
 Both use emulators --instances (default 1,2), two at a time.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
+import lzma
 import os
+import tarfile
+import urllib.request
 import re
 import shutil
 import subprocess
@@ -34,6 +47,15 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 SAVED = ROOT / "captures/emulation/saved"
+# The public plugs as published: one xz-compressed tar of the two, named by
+# its hash, in the release below. Made again only with what runs before the
+# final firmware (an interim firmware, or what a run keeps of itself).
+RELEASE = "emulator-public-plugs"
+REPOSITORY = "adamsthws/Sonoff-OTA"
+PUBLISHED = {
+    "file": "public-plugs-bdd2a0878b28.tar.xz",
+    "sha256": "bdd2a0878b28248c23ab59166197a33fbaec13baa40e041270f542a90104ff3d",
+}
 LOGS = ROOT / "captures/emulation/public-plugs"
 UNATTENDED = ROOT / "tools/emulator/unattended-test.sh"
 # Where each way stops before its final firmware, and what it is made into.
@@ -155,6 +177,80 @@ def command_test(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def packed() -> bytes:
+    """The two public plugs as an xz tar, the same bytes for the same plugs."""
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w", format=tarfile.PAX_FORMAT) as tar:
+        for _, public in STARTS.values():
+            for path in sorted([SAVED / public, *(SAVED / public).rglob("*")]):
+                info = tar.gettarinfo(str(path), arcname=str(path.relative_to(SAVED)))
+                info.uid = info.gid = 0
+                info.uname = info.gname = ""
+                info.mtime = 0
+                info.mode = 0o755 if path.is_dir() else 0o644
+                if path.is_file():
+                    with open(path, "rb") as data:
+                        tar.addfile(info, data)
+                else:
+                    tar.addfile(info)
+    return lzma.compress(out.getvalue(), preset=9)
+
+
+def command_publish(args: argparse.Namespace) -> int:
+    from tools.autoflash import plugs
+    from tools.emulator import sanitise_plug
+    stock = (args.stock / "flash.bin").read_bytes()
+    real_mac = plugs.mac_from_efuse((args.stock / "efuse.bin").read_bytes())
+    for _, public in STARTS.values():
+        checked = sanitise_plug.prove(SAVED / public, stock, real_mac)
+        print(f"{public}: shown public again ({checked['files']} files)")
+    data = packed()
+    digest = hashlib.sha256(data).hexdigest()
+    name = f"public-plugs-{digest[:12]}.tar.xz"
+    with __import__("tempfile").TemporaryDirectory() as tmp:
+        path = Path(tmp) / name
+        path.write_bytes(data)
+        if subprocess.run(["gh", "release", "view", RELEASE, "--repo", REPOSITORY],
+                          capture_output=True).returncode:
+            subprocess.run(["gh", "release", "create", RELEASE, "--repo", REPOSITORY, "--prerelease",
+                            "--title", "Emulator: public plugs",
+                            "--notes", "Plugs for the emulator with nothing of Sonoff's or of any real plug in "
+                                       "them, from which the firmware a conversion ends on is tested "
+                                       "(docs/emulator.md#public-plugs). Not a release of the tool."],
+                           check=True)
+        subprocess.run(["gh", "release", "upload", RELEASE, str(path), "--repo", REPOSITORY, "--clobber"],
+                       check=True)
+    print(f"Published {name} ({len(data):,} bytes). Pin it in tools/emulator/public_plugs.py:")
+    print(f'PUBLISHED = {{\n    "file": "{name}",\n    "sha256": "{digest}",\n}}')
+    return 0
+
+
+def command_fetch(_args: argparse.Namespace) -> int:
+    if not PUBLISHED["file"]:
+        print("No public plugs are published yet (PUBLISHED)", file=sys.stderr)
+        return 1
+    url = f"https://github.com/{REPOSITORY}/releases/download/{RELEASE}/{PUBLISHED['file']}"
+    with urllib.request.urlopen(url, timeout=120) as response:
+        data = response.read()
+    if hashlib.sha256(data).hexdigest() != PUBLISHED["sha256"]:
+        print(f"{url} is not the file pinned: not used", file=sys.stderr)
+        return 1
+    names = {public for _, public in STARTS.values()}
+    with tarfile.open(fileobj=io.BytesIO(lzma.decompress(data)), mode="r") as tar:
+        members = tar.getmembers()
+        for member in members:
+            top = member.name.split("/", 1)[0]
+            if top not in names or ".." in member.name.split("/") or not (member.isfile() or member.isdir()):
+                print(f"{url} holds {member.name!r}: not used", file=sys.stderr)
+                return 1
+        for public in names:
+            shutil.rmtree(SAVED / public, ignore_errors=True)
+        SAVED.mkdir(parents=True, exist_ok=True)
+        tar.extractall(SAVED, members=members, filter="data")
+    print(f"Fetched the public plugs ({PUBLISHED['file']}) into {SAVED}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--instances", default="1,2", help="the two emulators to use (default 1,2)")
@@ -164,6 +260,10 @@ def main(argv: list[str] | None = None) -> int:
     make.add_argument("--stock", type=Path, required=True, help="the real plug's Sonoff backup directory")
     make.set_defaults(run=command_make)
     commands.add_parser("test", help="the final firmware, from the public plugs").set_defaults(run=command_test)
+    publish = commands.add_parser("publish", help="publish the public plugs (needs the real dump)")
+    publish.add_argument("--stock", type=Path, required=True, help="the real plug's Sonoff backup directory")
+    publish.set_defaults(run=command_publish)
+    commands.add_parser("fetch", help="the published public plugs, into captures/").set_defaults(run=command_fetch)
     args = parser.parse_args(argv)
     args.instances = [int(n) for n in args.instances.split(",")][:2]
     if len(args.instances) != 2:

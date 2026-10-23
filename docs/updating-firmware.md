@@ -157,7 +157,9 @@ stub, nor an account:
 python -I tools/emulator/public_plugs.py test
 ```
 
-All four must convert. The faults are not put in their way: they test the
+All four must convert. The repository's `emulator-check` workflow runs the
+same, with the unit tests, on GitHub's own runners, from the published public
+plugs and emulator image, whenever the tool or its firmware changes. The faults are not put in their way: they test the
 tool's own recovery, which a new final firmware does not change. Where the
 recovery leans on the firmware's own behaviour, a major release (16 to 17,
 say) or release notes touching its Wi-Fi, settings, updates or Berry, run

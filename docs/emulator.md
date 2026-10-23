@@ -62,7 +62,7 @@ laptop with 8 GB, from 2020 - or faster. A faster one is nearer the low end.
 
 | Step | Takes |
 |---|---|
-| Building the emulator's image (QEMU from source) | 2-3 minutes |
+| Downloading the emulator's image, or building it (QEMU from source) where it is not published | under a minute; 2-3 minutes to build |
 | Building the Windows VM's image | about a minute |
 | Downloading Microsoft's ISO, 8.2 GB | depends on the connection: about 20 minutes at 50 Mbit/s, 2-3 at 500 Mbit/s |
 | Installing Windows (layer `installed`) | 5-10 minutes |
@@ -231,8 +231,9 @@ firmware the published one with the emulator's open network written in, the
 boot selection, and the interim Tasmota's settings alone, naming only that
 network. Sonoff's settings - its eWeLink keys, the Wi-Fi it was set up with,
 its calibration - the copy of them the repartition keeps, and any leftover are
-not copied. Of the eFuses it keeps the MAC and the chip's calibration, not its
-factory ID; of the computer's files the run's state and its steps' reports,
+not copied. Of the eFuses it keeps the MAC, and what every chip of the kind shares - its
+revision and package, which the bootloader checks, and the flash's type - and
+nothing measured on the one chip (its calibration and factory ID); of the computer's files the run's state and its steps' reports,
 with the account and eWeLink device made placeholders, not the Sonoff backup,
 the logs or the firmware bundle. Then it searches everything it wrote for any
 256-byte block of your dump, every identifying value of Sonoff's settings in
@@ -252,7 +253,14 @@ python -I tools/emulator/public_plugs.py test                              # no 
 ```
 
 They are made again only when what runs before the final firmware changes: an
-interim firmware, or what a run keeps of itself. `unattended-test.sh
+interim firmware, or what a run keeps of itself. Then `public_plugs.py publish
+--stock <backup>` shows them public once more and uploads them, as one
+tarball named by its hash, to the repository's
+[`emulator-public-plugs`](https://github.com/adamsthws/Sonoff-OTA/releases/tag/emulator-public-plugs)
+pre-release, and prints the pin for `PUBLISHED` in `public_plugs.py`;
+`public_plugs.py fetch` puts the pinned ones in `captures/`, checked - which
+is how a checkout with no backup, such as a GitHub Actions runner, tests from
+them (the `emulator-check` workflow). `unattended-test.sh
 --from=public-...` runs one offline, with no cloud, real or stub, and no
 `.env`; a plug kept from that run (`--save`) is public too, and `emu.sh
 --plug-dir=DIR` starts one with no backup at all. A public plug cannot go
@@ -485,7 +493,13 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
   against the SHA-256 in `emu.Dockerfile`, and the image is built from it with
   no network - so building needs nothing outside this repository. QEMU is
   GPL-2.0: the archive is its unmodified source, and this project's changes
-  to it are the patches in `tools/emulator/fork/`.
+  to it are the patches in `tools/emulator/fork/`. The image is labelled with
+  a hash of what it is built from (`tools/emulator/image.sh tag`), and the
+  repository's `emulator-image` workflow publishes each one as
+  `ghcr.io/adamsthws/autoflash-emu:<that hash>`: `emu.sh` pulls that, and
+  builds only where it is not published (`AUTOFLASH_EMU_NO_PULL=1`, or
+  `--rebuild`, always builds). Either way it runs only an image labelled
+  with its own checkout's hash.
 - **The home network.** `tap0` is the home network, and the container is its
   router: dnsmasq hands out addresses (the plug's MAC always gets
   192.168.60.50), and mDNS discovery works as on a real LAN. Without
