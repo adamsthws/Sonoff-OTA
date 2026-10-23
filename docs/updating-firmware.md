@@ -143,29 +143,26 @@ on most of them while they are missing:
 python3 -m unittest discover -s tests
 ```
 
-**The emulator.** The fault suite's starting plugs are converted again, now
-with the new firmware - that is every conversion from Sonoff - and then the
-faults that matter to a firmware update are run: at each step that writes,
-starts or checks the new firmware, the network gone for 30 s, the power off
-for 5 s and the computer crashing; and every run of the release people have
-now, killed part way and finished by this one (`legacy-v<release>`). On a
-test copy of a backed-up plug, with the cloud stub:
+**The emulator**, from just before the final firmware: nothing before it
+changes, and it was tested by the fault suite when it last did. Two public
+plugs ([emulator.md](emulator.md#public-plugs)) - one after E3 on the way to
+Tasmota, one after D5 on the way to ESPHome - are taken to their final
+firmware (F2 to H1, and I1 and I2), and the plugs that makes are then taken
+each to the other (L1 to I2, and X1 to H1): every step that writes, starts,
+checks or runs code on the final firmware, in about five minutes on two
+emulators. The plugs hold nothing of Sonoff's, so no cloud is needed, real or
+stub, nor an account:
 
 ```sh
-python -I tools/emulator/copy_plug.py --from MAC --to 12:34:56:ab:cd:ef
-export AUTOFLASH_STUB_WORKERS=3
-tools/emulator/fault_suite.py --plug=12:34:56:ab:cd:ef --stub-cloud prep
-tools/emulator/fault_suite.py --stub-cloud list | awk '{print $1}' | grep -E \
-  ':(E2|E3|F2|F4|G1|H1|I1|I2|L1|M1|X1|X2|R1):(outage-30|plugoff-5|crash-1)$|:legacy-v2\.0\.2$' \
-  > firmware-update.txt
-tools/emulator/fault_suite.py --plug=12:34:56:ab:cd:ef --stub-cloud batch firmware-update.txt
-tools/emulator/fault_suite.py --stub-cloud report
+python -I tools/emulator/public_plugs.py test
 ```
 
-Every scenario must pass. The release people have now is added to
-`LEGACY_STEPS` in `tools/emulator/fault_suite.py` before the runs: its steps
-from Sonoff by route, and their lengths as `ROUTES` has them, and to
-`LEGACY_STARTS`. Then change `legacy-v2.0.2` above to it.
+All four must convert. The faults are not put in their way: they test the
+tool's own recovery, which a new final firmware does not change. Where the
+recovery leans on the firmware's own behaviour, a major release (16 to 17,
+say) or release notes touching its Wi-Fi, settings, updates or Berry, run
+those few scenarios of the fault suite too - F4's reset, G1, `seven-times`,
+and the network gone at L1 and X1 ([testing.md](testing.md#the-fault-suite)).
 
 **A real plug**, converted from Sonoff to each firmware and between them,
 before the release: an emulator does not show real flash, radios or timings

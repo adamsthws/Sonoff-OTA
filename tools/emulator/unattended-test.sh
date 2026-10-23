@@ -10,7 +10,9 @@
 #   tools/emulator/unattended-test.sh --save=NAME   keep the plug as the run left it, and its
 #                                                   captures (its backup, its runs), as NAME
 #   tools/emulator/unattended-test.sh --from=NAME   start from a plug kept with --save: one
-#                                                   converted earlier, on this computer
+#                                                   converted earlier, on this computer; or a
+#                                                   public one (sanitise_plug.py), with nothing
+#                                                   of Sonoff's: offline, no account, no stub
 #   tools/emulator/unattended-test.sh --stub-cloud  convert against the local cloud stub, with
 #                                                   no eWeLink account and no .env (emu.sh --stub-cloud)
 #   tools/emulator/unattended-test.sh --code=DIR    the tool in DIR - an earlier release
@@ -51,9 +53,22 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# A public plug (sanitise_plug.py) is past every step that reaches eWeLink, and
+# runs nothing of Sonoff's: no cloud, real or stub, and no account.
+SAVED=$ROOT/captures/emulation/saved
+public=0
+if [ -n "$from" ] && [ "$(cat "$SAVED/$from/flash-mode" 2>/dev/null)" = public ]; then
+    public=1 stub=0
+    emu_args+=("--plug-dir=$SAVED/$from")
+    # Its MAC, so the kept flash is taken as this plug's (below).
+    plug_mac=$(python3 -I -c 'import sys; d=open(sys.argv[1],"rb").read(); print(":".join(f"{b:02x}" for b in (d[0x18:0x1C]+d[0x1C:0x1E])[::-1]))' \
+               "$SAVED/$from/efuse.bin")
+fi
 # The stub is its own cloud and needs no account; otherwise the real cloud is
 # used, which needs the account in .env and the real plug unplugged.
-if [ "$stub" = 1 ]; then
+if [ "$public" = 1 ]; then
+    :
+elif [ "$stub" = 1 ]; then
     emu_args=(--stub-cloud "${emu_args[@]}")
 else
     emu_args=(--cloud --yes "${emu_args[@]}")
@@ -63,8 +78,7 @@ fi
 # Plugs kept with --save: the flash, the mode it was built for (a stub run's
 # flash differs from a cloud run's - see emu.sh), and the captures of the runs
 # that made it. A plug kept before modes were recorded is a cloud one.
-SAVED=$ROOT/captures/emulation/saved
-mode=plain; [ "$stub" = 1 ] && mode=stub
+mode=plain; [ "$stub" = 1 ] && mode=stub; [ "$public" = 1 ] && mode=public
 if [ -n "$from" ]; then
     [ -f "$SAVED/$from/flash.bin" ] || { echo "No plug kept as '$from' (--save=$from)" >&2; exit 1; }
     kept_for=$(cat "$SAVED/$from/flash-mode" 2>/dev/null || echo plain)
@@ -109,6 +123,8 @@ keep_plug() {
     rm -rf "${SAVED:?}/$save" && mkdir -p "$SAVED/$save"
     cp "$STATE/flash.bin" "$SAVED/$save/flash.bin"
     cat "$STATE/.flash-mode" 2>/dev/null > "$SAVED/$save/flash-mode" || echo plain > "$SAVED/$save/flash-mode"
+    # A public plug kept is public still: its eFuses go with it.
+    [ "$public" = 0 ] || cp "$STATE/efuse.bin" "$SAVED/$save/efuse.bin"
     cp -a "$STATE/work/captures" "$SAVED/$save/captures"
     rm -rf "$SAVED/$save/captures/unattended"
     echo "Kept as '$save' (--from=$save)."
@@ -150,7 +166,11 @@ echo "The emulated plug is up; converting it unattended..."
 # repository has no .env, so a run you sit through asks for it. Kept in the
 # container's /tmp, gone when it stops, and removed after the run anyway.
 answers=/tmp/autoflash-unattended.env
-if [ "$stub" = 1 ]; then
+if [ "$public" = 1 ]; then
+    # None: a public plug is past eWeLink, and nothing of this computer's
+    # (its .env, its account) may reach a run that is kept as public.
+    "${as_you[@]}" "$NAME" sh -c "umask 077 && : > $answers"
+elif [ "$stub" = 1 ]; then
     # A placeholder account: the stub answers the account API and ignores it.
     printf 'EWELINK_EMAIL=%s\nEWELINK_PASSWORD=%s\n' stub@autoflash-stub.test stub \
         | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"

@@ -208,6 +208,51 @@ and all. The recording stays in
 `captures/emulation/state/work/captures/unattended/<time>/`, beside the run's
 own `run.log`. The exit code is the run's: 0 when the plug was converted.
 
+### Public plugs
+
+Every plug above starts from your Sonoff backup, and a plug kept with `--save`
+holds Sonoff's settings and a copy of the backup. A **public plug** holds
+nothing of Sonoff's or of your plug's, so it can go where your backup must
+not. Past D5 a plug runs none of Sonoff's code - the installer and the interim
+Tasmota have taken its app slots, and D5 its bootloader - so from there on
+nothing of Sonoff's is needed: that is what tests the firmware a conversion
+ends on ([updating-firmware.md](updating-firmware.md)).
+
+`tools/emulator/sanitise_plug.py` makes one from a plug kept past D5, on a test
+copy's made-up MAC (`copy_plug.py`). It rebuilds the flash from blank and
+copies in only what it shows to be public: the bootloader, partition table and
+app images byte for byte the published files in `artifacts/`, the startup
+firmware the published one with the emulator's open network written in, the
+boot selection, and the interim Tasmota's settings alone, naming only that
+network. Sonoff's settings - its eWeLink keys, the Wi-Fi it was set up with,
+its calibration - the copy of them the repartition keeps, and any leftover are
+not copied. Of the eFuses it keeps the MAC and the chip's calibration, not its
+factory ID; of the computer's files the run's state and its steps' reports,
+with the account and eWeLink device made placeholders, not the Sonoff backup,
+the logs or the firmware bundle. Then it searches everything it wrote for any
+256-byte block of your dump, every identifying value of Sonoff's settings in
+it, the real MAC in any form, and the eWeLink account and devices on this
+computer, and writes nothing if it finds one (`--explain` says which setting
+a value came from, never the value).
+
+`tools/emulator/public_plugs.py` makes the two the final-firmware test starts
+from - after E3 on the way to Tasmota, after D5 on the way to ESPHome - from
+the fault suite's plugs saved after D1, and runs that test:
+
+```sh
+tools/emulator/fault_suite.py --plug=12:34:56:ab:cd:ef --stub-cloud prep   # once, with your backup
+python -I tools/emulator/public_plugs.py make --plug 12:34:56:ab:cd:ef \
+    --stock captures/plugs/<your plug's MAC>/sonoff-backup
+python -I tools/emulator/public_plugs.py test                              # no backup, no cloud
+```
+
+They are made again only when what runs before the final firmware changes: an
+interim firmware, or what a run keeps of itself. `unattended-test.sh
+--from=public-...` runs one offline, with no cloud, real or stub, and no
+`.env`; a plug kept from that run (`--save`) is public too, and `emu.sh
+--plug-dir=DIR` starts one with no backup at all. A public plug cannot go
+back to Sonoff: it has nothing of Sonoff's to go back to.
+
 ## On Windows
 
 To test the tool's Windows code paths (`arp -a`, `netsh` firewall rules
