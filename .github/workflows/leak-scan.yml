@@ -8,6 +8,10 @@ name: Leak scan
 on:
   push:
   pull_request:
+  # On a branch the firmware-update workflow made (its pull requests start no
+  # workflow themselves), and before a release.
+  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -26,6 +30,9 @@ jobs:
           BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           AFTER: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+              BEFORE=$(git merge-base origin/main HEAD) AFTER=HEAD   # what the branch adds to main
+          fi
           if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ] \
                   && git cat-file -e "$BEFORE" 2>/dev/null; then
               python3 tools/leak_scan.py range "$BEFORE..$AFTER"

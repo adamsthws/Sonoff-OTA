@@ -60,13 +60,17 @@ behind, on a series that has had its fixes. A release listed under `hold` in
 
 What is due, it makes into a pull request: the update (steps 1 and 2 below,
 its docs and changelog line written, the version raised a minor version),
-then the unit tests and the final-firmware emulator test (step 4). The pull
-request says which releases, what each check found, and the tests' results.
-One whose tests passed **merges itself 7 days after it was opened, which is
-the release**, unless it is labelled `hold`; one whose tests failed is
-labelled `tests-failed` and never merged by the workflow. A pull request is
-merged only if `main` has not moved on since it was made and tested;
-otherwise it is closed, and the next week's run makes it again.
+then the unit tests and the final-firmware emulator test (step 4). Nothing is
+pushed if the leak scan finds anything in it. The pull request says which
+releases, what each check found, and the tests' results; the workflow then
+starts the lint, leak-scan and emulator-check workflows on its branch, as a
+pull request opened with a workflow's own token starts none itself, so the
+checks `main` requires are there. One whose tests passed **merges itself 7
+days after it was opened, which is the release**, unless it is labelled
+`hold`; one whose tests failed, or a check `main` requires, is labelled
+`tests-failed` and never merged by the workflow. A pull request is merged only
+if `main` has not moved on since it was made and tested; otherwise it is
+closed, and the next week's run makes it again.
 
 The same run checks the pinned Tasmota release is still published - each
 conversion downloads its files - and opens an issue if it has gone, taking its

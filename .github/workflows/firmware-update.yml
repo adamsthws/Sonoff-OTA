@@ -98,6 +98,7 @@ jobs:
       contents: write        # push the branch
       pull-requests: write   # open the pull request
       issues: write          # its labels
+      actions: write         # start the checks on it
     env:
       TASMOTA: ${{ needs.due.outputs.tasmota }}
       ESPHOME: ${{ needs.due.outputs.esphome }}
@@ -140,6 +141,9 @@ jobs:
           title="Install${TASMOTA:+ Tasmota $TASMOTA}${TASMOTA:+${ESPHOME:+ and}}${ESPHOME:+ ESPHome built with $ESPHOME}"
           echo "TITLE=$title" >> "$GITHUB_ENV"
           git commit -q -m "$title" -m "Made by the firmware-update workflow: tools/update_firmware.py, then the unit tests and the final-firmware emulator test (the pull request says what they found)."
+      - name: Nothing in it that should not be there
+        if: steps.branch.outputs.made != 'yes'
+        run: python3 tools/leak_scan.py range origin/main..HEAD
       - name: The unit tests
         if: steps.branch.outputs.made != 'yes'
         id: unit
@@ -203,6 +207,11 @@ jobs:
           [ "$passed" = yes ] || labels+=(--label tests-failed)
           gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file body.md \
               "${labels[@]}"
+          # A pull request opened with this workflow's token starts no workflow
+          # (GitHub's rule), so the checks main requires are started on its branch.
+          for workflow in lint.yml leak-scan.yml emulator-check.yml; do
+              gh workflow run "$workflow" --ref "$BRANCH"
+          done
 
   merge:
     if: ${{ !inputs.dry_run }}
@@ -211,6 +220,7 @@ jobs:
     permissions:
       contents: write        # merge
       pull-requests: write   # comment on, close
+      issues: write          # the tests-failed label
       actions: write         # start the release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -223,16 +233,30 @@ jobs:
           merged=0
           for number in $(gh pr list --state open --label firmware-update --json number,createdAt,labels \
                   --jq ".[] | select(.createdAt <= \"$cutoff\") | select([.labels[].name] | (index(\"hold\") or index(\"tests-failed\")) | not) | .number"); do
-              # Tested on main as it is now: main is in it, and it merges cleanly.
+              # Tested on main as it is now: main is in it, it merges cleanly,
+              # and the checks main requires passed.
               git fetch -q origin main "pull/$number/head:pr-$number"
               state=$(gh pr view "$number" --json mergeStateStatus --jq .mergeStateStatus)
-              if ! git merge-base --is-ancestor origin/main "pr-$number" || [ "$state" != CLEAN ]; then
+              git merge-base --is-ancestor origin/main "pr-$number" || state=BEHIND
+              case $state in
+              CLEAN)
+                  gh pr merge "$number" --squash --delete-branch
+                  merged=1 ;;
+              BEHIND|DIRTY)
                   gh pr comment "$number" --body "Not merged: main has moved on since it was made and tested ($state). Closed: the next weekly run makes it again from main as it is, and tests that."
-                  gh pr close "$number" --delete-branch
-                  continue
-              fi
-              gh pr merge "$number" --squash --delete-branch
-              merged=1
+                  gh pr close "$number" --delete-branch ;;
+              BLOCKED|UNSTABLE)
+                  # A required check failed, or has not finished: only the first is final.
+                  buckets=$(gh pr checks "$number" --required --json bucket --jq '.[].bucket' || true)
+                  if grep -qx fail <<< "$buckets"; then
+                      gh pr edit "$number" --add-label tests-failed
+                      gh pr comment "$number" --body "Not merged: a check main requires failed (its checks say which). Fix it here, or close it and put the release in \`hold\` in firmware.json."
+                  else
+                      echo "#$number: its checks have not all finished; looked at again next week."
+                  fi ;;
+              *)
+                  echo "#$number: GitHub cannot say yet whether it merges ($state); looked at again next week." ;;
+              esac
           done
           if [ "$merged" = 1 ]; then
               gh workflow run release.yml --ref main
