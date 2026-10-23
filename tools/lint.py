@@ -9,6 +9,10 @@ Each linter is handed the files of its kind:
 
     ruff          Python (ruff.toml)
     shellcheck    shell scripts: *.sh, and files starting #!/bin/sh or bash
+    actionlint    the workflows (with shellcheck on their scripts)
+    zizmor        the workflows and dependabot.yml, for what an attacker could use;
+                  with GH_TOKEN set, also against GitHub (a pinned commit is the
+                  action's own, a version with a known advisory)
 
 They come from requirements/lint.txt, in the repository's .venv:
 
@@ -55,6 +59,10 @@ def python(path: Path) -> bool:
     return path.suffix == ".py" and path.parts[0] != "archive"   # archive/ is kept as it was
 
 
+def workflow(path: Path) -> bool:
+    return path.parent == Path(".github/workflows") and path.suffix in (".yml", ".yaml")
+
+
 def shell(path: Path) -> bool:
     if path.parts[0] == "archive":
         return False
@@ -70,6 +78,10 @@ LINTERS = [
            lambda files: ["shellcheck", *files], "shellcheck"),
     Linter("shellcheck", lambda path: shell(path) and CONTAINER in path.parents,
            lambda files: ["shellcheck", "--exclude=SC1091,SC2154", *files], "shellcheck"),
+    Linter("actionlint", workflow, lambda files: ["actionlint", *files], "actionlint"),
+    Linter("zizmor", lambda path: workflow(path) or path == Path(".github/dependabot.yml"),
+           lambda files: ["zizmor", "--quiet", *([] if os.environ.get("GH_TOKEN") else ["--offline"]), *files],
+           "zizmor"),
 ]
 
 

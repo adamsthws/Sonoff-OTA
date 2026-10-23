@@ -27,4 +27,5 @@ jobs:
       - name: Lint
         env:
           RUFF_OUTPUT_FORMAT: github   # findings marked on the pull request's lines
+          GH_TOKEN: ${{ github.token }}   # zizmor's checks against GitHub
         run: .venv/bin/python tools/lint.py all
