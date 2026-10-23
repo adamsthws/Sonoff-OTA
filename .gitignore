@@ -14,6 +14,8 @@ bridge/.pio/
 
 # Generated build configuration and caches.
 sdkconfig.*
+# The unit tests' coverage (python -m coverage run).
+.coverage
 # Generated configs stay out; the bridge's chosen settings must not.
 !sdkconfig.defaults
 __pycache__/
