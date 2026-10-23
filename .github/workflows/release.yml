@@ -7,6 +7,9 @@ name: Release
 on:
   push:
     branches: [main]
+  # The firmware-update workflow starts it after merging: a merge by a
+  # workflow's own token does not start another workflow.
+  workflow_dispatch:
 
 permissions:
   contents: write

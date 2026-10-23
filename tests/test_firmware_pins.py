@@ -146,3 +146,95 @@ class UpdateHelperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SettledReleaseTests(unittest.TestCase):
+    """The settled-release rule (update_firmware.SETTLE_DAYS), on made-up histories."""
+
+    @staticmethod
+    def releases(*pairs):
+        import datetime as dt
+        return [{"tag": tag, "published": dt.datetime.fromisoformat(day + "T12:00:00+00:00")} for tag, day in pairs]
+
+    @staticmethod
+    def on(day):
+        import datetime as dt
+        return dt.datetime.fromisoformat(day + "T13:00:00+00:00")
+
+    def test_tasmota_waits_fourteen_days(self):
+        history = self.releases(("v15.6.0", "2026-08-25"), ("v16.0.0", "2026-10-16"))
+        due = lambda day: uf.due("tasmota", history, self.on(day), "15.6.0", [])["due"]  # noqa: E731
+        self.assertIsNone(due("2026-10-29"))
+        self.assertEqual(due("2026-10-30"), "16.0.0")
+
+    def test_a_fix_release_starts_the_wait_again(self):
+        history = self.releases(("v15.6.0", "2026-08-25"), ("v16.0.0", "2026-10-16"), ("v16.0.1", "2026-10-27"))
+        self.assertIsNone(uf.due("tasmota", history, self.on("2026-11-05"), "15.6.0", [])["due"])
+        self.assertEqual(uf.due("tasmota", history, self.on("2026-11-10"), "15.6.0", [])["due"], "16.0.1")
+
+    def test_esphome_takes_last_months_last_point_release_once_this_months_is_out(self):
+        history = self.releases(("2026.9.0", "2026-09-16"), ("2026.9.1", "2026-09-29"),
+                                ("2026.10.0", "2026-10-21"), ("2026.10.1", "2026-10-30"),
+                                ("2026.11.0", "2026-11-18"))
+        due = lambda day: uf.due("esphome", history, self.on(day), "2026.9.1", [])["due"]  # noqa: E731
+        self.assertIsNone(due("2026-11-10"))                     # 2026.10.1 only 11 days old, no 2026.11 yet
+        self.assertEqual(due("2026-11-13"), "2026.10.1")         # 14 days old, before 2026.11.0
+        self.assertEqual(due("2026-11-18"), "2026.10.1")         # 2026.11.0 out, and never itself so soon
+
+    def test_a_series_followed_by_a_newer_one_still_waits_seven_days(self):
+        history = self.releases(("2026.9.1", "2026-09-29"), ("2026.10.0", "2026-10-21"),
+                                ("2026.10.1", "2026-10-24"), ("2026.11.0", "2026-10-26"))
+        self.assertIsNone(uf.due("esphome", history, self.on("2026-10-29"), "2026.9.1", [])["due"])
+        self.assertEqual(uf.due("esphome", history, self.on("2026-10-31"), "2026.9.1", [])["due"], "2026.10.1")
+
+    def test_a_release_on_hold_is_never_taken(self):
+        history = self.releases(("v15.6.0", "2026-08-25"), ("v16.0.0", "2026-10-16"))
+        self.assertIsNone(uf.due("tasmota", history, self.on("2026-12-01"), "15.6.0", ["16.0.0"])["due"])
+
+    def test_nothing_older_than_the_pin_is_ever_due(self):
+        history = self.releases(("2026.9.1", "2026-09-29"), ("2026.10.0", "2026-10-21"))
+        self.assertIsNone(uf.due("esphome", history, self.on("2026-12-01"), "2026.10.0", [])["due"])
+
+    def test_a_pinned_release_withdrawn_is_replaced_by_its_fix_at_once(self):
+        # As 15.0.0 was: withdrawn the day after, 15.0.1 in its place.
+        history = self.releases(("v14.6.0", "2025-04-16"), ("v15.0.1", "2025-06-14"))
+        state = uf.due("tasmota", history, self.on("2025-06-15"), "15.0.0", [])
+        self.assertTrue(state["pinned_missing"])
+        self.assertEqual(state["due"], "15.0.1")
+
+
+class ChangelogTests(unittest.TestCase):
+    """An update's line goes under the release to come: merging it is that release."""
+
+    def write(self, directory, changelog, version):
+        from unittest import mock
+        changelog_path, version_path = Path(directory) / "CHANGELOG.md", Path(directory) / "__init__.py"
+        changelog_path.write_text(changelog)
+        version_path.write_text(f'"""x"""\n__version__ = "{version}"\n')
+        return mock.patch.multiple(uf, CHANGELOG=changelog_path, VERSION_FILE=version_path)
+
+    def test_after_a_release_a_new_minor_version_is_opened(self):
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp, self.write(tmp, "# Changelog\n\nRules.\n\n## 2.1.0\n\n- Old.\n", "2.1.0"), \
+             mock.patch.object(uf, "released", return_value=True):
+            texts = {}
+            self.assertEqual(uf.changelog_with("A converted plug ends on Tasmota 16.1.0.", texts), "2.2.0")
+            changelog, version = texts[uf.CHANGELOG], texts[uf.VERSION_FILE]
+        self.assertIn("## 2.2.0\n\n- A converted plug ends on Tasmota 16.1.0.\n\n## 2.1.0\n\n- Old.", changelog)
+        self.assertIn('__version__ = "2.2.0"', version)
+
+    def test_before_it_the_line_joins_the_release_to_come(self):
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp, \
+             self.write(tmp, "# Changelog\n\n## 2.2.0\n\n- First.\n\n## 2.1.0\n\n- Old.\n", "2.2.0"), \
+             mock.patch.object(uf, "released", return_value=False):
+            texts = {}
+            self.assertEqual(uf.changelog_with("Second.", texts), "2.2.0")
+            changelog = texts[uf.CHANGELOG]
+        self.assertIn("## 2.2.0\n\n- First.\n- Second.\n\n## 2.1.0", changelog)
+
+    def test_a_passage_not_found_changes_nothing(self):
+        with self.assertRaisesRegex(uf.UpdateError, "nothing was changed"):
+            uf.substituted("no such text", r"ESPHome \S+ built the current", "x", "the release")

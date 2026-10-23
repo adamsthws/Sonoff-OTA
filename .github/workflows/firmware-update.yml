@@ -1,0 +1,208 @@
+# Moves the firmware the tool installs to each settled Tasmota and ESPHome
+# release, by itself (docs/updating-firmware.md):
+#
+#   1. due      which release of each is settled now (update_firmware.py due);
+#               an issue if the pinned Tasmota release has gone
+#   2. update   the update made, its docs written, the unit tests and the
+#               final-firmware emulator test run, and a pull request opened
+#               with what they found
+#   3. merge    a pull request whose tests passed, open SETTLE_MERGE_DAYS with
+#               no `hold` label, merged - which is the release, started here
+#               (a merge by this workflow's token does not start one itself)
+#
+# Weekly, or by hand: with `tasmota` / `esphome` to take a given release, and
+# `dry_run` to do everything but push, open or merge.
+name: Firmware update
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays, 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      tasmota:
+        description: "Take this Tasmota release (e.g. 16.1.0), whether settled or not"
+        required: false
+      esphome:
+        description: "Build with this ESPHome release (e.g. 2026.11.2), whether settled or not"
+        required: false
+      dry_run:
+        description: "Make and test the update, but push, open and merge nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: firmware-update
+
+env:
+  MERGE_AFTER_DAYS: "7"
+  GH_TOKEN: ${{ github.token }}
+  GITHUB_TOKEN: ${{ github.token }}
+
+jobs:
+  due:
+    runs-on: ubuntu-24.04
+    outputs:
+      tasmota: ${{ steps.due.outputs.tasmota }}
+      esphome: ${{ steps.due.outputs.esphome }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: What is due
+        id: due
+        run: |
+          python3 tools/update_firmware.py due > due.json
+          tasmota=$(python3 -c 'import json; print(json.load(open("due.json"))["tasmota"]["due"] or "")')
+          esphome=$(python3 -c 'import json; print(json.load(open("due.json"))["esphome"]["due"] or "")')
+          [ -z "${{ inputs.tasmota }}" ] || tasmota="${{ inputs.tasmota }}"
+          [ -z "${{ inputs.esphome }}" ] || esphome="${{ inputs.esphome }}"
+          echo "tasmota=$tasmota" >> "$GITHUB_OUTPUT"
+          echo "esphome=$esphome" >> "$GITHUB_OUTPUT"
+          { echo "### Due"; echo; echo "Tasmota: ${tasmota:-nothing}; ESPHome: ${esphome:-nothing}";
+            echo; echo '```json'; python3 -m json.tool due.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: An issue if the pinned Tasmota release has gone
+        if: ${{ !inputs.dry_run }}
+        run: |
+          missing=$(python3 -c 'import json; s=json.load(open("due.json"))["tasmota"]; print(s["pinned"] if s["pinned_missing"] else "")')
+          [ -n "$missing" ] || exit 0
+          title="Tasmota $missing, which the tool installs, is gone from its releases"
+          if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[].number')" ]; then
+              gh issue create --title "$title" --body "The weekly check found Tasmota $missing missing from \
+          https://github.com/arendst/Tasmota/releases: new conversions cannot download its files. This workflow \
+          takes its series' newest release at once if there is one; otherwise pin another by hand \
+          (docs/updating-firmware.md)."
+          fi
+
+  update:
+    needs: due
+    if: ${{ needs.due.outputs.tasmota != '' || needs.due.outputs.esphome != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the tags say which version is released
+      - name: Not made already
+        id: branch
+        run: |
+          branch="firmware/tasmota-${{ needs.due.outputs.tasmota || 'same' }}-esphome-${{ needs.due.outputs.esphome || 'same' }}"
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+          if [ -n "$(gh pr list --state open --head "$branch" --json number --jq '.[].number')" ]; then
+              echo "A pull request for $branch is open already."
+              echo "made=yes" >> "$GITHUB_OUTPUT"
+          fi
+      - name: The tools
+        if: steps.branch.outputs.made != 'yes'
+        run: |
+          command -v rsync >/dev/null || sudo apt-get install -y -q rsync
+          python3 -m venv .venv
+          .venv/bin/pip install -q esp-idf-nvs-partition-gen==0.3.0 cryptography==50.0.2
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${{ steps.branch.outputs.name }}"
+      - name: The update
+        if: steps.branch.outputs.made != 'yes'
+        run: |
+          set -o pipefail
+          : > update.txt
+          if [ -n "${{ needs.due.outputs.tasmota }}" ]; then
+              .venv/bin/python tools/update_firmware.py tasmota "${{ needs.due.outputs.tasmota }}" 2>&1 | tee -a update.txt
+          fi
+          if [ -n "${{ needs.due.outputs.esphome }}" ]; then
+              .venv/bin/python tools/update_firmware.py esphome "${{ needs.due.outputs.esphome }}" 2>&1 | tee -a update.txt
+          fi
+          git add -A -- . ':!update.txt'
+          title="Install$([ -n "${{ needs.due.outputs.tasmota }}" ] && echo " Tasmota ${{ needs.due.outputs.tasmota }}")$([ -n "${{ needs.due.outputs.tasmota }}" ] && [ -n "${{ needs.due.outputs.esphome }}" ] && echo " and")$([ -n "${{ needs.due.outputs.esphome }}" ] && echo " ESPHome built with ${{ needs.due.outputs.esphome }}")"
+          echo "TITLE=$title" >> "$GITHUB_ENV"
+          git commit -q -m "$title" -m "Made by the firmware-update workflow: tools/update_firmware.py, then the unit tests and the final-firmware emulator test (the pull request says what they found)."
+      - name: The unit tests
+        if: steps.branch.outputs.made != 'yes'
+        id: unit
+        continue-on-error: true
+        run: |
+          PYTHONUNBUFFERED=1 .venv/bin/python -m unittest discover -s tests > unit.txt 2>&1
+      - name: The final firmware on the emulator
+        if: steps.branch.outputs.made != 'yes'
+        id: emulator
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          .venv/bin/python -I tools/emulator/public_plugs.py fetch
+          .venv/bin/python -I tools/emulator/public_plugs.py test | tee emulator.txt
+      - name: The pull request
+        if: steps.branch.outputs.made != 'yes'
+        run: |
+          passed=$([ "${{ steps.unit.outcome }}" = success ] && [ "${{ steps.emulator.outcome }}" = success ] && echo yes || echo no)
+          merge_on=$(date -u -d "+${MERGE_AFTER_DAYS} days" +%Y-%m-%d)
+          {
+            echo "Made by the [firmware-update workflow]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) under the settled-release rule ([docs/updating-firmware.md](docs/updating-firmware.md))."
+            echo
+            [ -z "${{ needs.due.outputs.tasmota }}" ] || echo "- **Tasmota ${{ needs.due.outputs.tasmota }}**: [release notes](https://github.com/arendst/Tasmota/releases/tag/v${{ needs.due.outputs.tasmota }})"
+            [ -z "${{ needs.due.outputs.esphome }}" ] || echo "- **ESPHome built with ${{ needs.due.outputs.esphome }}**: [release notes](https://github.com/esphome/esphome/releases/tag/${{ needs.due.outputs.esphome }})"
+            echo
+            if [ "$passed" = yes ]; then
+              echo "**Tests passed.** This merges itself on or after **$merge_on** (${MERGE_AFTER_DAYS} days), which releases it, unless it is labelled \`hold\`."
+            else
+              echo "**Tests failed: this is never merged by the workflow.** Fix it here, or close it and put the release in \`hold\` in firmware.json."
+            fi
+            echo
+            echo "### The final firmware on the emulator"
+            echo
+            echo '```'; cat emulator.txt 2>/dev/null || echo "(did not run)"; echo '```'
+            echo
+            echo "### Unit tests"
+            echo
+            echo '```'; grep -E "^(Ran [0-9]+ tests|OK|FAILED)" unit.txt || echo "(did not finish)"
+            awk '/^(FAIL|ERROR): /{show=1} /^Ran [0-9]+ tests/{show=0} show' unit.txt | head -150; echo '```'
+            echo
+            echo "### The update's own checks"
+            echo
+            echo '<details><summary>update_firmware.py</summary>'; echo; echo '```'; cat update.txt; echo '```'; echo '</details>'
+            echo
+            echo "- [ ] Converted a real plug with it (optional: the workflow merges without)"
+          } > body.md
+          cat body.md >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ inputs.dry_run }}" = true ]; then
+              echo "Dry run: nothing pushed or opened."
+              exit 0
+          fi
+          gh label create firmware-update --color 0E8A16 --description "Made by the firmware-update workflow" 2>/dev/null || true
+          gh label create hold --color B60205 --description "Never merged by the firmware-update workflow" 2>/dev/null || true
+          gh label create tests-failed --color D93F0B --description "The firmware-update workflow's tests failed" 2>/dev/null || true
+          git push -q origin "${{ steps.branch.outputs.name }}"
+          labels=(--label firmware-update)
+          [ "$passed" = yes ] || labels+=(--label tests-failed)
+          gh pr create --base main --head "${{ steps.branch.outputs.name }}" --title "$TITLE" --body-file body.md \
+              "${labels[@]}"
+
+  merge:
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge what has waited long enough, and release it
+        run: |
+          cutoff=$(date -u -d "-${MERGE_AFTER_DAYS} days +2 hours" +%Y-%m-%dT%H:%M:%SZ)
+          merged=0
+          for number in $(gh pr list --state open --label firmware-update --json number,createdAt,labels \
+                  --jq ".[] | select(.createdAt <= \"$cutoff\") | select([.labels[].name] | (index(\"hold\") or index(\"tests-failed\")) | not) | .number"); do
+              # Tested on main as it is now: main is in it, and it merges cleanly.
+              git fetch -q origin main "pull/$number/head:pr-$number"
+              state=$(gh pr view "$number" --json mergeStateStatus --jq .mergeStateStatus)
+              if ! git merge-base --is-ancestor origin/main "pr-$number" || [ "$state" != CLEAN ]; then
+                  gh pr comment "$number" --body "Not merged: main has moved on since it was made and tested ($state). Closed: the next weekly run makes it again from main as it is, and tests that."
+                  gh pr close "$number" --delete-branch
+                  continue
+              fi
+              gh pr merge "$number" --squash --delete-branch
+              merged=1
+          done
+          if [ "$merged" = 1 ]; then
+              gh workflow run release.yml --ref main
+          fi

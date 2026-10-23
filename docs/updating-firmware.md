@@ -1,8 +1,10 @@
 # Updating the firmware the tool installs
 
 A converted plug ends on official Tasmota or on this project's ESPHome. Both
-follow their projects' releases: each new stable release of either is taken
-the same way, by the steps below, and goes out as a release of the tool.
+follow their projects' releases, a little behind: the repository's
+`firmware-update` workflow takes each once it has settled, tests it and
+releases it, by itself ([below](#by-itself)). By hand, it is the same steps
+([after that](#by-hand)).
 
 ## What follows a release, and what does not
 
@@ -36,19 +38,46 @@ with no secure boot or flash encryption); the bootloader of ESP-IDF 5.x starts
 the apps of later 5.x releases. Replacing it is a decision of its own:
 `--new-bootloader`, then the whole fault suite and real plugs.
 
-## When
+## By itself
 
-```sh
-python3 tools/update_firmware.py check
-```
+Every Monday `.github/workflows/firmware-update.yml` asks which release of each
+project has **settled** (`python3 tools/update_firmware.py due`). A release has
+settled when it is
 
-says what `firmware.json` pins and each project's latest stable release, and
-exits 1 when either is behind. Only stable releases are taken: never an
-ESPHome beta (`2026.10.0b1`) or a Tasmota development build. Both projects
-often follow a release with a fix within a week or so (ESPHome's `.1`); one
-that has been out a few days is the safer pick.
+1. a stable release - never a beta, a pre-release or a development build;
+2. the newest of its series (Tasmota's `16.0.x`, ESPHome's month, `2026.10.x`):
+   no later point release; and
+3. at least 7 days old, and either a newer series has begun or it is at least
+   14 days old (`SETTLE_MIN_DAYS`, `SETTLE_DAYS`).
 
-## Steps
+A fix for a bad release has come within days or not at all - Tasmota 14.4.0
+was followed by 14.4.1 in four days, 15.0.0 by 15.0.1 in one, each `.0`
+withdrawn - so this lets it come first. For Tasmota, a release every two months
+or so, it means 14 quiet days; for ESPHome, a series a month, the month
+before's last point release once the new month's `.0` is out: always a month
+behind, on a series that has had its fixes. A release listed under `hold` in
+`firmware.json` (`"hold": {"tasmota": ["16.1.0"]}`) is never taken.
+
+What is due, it makes into a pull request: the update (steps 1 and 2 below,
+its docs and changelog line written, the version raised a minor version),
+then the unit tests and the final-firmware emulator test (step 4). The pull
+request says which releases, what each check found, and the tests' results.
+One whose tests passed **merges itself 7 days after it was opened, which is
+the release**, unless it is labelled `hold`; one whose tests failed is
+labelled `tests-failed` and never merged by the workflow. A pull request is
+merged only if `main` has not moved on since it was made and tested;
+otherwise it is closed, and the next week's run makes it again.
+
+The same run checks the pinned Tasmota release is still published - each
+conversion downloads its files - and opens an issue if it has gone, taking its
+series' newest release at once where there is one.
+
+By hand, from the Actions tab: `tasmota` or `esphome` takes a given release
+whether settled or not, and `dry_run` makes and tests the update and opens
+nothing. `python3 tools/update_firmware.py check` says what is pinned and what
+is latest.
+
+## By hand
 
 Work on a branch from `main`. Each step below is one commit.
 
@@ -121,19 +150,24 @@ built and where - so what pins a build is the Docker image it was made in, in
 `firmware.json`. The bootloader is repeatable: built again with the release
 that made the published one, it comes out the same.
 
-### 3. By hand
+### 3. The docs
 
-The update lists these when it finishes; `tests/test_firmware_pins.py` fails
-on most of them while they are missing:
+Each update writes what it changed, and `tests/test_firmware_pins.py` fails
+while any of it is missing:
 
-- `artifacts/README.md`: each changed file's row (its name and SHA-256), and a
-  paragraph on the new build: what changed, and that the config did not.
-- `THIRD_PARTY_NOTICES.md`: each ESPHome file's name, the ESPHome release and
-  the ESP-IDF version it was built with.
-- `ESPHome/README.md`: the ESPHome release that built the current image.
-- `README.md` and `docs/`: any line naming the release installed.
-- `CHANGELOG.md`: a section for the next minor version - it adds something -
-  saying which release each firmware is now, with a link to its release notes.
+- `artifacts/README.md`: the image's row (its name and SHA-256), the ESPHome
+  release that builds it, and a paragraph on the new build;
+- `THIRD_PARTY_NOTICES.md`: the image's name, ESPHome release and ESP-IDF
+  version;
+- `ESPHome/README.md`: the ESPHome release that built the current image;
+- `CHANGELOG.md`: a line for each firmware, with a link to its release notes,
+  under the release to come - a new section, a minor version on, once the one
+  above has been released, with `tools/autoflash/__init__.py` raised to it.
+
+Each passage is found and rewritten, and if one is not found nothing is
+changed: `--no-docs` leaves them all to be written by hand, as a change to
+the mover or the bootloader (`--mover`, `--new-bootloader`) needs anyway. The
+README's badges read `firmware.json` on `main`, and change by themselves.
 
 ### 4. Test
 
@@ -172,8 +206,9 @@ before the release: an emulator does not show real flash, radios or timings
 
 ### 5. Release
 
-Raise the version in `tools/autoflash/__init__.py` to the changelog's; merging
-to `main` publishes the release (`.github/workflows/release.yml`). Runs left
+The update raised the version in `tools/autoflash/__init__.py` to the
+changelog's; merging to `main` publishes the release
+(`.github/workflows/release.yml`). Runs left
 part way by the release before carry on with the new firmware by themselves:
 the bundle is built again for the new pins - at A5, or as a run carried on
 past A5 starts - and a step whose checks were made with the old bundle does

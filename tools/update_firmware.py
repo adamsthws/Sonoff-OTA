@@ -5,6 +5,10 @@
         what firmware.json pins, against each project's latest stable release;
         exits 1 when either is behind
 
+    python3 tools/update_firmware.py due [--today YYYY-MM-DD]
+        the release of each project now due by the settled-release rule
+        (SETTLE_DAYS below), as JSON: what the firmware-update workflow takes
+
     python3 tools/update_firmware.py tasmota [VERSION]
         pin that official Tasmota release (default: the latest) - its ESP32-C3
         app, Safeboot and factory image, from the release's page on GitHub -
@@ -24,12 +28,14 @@ is the whole procedure, and what each check is for.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import textwrap
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -132,6 +138,97 @@ def tag_commit(repo: str, tag: str) -> str:
     return ref["sha"]
 
 
+# -- which release is due ------------------------------------------------------
+#
+# A release is taken once it has settled: the newest of its series (Tasmota's
+# major.minor, ESPHome's month), at least SETTLE_MIN_DAYS old, and either
+# followed by a newer series or SETTLE_DAYS old. A fix for a bad release has
+# come within days or not at all (Tasmota 14.4.0 to .1 in 4, 15.0.0 to .1 in
+# 1, each .0 withdrawn), so this lets it come first; for ESPHome it means the
+# month before's last point release, once the new month's .0 is out.
+# firmware.json's "hold" names releases never to take.
+SETTLE_MIN_DAYS = 7
+SETTLE_DAYS = 14
+PROJECTS = {"tasmota": TASMOTA_REPO, "esphome": ESPHOME_REPO}
+
+
+def version_key(project: str, tag: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in tag.removeprefix("v").split("."))
+
+
+def series(project: str, tag: str) -> tuple[int, ...]:
+    return version_key(project, tag)[:2]
+
+
+def stable_releases(repo: str) -> list[dict[str, Any]]:
+    """Every stable release: its tag and when it was published."""
+    found = []
+    for page in range(1, 4):
+        batch = github(f"repos/{repo}/releases?per_page=100&page={page}")
+        found += [{"tag": release["tag_name"],
+                   "published": dt.datetime.fromisoformat(release["published_at"].replace("Z", "+00:00"))}
+                  for release in batch if not release["draft"] and not release["prerelease"]
+                  and release.get("published_at")]
+        if len(batch) < 100:
+            break
+    return found
+
+
+def settled(project: str, releases: list[dict[str, Any]], today: dt.datetime) -> list[str]:
+    """The tags settled by `today`, oldest first."""
+    out = []
+    published = [release for release in releases if release["published"] <= today]
+    for release in published:
+        own = series(project, release["tag"])
+        newest = max((r for r in published if series(project, r["tag"]) == own),
+                     key=lambda r: version_key(project, r["tag"]))
+        if newest is not release:
+            continue
+        age = (today - release["published"]).days
+        followed = any(series(project, r["tag"]) > own for r in published)
+        if age >= SETTLE_MIN_DAYS and (followed or age >= SETTLE_DAYS):
+            out.append(release["tag"])
+    return sorted(out, key=lambda tag: version_key(project, tag))
+
+
+def pinned_version(pins: dict[str, Any], project: str) -> str:
+    return pins["tasmota"]["version"] if project == "tasmota" else pins["esphome"]["image"]["esphome"]
+
+
+def due(project: str, releases: list[dict[str, Any]], today: dt.datetime, pinned: str,
+        hold: list[str]) -> dict[str, Any]:
+    """What is due for one project: the newest settled release newer than the
+    pin, unless held. Where the pinned release is gone (withdrawn, as Tasmota
+    has withdrawn a release days after making it), its series' newest release
+    at once."""
+    tags = {release["tag"].removeprefix("v") for release in releases}
+    missing = pinned not in tags
+    candidates = [tag.removeprefix("v") for tag in settled(project, releases, today)]
+    if missing:
+        candidates += [release["tag"].removeprefix("v") for release in releases
+                       if series(project, release["tag"]) == series(project, pinned)]
+    newer = sorted({tag for tag in candidates if tag not in hold
+                    and version_key(project, tag) > version_key(project, pinned)},
+                   key=lambda tag: version_key(project, tag))
+    latest = max(tags, key=lambda tag: version_key(project, tag)) if tags else None
+    return {"pinned": pinned, "pinned_missing": missing, "latest": latest,
+            "due": newer[-1] if newer else None}
+
+
+def command_due(args: argparse.Namespace) -> int:
+    pins = load_pins()
+    today = (dt.datetime.fromisoformat(args.today).replace(tzinfo=dt.timezone.utc) if args.today
+             else dt.datetime.now(dt.timezone.utc))
+    report = {project: due(project, stable_releases(repo), today, pinned_version(pins, project),
+                           pins.get("hold", {}).get(project, []))
+              for project, repo in PROJECTS.items()}
+    for project, state in report.items():
+        print(f"{project}: pinned {state['pinned']}{' (GONE from its releases)' if state['pinned_missing'] else ''}, "
+              f"latest {state['latest']}, due {state['due'] or 'nothing'}", file=sys.stderr)
+    print(json.dumps(report))
+    return 0
+
+
 def command_check(_args: argparse.Namespace) -> int:
     pins = load_pins()
     tasmota_latest = stable_release(TASMOTA_REPO, None)["tag_name"].removeprefix("v")
@@ -225,6 +322,8 @@ def command_tasmota(args: argparse.Namespace) -> int:
     earlier = [entry for entry in old.get("earlier", []) if entry["version"] != version]
     if previous != version:
         earlier.insert(0, {key: old[key] for key in ("version", "tag", "commit", "files")})
+    texts, release_version = tasmota_doc_texts(old["version"], version) if not args.no_docs and previous != version \
+        else ({}, None)
     pins["tasmota"] = {
         "version": version,
         "tag": tag,
@@ -238,13 +337,15 @@ def command_tasmota(args: argparse.Namespace) -> int:
         print("\nChecked; firmware.json left as it was (--dry-run).")
         return 0
     save_pins(pins)
+    write_texts(texts)
     print(f"\nfirmware.json now pins Tasmota {version} (was {previous}).")
-    left_to_do([
-        f"CHANGELOG.md: the official Tasmota installed is {version}, with a link to its release notes",
-        "README.md and docs/: any line naming the Tasmota release installed",
-        "python3 -m unittest discover -s tests",
-        "the emulator runs in docs/updating-firmware.md, then a real plug",
-    ])
+    if args.no_docs:
+        left_to_do([f"CHANGELOG.md: the official Tasmota installed is {version}, with a link to its release notes"])
+    elif release_version:
+        print(f"CHANGELOG.md says so, under {release_version}.")
+    left_to_do(["README.md and docs/: any line naming the Tasmota release installed",
+                "python3 -m unittest discover -s tests",
+                "the emulator runs in docs/updating-firmware.md, then a real plug"])
     return 0
 
 
@@ -378,6 +479,7 @@ def publish(pins: dict[str, Any], key: str, file: str, data: bytes, record: dict
 def command_esphome(args: argparse.Namespace) -> int:
     release = stable_release(ESPHOME_REPO, args.version)["tag_name"]
     pins = load_pins()
+    old_image = dict(pins["esphome"]["image"])
     builder = esphome_builder(release)
     print(f"ESPHome {release}: {builder}")
     check_esphome_internals(builder)
@@ -401,6 +503,11 @@ def command_esphome(args: argparse.Namespace) -> int:
     if args.dry_run:
         print("\nBuilt and checked; nothing published (--dry-run).")
         return 0
+    replaced = bool(args.new_bootloader and new_bootloader)
+    texts, release_version = ({}, None) if args.no_docs else esphome_doc_texts(
+        old_image, {"file": ESPHOME_BUILDS["image"][1].format(version=version), "version": version,
+                    "esphome": release, "esp_idf": described["esp_idf"], "sha256": sha256_bytes(app)},
+        not new_bootloader, replaced)
 
     for key, (version, app, _bootloader, described) in built.items():
         config_path = ROOT / ESPHOME_BUILDS[key][0]
@@ -419,15 +526,126 @@ def command_esphome(args: argparse.Namespace) -> int:
     save_pins(pins)
     print("\nfirmware.json, SHA256SUMS, .gitignore and artifacts/ updated: git add the new "
           "files, and git rm the old.")
-    left_to_do([
-        "artifacts/README.md: each changed file's row (name, SHA-256) and a paragraph on what changed",
-        "THIRD_PARTY_NOTICES.md: the files' names, the ESPHome release and ESP-IDF version",
-        "ESPHome/README.md: the ESPHome release that built the current image",
-        f"CHANGELOG.md: ESPHome is built with {release}",
-        "python3 -m unittest discover -s tests (tests/test_firmware_pins.py checks the above)",
-        "the emulator runs in docs/updating-firmware.md, then a real plug",
-    ])
+    by_hand = []
+    if args.no_docs:
+        by_hand += ["artifacts/README.md: each changed file's row (name, SHA-256) and a paragraph on what changed",
+                    "THIRD_PARTY_NOTICES.md: the files' names, the ESPHome release and ESP-IDF version",
+                    "ESPHome/README.md: the ESPHome release that built the current image",
+                    f"CHANGELOG.md: ESPHome is built with {release}"]
+    else:
+        write_texts(texts)
+        print(f"artifacts/README.md, THIRD_PARTY_NOTICES.md, ESPHome/README.md and CHANGELOG.md "
+              f"({release_version}) say so.")
+        if args.mover or replaced:
+            by_hand.append("the mover's or bootloader's own rows and paragraphs, which only the image's are written for")
+    left_to_do(by_hand + ["python3 -m unittest discover -s tests (tests/test_firmware_pins.py checks the docs)",
+                          "the emulator runs in docs/updating-firmware.md, then a real plug"])
     return 0
+
+
+# -- what is written about it ----------------------------------------------------
+#
+# Each update writes what it changes into the docs the tests hold to it
+# (tests/test_firmware_pins.py), and its line in CHANGELOG.md: under the
+# section not yet released, or a new one, a minor version on (raising
+# tools/autoflash/__init__.py), so that merging it is the release. --no-docs
+# leaves them for a person to write.
+CHANGELOG = ROOT / "CHANGELOG.md"
+VERSION_FILE = ROOT / "tools/autoflash/__init__.py"
+ARTIFACTS_README = ROOT / "artifacts/README.md"
+NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
+ESPHOME_README = ROOT / "ESPHome/README.md"
+
+
+def released(version: str) -> bool:
+    return subprocess.run(["git", "-C", str(ROOT), "rev-parse", "-q", "--verify", f"refs/tags/v{version}"],
+                          capture_output=True).returncode == 0
+
+
+def bullet(text: str) -> str:
+    return textwrap.fill(text, width=76, initial_indent="- ", subsequent_indent="  ",
+                         break_long_words=False, break_on_hyphens=False)
+
+
+def changelog_with(entry: str, texts: dict[Path, str]) -> str:
+    """CHANGELOG.md and tools/autoflash/__init__.py, in `texts`, with the entry
+    under the release to come; that release's version."""
+    text = texts.get(CHANGELOG) or CHANGELOG.read_text(encoding="utf-8")
+    heading = re.search(r"^## (\d+\.\d+\.\d+)\n", text, re.MULTILINE)
+    version = heading.group(1)
+    if released(version):
+        version = next_minor(version)
+        text = text[:heading.start()] + f"## {version}\n\n{bullet(entry)}\n\n" + text[heading.start():]
+    else:
+        following = re.search(r"^## ", text[heading.end():], re.MULTILINE)
+        end = heading.end() + following.start() if following else len(text)
+        text = text[:heading.end()] + text[heading.end():end].rstrip("\n") + "\n" + bullet(entry) + "\n\n" + text[end:]
+    texts[CHANGELOG] = text
+    texts[VERSION_FILE] = re.sub(r'^__version__ = "[^"]+"', f'__version__ = "{version}"',
+                                 VERSION_FILE.read_text(encoding="utf-8"), count=1, flags=re.MULTILINE)
+    return version
+
+
+def write_texts(texts: dict[Path, str]) -> None:
+    for path, text in texts.items():
+        path.write_text(text, encoding="utf-8")
+
+
+def substituted(text: str, pattern: str, replacement, what: str) -> str:
+    new, count = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE)
+    if not count:
+        raise UpdateError(f"could not find {what} to update: nothing was changed; --no-docs leaves the docs "
+                          "to be written by hand")
+    return new
+
+
+def tasmota_doc_texts(old: str, new: str) -> tuple[dict[Path, str], str]:
+    texts: dict[Path, str] = {}
+    version = changelog_with(f"A converted plug ends on Tasmota "
+                             f"[{new}](https://github.com/{TASMOTA_REPO}/releases/tag/v{new}), where it ended on {old}.",
+                             texts)
+    return texts, version
+
+
+def esphome_doc_texts(old: dict[str, Any], new: dict[str, Any], bootloader_same: bool,
+                      replaced: bool = False) -> tuple[dict[Path, str], str]:
+    """artifacts/README.md, THIRD_PARTY_NOTICES.md, ESPHome/README.md and the
+    changelog for a new image built from the same config - worked out before
+    anything is written, so a passage not found changes nothing."""
+    old_name, new_name = Path(old["file"]).name, Path(new["file"]).name
+    kept = ("Its build's bootloader is the one it starts with now." if replaced else
+            "Its build's bootloader is byte for byte the published one." if bootloader_same else
+            f"The bootloader that build makes (ESP-IDF {new['esp_idf']}) differs from the published one, "
+            "which is kept: no plug is given a new one.")
+    readme = ARTIFACTS_README.read_text(encoding="utf-8")
+    readme = substituted(readme, rf"^\| `{re.escape(old_name)}` \|.*$",
+                         lambda row: row.group(0).replace(old_name, new_name).replace(old["sha256"], new["sha256"]),
+                         f"{old_name}'s row in artifacts/README.md")
+    readme = substituted(readme, r"(\(its `project` version is the one in the file name\) with ESPHome )\S+( and\s+ESP-IDF )[\d.]+",
+                         lambda m: f"{m.group(1)}{new['esphome']}{m.group(2)}{new['esp_idf']}",
+                         "the ESPHome release that builds the image, in artifacts/README.md")
+    paragraph = textwrap.fill(
+        f"ESPHome {new['version']} is {old['version']}'s config built with ESPHome {new['esphome']} "
+        f"(ESP-IDF {new['esp_idf']}), where {old['version']} was built with {old['esphome']} "
+        f"(ESP-IDF {old['esp_idf']}): the config is unchanged but for its version. {kept} "
+        f"{old['version']} is in the Git history:", width=79, break_long_words=False, break_on_hyphens=False)
+    texts = {ARTIFACTS_README: readme.rstrip("\n") + f"\n\n{paragraph}\n`git log --all -- {old['file']}`.\n"}
+    notices = NOTICES.read_text(encoding="utf-8")
+    notices = substituted(notices, r"`artifacts/esphome-sonoff-s60-imprintable-[\d.]+\.bin` is built with ESPHome(\s+)\S+ and ESP-IDF [\d.]+",
+                          lambda m: f"`{new['file']}` is built with ESPHome{m.group(1)}{new['esphome']} and ESP-IDF {new['esp_idf']}",
+                          "the image's paragraph in THIRD_PARTY_NOTICES.md")
+    texts[NOTICES] = substituted(notices, r"\[ESPHome \S+ release\]\(https://github.com/esphome/esphome/tree/\S+\)",
+                                 f"[ESPHome {new['esphome']} release](https://github.com/esphome/esphome/tree/{new['esphome']})",
+                                 "the image's source release in THIRD_PARTY_NOTICES.md")
+    texts[ESPHOME_README] = substituted(ESPHOME_README.read_text(encoding="utf-8"), r"ESPHome \S+ built the current",
+                                        f"ESPHome {new['esphome']} built the current", "ESPHome/README.md's release")
+    version = changelog_with(
+        f"ESPHome for the S60 is {new['version']}: the same config, built with ESPHome "
+        f"[{new['esphome']}](https://github.com/{ESPHOME_REPO}/releases/tag/{new['esphome']}), where "
+        f"{old['version']} was built with {old['esphome']}."
+        + ("" if replaced else " Its bootloader is unchanged, so a plug on ESPHome already is not given a new one."),
+        texts)
+    return texts, version
 
 
 def left_to_do(items: list[str]) -> None:
@@ -440,9 +658,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check", help="pinned against latest").set_defaults(run=command_check)
+    due_parser = commands.add_parser("due", help="what the settled-release rule takes now, as JSON")
+    due_parser.add_argument("--today", help="as on this date (YYYY-MM-DD), for a look ahead")
+    due_parser.set_defaults(run=command_due)
     tasmota = commands.add_parser("tasmota", help="pin an official Tasmota release")
     tasmota.add_argument("version", nargs="?", help="e.g. 16.0.0 (default: the latest)")
     tasmota.add_argument("--dry-run", action="store_true", help="check it, change nothing")
+    tasmota.add_argument("--no-docs", action="store_true", help="leave CHANGELOG.md to be written by hand")
     tasmota.set_defaults(run=command_tasmota)
     build_parser = commands.add_parser("esphome", help="build and publish ESPHome with a release")
     build_parser.add_argument("version", nargs="?", help="e.g. 2026.10.0 (default: the latest)")
@@ -451,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
     build_parser.add_argument("--new-bootloader", action="store_true",
                               help="publish this build's bootloader where it differs (see the docs first)")
     build_parser.add_argument("--dry-run", action="store_true", help="build and check, publish nothing")
+    build_parser.add_argument("--no-docs", action="store_true", help="leave the docs to be written by hand")
     build_parser.set_defaults(run=command_esphome)
     args = parser.parse_args(argv)
     if shutil.which("docker") is None and args.command == "esphome":
