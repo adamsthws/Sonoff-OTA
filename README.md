@@ -145,6 +145,8 @@ report back on how it went here:
 
 > Reading the thread is the quickest way to see how it went for others.
 
+A security problem is reported privately instead: see [SECURITY.md](SECURITY.md).
+
 <br>
 
 ## More detail
