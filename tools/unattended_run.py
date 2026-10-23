@@ -242,7 +242,9 @@ def main() -> int:
 
     extra = args.run_options[1:] if args.run_options[:1] == ["--"] else args.run_options
     live = sys.stdout.isatty()
-    size = args.size or (tuple(shutil.get_terminal_size()) if live else (100, 40))
+    # Python 3.10 gives 0 for a side a terminal does not report; 3.11 the fallback.
+    size = args.size or (tuple(n or d for n, d in zip(shutil.get_terminal_size(), (80, 24)))
+                         if live else (100, 40))
     save = args.save or ROOT / "captures" / "unattended" / time.strftime("%Y%m%d-%H%M%S")
     command = [sys.executable, str(TOOL), "run", "--unattended", *extra]
 

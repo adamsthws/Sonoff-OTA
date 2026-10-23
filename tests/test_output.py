@@ -450,6 +450,16 @@ class NarrowTerminalTests(OutputTestCase):
         self.assertTrue(drawn.endswith("..."))
         self.assertLessEqual(len(drawn), 39)
 
+    def test_a_terminal_that_reports_no_size_is_not_taken_as_narrow(self):
+        # Python 3.10 hands back the 0 a pseudo-terminal nobody sized reports.
+        def body():
+            with mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((0, 0))):
+                output.stage_begin(6, 14, "Installing the official startup firmware")
+                output.stage_end("complete")
+        screen, _ = self.run_with(FakeTerminal(), False, body)
+        self.assertIn("Installing the official startup firmware", screen)
+        self.assertNotIn("...", screen)
+
 
 class FallbackScreenTests(OutputTestCase):
     """The Wi-Fi fallbacks still say everything the person has to read or do."""
