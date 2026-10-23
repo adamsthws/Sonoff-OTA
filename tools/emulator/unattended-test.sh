@@ -52,6 +52,10 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+# Keeping the plug switches it off when the run ends; --keep leaves it on.
+if [ "$keep" = 1 ] && [ -n "$save" ]; then
+    echo "--save turns the plug off to keep it as the run left it: not with --keep" >&2; exit 2
+fi
 
 # A public plug (sanitise_plug.py) is past every step that reaches eWeLink, and
 # runs nothing of Sonoff's: no cloud, real or stub, and no account.
