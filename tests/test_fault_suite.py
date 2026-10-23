@@ -105,6 +105,16 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn("sonoff>esphome:C2:crash-60", ids)
         self.assertNotIn("tasmota>sonoff:D4:crash-60", ids)
 
+    def test_a_packet_is_changed_only_where_a_step_sends_one(self):
+        # R2 only sees Sonoff's LAN port take a connection: no packet there
+        # carries data, and corrupt-once was always NO-TRAFFIC.
+        ids = {sc["id"] for sc in fs.scenarios()}
+        for route in ("tasmota>sonoff", "esphome>sonoff"):
+            self.assertNotIn(f"{route}:R2:corrupt-once", ids)
+            self.assertIn(f"{route}:R2:outage-5", ids)
+            self.assertIn(f"{route}:R1:corrupt-once", ids)
+        self.assertIn("sonoff>tasmota:H1:corrupt-once", ids)
+
     def test_the_tools_own_handling_at_the_riskiest_steps(self):
         ids = {sc["id"] for sc in fs.scenarios()}
         for fault in ("second-run", "ctrlc-countdown", "ctrlc-apart", "sleep-120"):

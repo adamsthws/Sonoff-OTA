@@ -145,6 +145,10 @@ CORE = ([("outage", s) for s in (5, 15, 30, 60, 120, 180)]
         + [("cancel", "continue"), ("cancel", "new"), ("ctrlc", "once")])
 NEW = [("hangup", "continue"), ("sleep", 600), ("weak", 60),
        ("pcoff", 30), ("pcoff", 120), ("corrupt", "once")]
+# Steps that send nothing a changed packet could reach: R2 knows Sonoff's
+# firmware by its LAN port taking a connection, and reads nothing over it, so
+# corrupt-once there only ever came back NO-TRAFFIC.
+NOTHING_TO_CORRUPT = {"R2"}
 # Where a firmware raises its own network when it loses the home one: the
 # installer (C3, D1: after 45 s), the mover and ESPHome (L1, M1, X1, I2: after
 # 1.5 to 2 minutes). There the person joins it before being asked, and the run
@@ -173,7 +177,7 @@ def step_faults(step):
         faults += [("crash", 60)]
     if step == "C3fb":
         return faults
-    faults += NEW
+    faults += [fault for fault in NEW if not (fault[0] == "corrupt" and step in NOTHING_TO_CORRUPT)]
     if step in OWN_HANDLING_STEPS:
         faults += OWN_HANDLING
     if step in OWN_HANDLING_STEPS or step in FALLBACK_STEPS:

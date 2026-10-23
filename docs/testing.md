@@ -49,7 +49,7 @@ person converting it again would have.
 ## The fault suite
 
 `tools/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,368 scenarios:
+every direction - 1,366 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
@@ -67,7 +67,9 @@ every direction - 1,368 scenarios:
     beginning (`--new`), or choosing the other firmware; the terminal window
     closed;
   - a packet changed on its way, its checksum made good, so that only the
-    tool's and the plug's own checks can tell;
+    tool's and the plug's own checks can tell - at each step but R2, which
+    only sees that Sonoff's firmware takes a connection, and sends nothing
+    to change;
   - the tool's own handling, the same at every step, so tried at the riskiest
     steps and where each firmware is first written from (C2, L1, X1): a second
     run started while the first works, which must be refused without
