@@ -1328,11 +1328,15 @@ class Scenario:
             if later and len(results) == 1:
                 step, later_fault, later_arg, later_delay = later
 
-                def later_inject(since=time.time(), headers=self.headers_now()):
-                    self.inject(since, headers, later_delay, stop2, later_fault, later_arg, False, step)
-                    if not stop2.is_set():
-                        self.notes["later_fired"] = f"{later_fault}-{later_arg} at {step}"
-                threading.Thread(target=later_inject, daemon=True).start()
+                # Given its stop event, not reading stop2 when done: by then the
+                # loop may have made a new one, never set, for the next run.
+                def later_inject(since, headers, stop, step, fault, arg, delay):
+                    self.inject(since, headers, delay, stop, fault, arg, False, step)
+                    if not stop.is_set():
+                        self.notes["later_fired"] = f"{fault}-{arg} at {step}"
+                threading.Thread(target=later_inject, daemon=True,
+                                 args=(time.time(), self.headers_now(), stop2, step,
+                                       later_fault, later_arg, later_delay)).start()
             results.append((self.run_tool(target, extra, code=code), None))
             results[-1] = (results[-1][0], self.screen_result())
             stop2.set()
