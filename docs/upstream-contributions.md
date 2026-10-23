@@ -33,6 +33,8 @@ several other HTTP clients, and following it led to a few more bugs nearby.
   LibreTiny, SCons
 - [The emulator's Wi-Fi](#the-emulators-wi-fi) - QEMU (lcgamboa's fork)
 - [Smaller fixes found along the way](#smaller-fixes-found-along-the-way) - Tasmota
+- [Other people's reports, reproduced on the emulator](#other-peoples-reports-reproduced-on-the-emulator) -
+  Tasmota
 
 ## HTTP clients that waited for ever
 
@@ -150,6 +152,22 @@ to its own setup network: join it, and let the conversion carry on through it.
 |---|---|---|
 | Tasmota | [#25163](https://github.com/arendst/Tasmota/pull/25163) | Berry's `webclient` logged a connection timeout's error code as its time: "Connection timeout after -1 ms" |
 | Tasmota | [#25169](https://github.com/arendst/Tasmota/pull/25169) | Its setup network went out under the chip's default name (`ESP_` and its MAC) for its first tenth of a second, which phones and computers then list beside the real one |
+
+## Other people's reports, reproduced on the emulator
+
+With the emulator built, we went through Tasmota's open reports for problems
+it could reproduce, and picked those an S60 owner could meet. Two came from
+one person changing an ESP32-C3 plug's Wi-Fi (discussions
+[#24591](https://github.com/arendst/Tasmota/discussions/24591) and
+[#24585](https://github.com/arendst/Tasmota/discussions/24585)), as someone
+might after converting a plug. Both were in Tasmota's own setup and settings
+pages, beside [#25169](https://github.com/arendst/Tasmota/pull/25169) above.
+
+| Project | Pull request | What it fixes |
+|---|---|---|
+| Tasmota | [#25183](https://github.com/arendst/Tasmota/pull/25183) | On ESP32, `WifiConfig 2` gave a setup network whose page was the normal main page within a second: no captive portal, and Wi-Fi details sent to it were not taken |
+| Tasmota | [#25184](https://github.com/arendst/Tasmota/pull/25184) | A Wi-Fi, web or MQTT password with a `;` saved from a settings page was cut there and the rest run as a command; an unpaired `{` took in the rest of the page |
+| Tasmota | [#25185](https://github.com/arendst/Tasmota/pull/25185) | Matter could not encode a string longer than 255 bytes (a typo another user spotted in issue [#24624](https://github.com/arendst/Tasmota/issues/24624)) |
 
 ## How each fix was proven
 
