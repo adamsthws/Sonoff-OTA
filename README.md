@@ -161,6 +161,8 @@ report back on how it went here:
   the emulator, every fault in the way of every step, and real plugs.
 - **[docs/updating-firmware.md](docs/updating-firmware.md)** - how the
   Tasmota and ESPHome the tool installs are moved to each new release.
+- **[docs/private-backup.md](docs/private-backup.md)** - for the maintainer:
+  how their own Sonoff backup is kept sealed and private, off their computer.
 - **[docs/device-names.md](docs/device-names.md)** - the name the plug goes by
   at each stage, where each is set, and how to change them.
 - **[docs/upstream-contributions.md](docs/upstream-contributions.md)** - bugs

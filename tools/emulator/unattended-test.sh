@@ -177,8 +177,9 @@ elif [ "$stub" = 1 ]; then
 else
     # Not the Wi-Fi in it, if any, nor a plug's password, web login or key:
     # those are your real network's and plugs', and the emulated plug's are
-    # its own (given below).
-    grep -v '^ *\(export \)\?\(AUTOFLASH\|S60\)_\(WIFI_\|TASMOTA_PASSWORD\|ESPHOME_\)' "$ROOT/.env" \
+    # its own (given below). Nor the key to the sealed Sonoff backup, which
+    # no run needs.
+    grep -v '^ *\(export \)\?\(AUTOFLASH\|S60\)_\(WIFI_\|TASMOTA_PASSWORD\|ESPHOME_\|BACKUP_KEY\)' "$ROOT/.env" \
         | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
 fi
 [ "$keep" = 1 ] && trap 'docker exec "$NAME" rm -f "$answers" 2>/dev/null || true' EXIT
