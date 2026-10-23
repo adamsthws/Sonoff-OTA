@@ -200,6 +200,18 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(again.call_args.kwargs["later"],
                          ("G1", "plugoff", 1, 0.6 * fs.ROUTES["sonoff>tasmota"][2]["G1"]))
 
+    def test_an_earlier_releases_own_error_is_not_this_checkouts(self):
+        # 1.2.0, killed as G1 began, had stopped on a TimeoutError of its own:
+        # this checkout's run carried on in the same run log and converted.
+        sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "G1", "fault": "legacy",
+                              "arg": "v1.2.0", "at": 40}, "/dev/null")
+        old = f"=== run started, tool version 1.2.0 ===\nFAILED: {fs.UNEXPECTED}: TimeoutError\n"
+        log = Path("run.log")
+        sc.earlier_release_wrote = {log: len(old)}
+        self.assertNotIn(fs.UNEXPECTED, sc.ours(log, old + "=== run started ===\nConverted\n"))
+        self.assertIn(fs.UNEXPECTED, sc.ours(log, old + f"FAILED: {fs.UNEXPECTED}: KeyError\n"))
+        self.assertIn(fs.UNEXPECTED, sc.ours(Path("another/run.log"), old))
+
     def test_a_step_with_a_start_of_its_own_needs_no_length(self):
         # F4rs is in STARTS only: its length comes from there.
         sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "F4rs", "fault": "plugoff",

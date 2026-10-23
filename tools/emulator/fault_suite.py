@@ -705,6 +705,12 @@ class Scenario:
         self.fired = None
         self.notes = {}
         self.step_length = 60  # the step under test's usual length (go_watched)
+        self.earlier_release_wrote = {}  # each run log, as far as a legacy run left it
+
+    def ours(self, log, text):
+        """What this checkout's runs wrote to a run log: past what an earlier
+        release's run (go_legacy), carried on in the same run, wrote first."""
+        return text[self.earlier_release_wrote.get(log, 0):]
 
     def say(self, text):
         with open(self.log, "a") as f:
@@ -1216,6 +1222,7 @@ class Scenario:
         results = [(self.run_tool(first, fresh=True, code=old), None)]
         results[-1] = (results[-1][0], self.screen_result())
         stop.set()
+        self.earlier_release_wrote = {log: len(text) for _, log, text in run_logs(self.state)}
         if step == "start":
             if "Converted" not in results[-1][1]:
                 return self.finish(results, "OLD-RUN-FAILED")
@@ -1399,10 +1406,12 @@ class Scenario:
         if not special:
             if self.notes.get("mistimed"):
                 special = "MISTIMED"
-            elif any(UNEXPECTED in t for m, _, t in run_logs(self.state) if m >= self.started):
+            elif any(UNEXPECTED in self.ours(p, t) for m, p, t in run_logs(self.state) if m >= self.started):
                 # A run stopped by an error the tool did not see coming - a bug,
                 # whatever the fault - though the next run may convert the plug
                 # (seen: a report that could not be made, KeyError: 'safeboot').
+                # Not an earlier release's, which is out already (1.2.0's
+                # TimeoutError as G1 starts).
                 special = "FAIL-UNEXPECTED"
             elif fault == "corrupt" and not self.notes.get("corrupted_packets"):
                 special = "NO-TRAFFIC"
