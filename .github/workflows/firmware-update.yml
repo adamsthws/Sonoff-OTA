@@ -30,11 +30,8 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-  actions: write
+# Each job is given only what it uses.
+permissions: {}
 
 concurrency:
   group: firmware-update
@@ -47,19 +44,34 @@ env:
 jobs:
   due:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write   # the issue below
     outputs:
       tasmota: ${{ steps.due.outputs.tasmota }}
       esphome: ${{ steps.due.outputs.esphome }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: What is due
         id: due
+        env:
+          INPUT_TASMOTA: ${{ inputs.tasmota }}
+          INPUT_ESPHOME: ${{ inputs.esphome }}
         run: |
           python3 tools/update_firmware.py due > due.json
           tasmota=$(python3 -c 'import json; print(json.load(open("due.json"))["tasmota"]["due"] or "")')
           esphome=$(python3 -c 'import json; print(json.load(open("due.json"))["esphome"]["due"] or "")')
-          [ -z "${{ inputs.tasmota }}" ] || tasmota="${{ inputs.tasmota }}"
-          [ -z "${{ inputs.esphome }}" ] || esphome="${{ inputs.esphome }}"
+          [ -z "$INPUT_TASMOTA" ] || tasmota=$INPUT_TASMOTA
+          [ -z "$INPUT_ESPHOME" ] || esphome=$INPUT_ESPHOME
+          # Release numbers only: they name a branch and go into commands below.
+          for version in "$tasmota" "$esphome"; do
+              if [ -n "$version" ] && ! [[ "$version" =~ ^v?[0-9]+(\.[0-9]+){1,3}$ ]]; then
+                  echo "::error::$version is not a release number"; exit 1
+              fi
+          done
           echo "tasmota=$tasmota" >> "$GITHUB_OUTPUT"
           echo "esphome=$esphome" >> "$GITHUB_OUTPUT"
           { echo "### Due"; echo; echo "Tasmota: ${tasmota:-nothing}; ESPHome: ${esphome:-nothing}";
@@ -82,15 +94,24 @@ jobs:
     if: ${{ needs.due.outputs.tasmota != '' || needs.due.outputs.esphome != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    permissions:
+      contents: write        # push the branch
+      pull-requests: write   # open the pull request
+      issues: write          # its labels
+    env:
+      TASMOTA: ${{ needs.due.outputs.tasmota }}
+      ESPHOME: ${{ needs.due.outputs.esphome }}
+      DRY_RUN: ${{ inputs.dry_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0   # the tags say which version is released
+          persist-credentials: false
       - name: Not made already
         id: branch
         run: |
-          branch="firmware/tasmota-${{ needs.due.outputs.tasmota || 'same' }}-esphome-${{ needs.due.outputs.esphome || 'same' }}"
-          echo "name=$branch" >> "$GITHUB_OUTPUT"
+          branch="firmware/tasmota-${TASMOTA:-same}-esphome-${ESPHOME:-same}"
+          echo "BRANCH=$branch" >> "$GITHUB_ENV"
           if [ -n "$(gh pr list --state open --head "$branch" --json number --jq '.[].number')" ]; then
               echo "A pull request for $branch is open already."
               echo "made=yes" >> "$GITHUB_OUTPUT"
@@ -103,20 +124,20 @@ jobs:
           .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "${{ steps.branch.outputs.name }}"
+          git switch -c "$BRANCH"
       - name: The update
         if: steps.branch.outputs.made != 'yes'
         run: |
           set -o pipefail
           : > update.txt
-          if [ -n "${{ needs.due.outputs.tasmota }}" ]; then
-              .venv/bin/python tools/update_firmware.py tasmota "${{ needs.due.outputs.tasmota }}" 2>&1 | tee -a update.txt
+          if [ -n "$TASMOTA" ]; then
+              .venv/bin/python tools/update_firmware.py tasmota "$TASMOTA" 2>&1 | tee -a update.txt
           fi
-          if [ -n "${{ needs.due.outputs.esphome }}" ]; then
-              .venv/bin/python tools/update_firmware.py esphome "${{ needs.due.outputs.esphome }}" 2>&1 | tee -a update.txt
+          if [ -n "$ESPHOME" ]; then
+              .venv/bin/python tools/update_firmware.py esphome "$ESPHOME" 2>&1 | tee -a update.txt
           fi
           git add -A -- . ':!update.txt'
-          title="Install$([ -n "${{ needs.due.outputs.tasmota }}" ] && echo " Tasmota ${{ needs.due.outputs.tasmota }}")$([ -n "${{ needs.due.outputs.tasmota }}" ] && [ -n "${{ needs.due.outputs.esphome }}" ] && echo " and")$([ -n "${{ needs.due.outputs.esphome }}" ] && echo " ESPHome built with ${{ needs.due.outputs.esphome }}")"
+          title="Install${TASMOTA:+ Tasmota $TASMOTA}${TASMOTA:+${ESPHOME:+ and}}${ESPHOME:+ ESPHome built with $ESPHOME}"
           echo "TITLE=$title" >> "$GITHUB_ENV"
           git commit -q -m "$title" -m "Made by the firmware-update workflow: tools/update_firmware.py, then the unit tests and the final-firmware emulator test (the pull request says what they found)."
       - name: The unit tests
@@ -135,14 +156,17 @@ jobs:
           .venv/bin/python -I tools/emulator/public_plugs.py test | tee emulator.txt
       - name: The pull request
         if: steps.branch.outputs.made != 'yes'
+        env:
+          UNIT: ${{ steps.unit.outcome }}
+          EMULATOR: ${{ steps.emulator.outcome }}
         run: |
-          passed=$([ "${{ steps.unit.outcome }}" = success ] && [ "${{ steps.emulator.outcome }}" = success ] && echo yes || echo no)
+          passed=$([ "$UNIT" = success ] && [ "$EMULATOR" = success ] && echo yes || echo no)
           merge_on=$(date -u -d "+${MERGE_AFTER_DAYS} days" +%Y-%m-%d)
           {
             echo "Made by the [firmware-update workflow]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) under the settled-release rule ([docs/updating-firmware.md](docs/updating-firmware.md))."
             echo
-            [ -z "${{ needs.due.outputs.tasmota }}" ] || echo "- **Tasmota ${{ needs.due.outputs.tasmota }}**: [release notes](https://github.com/arendst/Tasmota/releases/tag/v${{ needs.due.outputs.tasmota }})"
-            [ -z "${{ needs.due.outputs.esphome }}" ] || echo "- **ESPHome built with ${{ needs.due.outputs.esphome }}**: [release notes](https://github.com/esphome/esphome/releases/tag/${{ needs.due.outputs.esphome }})"
+            [ -z "$TASMOTA" ] || echo "- **Tasmota $TASMOTA**: [release notes](https://github.com/arendst/Tasmota/releases/tag/v$TASMOTA)"
+            [ -z "$ESPHOME" ] || echo "- **ESPHome built with $ESPHOME**: [release notes](https://github.com/esphome/esphome/releases/tag/$ESPHOME)"
             echo
             if [ "$passed" = yes ]; then
               echo "**Tests passed.** This merges itself on or after **$merge_on** (${MERGE_AFTER_DAYS} days), which releases it, unless it is labelled \`hold\`."
@@ -166,26 +190,33 @@ jobs:
             echo "- [ ] Converted a real plug with it (optional: the workflow merges without)"
           } > body.md
           cat body.md >> "$GITHUB_STEP_SUMMARY"
-          if [ "${{ inputs.dry_run }}" = true ]; then
+          if [ "$DRY_RUN" = true ]; then
               echo "Dry run: nothing pushed or opened."
               exit 0
           fi
           gh label create firmware-update --color 0E8A16 --description "Made by the firmware-update workflow" 2>/dev/null || true
           gh label create hold --color B60205 --description "Never merged by the firmware-update workflow" 2>/dev/null || true
           gh label create tests-failed --color D93F0B --description "The firmware-update workflow's tests failed" 2>/dev/null || true
-          git push -q origin "${{ steps.branch.outputs.name }}"
+          gh auth setup-git   # the checkout keeps no credentials
+          git push -q origin "$BRANCH"
           labels=(--label firmware-update)
           [ "$passed" = yes ] || labels+=(--label tests-failed)
-          gh pr create --base main --head "${{ steps.branch.outputs.name }}" --title "$TITLE" --body-file body.md \
+          gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file body.md \
               "${labels[@]}"
 
   merge:
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write        # merge
+      pull-requests: write   # comment on, close
+      actions: write         # start the release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Merge what has waited long enough, and release it
         run: |
           cutoff=$(date -u -d "-${MERGE_AFTER_DAYS} days +2 hours" +%Y-%m-%dT%H:%M:%SZ)
