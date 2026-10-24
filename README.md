@@ -3,6 +3,8 @@
 
 [![Installs Tasmota](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.tasmota.version&label=installs%20Tasmota&color=blue)](docs/updating-firmware.md) [![Installs ESPHome](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.esphome.image.esphome&label=installs%20ESPHome&color=blue)](docs/updating-firmware.md)
 
+[![Release](https://img.shields.io/github/v/release/adamsthws/Sonoff-OTA)](https://github.com/adamsthws/Sonoff-OTA/releases/latest) [![Downloads](https://img.shields.io/github/downloads/adamsthws/Sonoff-OTA/total)](https://github.com/adamsthws/Sonoff-OTA/releases) [![Final firmware on the emulator](https://github.com/adamsthws/Sonoff-OTA/actions/workflows/emulator-check.yml/badge.svg?branch=main)](https://github.com/adamsthws/Sonoff-OTA/actions/workflows/emulator-check.yml) [![Lint](https://github.com/adamsthws/Sonoff-OTA/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/adamsthws/Sonoff-OTA/actions/workflows/lint.yml) [![License: GPL-3.0](https://img.shields.io/github/license/adamsthws/Sonoff-OTA)](LICENSE) [![Runs on Linux, macOS and Windows](https://img.shields.io/badge/runs%20on-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#what-it-has-been-run-on) [![Discussions](https://img.shields.io/github/discussions/adamsthws/Sonoff-OTA)](https://github.com/adamsthws/Sonoff-OTA/discussions) [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/adamsthws)
+
 <br>
 <br>
 
