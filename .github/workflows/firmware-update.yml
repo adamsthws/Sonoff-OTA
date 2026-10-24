@@ -143,6 +143,7 @@ jobs:
           git switch -c "$BRANCH"
       - name: The update
         if: steps.branch.outputs.made != 'yes'
+        id: update
         run: |
           set -o pipefail
           : > update.txt
@@ -153,20 +154,27 @@ jobs:
               .venv/bin/python tools/update_firmware.py esphome "$ESPHOME" 2>&1 | tee -a update.txt
           fi
           git add -A -- . ':!update.txt'
+          # Asked by hand for what it installs already: nothing to make, test or open.
+          if git diff --cached --quiet; then
+              echo "::notice::Nothing to update: firmware.json pins these releases already."
+              echo "changed=no" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          echo "changed=yes" >> "$GITHUB_OUTPUT"
           title="Install${TASMOTA:+ Tasmota $TASMOTA}${TASMOTA:+${ESPHOME:+ and}}${ESPHOME:+ ESPHome built with $ESPHOME}"
           echo "TITLE=$title" >> "$GITHUB_ENV"
           git commit -q -m "$title" -m "Made by the firmware-update workflow: tools/update_firmware.py, then the unit tests and the final-firmware emulator test (the pull request says what they found)."
       - name: Nothing in it that should not be there
-        if: steps.branch.outputs.made != 'yes'
+        if: steps.branch.outputs.made != 'yes' && steps.update.outputs.changed == 'yes'
         run: python3 tools/leak_scan.py range origin/main..HEAD
       - name: The unit tests
-        if: steps.branch.outputs.made != 'yes'
+        if: steps.branch.outputs.made != 'yes' && steps.update.outputs.changed == 'yes'
         id: unit
         continue-on-error: true
         run: |
           PYTHONUNBUFFERED=1 .venv/bin/python -m unittest discover -s tests > unit.txt 2>&1
       - name: The final firmware on the emulator
-        if: steps.branch.outputs.made != 'yes'
+        if: steps.branch.outputs.made != 'yes' && steps.update.outputs.changed == 'yes'
         id: emulator
         continue-on-error: true
         run: |
@@ -174,7 +182,7 @@ jobs:
           .venv/bin/python -I tools/emulator/public_plugs.py fetch
           .venv/bin/python -I tools/emulator/public_plugs.py test | tee emulator.txt
       - name: The pull request
-        if: steps.branch.outputs.made != 'yes'
+        if: steps.branch.outputs.made != 'yes' && steps.update.outputs.changed == 'yes'
         env:
           UNIT: ${{ steps.unit.outcome }}
           EMULATOR: ${{ steps.emulator.outcome }}
