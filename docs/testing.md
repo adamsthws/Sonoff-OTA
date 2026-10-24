@@ -33,6 +33,48 @@ and, beside it, on 3.10, the oldest the tool runs on: a Mac's own Python may
 be older than 3.12, and so may one already installed where the portable one
 cannot be had.
 
+### Side by side, in any order
+
+`tests/run.py` runs each test in its own turn on one of many processes, in
+an order unittest never uses, so a test must pass whatever ran before it in
+its process and whatever runs beside it in the others. A test still running
+after 60 seconds (`--timeout`; the longest takes 10) is stopped, reported
+with where each of its threads was, and the run fails, rather than waiting
+for ever.
+
+On 2026-10-24 that was tested to exhaustion: 2,000 runs in a row passed,
+each in a new random order, on Python 3.10, 3.12 and 3.14 and on 2 to 64
+processes, after five problems the first hundred runs found had been fixed:
+
+| Found | What it was | Fixed by |
+|---|---|---|
+| A test saw a sleep hold another had just taken | the awake tests check this computer's systemd inhibitors, which one takes while another checks none is left | running them as one (`TOGETHER` in `tests/run.py`) |
+| "recovery_safeboot size changed" | bundle tests left the recovery image in memory, for the next test's bundle | each starting and ending with none |
+| A wait of -1,000,000 s | a question left unanswered by one test was taken as the next's wait | `output.start()` beginning with no question pending |
+| "Address already in use" | a port picked free, let go, then taken by another test before the server bound it | the server started again on another |
+| A clean-up waiting for ever, once | a test server's `shutdown()`; never seen again, so not known | the time limit, which would now show where it was |
+
+Writing a test that keeps it so:
+
+- **Leave nothing behind** in a module, a class or the environment: patch it
+  for the test (`mock.patch...start()` with `addCleanup`), and put back what
+  the code under test keeps for the life of a process.
+- **Keep a port** picked as free: a server picked one for is started again
+  on another if it cannot bind; a check that nobody answers keeps the socket
+  bound, not listening - refused at once, and no one else's meanwhile.
+- **Nothing of the whole computer's** - its sleep inhibitors, a fixed port, a
+  file outside the test's own temporary directory - unless the tests sharing
+  it are in `TOGETHER`, with why.
+
+To soak them again, after a change to how tests share anything:
+
+```sh
+for i in $(seq 200); do python3 tests/run.py --shuffle -j 24 > soak.txt 2>&1 || { grep -m1 seed soak.txt; break; }; done
+```
+
+stops at the first failure and says its seed: `--seed N` with the same `-j`
+runs that order again.
+
 ## Linters
 
 ```sh
