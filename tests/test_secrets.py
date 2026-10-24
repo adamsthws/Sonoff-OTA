@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from tools import prepare_imprinted_bundle as bundle
+from tools import safeboot_migration
 from tools.safeboot_migration import RECOVERY_ARTIFACT
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,9 +34,18 @@ HAVE_OFFICIAL = all(_is_pinned(OFFICIAL[file], name) for name, file in
                      ("app", "tasmota32c3.bin")))
 
 
+def keep_memory_artifacts_to_the_test(test: unittest.TestCase) -> None:
+    """The recovery image handed over in memory goes with the test: left
+    behind, it would be read for the next test's bundle in this process."""
+    patcher = mock.patch.dict(safeboot_migration._MEMORY_ARTIFACTS, clear=True)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 @unittest.skipUnless(HAVE_OFFICIAL, "needs the official release files from a real bundle")
 class MemoryOnlyBundleTests(unittest.TestCase):
     def setUp(self):
+        keep_memory_artifacts_to_the_test(self)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.out = Path(directory.name)
@@ -132,6 +142,7 @@ class BundleWithoutWifiTests(unittest.TestCase):
     """A5 builds the bundle with no Wi-Fi; E1 writes in what it reads off the plug."""
 
     def setUp(self):
+        keep_memory_artifacts_to_the_test(self)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.out = Path(directory.name)
