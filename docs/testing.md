@@ -12,10 +12,17 @@ Three layers, each catching what the one before cannot:
 ## Unit tests
 
 ```sh
-python3 -m unittest discover -s tests
+python3 tests/run.py
 ```
 
-Unit tests complete in under a minute. They cover the decisions the tool makes - which
+That runs them side by side, in about 11 seconds on six cores, where
+`python3 -m unittest discover -s tests` - the same tests, one after another -
+takes a minute: most of their time is spent waiting, not computing. It shows
+only what fails, with what the test printed; `python3 tests/run.py test_output`
+runs some, and `--shuffle` runs them in a random order, to find a test that
+passes only after another.
+
+They cover the decisions the tool makes - which
 route to take, what to ask, when to try again, what counts as done - with the
 plug and the network stood in for; and the parts that have to be exact - the
 plans the plug carries out, the update protocols, image checks and pins, what

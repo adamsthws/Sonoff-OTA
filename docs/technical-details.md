@@ -327,7 +327,7 @@ procedure - is in **[archive/docs/reference/](../archive/docs/reference/)**.
 The tests check the tool against itself; nothing touches the plug:
 
 ```sh
-python3 -m unittest discover -s tests
+python3 tests/run.py
 ```
 
 To try a change against a plug without converting a real one, the emulator in

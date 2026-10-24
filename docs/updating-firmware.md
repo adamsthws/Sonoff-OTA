@@ -180,7 +180,7 @@ README's badges read `firmware.json` on `main`, and change by themselves.
 **Unit tests**, in a checkout with no emulator state linked in:
 
 ```sh
-python3 -m unittest discover -s tests
+python3 tests/run.py
 ```
 
 **The emulator**, from just before the final firmware: nothing before it

@@ -16,6 +16,8 @@ bridge/.pio/
 sdkconfig.*
 # The unit tests' coverage (python -m coverage run).
 .coverage
+# How long each unit test took last time, for tests/run.py's order.
+.test-times.json
 # Generated configs stay out; the bridge's chosen settings must not.
 !sdkconfig.defaults
 __pycache__/
