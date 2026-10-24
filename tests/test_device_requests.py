@@ -141,8 +141,9 @@ class HeldRequestTests(unittest.TestCase):
         with socket.socket() as spare:
             spare.bind(("127.0.0.1", 0))
             port = spare.getsockname()[1]
-        with self.assertRaises(urllib.error.URLError):
-            Device(f"127.0.0.1:{port}")._get("/", {}, timeout=2)
+            # Held, not listening, while asked: refused, and no other test can take it.
+            with self.assertRaises(urllib.error.URLError):
+                Device(f"127.0.0.1:{port}")._get("/", {}, timeout=2)
         self.assertEqual(device.held_requests(), 0)
 
     def test_a_web_password_is_still_reported(self):
@@ -300,7 +301,8 @@ class WebPasswordTests(unittest.TestCase):
         with socket.socket() as spare:
             spare.bind(("127.0.0.1", 0))
             port = spare.getsockname()[1]
-        self.assertIsNone(Device(f"127.0.0.1:{port}").wants_password(timeout=2))
+            # Held, not listening, while asked: refused, and no other test can take it.
+            self.assertIsNone(Device(f"127.0.0.1:{port}").wants_password(timeout=2))
 
     def test_a_command_refused_for_it_says_how_to_give_it(self):
         with self.assertRaisesRegex(device.NeedsPassword, "not given: give it with --web-password"):

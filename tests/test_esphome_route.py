@@ -349,11 +349,11 @@ class ApiSignalTests(unittest.TestCase):
 
     def test_no_api_at_all_gives_nothing(self):
         import socket
-        unused = socket.socket()
-        unused.bind(("127.0.0.1", 0))
-        port = unused.getsockname()[1]
-        unused.close()
-        self.assertIsNone(af.esphome.api_signal("127.0.0.1", port, timeout=2.0))
+        with socket.socket() as unused:
+            unused.bind(("127.0.0.1", 0))
+            port = unused.getsockname()[1]
+            # Held, not listening, while asked: refused, and no other test can take it.
+            self.assertIsNone(af.esphome.api_signal("127.0.0.1", port, timeout=2.0))
 
 
 class WifiActionTests(unittest.TestCase):

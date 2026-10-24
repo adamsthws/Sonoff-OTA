@@ -179,7 +179,8 @@ class ProtocolTests(unittest.TestCase):
         with socket.socket() as unused:
             unused.bind(("127.0.0.1", 0))
             port = unused.getsockname()[1]
-        self.assertIsNone(ota.probe("127.0.0.1", port=port, timeout=1))
+            # Held, not listening, while asked: refused, and no other test can take it.
+            self.assertIsNone(ota.probe("127.0.0.1", port=port, timeout=1))
 
     def test_an_update_password_is_reported_not_guessed(self):
         fake = self.fake(password="s3cret-71")
@@ -209,7 +210,8 @@ class ProtocolTests(unittest.TestCase):
         with socket.socket() as unused:
             unused.bind(("127.0.0.1", 0))
             port = unused.getsockname()[1]
-        self.assertIsNone(ota.wants("127.0.0.1", port=port, timeout=1))
+            # Held, not listening, while asked: refused, and no other test can take it.
+            self.assertIsNone(ota.wants("127.0.0.1", port=port, timeout=1))
 
     def test_one_taking_only_encrypted_updates_wants_its_key(self):
         fake = self.fake(encrypted_only=True, key=KEY)
