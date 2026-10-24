@@ -154,6 +154,20 @@ class ConciseTests(OutputTestCase):
         screen, log = self.run_with(FakeTerminal(), False, body)
         self.assertIn("Discovering the plug - complete (10s)", log)
 
+    def test_a_question_left_unanswered_is_not_the_next_runs_wait(self):
+        now = [100.0]
+        with mock.patch.object(output.time, "monotonic", side_effect=lambda: now[0]):
+            output.before_input("The plug's address: ")   # never answered
+            now[0] += 1000
+            def body():
+                output.stage_begin(3, 14, "Discovering the plug")
+                output.before_input("The plug's address: ")
+                now[0] += 60
+                self.assertEqual(output.waited(), 60)
+                output.answered("192.168.0.50")
+                output.stage_end("complete")
+            self.run_with(FakeTerminal(), False, body)
+
     def test_no_clock_drawn_in_an_open_block(self):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True), \

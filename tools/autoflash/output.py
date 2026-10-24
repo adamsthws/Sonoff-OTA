@@ -150,6 +150,7 @@ def start(log_path: Path | None, *, verbose: bool) -> None:
         _s.concise = not verbose
         _s.paused = False
         _s.run_waited = 0.0
+        _s.waiting_since = None   # a question left unanswered is not this run's wait
         if _s.concise and sys.stdout.isatty() and _s.ticker is None:
             # Keeps the stage clock moving through waits that print nothing.
             _s.stop_ticker.clear()
