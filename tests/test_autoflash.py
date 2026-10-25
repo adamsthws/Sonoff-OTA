@@ -1877,6 +1877,14 @@ class ConsentTests(unittest.TestCase):
             autoflash.consent_to_leave(ctx, "Tasmota")
         self.assertEqual(asked.call_count, 1)
 
+    def test_refused_it_says_nothing_was_written(self):
+        # A run stopped there does not say what the plug is (past_the_commit).
+        from types import SimpleNamespace
+        import tools.autoflash_cli as autoflash
+        with mock.patch.object(autoflash, "require_word", return_value=False), \
+             mock.patch.object(autoflash, "warning_box"), self.assertRaises(autoflash.NothingWritten):
+            autoflash.consent_to_leave(SimpleNamespace(), "Tasmota")
+
     def test_proceed_in_any_case_goes_ahead(self):
         for reply in ("PROCEED", "proceed", " Proceed "):
             with self.subTest(reply=reply):
@@ -2510,7 +2518,11 @@ class PastTheCommitTests(unittest.TestCase):
             (run / "live").mkdir(parents=True)
             state = RunState.open(run)
             for step in done:
-                state.mark(step, "done")
+                # "X1!": stopped before it wrote anything; "X1?": stopped, maybe after.
+                if step.endswith(("!", "?")):
+                    state.mark(step[:-1], "failed", **({"nothing_written": True} if step[-1] == "!" else {}))
+                else:
+                    state.mark(step, "done")
             if stopped:  # stopped as E3 ran: what its server saw of the plug
                 state.mark("E3", ATTEMPTED)
                 (run / "live" / "commit-server.log").write_text(stopped[0])
@@ -2568,6 +2580,28 @@ class PastTheCommitTests(unittest.TestCase):
         self.assertEqual(self.source([]), "midway")                           # no record of it
         # The latest run decides: one past the commit, then one that started over.
         self.assertEqual(self.source([(["E3"], None), (["X1"], None)]), "midway")
+
+    def test_a_run_that_wrote_nothing_does_not_hide_the_one_before(self):
+        # Seen: runs stopped at X1, sent to a Tasmota with no update service,
+        # stood between a plug and the record of the run that knew it.
+        self.assertEqual(self.source([(["E1", "E2", "E3"], None), (["X1!"], None)]), "committed")
+        self.assertEqual(self.source([(["E1", "E2", "E3"], None), ([], None)]), "committed")
+        # One that may have written something decides, as before.
+        self.assertEqual(self.source([(["E1", "E2", "E3"], None), (["X1?"], None)]), "midway")
+
+    def test_x1_finding_no_update_service_says_nothing_was_written(self):
+        from types import SimpleNamespace
+        import tools.autoflash_cli as autoflash
+        inputs = {"plug_ip": "192.168.0.137", "source": "tasmota"}
+        ctx = SimpleNamespace(state=SimpleNamespace(input=inputs.get), dry_run=False,
+                              wifi=lambda why=None: ("wifi", "password"))
+        with mock.patch.object(autoflash, "identify", return_value="tasmota"), \
+                mock.patch.object(autoflash, "startup_image", return_value=b"image"), \
+                mock.patch.object(autoflash, "wait_for", side_effect=autoflash.Abort("did not answer")), \
+                mock.patch.object(autoflash, "send_as_esphome_update") as sent, \
+                self.assertRaises(autoflash.NothingWritten):
+            autoflash.step_startup_from_esphome(ctx)
+        sent.assert_not_called()
 
     def test_a_tasmota_without_its_template_is_never_sent_the_hubs_steps(self):
         # Seen: a converted plug that had lost its template, taken for part

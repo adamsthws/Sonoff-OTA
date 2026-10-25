@@ -253,6 +253,11 @@ class Abort(RuntimeError):
     pass
 
 
+class NothingWritten(Abort):
+    """A step stopped before it wrote anything to the plug: a run of nothing
+    else does not say what the plug is (past_the_commit)."""
+
+
 # ---------------------------------------------------------------- utilities
 
 
@@ -2314,7 +2319,7 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
         "Only go ahead with a plug you can afford to lose",
     ])
     if not require_word(CONSENT_WORD):
-        raise Abort("not confirmed - nothing has been written to the plug")
+        raise NothingWritten("not confirmed - nothing has been written to the plug")
     output.transient_end()  # agreed: the note and the question have done their job
 
     started = time.monotonic()
@@ -3980,7 +3985,7 @@ def consent_to_leave(ctx: Context, what: str) -> None:
         "Only go ahead with a plug you can afford to lose",
     ])
     if not require_word(CONSENT_WORD):
-        raise Abort("not confirmed - nothing has been written to the plug")
+        raise NothingWritten("not confirmed - nothing has been written to the plug")
     output.transient_end()
     ctx.consented = True
 
@@ -4246,7 +4251,10 @@ def step_startup_from_esphome(ctx: Context, *, again: bool = False) -> dict[str,
         raise Abort(f"the startup firmware cannot be prepared: {exc}") from exc
     if ctx.dry_run:
         return {"dry_run": True}
-    wait_for(ctx, lambda address: esphome_ota.probe(address), "ESPHome's update service")
+    try:
+        wait_for(ctx, lambda address: esphome_ota.probe(address), "ESPHome's update service")
+    except Abort as exc:
+        raise NothingWritten(str(exc)) from exc
     seconds = send_as_esphome_update(ctx, image, "the startup firmware")
     wait_for(ctx, lambda address: Device(address, timeout=4).is_safeboot(),
              "the startup firmware on your Wi-Fi")
@@ -5093,6 +5101,10 @@ def past_the_commit(ctx: Context, running: str) -> str:
         # starts only once the new layout is in place - as E3's own check says.
         finished_alone = (not committed and state.status("E3") == ATTEMPTED
                           and table_fetched(directory / "live") and ctx.device.is_safeboot())
+        if not (committed or finished_alone) and wrote_nothing(state):
+            # Stopped before it wrote anything - X1 sent to a Tasmota, finding
+            # no update service: seen hiding the run before it.
+            continue
         if (committed or finished_alone) and not state.is_done("H1"):
             if finished_alone:
                 say("    Its last run was stopped as the commit ran, and the plug finished it:")
@@ -5115,6 +5127,15 @@ def past_the_commit(ctx: Context, running: str) -> str:
             return "committed"
         return tasmota_missing(ctx, running)  # its latest run says otherwise
     return tasmota_missing(ctx, running)
+
+
+def wrote_nothing(state: RunState) -> bool:
+    """Whether a run wrote nothing to the plug: no step that writes done or
+    part way, and each that failed stopped before writing."""
+    steps = state.data.get("steps", {})
+    return all(state.status(step) == PENDING
+               or (state.status(step) == FAILED and steps.get(step, {}).get("nothing_written"))
+               for step in DESTRUCTIVE_STEPS)
 
 
 # Tasmota's own safeboot, as a build of Tasmota's own says it is - "15.6.0
@@ -5237,7 +5258,7 @@ def _execute(ctx: Context, step: str) -> int:
         # it crashed the run.
         set_up_if_erased(ctx, step)
         if step in DESTRUCTIVE_STEPS:
-            ctx.state.mark(step, ATTEMPTED)
+            ctx.state.mark(step, ATTEMPTED, nothing_written=False)
         captured = handler(ctx)
     except QuitRun:
         output.stage_end("stopped")
@@ -5255,7 +5276,8 @@ def _execute(ctx: Context, step: str) -> int:
         # where the plug can show whether the step finished, the step stays
         # "attempted" and the next run asks it.
         if not (isinstance(exc, PhaseError) and step in ATTEMPTED_EVIDENCE):
-            ctx.state.mark(step, FAILED, error=str(exc))
+            ctx.state.mark(step, FAILED, error=str(exc),
+                           **({"nothing_written": True} if isinstance(exc, NothingWritten) else {}))
         output.stage_end("stopped")
         ctx.last_failure = str(exc)
         ctx.last_failed_step = step
