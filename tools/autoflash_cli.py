@@ -3581,7 +3581,7 @@ def step_configure(ctx: Context) -> dict[str, Any]:
     # cannot go in there: see at_next_save.)
     if run_source(ctx.state) != "untemplated":
         hooked = device.at_next_save([*([f"Hostname {hostname}"] if hostname else []),
-                                      f"Template {template}", "Module 0"],
+                                      f"Template {template}", "Module2 0", "Module 0"],
                                      timeout=SLOW_COMMAND)
         booted, uptime = device.started_at(), device.uptime_seconds()
         device.command("Reset 4", timeout=SLOW_COMMAND)
@@ -3612,7 +3612,7 @@ def give_template(device: Device, template: str, hostname: str | None) -> None:
     device.command(f"Template {template}", timeout=SLOW_COMMAND)
     # Named as every converted Tasmota is (tasmota-abcdef), and its own network
     # with it; one restart for both, as each would restart the plug alone.
-    device.command(f"Backlog Hostname {hostname}; Module 0" if hostname else "Module 0",
+    device.command(f"Backlog {f'Hostname {hostname}; ' if hostname else ''}Module2 0; Module 0",
                    timeout=SLOW_COMMAND)
     say(f"Template applied as {json.loads(template)['NAME']}"
         + (f", and named {hostname}" if hostname else "") + "; the plug restarts")
@@ -3654,21 +3654,31 @@ def back_after_reset(ctx: Context, booted: str | None, uptime: int | None) -> No
 SLOW_COMMAND = 30.0
 
 
-def template_in_place(device: Device, template: str, hostname: str | None = None) -> bool:
+def template_in_place(device: Device, template: str, hostname: str | None = None,
+                      fallback: bool = True) -> bool:
     """Whether F4 has done its work already: the plug's template in use,
-    settings saved, and its name `hostname` (when known)."""
+    settings saved, its name `hostname` (when known) - and, with `fallback`,
+    the template as Tasmota's fallback module too.
+
+    Restarted six times in a row, each within 10 s of starting, Tasmota takes
+    itself for a boot loop and goes over to its fallback module - Generic,
+    by default - keeping its Wi-Fi: a plug that switches nothing (seen: a
+    user's, half an hour after it was converted). Its own template there, it
+    goes on switching."""
     try:
         current = device.command("Template", timeout=SLOW_COMMAND)
         module = device.command("Module", timeout=SLOW_COMMAND)
         saving = device.command("SaveData", timeout=SLOW_COMMAND)
         named = device.command("Hostname", timeout=SLOW_COMMAND) if hostname else {"Hostname": None}
+        fallen = device.command("Module2", timeout=SLOW_COMMAND) if fallback else {"Module2": {"0": ""}}
     except (DeviceError, OSError):
         return False
     name = json.loads(template)["NAME"]
     return (isinstance(current, dict) and current.get("NAME") == name
             and isinstance(module, dict) and "0" in (module.get("Module") or {})
             and isinstance(saving, dict) and saving.get("SaveData") in ("ON", "1", 1)
-            and isinstance(named, dict) and named.get("Hostname") == hostname)
+            and isinstance(named, dict) and named.get("Hostname") == hostname
+            and isinstance(fallen, dict) and "0" in (fallen.get("Module2") or {}))
 
 
 
@@ -3834,10 +3844,17 @@ def step_verify(ctx: Context) -> dict[str, Any]:
     template = kinds.of_run(ctx.state).tasmota_template(ctx.state.input("product_model"))
     hostname = final_name(ctx, "tasmota")
     if not template_in_place(device, template, hostname):
-        # A run is not complete on a plug that switches nothing.
-        tell("    The plug's template is not in place: it is put in again, its other settings kept.")
-        ctx.state.capture("H1.template_again", True)
-        give_template(device, template, hostname)
+        if template_in_place(device, template, hostname, fallback=False):
+            # Converted by an earlier version: the fallback alone, no restart.
+            device.command("Module2 0", timeout=SLOW_COMMAND)
+            say("  The plug's template is now its fallback module too, should Tasmota take")
+            say("  itself for a boot loop.")
+            ctx.state.capture("H1.fallback_set", True)
+        else:
+            # A run is not complete on a plug that switches nothing.
+            tell("    The plug's template is not in place: it is put in again, its other settings kept.")
+            ctx.state.capture("H1.template_again", True)
+            give_template(device, template, hostname)
     earlier = earlier_release(manifest) if manifest.get("official_release") != official_release() else None
     if earlier is not None:
         # Begun by an earlier version, which installed that release at F2.

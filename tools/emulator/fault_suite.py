@@ -246,7 +246,10 @@ def composite_scenarios():
         never replaced.
     notemplate-generic: a converted plug's template replaced with Tasmota's
         generic one, and an MQTT host set, as a person might (go_notemplate);
-        then the tool, to Tasmota, ESPHome or Sonoff."""
+        then the tool, to Tasmota, ESPHome or Sonoff.
+    bootloop-fallback: a plug converted to Tasmota, then put on its
+        fallback module, as Tasmota does in a boot loop (go_bootloop): it
+        must still run its own template (BAD-TEMPLATE)."""
     def one(route, step, fault, arg, at=40):
         return dict(id=sid(route, step, fault, arg, at), route=route, step=step, fault=fault, arg=arg, at=at)
 
@@ -281,6 +284,8 @@ def composite_scenarios():
         yield one(route, "start", "lostapp", "switched")
     for route in ("tasmota>tasmota", "tasmota>esphome", "tasmota>sonoff"):
         yield one(route, "start", "notemplate", "generic")
+    for route in ("sonoff>tasmota", "esphome>tasmota"):
+        yield one(route, "start", "bootloop", "fallback")
     for route, step in BLIP_STEPS:
         yield one(route, step, "blips", 3, at=10)
         yield one(route, step, "lossy", "phase", at=10)
@@ -1186,6 +1191,8 @@ class Scenario:
             return self.go_lostapp()
         if sc["fault"] == "notemplate":
             return self.go_notemplate()
+        if sc["fault"] == "bootloop":
+            return self.go_bootloop()
         if step == "C2":
             source, self.target, steps = None, C2_ROUTES[route], {"C2": 20}
         else:
@@ -1353,6 +1360,42 @@ class Scenario:
             return self.finish(results, "NOT-FIRED")
         results[-1] = (results[-1][0], "on Tasmota, without the plug's template")
         return self.again(results, self.target, [])
+
+    def go_bootloop(self):
+        """A plug converted to Tasmota, then put through what Tasmota does
+        at the sixth start in a row within 10 s of the last: taking that for
+        a boot loop, it goes over to its fallback module - Generic, unless
+        the plug's own template is set there - keeping its Wi-Fi. Left on
+        Generic, the plug switches nothing (Sonoff-OTA discussion #8).
+
+        Done here as Tasmota would, by `Module` to the fallback `Module2`
+        names: Tasmota counts those starts in RTC memory, which the emulator
+        loses at every restart (plug-supervisor starts QEMU afresh). The
+        restarts themselves would also do harm a real plug may not: each
+        start ending before 8 s counts as a quick power cycle, kept in flash,
+        and at the seventh Tasmota erases every setting, its Wi-Fi too."""
+        route = self.sc["route"]
+        source, self.target, _ = ROUTES[route]
+        source = AFTER_D1.get(route, source)
+        results = [(self.run_tool(self.target, source=source), None)]
+        results[-1] = (results[-1][0], self.screen_result())
+        while "Converted" not in results[-1][1] and len(results) < MAX_RUNS:
+            results.append((self.run_tool(self.target), None))
+            results[-1] = (results[-1][0], self.screen_result())
+        self.target_final = self.target
+        if "Converted" not in results[-1][1]:
+            return self.finish(results, None)
+        fallback = self.tasmota("Module2")
+        fallback = fallback.get("Module2") if isinstance(fallback, dict) else None
+        if not isinstance(fallback, dict) or len(fallback) != 1:
+            self.say(f"BOOTLOOP: the plug did not say its fallback module ({fallback})")
+            return self.finish(results, "NOT-FIRED")
+        (number, name), = fallback.items()
+        self.notes["fallback_module"] = name
+        self.say(f"BOOTLOOP: the plug goes over to its fallback module, {name} ({number})")
+        self.tasmota(f"Module {number}")
+        time.sleep(15)  # Module restarts the plug; template_ok waits on from there
+        return self.finish(results, None)
 
     def until_page(self, path, words, limit):
         """Whether the plug's page `path` says `words`, in any case, within `limit` seconds."""

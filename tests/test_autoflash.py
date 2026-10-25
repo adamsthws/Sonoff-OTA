@@ -2476,15 +2476,25 @@ class BegunByAnEarlierVersionTests(unittest.TestCase):
         ctx.manifest_path = Path("unused")
         ctx.device = mock.Mock(sha_region=lambda address, length: hashes[address])
         with mock.patch.object(autoflash, "load_manifest", return_value={"artifacts": artifacts}), \
-             mock.patch.object(autoflash, "template_in_place", return_value=template), \
+             mock.patch.object(autoflash, "template_in_place",
+                               side_effect=lambda *_, fallback=True: template is True
+                               or (template == "fallback" and not fallback)), \
              mock.patch.object(autoflash, "give_template") as given, \
              mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"):
             results = autoflash.step_verify(ctx)
         self.given = given.called
+        self.sent = [c.args[0] for c in ctx.device.command.call_args_list]
         return results
 
     def test_h1_takes_the_kept_bootloader(self):
         self.assertEqual(sorted(self.verified(kept=True)), ["app0", "safeboot", "table"])
+
+    def test_h1_sets_the_fallback_alone_on_a_plug_converted_before(self):
+        # Seen: a converted plug restarted six times in a row went over to
+        # Tasmota's fallback module, Generic, and switched nothing.
+        self.verified(kept=True, template="fallback")
+        self.assertFalse(self.given)  # no restart for it
+        self.assertEqual(self.sent, ["Module2 0"])
 
     def test_h1_puts_the_plugs_template_in_again_without_it(self):
         # Seen: a run completed on a plug with none, which switched nothing.
@@ -3682,7 +3692,7 @@ class ConfigureStepTests(unittest.TestCase):
         import tools.autoflash_cli as autoflash
         settled = {"Template": json.loads(autoflash.kinds.SONOFF_S60.tasmota_template("S60TPF")),
                    "Module": {"Module": {"0": "Sonoff S60TPF"}}, "SaveData": {"SaveData": "ON"},
-                   "Hostname": {"Hostname": hostname}}
+                   "Hostname": {"Hostname": hostname}, "Module2": {"Module2": {"0": "Sonoff S60TPF"}}}
 
         def command(c, timeout=None):
             sent.append(c)
@@ -3725,7 +3735,7 @@ class ConfigureStepTests(unittest.TestCase):
                               state=SimpleNamespace(input=inputs.get))
         with mock.patch.object(autoflash, "say"):
             result = autoflash.step_configure(ctx)
-        self.assertIn("Backlog Hostname tasmota-abcdef; Module 0", sent)
+        self.assertIn("Backlog Hostname tasmota-abcdef; Module2 0; Module 0", sent)
         self.assertEqual(result["restarts"], 2)
 
     def test_a_tasmota_in_use_that_lost_its_template_keeps_its_settings(self):
@@ -3744,8 +3754,22 @@ class ConfigureStepTests(unittest.TestCase):
         with mock.patch.object(autoflash, "say"):
             result = autoflash.step_configure(ctx)
         self.assertNotIn("Reset 4", sent)
-        self.assertIn("Backlog Hostname tasmota-abcdef; Module 0", sent)
+        self.assertIn("Backlog Hostname tasmota-abcdef; Module2 0; Module 0", sent)
         self.assertEqual(result["template"], "applied")
+
+    def test_tasmotas_fallback_module_counts_as_part_of_the_template(self):
+        # Generic as the fallback: six quick restarts and the plug switches nothing.
+        import json
+        from types import SimpleNamespace
+        import tools.autoflash_cli as autoflash
+        template = autoflash.kinds.SONOFF_S60.tasmota_template("S60TPF")
+        answers = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
+                   "SaveData": {"SaveData": "ON"}, "Module2": {"Module2": {"1": "ESP32C3"}}}
+        device = SimpleNamespace(command=lambda c, timeout=None: answers.get(c))
+        self.assertFalse(autoflash.template_in_place(device, template))
+        self.assertTrue(autoflash.template_in_place(device, template, fallback=False))
+        answers["Module2"] = {"Module2": {"0": "Sonoff S60TPF"}}
+        self.assertTrue(autoflash.template_in_place(device, template))
 
     def test_a_template_not_kept_stops_the_step(self):
         # Seen: a run completed on a plug left with no template, which
@@ -3775,7 +3799,8 @@ class ConfigureStepTests(unittest.TestCase):
         template = autoflash.kinds.SONOFF_S60.tasmota_template("S60TPF")
         hooked, sent, reset = [], [], []
         settled = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
-                   "SaveData": {"SaveData": "ON"}, "Hostname": {"Hostname": "tasmota-abcdef"}}
+                   "SaveData": {"SaveData": "ON"}, "Hostname": {"Hostname": "tasmota-abcdef"},
+                   "Module2": {"Module2": {"0": "Sonoff S60TPF"}}}
 
         def command(c, timeout=None):
             sent.append(c)
@@ -3792,7 +3817,7 @@ class ConfigureStepTests(unittest.TestCase):
                               state=SimpleNamespace(input=inputs.get))
         with mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "back_after_reset") as back:
             result = autoflash.step_configure(ctx)
-        self.assertEqual(hooked, [["Hostname tasmota-abcdef", f"Template {template}", "Module 0"]])
+        self.assertEqual(hooked, [["Hostname tasmota-abcdef", f"Template {template}", "Module2 0", "Module 0"]])
         self.assertEqual([c for c in sent if " " in c], ["Reset 4"])  # nothing after it
         back.assert_called_once()
         self.assertEqual(result["restarts"], 1)
@@ -3807,7 +3832,8 @@ class ConfigureStepTests(unittest.TestCase):
         import tools.autoflash_cli as autoflash
         template = autoflash.kinds.SONOFF_S60.tasmota_template("S60TPF")
         answers = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
-                   "SaveData": {"SaveData": "ON"}, "Hostname": {"Hostname": "tasmota-abcdef"}}
+                   "SaveData": {"SaveData": "ON"}, "Hostname": {"Hostname": "tasmota-abcdef"},
+                   "Module2": {"Module2": {"0": "Sonoff S60TPF"}}}
         sent = []
 
         def command(c, timeout=None):

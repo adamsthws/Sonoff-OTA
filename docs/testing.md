@@ -130,7 +130,7 @@ person converting it again would have.
 ## The fault suite
 
 `tools/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,375 scenarios:
+every direction - 1,377 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
@@ -206,6 +206,15 @@ every direction - 1,375 scenarios:
   is an ESPHome update no Tasmota takes (FAIL-X1-ON-TASMOTA), and staying on
   Tasmota, give it the template alone, the MQTT host kept
   (FAIL-SETTINGS-LOST).
+- **A converted plug in a boot loop** (`bootloop-fallback`, to Tasmota):
+  Tasmota started a sixth time in a row within 10 s of the last start goes
+  over to its fallback module - Generic, unless the plug's template is set
+  there - and switches nothing, as a user's plug did. The plug is put on its
+  fallback module just as Tasmota would, since the emulator loses Tasmota's
+  count of those starts at every restart; it must still run its template
+  (BAD-TEMPLATE). Restarting it for real would also cost its settings:
+  Tasmota counts each start that ends before 8 s as a quick power cycle, and
+  at the seventh erases everything, its Wi-Fi too.
 - **A Berry phase riding out the network by itself** (`blips-3`,
   `lossy-phase`, at E2, G1, I1, L1 and R1): two 3 s outages from 10% to 90%
   of the phase - further apart than its 20 s of retrying - or one packet in
