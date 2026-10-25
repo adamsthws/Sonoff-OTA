@@ -105,7 +105,13 @@ cd Sonoff-OTA
 
 ## What you'll see
 
-![A successful conversion run](docs/SuccessRun.svg)
+**Tasmota:**
+
+![A successful conversion to Tasmota](docs/SuccessRun.svg)
+
+**ESPHome:**
+
+![A successful conversion to ESPHome](docs/SuccessRunESPHome.svg)
 
 <br>
 
