@@ -27,7 +27,7 @@ part of the ordinary release download:
 
 - [`artifacts/tasmota32c3-bluetooth.bin`](../artifacts/tasmota32c3-bluetooth.bin)
   is the Berry-capable ESP32-C3 build used while the old partition map is still
-  active. It is pinned byte-for-byte and includes its upstream source revision
+  active. It is pinned and includes its upstream source revision
   in [the artifact notes](../artifacts/README.md).
 - [`artifacts/autoflash-recovery-safeboot-imprintable.bin`](../artifacts/autoflash-recovery-safeboot-imprintable.bin)
   is the small temporary startup firmware. It contains placeholders, not a

@@ -38,7 +38,7 @@ flash it over USB-serial - hard work, because the case is plastic-welded shut.
 
 ### Indistinguishable
 
-Converted plugs end up byte-for-byte identical to a plug flashed over USB
+Converted plugs end up identical to a plug flashed over USB
 > The final automated checks verify this by reading their flash back at the end of the conversion. Every block of it is read back before the plug switches to it.
 
 <br>
@@ -123,12 +123,11 @@ was interrupted, it checks the plug to work out where to resume from.
 
 **Tasmota:** Official Tasmota
 
-**ESPHome:** Official ESPHome, ready for Home Assistant to find.
+**ESPHome:** Official ESPHome
 
 **Sonoff:** A full backup of the plug's Sonoff firmware to restore later.
 
-> The firmware is laid out in memory exactly as if the plug had been flashed
-over USB. That means normal upgrades from then on.
+> Afterward, Tasmota and ESPhome updates are applied as normal.
 
 <br>
 
@@ -148,8 +147,6 @@ report back on how it went here:
 > A clean conversion, a run that stopped partway, or only the read-only checks - all of it is useful. 
 
 > Reading the thread is the quickest way to see how it went for others.
-
-A security problem is reported privately instead: see [SECURITY.md](SECURITY.md).
 
 <br>
 
@@ -184,11 +181,8 @@ A security problem is reported privately instead: see [SECURITY.md](SECURITY.md)
 
 ## Thanks
 
-This is a fork of [HG0161/SonoffS60OTA](https://github.com/HG0161/SonoffS60OTA),
-which did the groundwork of working out the OTA route.
-
-A big thank you to [HG0161](https://github.com/HG0161) and the original
-[SonoffS60OTA](https://github.com/HG0161/SonoffS60OTA) repository for working out the update mechanism, decoding the firmware format
+A big thank you to [HG0161](https://github.com/HG0161) and the
+[SonoffS60OTA](https://github.com/HG0161/SonoffS60OTA) repository for laying the groundwork; working out the update mechanism, decoding the firmware format
 and proving the OTA route on real plugs. This repository carries that work on.
 
 Thanks to [p1otr](https://github.com/p1otr) for the ESPHome option and its

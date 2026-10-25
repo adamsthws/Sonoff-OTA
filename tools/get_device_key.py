@@ -60,7 +60,7 @@ class EwelinkError(RuntimeError):
 
 def signed_login_body(email: str, password: str, country_code: str) -> tuple[bytes, dict[str, str]]:
     # Preserve insertion order and default json.dumps separators to match the
-    # byte-for-byte request body covered by the HMAC signature.
+    # request body covered by the HMAC signature.
     payload = {"password": password, "countryCode": country_code, "email": email}
     body = json.dumps(payload).encode("utf-8")
     signature = hmac.new(APP_SECRET.encode("utf-8"), body, hashlib.sha256).digest()
