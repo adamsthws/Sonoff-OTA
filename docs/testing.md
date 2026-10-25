@@ -130,7 +130,7 @@ person converting it again would have.
 ## The fault suite
 
 `tools/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,366 scenarios:
+every direction - 1,375 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
@@ -171,7 +171,9 @@ every direction - 1,366 scenarios:
     Tasmota that cannot join the home Wi-Fi (`seven-times`, `seven-advised`);
   - F4's Berry driver refused, so F4 falls back to two restarts
     (`nohook-run`), and a power cut or crash at F4's reset itself, at 10, 50
-    and 90% of it (step `F4rs`).
+    and 90% of it (step `F4rs`); and that fallback cut off by a second's
+    power cut as the plug restarts to save the template it sent (`nohook-cut`,
+    step `F4tp`), which can leave it without one.
 - **Runs left by an earlier release** (`legacy-v1.2.0`): release 1.2.0 itself
   - its tagged files, with only `tools/emulator/legacy/v1.2.0.patch` on top,
   which points it at the cloud stub - converting a plug fresh from Sonoff,
@@ -196,6 +198,14 @@ every direction - 1,366 scenarios:
   to Tasmota, ESPHome or Sonoff. And one only switched to its safeboot, its
   Tasmota unharmed (`lostapp-switched`), which must be started again, never
   written over (FAIL-REPLACED).
+- **A converted plug that lost its template** (`notemplate-generic`): the
+  saved Tasmota given Tasmota's generic template and an MQTT host, as a person
+  might, so it switches nothing - as a user's plug did. Then the tool, to
+  Tasmota, ESPHome or Sonoff: it must know the plug for one that lost its
+  template (FAIL-NOT-UNTEMPLATED), never send it the hub's steps, whose first
+  is an ESPHome update no Tasmota takes (FAIL-X1-ON-TASMOTA), and staying on
+  Tasmota, give it the template alone, the MQTT host kept
+  (FAIL-SETTINGS-LOST).
 - **A Berry phase riding out the network by itself** (`blips-3`,
   `lossy-phase`, at E2, G1, I1, L1 and R1): two 3 s outages from 10% to 90%
   of the phase - further apart than its 20 s of retrying - or one packet in
@@ -221,7 +231,12 @@ plug went by a name it never should (the names are made from its MAC:
 its own, or did not end under its converted name; every name it had is kept
 with the result. It is **FAIL-UNEXPECTED** when a run stopped with
 "something unexpected went wrong" - an error the tool did not see coming, a
-bug whatever the fault - even if the next run converts the plug.
+bug whatever the fault - even if the next run converts the plug. It is
+**BAD-TEMPLATE** when a plug converted to Tasmota does not answer with the
+plug's template - a Tasmota that switches nothing; **FAIL-ASKED-AGAIN** when a
+run asked for the go-ahead twice, as a step tried again by itself once did;
+and **FAIL-BACKUP-LINE** when a run from a converted plug reported no Sonoff
+backup though the run that converted it took one.
 
 The emulated computer's list of networks keeps one the plug put out for a
 minute after it has gone or been renamed, as a real computer's does (the

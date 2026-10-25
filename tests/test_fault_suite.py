@@ -240,7 +240,7 @@ class ScenarioTests(unittest.TestCase):
                 steps = fs.LEGACY_STEPS[sc["arg"].partition("+")[0]].get(sc["route"], {})
                 self.assertTrue(sc["step"] == "start" or sc["step"] in steps, sc["id"])
                 continue
-            if sc["fault"] == "lostapp":
+            if sc["fault"] in ("lostapp", "notemplate"):
                 self.assertEqual(sc["step"], "start", sc["id"])
                 continue
             if sc["step"] == "C2":

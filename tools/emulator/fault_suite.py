@@ -85,6 +85,9 @@ def saved(name):
 
 
 MAC = None  # --plug: the backed-up plug the emulators run copies of
+PLUG_URL = "http://192.168.60.50"
+# An MQTT host for a plug set up by its owner (notemplate): nobody's (RFC 5737).
+NOTEMPLATE_MQTT_HOST = "192.0.2.10"
 APP0_OFFSET = 0xE0000  # Tasmota's own firmware, on its layout (tools/safeboot_migration.py)
 PLUG_CMD = "/opt/autoflash-emu/bin/plug"
 MAX_RUNS = 4
@@ -129,9 +132,12 @@ OTHER = {"tasmota": "esphome", "esphome": "tasmota"}
 # F4rs is the moment F4's reset restarts the plug and saves the defaults it
 # rebuilt, with the plug's name and template put in (one restart): a fault
 # there may cut it off before the save, or after.
+# F4tp is the restart after F4's fallback sent the template itself (the
+# reset's save did not take it): cut off before Tasmota saves, the plug comes
+# back without it.
 STARTS = {"C3": (r"Backing up the plug's Sonoff firmware", 12), "C3fb": (r"\] C3  ", 14),
-          "F4rs": (r"Settings reset to Tasmota's defaults", 3)}
-STEP_OF = {"C3fb": "C3", "F4rs": "F4"}  # the tool's own name for a step
+          "F4rs": (r"Settings reset to Tasmota's defaults", 3), "F4tp": (r"Template applied as", 2)}
+STEP_OF = {"C3fb": "C3", "F4rs": "F4", "F4tp": "F4"}  # the tool's own name for a step
 
 # Each length where it can lead somewhere the others do not (2026-10-21): an
 # outage of 5 s is within every timeout of the tool's (8 s and up) and takes
@@ -222,6 +228,8 @@ def composite_scenarios():
         erases a Tasmota's settings; seven-advised (D1): Tasmota cannot join
         the home Wi-Fi, and that is done when the run advises it.
     nohook-run (F4): Tasmota will not take F4's name and template at the save.
+    nohook-cut (F4tp): that, and the plug switched off for a second at 10, 50
+        and 90% of the restart after F4 sent the template itself.
     F4rs: a power cut or crash at F4's reset, at 10, 50 and 90% of it.
     legacy-v1.2.0, legacy-v2.0.2 (LEGACY_STEPS): a run of that release
         (legacy_tree) killed at 40% of each of its steps from Sonoff, then
@@ -235,7 +243,10 @@ def composite_scenarios():
         factory image uploaded through Tasmota's page (go_lostapp), then the
         tool, to Tasmota, ESPHome or Sonoff; lostapp-switched: only switched
         to its safeboot, its Tasmota unharmed, which must be started again,
-        never replaced."""
+        never replaced.
+    notemplate-generic: a converted plug's template replaced with Tasmota's
+        generic one, and an MQTT host set, as a person might (go_notemplate);
+        then the tool, to Tasmota, ESPHome or Sonoff."""
     def one(route, step, fault, arg, at=40):
         return dict(id=sid(route, step, fault, arg, at), route=route, step=step, fault=fault, arg=arg, at=at)
 
@@ -249,6 +260,8 @@ def composite_scenarios():
         for step in ("F4", "G1"):
             yield one(route, step, "seven", "times")
         yield one(route, "F4", "nohook", "run")
+        for at in (10, 50, 90):
+            yield one(route, "F4tp", "nohook", "cut", at)
         for at, fault, arg in ((10, "plugoff", 1), (50, "plugoff", 1), (90, "plugoff", 1),
                                (50, "plugoff", 5), (50, "crash", 1)):
             yield one(route, "F4rs", fault, arg, at)
@@ -266,6 +279,8 @@ def composite_scenarios():
         yield one(route, "start", "lostapp", "factory")
     for route in ("tasmota>tasmota", "tasmota>esphome"):
         yield one(route, "start", "lostapp", "switched")
+    for route in ("tasmota>tasmota", "tasmota>esphome", "tasmota>sonoff"):
+        yield one(route, "start", "notemplate", "generic")
     for route, step in BLIP_STEPS:
         yield one(route, step, "blips", 3, at=10)
         yield one(route, step, "lossy", "phase", at=10)
@@ -1169,6 +1184,8 @@ class Scenario:
             return self.go_legacy()
         if sc["fault"] == "lostapp":
             return self.go_lostapp()
+        if sc["fault"] == "notemplate":
+            return self.go_notemplate()
         if step == "C2":
             source, self.target, steps = None, C2_ROUTES[route], {"C2": 20}
         else:
@@ -1183,7 +1200,8 @@ class Scenario:
             # its usual time (X1's upload), and a short step's in seconds.
             delay = 0.3
         fault, arg = sc["fault"], sc["arg"]
-        first_fault = (arg.split("-")[0], int(arg.split("-")[1])) if fault == "double" else (fault, arg)
+        first_fault = ((arg.split("-")[0], int(arg.split("-")[1])) if fault == "double" else
+                       ("plugoff", 1) if (fault, arg) == ("nohook", "cut") else (fault, arg))
         stop = threading.Event()
         since = time.time()
         injector = threading.Thread(target=self.inject, args=(since, None, delay, stop, *first_fault),
@@ -1288,6 +1306,52 @@ class Scenario:
             return self.finish(results, "NOT-FIRED")
         self.notes["stuck_on_safeboot"] = True
         results[-1] = (results[-1][0], "on Tasmota's safeboot, Tasmota missing")
+        return self.again(results, self.target, [])
+
+    def tasmota(self, command):
+        """What the plug's Tasmota answers to `command`, as JSON - or None."""
+        out = self.ex("curl", "-s", "-m", "10", "-G", "-e", f"{PLUG_URL}/",
+                      "--data-urlencode", f"cmnd={command}", f"{PLUG_URL}/cm").stdout
+        try:
+            return json.loads(out)
+        except ValueError:
+            return None
+
+    def template_ok(self):
+        """Whether the plug runs Tasmota with the S60's template, asked a few
+        times: it may still be starting."""
+        for _ in range(6):
+            template, module = self.tasmota("Template"), self.tasmota("Module")
+            if isinstance(template, dict) and isinstance(module, dict):
+                self.notes["template"] = template.get("NAME")
+                return "S60" in str(template.get("NAME")) and "0" in (module.get("Module") or {})
+            time.sleep(5)
+        return False
+
+    def go_notemplate(self):
+        """A converted plug on Tasmota whose template a person replaced with
+        Tasmota's generic one - which switches nothing (Sonoff-OTA discussion
+        #8) - having set it up for themselves (an MQTT host). Then the tool:
+        to Tasmota it gives the template alone, the MQTT host kept; to the
+        others it leaves Tasmota as from any converted plug, never by X1."""
+        self.target = self.sc["route"].split(">")[1]
+        results = [(self.run_tool("tasmota", source="suite-tasmota"), None)]
+        results[-1] = (results[-1][0], self.screen_result())
+        if "nothing to convert" not in results[-1][1]:
+            return self.finish(results, "NOT-FIRED")
+        generic = json.dumps({"NAME": "Generic", "GPIO": [0] * 22, "FLAG": 0, "BASE": 1}, separators=(",", ":"))
+        self.say("NOTEMPLATE: the generic template and an MQTT host set, as a person might")
+        self.tasmota(f"Backlog MqttHost {NOTEMPLATE_MQTT_HOST}; Template {generic}; Module 0")
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            time.sleep(5)
+            template = self.tasmota("Template")
+            if isinstance(template, dict) and template.get("NAME") == "Generic":
+                break
+        else:
+            self.say("NOTEMPLATE: the plug did not take the generic template")
+            return self.finish(results, "NOT-FIRED")
+        results[-1] = (results[-1][0], "on Tasmota, without the plug's template")
         return self.again(results, self.target, [])
 
     def until_page(self, path, words, limit):
@@ -1411,6 +1475,17 @@ class Scenario:
             self.notes["restore_carried_on_after"] = int(found[-1]) if found else 0
             if not self.notes.get("later_fired") and not special:
                 special = "NOT-FIRED"
+        ours = re.sub(r"\s+", " ", "".join(self.ours(p, t) for m, p, t in run_logs(self.state)
+                                           if m >= self.started))
+        converted_from_untemplated = "Converting the plug from Tasmota without the plug's template" in ours
+        target_final = getattr(self, "target_final", self.target)
+        template_bad = converted and target_final == "tasmota" and not self.template_ok()
+        # The report of the last run, from a converted plug (its backup taken
+        # by the run that converted it): not a legacy release's.
+        line = re.findall(r"Sonoff backup:\s+(.*)", re.sub(r"\x1b\[[0-9;]*m", "", Path(self.log).read_text(
+            encoding="utf-8", errors="replace").split("--- ")[-1]))
+        backup_line = (line[-1].strip() if line and not sc["route"].startswith("sonoff>")
+                       and fault != "legacy" else None)
         if not special:
             if self.notes.get("mistimed"):
                 special = "MISTIMED"
@@ -1451,6 +1526,22 @@ class Scenario:
             elif fault == "nohook" and "Settings reset to Tasmota's defaults, keeping the Wi-Fi; the plug" \
                     not in re.sub(r"\s+", " ", "".join(t for _, _, t in run_logs(self.state))):
                 special = "NOT-FIRED"  # F4 took the name and template at the save after all
+            elif any(len(re.findall(r"Type PROCEED to go ahead", run)) > 1
+                     for m, p, t in run_logs(self.state) if m >= self.started
+                     for run in self.ours(p, t).split("=== run started")):
+                special = "FAIL-ASKED-AGAIN"  # the go-ahead is asked once a run
+            elif fault == "notemplate" and not converted_from_untemplated:
+                special = "FAIL-NOT-UNTEMPLATED"  # taken for something else
+            elif fault == "notemplate" and "ESPHome's update service did not answer" in ours:
+                special = "FAIL-X1-ON-TASMOTA"  # sent the hub's steps, as in #8
+            elif fault == "notemplate" and self.target == "tasmota" and converted and (
+                    "Settings reset to Tasmota's defaults" in ours
+                    or (self.tasmota("MqttHost") or {}).get("MqttHost") != NOTEMPLATE_MQTT_HOST):
+                special = "FAIL-SETTINGS-LOST"  # its owner's settings reset with the template
+            elif converted and template_bad:
+                special = "BAD-TEMPLATE"  # a Tasmota that switches nothing
+            elif converted and backup_line and backup_line != "Taken by an earlier run":
+                special = "FAIL-BACKUP-LINE"  # its backup is on this computer
             elif converted and (unknown or final):
                 # A name this plug should never have, or not its converted
                 # one at the end (docs/device-names.md).
