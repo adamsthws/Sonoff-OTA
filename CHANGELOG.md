@@ -14,6 +14,36 @@ on that commit, and carries the firmware files the tool installs with
 which `gh release verify vX.Y.Z` and `gh release verify-asset vX.Y.Z FILE`
 check.
 
+## 2.1.1
+
+- A plug converted to Tasmota could finish without the plug's template -
+  when it did not go in with Tasmota's reset and the second try did not take
+  either - and so switch nothing: Home Assistant showed only its restart
+  button and Wi-Fi ([#8](https://github.com/adamsthws/Sonoff-OTA/discussions/8)).
+  The run now checks the template is in place before it calls the plug
+  converted, and puts it back if not. The final check (H1) does the same, so
+  running it on a finished plug puts a missing template back, keeping the
+  plug's other settings.
+- A converted plug that had lost its template was taken for one part way
+  through a conversion, and sent an update only ESPHome takes: the run
+  waited 4 minutes, and stopped. It is now known for a Tasmota without its
+  template - found on the network, or given with `--plug-ip` - and goes on as
+  any converted plug does; choosing Tasmota gives it the template alone,
+  keeping its other settings, such as MQTT.
+- A device with ESPHome's update service and no web page was listed as a
+  plug part way through a conversion, whatever it was - another ESPHome
+  device on the network, say. Only a plug this computer has a record of is
+  listed so now.
+- A run stopped before it wrote anything no longer hides, from the next run,
+  the run before it that knew where the plug had got to.
+- The go-ahead to replace a plug's Tasmota or ESPHome is asked once a run,
+  not again when a step is tried again by itself.
+- The report of a run from a converted plug said "Sonoff backup: Not taken"
+  although this computer had the plug's backup; it now says it was taken by
+  an earlier run.
+- On Python 3.10, a terminal that reports no size - ssh without one, some
+  IDE consoles - was taken as 20 columns wide, and every line wrapped or cut.
+
 ## 2.1.0
 
 - A converted plug ends on Tasmota
