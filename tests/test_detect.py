@@ -118,6 +118,17 @@ class TasmotaTests(unittest.TestCase):
             found = detect.converted_plugs("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
         self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.137", "midway")])
 
+    def test_the_mover_is_taken_only_with_a_mac_this_computer_knows(self):
+        # No page, only ESPHome's update service: as any ESPHome built without
+        # a web server looks - seen on a network with four of them.
+        neighbours = {"192.168.0.137": "12:34:56:ab:cd:ef", "192.168.0.99": "aa:bb:cc:dd:ee:ff"}
+        with mock.patch.object(detect.hostsys, "sweep"), \
+                mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
+                mock.patch.object(detect, "_port_open", return_value=False), \
+                mock.patch.object(detect.esphome_ota, "probe", return_value=object()):
+            found = detect.converted_plugs("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
+        self.assertEqual([(f.host, f.name) for f in found], [("192.168.0.137", "the mover")])
+
     def test_a_converted_tasmota_is_found_with_its_kind(self):
         fake = FakeTasmota(version="15.6.0(release-tasmota32)", table=TASMOTA_TABLE)
         with mock.patch.object(detect, "Device", fake), \
