@@ -2419,7 +2419,7 @@ class BegunByAnEarlierVersionTests(unittest.TestCase):
         self.assertEqual(self.gate([(False, "app0 on the plug no longer matches the pinned image")]), (False, 1))
         self.assertEqual(self.gate([autoflash.DeviceError("no Berry console")]), (False, 1))
 
-    def verified(self, kept):
+    def verified(self, kept, template=True):
         from unittest import mock
         import tools.autoflash_cli as autoflash
         ctx = self.ctx()
@@ -2432,11 +2432,22 @@ class BegunByAnEarlierVersionTests(unittest.TestCase):
         ctx.manifest_path = Path("unused")
         ctx.device = mock.Mock(sha_region=lambda address, length: hashes[address])
         with mock.patch.object(autoflash, "load_manifest", return_value={"artifacts": artifacts}), \
+             mock.patch.object(autoflash, "template_in_place", return_value=template), \
+             mock.patch.object(autoflash, "give_template") as given, \
              mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"):
-            return autoflash.step_verify(ctx)
+            results = autoflash.step_verify(ctx)
+        self.given = given.called
+        return results
 
     def test_h1_takes_the_kept_bootloader(self):
         self.assertEqual(sorted(self.verified(kept=True)), ["app0", "safeboot", "table"])
+
+    def test_h1_puts_the_plugs_template_in_again_without_it(self):
+        # Seen: a run completed on a plug with none, which switched nothing.
+        self.verified(kept=True)
+        self.assertFalse(self.given)
+        self.verified(kept=True, template=False)
+        self.assertTrue(self.given)
 
     def test_h1_otherwise_wants_esphomes(self):
         import tools.autoflash_cli as autoflash
@@ -3576,6 +3587,21 @@ class EwelinkAccountTests(unittest.TestCase):
 class ConfigureStepTests(unittest.TestCase):
     """F4 rebuilds Tasmota's settings from its own defaults before anything else."""
 
+    @staticmethod
+    def console(sent, hostname=None, takes=True):
+        """A Tasmota's console, recording what it is `sent`: set up as F4 sets
+        it once the commands after the reset are in (if it `takes` them)."""
+        import json
+        import tools.autoflash_cli as autoflash
+        settled = {"Template": json.loads(autoflash.kinds.SONOFF_S60.tasmota_template("S60TPF")),
+                   "Module": {"Module": {"0": "Sonoff S60TPF"}}, "SaveData": {"SaveData": "ON"},
+                   "Hostname": {"Hostname": hostname}}
+
+        def command(c, timeout=None):
+            sent.append(c)
+            return settled.get(c) if takes and any("Module 0" in s for s in sent) else None
+        return command
+
     def test_reset_4_comes_first_and_keeps_the_wifi(self):
         from types import SimpleNamespace
         from unittest import mock
@@ -3584,7 +3610,7 @@ class ConfigureStepTests(unittest.TestCase):
         # A Tasmota that does not take the name and template at the reset's save.
         device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
                                  uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
-                                 command=lambda c, timeout=None: sent.append(c), is_safeboot=lambda: False,
+                                 command=self.console(sent), is_safeboot=lambda: False,
                                  at_next_save=lambda commands, timeout=None: False)
         state = SimpleNamespace(input=lambda key: {"product_model": "S60TPF"}.get(key))
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device, state=state)
@@ -3605,15 +3631,31 @@ class ConfigureStepTests(unittest.TestCase):
         sent = []
         device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
                                  uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
-                                 command=lambda c, timeout=None: sent.append(c), is_safeboot=lambda: False,
+                                 command=self.console(sent, "tasmota-abcdef"), is_safeboot=lambda: False,
                                  at_next_save=lambda commands, timeout=None: False)
         inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
                               state=SimpleNamespace(input=inputs.get))
         with mock.patch.object(autoflash, "say"):
             result = autoflash.step_configure(ctx)
-        self.assertEqual(sent[-1], "Backlog Hostname tasmota-abcdef; Module 0")
+        self.assertIn("Backlog Hostname tasmota-abcdef; Module 0", sent)
         self.assertEqual(result["restarts"], 2)
+
+    def test_a_template_not_kept_stops_the_step(self):
+        # Seen: a run completed on a plug left with no template, which
+        # switched nothing - Home Assistant showed its restart button alone.
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
+                                 uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
+                                 command=self.console([], "tasmota-abcdef", takes=False),
+                                 is_safeboot=lambda: False, at_next_save=lambda commands, timeout=None: False)
+        inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
+                              state=SimpleNamespace(input=inputs.get))
+        with mock.patch.object(autoflash, "say"), self.assertRaises(autoflash.Abort):
+            autoflash.step_configure(ctx)
 
     def test_named_and_templated_as_the_reset_saves_in_its_one_restart(self):
         # Reset 4 rebuilds Tasmota's defaults, named its own way; the name and
@@ -3664,6 +3706,8 @@ class ConfigureStepTests(unittest.TestCase):
 
         def command(c, timeout=None):
             sent.append(c)
+            if c.startswith("Backlog Hostname "):
+                answers["Hostname"] = {"Hostname": c.split()[2].rstrip(";")}
             return answers.get(c)
 
         device = SimpleNamespace(wait_reachable=lambda **_: None, command=command, is_safeboot=lambda: False,

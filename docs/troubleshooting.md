@@ -396,5 +396,7 @@ python3 tools/autoflash_cli.py step H1 --plug-ip 192.168.1.50
 ```
 
 Reads four areas of the plug's memory - the bootloader, the memory map, Safeboot
-and Tasmota - and compares them against the pinned files. Read-only - safe to
+and Tasmota - and compares them against the pinned files, and checks Tasmota
+has the plug's template. Read-only but for that: a plug without its template
+(which switches nothing) is given it again, its other settings kept. Safe to
 run whenever you want reassurance.

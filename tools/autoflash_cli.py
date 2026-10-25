@@ -3587,6 +3587,15 @@ def step_configure(ctx: Context) -> dict[str, Any]:
         return {"template": "applied", "wifi_route": route, "restarts": 1}
     # Not taken - a power cut before the save, say, or a Tasmota whose Berry
     # would not have it: put in after the reset, at the cost of a restart.
+    give_template(device, template, hostname)
+    return {"template": "applied", "wifi_route": route, "restarts": 2}
+
+
+def give_template(device: Device, template: str, hostname: str | None) -> None:
+    """The plug's template and name put in, its other settings kept, at the
+    cost of a restart - and asked for after it.  Left without them, the plug
+    switches nothing (seen: a user's Home Assistant showed only its restart
+    button and Wi-Fi)."""
     booted, uptime = device.started_at(), device.uptime_seconds()
     device.command("SaveData 1", timeout=SLOW_COMMAND)
     device.command(f"Template {template}", timeout=SLOW_COMMAND)
@@ -3599,7 +3608,8 @@ def step_configure(ctx: Context) -> dict[str, Any]:
     device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
     # Restarted is not yet answering: the next step asks the plug at once.
     device.wait_reachable(timeout=120)
-    return {"template": "applied", "wifi_route": route, "restarts": 2}
+    if not template_in_place(device, template, hostname):
+        raise Abort("the plug did not keep its template and settings; it is safe to do this step again")
 
 
 def back_after_reset(ctx: Context, booted: str | None, uptime: int | None) -> None:
@@ -3810,6 +3820,13 @@ def step_verify(ctx: Context) -> dict[str, Any]:
         raise Abort("device does not match the pinned artifacts")
     say("")
     say(f"All {'four' if len(expected) == 4 else 'three'} regions match the pinned artifacts.")
+    template = kinds.of_run(ctx.state).tasmota_template(ctx.state.input("product_model"))
+    hostname = final_name(ctx, "tasmota")
+    if not template_in_place(device, template, hostname):
+        # A run is not complete on a plug that switches nothing.
+        tell("    The plug's template is not in place: it is put in again, its other settings kept.")
+        ctx.state.capture("H1.template_again", True)
+        give_template(device, template, hostname)
     earlier = earlier_release(manifest) if manifest.get("official_release") != official_release() else None
     if earlier is not None:
         # Begun by an earlier version, which installed that release at F2.
