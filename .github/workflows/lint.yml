@@ -4,7 +4,9 @@
 name: Lint
 
 on:
+  # A branch's commits are linted by its pull request, not twice over.
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:

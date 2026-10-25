@@ -1,4 +1,4 @@
-# The leak scan (tools/leak_scan.py) on every push and pull request: what
+# The leak scan (tools/leak_scan.py) on main and pull requests: what
 # the hooks stop on a maintainer's computer, by its shape alone here - a MAC
 # address that could be a real device's, a private key, a token - since the
 # values only a maintainer's computer knows are not here. For a pull request
@@ -6,7 +6,9 @@
 name: Leak scan
 
 on:
+  # A branch's commits are scanned by its pull request, not twice over.
   push:
+    branches: [main]
   pull_request:
   # On a branch the firmware-update workflow made (its pull requests start no
   # workflow themselves), and before a release.

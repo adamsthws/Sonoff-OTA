@@ -201,8 +201,8 @@ caught on its way out. It finds two kinds of thing:
 It says where each finding is and what kind, never the value. Take it out, or
 for something meant to be there - a new made-up example MAC, say, which
 belongs in `.leak-scan-allow` - `git commit --no-verify` lets it through. The
-repository's `leak-scan` workflow runs the shape checks on every push and
-pull request, and GitHub's own secret scanning and push protection, on for
+repository's `leak-scan` workflow runs the shape checks on each push to
+`main` and each pull request, and GitHub's own secret scanning and push protection, on for
 the repository, refuse pushes with known kinds of token. In examples, use
 `12:34:56:ab:cd:ef`, and addresses that are nobody's.
 

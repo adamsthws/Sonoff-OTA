@@ -6,7 +6,9 @@
 name: Final firmware on the emulator
 
 on:
+  # A branch's commits are tested by its pull request, not twice over.
   push:
+    branches: [main]
     paths:
       - firmware.json
       - artifacts/**
