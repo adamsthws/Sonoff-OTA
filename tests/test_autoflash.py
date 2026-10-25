@@ -1865,6 +1865,18 @@ class ConsentTests(unittest.TestCase):
              mock.patch.object(prompts, "_emit"), mock.patch.object(autoflash, "say"):
             return autoflash.require_word(autoflash.CONSENT_WORD)
 
+    def test_the_go_ahead_is_asked_once_in_a_run(self):
+        # Seen: X1 tried again by itself asked for it again, and Enter stopped the run.
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        ctx = SimpleNamespace()
+        with mock.patch.object(autoflash, "require_word", return_value=True) as asked, \
+             mock.patch.object(autoflash, "warning_box"):
+            autoflash.consent_to_leave(ctx, "Tasmota")
+            autoflash.consent_to_leave(ctx, "Tasmota")
+        self.assertEqual(asked.call_count, 1)
+
     def test_proceed_in_any_case_goes_ahead(self):
         for reply in ("PROCEED", "proceed", " Proceed "):
             with self.subTest(reply=reply):

@@ -586,6 +586,8 @@ class Context:
         self._given_ewelink_password = credentials.get("EWELINK_PASSWORD")
         self._given_email = credentials.get("EWELINK_EMAIL")
         self._finder: PlugFinder | None = None
+        # The go-ahead to replace the plug's firmware, given in this run.
+        self.consented = False
         # The account's record of the plug A1 chose, for its plug.json.
         self.account_plug: AccountPlug | None = None
         # Held only in memory: the Wi-Fi details, and the recovery image built
@@ -3964,7 +3966,11 @@ def plug_runs_tasmota(state: RunState) -> bool:
 
 
 def consent_to_leave(ctx: Context, what: str) -> None:
-    """The go-ahead, once, before the first write of a run from Tasmota or ESPHome."""
+    """The go-ahead, once, before the first write of a run from Tasmota or ESPHome.
+    Not asked again as a step that stopped is tried again by itself: seen, a
+    retry asked for it, and Enter stopped the run."""
+    if getattr(ctx, "consented", False):
+        return
     output.transient_begin()
     warning_box("Before going on", [
         f"From here the plug's {what} is replaced. DO NOT UNPLUG IT during the",
@@ -3976,6 +3982,7 @@ def consent_to_leave(ctx: Context, what: str) -> None:
     if not require_word(CONSENT_WORD):
         raise Abort("not confirmed - nothing has been written to the plug")
     output.transient_end()
+    ctx.consented = True
 
 
 def wait_for(ctx: Context, check: Callable[[str], Any], what: str, timeout: float = 240.0) -> Any:
