@@ -6058,7 +6058,9 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Plug type / region", kind.region(model) or "__"),
         ("Stock firmware", ctx.state.input("stock_version") or "__"),
         # How it went, never where it is or which plug: the path holds the MAC.
-        ("Sonoff backup", BACKUP_OUTCOMES.get(ctx.state.input("backup_outcome") or "not taken")[1]),
+        # A run from a converted plug takes none: one is there or not.
+        ("Sonoff backup", BACKUP_OUTCOMES[ctx.state.input("backup_outcome")
+                                          or ("existing" if sonoff_backup_exists(ctx) else "not taken")][1]),
         ("Computer", computer_description()),
         ("Python", python_description()),
         ("Time taken", took),

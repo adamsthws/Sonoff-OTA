@@ -816,6 +816,17 @@ class ReportTests(OutputTestCase):
         self.assertEqual(dict(af.report_fields(self.ctx(backup_outcome=""), 441, False))["Sonoff backup"],
                          "Not taken")
 
+    def test_a_run_from_a_converted_plug_reports_its_backup_from_before(self):
+        # Seen: "Not taken" in the report of a run whose log said the plug
+        # was backed up already - a run from Tasmota never reaches C3.
+        from unittest import mock
+        import tools.autoflash_cli as af
+        ctx = self.ctx(source="tasmota", plug_mac="12:34:56:ab:cd:ef")
+        with mock.patch.object(af.plugs, "find_backup", return_value=object()):
+            self.assertEqual(dict(af.report_fields(ctx, 441, False))["Sonoff backup"], "Taken by an earlier run")
+        with mock.patch.object(af.plugs, "find_backup", return_value=None):
+            self.assertEqual(dict(af.report_fields(ctx, 441, False))["Sonoff backup"], "Not taken")
+
     def test_hardware_that_was_not_checked_says_so(self):
         import tools.autoflash_cli as af
         fields = dict(af.report_fields(self.ctx(), 441, False))
