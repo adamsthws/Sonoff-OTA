@@ -155,7 +155,7 @@ class TasmotaTests(unittest.TestCase):
                 mock.patch.object(detect.esphome, "page", return_value="other"), \
                 mock.patch.object(detect, "_is_installer", return_value=False):  # nothing real asked
             found = detect.converted_plugs("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
-        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.137", "midway")])
+        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.137", "untemplated")])
 
 
 class LoginPage(http.server.ThreadingHTTPServer):

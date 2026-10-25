@@ -1830,6 +1830,30 @@ class QuitOptionTests(unittest.TestCase):
         self.assertTrue(issubclass(prompts.QuitRun, SystemExit))
 
 
+class UntemplatedByAddressTests(unittest.TestCase):
+    """--plug-ip at a Tasmota without the plug's template: found as the
+    network search finds it, on a plug this computer knows."""
+
+    def found(self, known):
+        from types import SimpleNamespace
+        import tools.autoflash_cli as autoflash
+        inputs = {"plug_ip": "192.168.0.137"}
+        ctx = SimpleNamespace(state=SimpleNamespace(input=inputs.get), web_password=None, esphome_login=None)
+        with mock.patch.object(autoflash.detect, "identify", return_value=None), \
+                mock.patch.object(autoflash.detect, "answers_as_tasmota", return_value=True), \
+                mock.patch.object(autoflash.hostsys, "mac_of", return_value="12:34:56:AB:CD:EF"), \
+                mock.patch.object(autoflash, "known_macs", return_value=known), \
+                mock.patch.object(autoflash, "adopt_plug"), \
+                mock.patch.object(autoflash, "past_the_commit", side_effect=lambda ctx, running: running):
+            return autoflash.find_current_firmware(ctx)
+
+    def test_a_known_plug_is_untemplated(self):
+        self.assertEqual(self.found({"12:34:56:ab:cd:ef"}), "untemplated")
+
+    def test_any_other_tasmota_is_not_taken_for_one(self):
+        self.assertEqual(self.found(set()), "sonoff")
+
+
 class ConsentTests(unittest.TestCase):
     """Only the word itself goes ahead; anything else stops."""
 
@@ -2459,7 +2483,7 @@ class PastTheCommitTests(unittest.TestCase):
     """A plug left on the startup firmware is on Tasmota's layout if this
     computer's run of it got past the commit - Sonoff's otherwise."""
 
-    def source(self, earlier, safeboot=False, version="15.6.0(safeboot)"):
+    def source(self, earlier, safeboot=False, version="15.6.0(safeboot)", running="midway"):
         import json
         from types import SimpleNamespace
         from unittest import mock
@@ -2490,7 +2514,7 @@ class PastTheCommitTests(unittest.TestCase):
         with mock.patch.object(autoflash, "run_directories", return_value=runs), \
              mock.patch.object(autoflash.plugs, "mac_of_run", return_value="12:34:56:ab:cd:ef"), \
              mock.patch.object(autoflash, "say"):
-            return autoflash.past_the_commit(ctx, "midway")
+            return autoflash.past_the_commit(ctx, running)
 
     def test_a_run_that_committed_and_did_not_finish(self):
         self.assertEqual(self.source([(["E1", "E2", "E3"], None)]), "committed")
@@ -2532,6 +2556,23 @@ class PastTheCommitTests(unittest.TestCase):
         self.assertEqual(self.source([]), "midway")                           # no record of it
         # The latest run decides: one past the commit, then one that started over.
         self.assertEqual(self.source([(["E3"], None), (["X1"], None)]), "midway")
+
+    def test_a_tasmota_without_its_template_is_never_sent_the_hubs_steps(self):
+        # Seen: a converted plug that had lost its template, taken for part
+        # way, was sent X1 - an ESPHome update - and waited 4 minutes for an
+        # update service no Tasmota has (Sonoff-OTA discussion #8).
+        import tools.autoflash_cli as autoflash
+        self.assertEqual(self.source([(["E3", "F2", "F4", "G1", "H1"], None)], running="untemplated"),
+                         "untemplated")
+        self.assertEqual(self.source([], running="untemplated"), "untemplated")
+        # Left past the commit by a run: official Tasmota's steps, as before.
+        self.assertEqual(self.source([(["E1", "E2", "E3"], None)], running="untemplated"), "committed")
+        for firmware in ("tasmota", "esphome", "sonoff"):
+            steps = [step for step, _, _ in autoflash.steps_for(firmware, "untemplated")]
+            self.assertIn(steps[2], ("L1", "F4"))  # leaving Tasmota, or given its template
+        self.assertEqual([step for step, _, _ in autoflash.steps_for("tasmota", "untemplated")],
+                         ["A0", "A5", "F4"])
+        self.assertEqual(autoflash.steps_for("sonoff", "untemplated"), autoflash.steps_for("sonoff", "tasmota"))
 
 
     def test_a_commit_the_plug_finished_after_its_run_was_stopped(self):
@@ -3640,6 +3681,25 @@ class ConfigureStepTests(unittest.TestCase):
             result = autoflash.step_configure(ctx)
         self.assertIn("Backlog Hostname tasmota-abcdef; Module 0", sent)
         self.assertEqual(result["restarts"], 2)
+
+    def test_a_tasmota_in_use_that_lost_its_template_keeps_its_settings(self):
+        # Its MQTT, say, set up since it was converted: Reset 4 would erase it.
+        from types import SimpleNamespace
+        from unittest import mock
+        import tools.autoflash_cli as autoflash
+        sent = []
+        device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
+                                 uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
+                                 command=self.console(sent, "tasmota-abcdef"), is_safeboot=lambda: False,
+                                 at_next_save=lambda commands, timeout=None: self.fail("hooked to a reset"))
+        inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef", "source": "untemplated"}
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
+                              state=SimpleNamespace(input=inputs.get))
+        with mock.patch.object(autoflash, "say"):
+            result = autoflash.step_configure(ctx)
+        self.assertNotIn("Reset 4", sent)
+        self.assertIn("Backlog Hostname tasmota-abcdef; Module 0", sent)
+        self.assertEqual(result["template"], "applied")
 
     def test_a_template_not_kept_stops_the_step(self):
         # Seen: a run completed on a plug left with no template, which

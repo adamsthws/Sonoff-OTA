@@ -664,6 +664,10 @@ class FromAConvertedPlugTests(RouteTestCase):
                     # whatever made them, to this version's.
                     self.assertEqual(steps, ["A0", "A5", "T1"])
                     continue
+                if (source, firmware) == ("untemplated", "tasmota"):
+                    # Given its template alone, likewise.
+                    self.assertEqual(steps, ["A0", "A5", "F4"])
+                    continue
                 self.assertEqual(steps[-1], last[firmware], (source, firmware))
                 self.assertEqual(len(steps), len(set(steps)), (source, firmware))
                 # The bootloader is written on every route, before any firmware goes

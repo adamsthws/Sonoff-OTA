@@ -3572,23 +3572,27 @@ def step_configure(ctx: Context) -> dict[str, Any]:
     # under no other name, in that one restart.
     # (SaveData 1 is a default the reset puts back, and a command that saves
     # cannot go in there: see at_next_save.)
-    hooked = device.at_next_save([*([f"Hostname {hostname}"] if hostname else []),
-                                  f"Template {template}", "Module 0"],
-                                 timeout=SLOW_COMMAND)
-    booted, uptime = device.started_at(), device.uptime_seconds()
-    device.command("Reset 4", timeout=SLOW_COMMAND)
-    say("Settings reset to Tasmota's defaults, keeping the Wi-Fi"
-        + (", with the plug's template and name" if hooked else "") + "; the plug restarts")
-    back_after_reset(ctx, booted, uptime)
-    device = ctx.device
-    if hooked and template_in_place(device, template, hostname):
-        say(f"Template applied as {json.loads(template)['NAME']}"
-            + (f", and named {hostname}" if hostname else ""))
-        return {"template": "applied", "wifi_route": route, "restarts": 1}
+    if run_source(ctx.state) != "untemplated":
+        hooked = device.at_next_save([*([f"Hostname {hostname}"] if hostname else []),
+                                      f"Template {template}", "Module 0"],
+                                     timeout=SLOW_COMMAND)
+        booted, uptime = device.started_at(), device.uptime_seconds()
+        device.command("Reset 4", timeout=SLOW_COMMAND)
+        say("Settings reset to Tasmota's defaults, keeping the Wi-Fi"
+            + (", with the plug's template and name" if hooked else "") + "; the plug restarts")
+        back_after_reset(ctx, booted, uptime)
+        device = ctx.device
+        if hooked and template_in_place(device, template, hostname):
+            say(f"Template applied as {json.loads(template)['NAME']}"
+                + (f", and named {hostname}" if hostname else ""))
+            return {"template": "applied", "wifi_route": route, "restarts": 1}
     # Not taken - a power cut before the save, say, or a Tasmota whose Berry
     # would not have it: put in after the reset, at the cost of a restart.
+    # Or a Tasmota in use that lost its template: put in without the reset,
+    # its other settings (its MQTT, say) kept.
     give_template(device, template, hostname)
-    return {"template": "applied", "wifi_route": route, "restarts": 2}
+    return {"template": "applied", "wifi_route": route,
+            "restarts": 1 if run_source(ctx.state) == "untemplated" else 2}
 
 
 def give_template(device: Device, template: str, hostname: str | None) -> None:
@@ -3949,6 +3953,8 @@ def plug_runs_tasmota(state: RunState) -> bool:
         # Its safeboot says nothing of the Wi-Fi; from T1 it is a Tasmota's run.
         if not state.is_done("T1"):
             return False
+        source = "tasmota"
+    if source == "untemplated":
         source = "tasmota"
     if source not in ("tasmota", "esphome"):
         return True
@@ -4479,7 +4485,12 @@ FIRMWARES = {"tasmota": "Tasmota", "esphome": "ESPHome", "sonoff": "Sonoff"}
 # "safeboot": a converted plug on Tasmota's own safeboot, its Tasmota missing -
 # an upload through Tasmota's page that failed part way (another firmware's
 # whole-flash image, say): official Tasmota goes back on, then on from there.
-SOURCES = ("sonoff", "tasmota", "esphome", "midway", "committed", "installer", "safeboot")
+# "untemplated": official Tasmota without the plug's template, on a plug this
+# computer knows, not left past a commit by its runs: a converted plug that
+# lost it, which switches nothing.  It leaves Tasmota as any converted plug;
+# staying on Tasmota, it is given the template.
+SOURCES = ("sonoff", "tasmota", "esphome", "midway", "committed", "installer", "safeboot",
+           "untemplated")
 TASMOTA_BACK_STEP = ("T1", "Official Tasmota back, from Tasmota's safeboot", step_tasmota_back)
 
 
@@ -4508,6 +4519,10 @@ def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Cal
     if source == "safeboot":
         # Tasmota back first, as it was; then on from Tasmota, as any converted plug.
         return START_STEPS + [TASMOTA_BACK_STEP] + steps_for(firmware, "tasmota")[len(START_STEPS):]
+    if source == "untemplated":
+        if firmware == "tasmota":
+            return START_STEPS + [step for step in TASMOTA_FINAL_STEPS if step[0] == "F4"]
+        return steps_for(firmware, "tasmota")
     leave = [LEAVE_TASMOTA_STEP] if source == "tasmota" else []
     return START_STEPS + leave + TO_HUB_STEPS + HUB_STEPS + final  # esphome and midway alike
 
@@ -4591,7 +4606,7 @@ def settle_route(ctx: Context) -> tuple[str, str]:
     ctx.state.set_input("source", source)
     ctx.state.set_input("firmware", firmware)
     say(f"Converting the plug from {detect.NAMES[source]} to {FIRMWARES[firmware]}."
-         if source in ("tasmota", "esphome") else f"Converting the plug to {FIRMWARES[firmware]}.")
+         if source in ("tasmota", "esphome", "untemplated") else f"Converting the plug to {FIRMWARES[firmware]}.")
     return firmware, source
 
 
@@ -4603,7 +4618,10 @@ def ask_firmware(source: str, choices: list[str]) -> str:
     body = (["This plug was left part way through a conversion; it can go on to any",
              "of these from where it is."] if source in ("midway", "committed", "installer") else
             ["Its Tasmota goes back on first, with its settings; choosing Tasmota",
-             "stops there. Or it can go on to either of the others."] if source == "safeboot" else [])
+             "stops there. Or it can go on to either of the others."] if source == "safeboot" else
+            ["It runs Tasmota without the plug's template, so it switches nothing;",
+             "choosing Tasmota gives it the template, keeping its other settings."]
+            if source == "untemplated" else [])
     if source != "sonoff" and "sonoff" not in choices:
         body += [""] * bool(body) + ["Going back to Sonoff's own firmware needs the backup this tool takes",
                                      "when it first converts a plug, and there is none for this one here."]
@@ -4625,6 +4643,12 @@ def sonoff_backup_exists(ctx: Context) -> bool:
     return bool(mac and plugs.find_backup(mac))
 
 
+def known_macs() -> set[str]:
+    """The MACs of the plugs this computer has records of: their backups and their runs."""
+    return {name.replace("-", ":") for name in
+            (path.name for path in plugs.PLUGS.glob("*")) if plugs.MAC_RE.match(name)}
+
+
 def find_current_firmware(ctx: Context) -> str:
     """What the plug runs now: Tasmota or ESPHome if it is one this tool can
     find converted on the network, else Sonoff's firmware (found later,
@@ -4640,18 +4664,20 @@ def find_current_firmware(ctx: Context) -> str:
             running = identify(ctx, given)
         if running in ("mover", "startup", "hub"):
             running = "midway"
-        if running in ("tasmota", "esphome", "midway", "installer"):
-            adopt_plug(ctx, detect.Found(given, running, hostsys.mac_of(given)))
+        mac = hostsys.mac_of(given)
+        if running is None and mac and hostsys.normalise_mac(mac) in known_macs() \
+                and detect.answers_as_tasmota(given):
+            # A Tasmota without the plug's template, as the search finds it.
+            running = "untemplated"
+        if running in ("tasmota", "esphome", "midway", "installer", "untemplated"):
+            adopt_plug(ctx, detect.Found(given, running, mac))
             return past_the_commit(ctx, running)
         return "sonoff"
     # On screen while it looks - 5-10 s, before any stage line and its clock -
     # and taken off again once it has looked.
     output.transient_begin()
     tell("Looking for plugs already running Tasmota or ESPHome on your network...")
-
-    # Plugs this computer has records of: their backups and their runs.
-    known = {name.replace("-", ":") for name in
-             (path.name for path in plugs.PLUGS.glob("*")) if plugs.MAC_RE.match(name)}
+    known = known_macs()
 
     def search() -> list[detect.Found]:
         try:
@@ -5022,7 +5048,7 @@ def unlock_tasmota(ctx: Context) -> None:
     leaves it (L1) - every firmware after that is one this tool put on.  A
     run carried on was not asked yet, nor one given the wrong password."""
     source = run_source(ctx.state)
-    if source not in ("tasmota", "safeboot") or ctx.state.is_done("L1"):
+    if source not in ("tasmota", "safeboot", "untemplated") or ctx.state.is_done("L1"):
         return
     if source == "safeboot" and not ctx.state.is_done("T1"):
         return  # its safeboot first: T1 asks for it there
@@ -5034,8 +5060,11 @@ def unlock_tasmota(ctx: Context) -> None:
 def past_the_commit(ctx: Context, running: str) -> str:
     """"committed" for a plug part way that a run of this computer's left past
     its commit: on Tasmota's layout, not Sonoff's, so the way on is official
-    Tasmota first - never the hub's steps, which need Sonoff's two slots."""
-    if running != "midway":
+    Tasmota first - never the hub's steps, which need Sonoff's two slots.
+    An official Tasmota without the plug's template is one too, if a run left
+    it so; any other is "untemplated", never "midway": the hub's steps begin
+    by sending ESPHome an update, which no Tasmota takes."""
+    if running not in ("midway", "untemplated"):
         return running
     mac = ctx.state.input("plug_mac")
     for directory in reversed(run_directories()):
@@ -5988,7 +6017,8 @@ def stage_timings(ctx: Context, key: str) -> str:
 # What a run's starting point is called in its report: one for each of SOURCES.
 CONVERTED_FROM = {"sonoff": "Sonoff", "tasmota": "Tasmota", "esphome": "ESPHome",
                   "midway": "unfinished conversion", "committed": "unfinished conversion",
-                  "installer": "unfinished conversion", "safeboot": "Tasmota's safeboot"}
+                  "installer": "unfinished conversion", "safeboot": "Tasmota's safeboot",
+                  "untemplated": "Tasmota without its template"}
 
 
 def report_fields(ctx: Context, seconds: float, resumed: bool,
