@@ -130,7 +130,7 @@ person converting it again would have.
 ## The fault suite
 
 `tools/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,377 scenarios:
+every direction - 1,380 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
@@ -215,6 +215,14 @@ every direction - 1,377 scenarios:
   (BAD-TEMPLATE). Restarting it for real would also cost its settings:
   Tasmota counts each start that ends before 8 s as a quick power cycle, and
   at the seventh erases everything, its Wi-Fi too.
+- **A converted plug in ESPHome's safe mode** (`safemode-ten`): the saved
+  ESPHome switched off as soon as it answers, until it starts in safe mode -
+  ESPHome stopped within a minute of starting ten times in a row does, its
+  count kept in flash, so the emulator keeps it too. Safe mode has only Wi-Fi
+  and the update service for five minutes, as the mover has. Then the tool,
+  to ESPHome, Tasmota or Sonoff: it must know the plug for ESPHome in safe
+  mode and wait for it (FAIL-TAKEN-FOR-MOVER), never take it for one left
+  part way - to stay on ESPHome, that sent it the startup firmware.
 - **A Berry phase riding out the network by itself** (`blips-3`,
   `lossy-phase`, at E2, G1, I1, L1 and R1): two 3 s outages from 10% to 90%
   of the phase - further apart than its 20 s of retrying - or one packet in

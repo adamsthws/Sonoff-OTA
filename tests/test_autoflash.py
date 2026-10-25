@@ -1854,6 +1854,68 @@ class UntemplatedByAddressTests(unittest.TestCase):
         self.assertEqual(self.found(set()), "sonoff")
 
 
+class EsphomeSafeModeTests(unittest.TestCase):
+    """A plug answering as the mover that a run left on ESPHome is ESPHome in
+    safe mode: waited out, never sent the startup firmware."""
+
+    def running(self, earlier, answers=("mover", "esphome"), by_address=False):
+        from types import SimpleNamespace
+        import tools.autoflash_cli as autoflash
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        runs = []
+        for index, (firmware, done) in enumerate(earlier):
+            run = root / f"run{index}"
+            run.mkdir()
+            state = RunState.open(run)
+            state.set_input("firmware", firmware)
+            for step in done:
+                state.mark(step, "done")
+            runs.append(run)
+        now = root / "now"
+        now.mkdir()
+        inputs = {"plug_ip": "192.168.0.137", "plug_mac": "12:34:56:ab:cd:ef"}
+        ctx = SimpleNamespace(dir=now, state=SimpleNamespace(input=inputs.get),
+                              web_password=None, esphome_login=None)
+        answers = iter(answers)
+        clock = iter(range(0, 10000, 5))
+        with mock.patch.object(autoflash, "run_directories", return_value=runs), \
+                mock.patch.object(autoflash.plugs, "mac_of_run", return_value="12:34:56:ab:cd:ef"), \
+                mock.patch.object(autoflash.detect, "identify", side_effect=lambda *a, **k: next(answers)), \
+                mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
+                mock.patch.object(autoflash.time, "sleep"), \
+                mock.patch.object(autoflash, "say"):
+            if by_address:
+                with mock.patch.object(autoflash.hostsys, "mac_of", return_value="12:34:56:AB:CD:EF"), \
+                        mock.patch.object(autoflash, "adopt_plug"), \
+                        mock.patch.object(autoflash, "past_the_commit", side_effect=lambda ctx, running: running):
+                    return autoflash.find_current_firmware(ctx)
+            return autoflash.esphome_safe_mode(ctx, "midway")
+
+    def test_left_on_esphome_it_is_waited_out(self):
+        converted = [("esphome", ["D5", "I1", "I2"])]
+        self.assertEqual(self.running(converted, answers=("mover", "mover", "esphome")), "esphome")
+        # Run again at its address, as the network search finds it.
+        self.assertEqual(self.running(converted, answers=("mover", "esphome"), by_address=True), "esphome")
+
+    def test_otherwise_it_is_the_mover(self):
+        self.assertEqual(self.running([]), "midway")
+        # Stopped before ESPHome had confirmed itself: back on the mover, part way.
+        self.assertEqual(self.running([("esphome", ["D5", "I1"])]), "midway")
+        # Its last run took it on from ESPHome.
+        self.assertEqual(self.running([("esphome", ["D5", "I1", "I2"]), ("tasmota", ["X1", "X2"])]), "midway")
+
+    def test_a_run_that_wrote_nothing_does_not_hide_it(self):
+        self.assertEqual(self.running([("esphome", ["D5", "I1", "I2"]), ("tasmota", [])]), "esphome")
+
+    def test_one_that_never_comes_back_stops_the_run(self):
+        import tools.autoflash_cli as autoflash
+        with self.assertRaises(autoflash.Abort):
+            self.running([("esphome", ["D5", "I1", "I2"])], answers=["mover"] * 1000)
+
+
 class ConsentTests(unittest.TestCase):
     """Only the word itself goes ahead; anything else stops."""
 

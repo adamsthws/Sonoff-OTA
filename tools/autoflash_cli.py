@@ -4694,6 +4694,7 @@ def find_current_firmware(ctx: Context) -> str:
         elif running == "esphome-login":
             ask_esphome_login(ctx, given)
             running = identify(ctx, given)
+        mover = running == "mover"
         if running in ("mover", "startup", "hub"):
             running = "midway"
         mac = hostsys.mac_of(given)
@@ -4703,6 +4704,8 @@ def find_current_firmware(ctx: Context) -> str:
             running = "untemplated"
         if running in ("tasmota", "esphome", "midway", "installer", "untemplated"):
             adopt_plug(ctx, detect.Found(given, running, mac))
+            if mover:
+                running = esphome_safe_mode(ctx, running)
             return past_the_commit(ctx, running)
         return "sonoff"
     # On screen while it looks - 5-10 s, before any stage line and its clock -
@@ -4769,6 +4772,8 @@ def find_current_firmware(ctx: Context) -> str:
         if chosen.firmware in LOCKED:
             chosen = unlocked(ctx, chosen)
     adopt_plug(ctx, chosen)
+    if chosen.firmware == "midway" and chosen.name == "the mover":
+        return past_the_commit(ctx, esphome_safe_mode(ctx, chosen.firmware))
     return past_the_commit(ctx, chosen.firmware)
 
 
@@ -5144,6 +5149,56 @@ def past_the_commit(ctx: Context, running: str) -> str:
             return "committed"
         return tasmota_missing(ctx, running)  # its latest run says otherwise
     return tasmota_missing(ctx, running)
+
+
+# ESPHome started ten times in a row, each stopped within a minute, takes that
+# for a boot loop and starts in safe mode: Wi-Fi and its update service, no
+# page and no relay, as the mover has. Five minutes on, it restarts as itself.
+ESPHOME_SAFE_MODE_WAIT = 400.0
+
+
+def left_on_esphome(ctx: Context) -> bool:
+    """Whether this computer's latest run of the plug that wrote to it left
+    it on ESPHome, checked (I2): one past that, the mover is gone for good."""
+    mac = ctx.state.input("plug_mac")
+    for directory in reversed(run_directories()):
+        if directory.resolve() == ctx.dir.resolve() or plugs.mac_of_run(directory) != mac:
+            continue
+        try:
+            state = RunState.open(directory)
+        except (OSError, ValueError):
+            continue
+        if wrote_nothing(state):
+            continue
+        return run_firmware(state) == "esphome" and state.is_done("I2")
+    return False
+
+
+def esphome_safe_mode(ctx: Context, running: str) -> str:
+    """What a plug that answers as the mover runs: ESPHome in safe mode, if
+    a run left it on ESPHome, waited out until it restarts as itself - taken
+    for part way, it was sent the startup firmware, even to stay on ESPHome."""
+    if not left_on_esphome(ctx):
+        return running
+    host = ctx.state.input("plug_ip")
+    say("    It answers only ESPHome's update service, though this computer left it on")
+    say("    ESPHome: ESPHome in safe mode, after starting ten times in a row, each")
+    say("    stopped within a minute. It restarts as itself within five minutes.")
+    say("    Waiting for it - leave it switched on...")
+    started = time.monotonic()
+    while time.monotonic() - started < ESPHOME_SAFE_MODE_WAIT:
+        found = identify(ctx, host)
+        if found == "esphome-login":
+            ask_esphome_login(ctx, host)
+            found = identify(ctx, host)
+        if found == "esphome":
+            say(f"    ESPHome answered after {time.monotonic() - started:.0f}s.")
+            return "esphome"
+        time.sleep(5)
+    raise Abort(
+        "the plug answers only ESPHome's update service, and has not started ESPHome "
+        f"in {ESPHOME_SAFE_MODE_WAIT / 60:.0f} minutes. Leave it switched on for ten "
+        "minutes, then run the same command again")
 
 
 def wrote_nothing(state: RunState) -> bool:

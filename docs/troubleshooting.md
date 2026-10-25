@@ -406,6 +406,14 @@ Backlog Template {"NAME":"Sonoff S60TPG","GPIO":[1,1,1,1,224,544,1,3104,1,32,1,0
 
 (`S60TPF` in the name for a European plug: the pins are the same.)
 
+## An ESPHome plug with no page and no relay
+
+ESPHome stopped within a minute of starting ten times in a row - switched
+off and on, say - takes that for a boot loop and starts in safe mode: on
+your Wi-Fi with only its update service, no page, no relay, nothing in Home
+Assistant. Five minutes on, it restarts as itself, with nothing lost; leave
+it switched on. The tool, run meanwhile, says so and waits for it.
+
 ## Checking a finished plug at any time
 
 ```sh

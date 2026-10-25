@@ -90,6 +90,7 @@ PLUG_URL = "http://192.168.60.50"
 NOTEMPLATE_MQTT_HOST = "192.0.2.10"
 APP0_OFFSET = 0xE0000  # Tasmota's own firmware, on its layout (tools/safeboot_migration.py)
 PLUG_CMD = "/opt/autoflash-emu/bin/plug"
+ESPHOME_OTA_PORT = 3232
 MAX_RUNS = 4
 TOOL = "tools/autoflash_cli.py"
 HELPERS = ("serve_safeboot_migration.py", "serve_tasmota_ota.py")
@@ -249,7 +250,12 @@ def composite_scenarios():
         then the tool, to Tasmota, ESPHome or Sonoff.
     bootloop-fallback: a plug converted to Tasmota, then put on its
         fallback module, as Tasmota does in a boot loop (go_bootloop): it
-        must still run its own template (BAD-TEMPLATE)."""
+        must still run its own template (BAD-TEMPLATE).
+    safemode-ten: a plug converted to ESPHome, switched off within a minute
+        of starting ten times, which ESPHome takes for a boot loop and starts
+        in safe mode (go_safemode); then the tool, to ESPHome, Tasmota or
+        Sonoff: it must know the plug for ESPHome in safe mode, not the mover
+        (FAIL-TAKEN-FOR-MOVER)."""
     def one(route, step, fault, arg, at=40):
         return dict(id=sid(route, step, fault, arg, at), route=route, step=step, fault=fault, arg=arg, at=at)
 
@@ -286,6 +292,8 @@ def composite_scenarios():
         yield one(route, "start", "notemplate", "generic")
     for route in ("sonoff>tasmota", "esphome>tasmota"):
         yield one(route, "start", "bootloop", "fallback")
+    for route in ("esphome>esphome", "esphome>tasmota", "esphome>sonoff"):
+        yield one(route, "start", "safemode", "ten")
     for route, step in BLIP_STEPS:
         yield one(route, step, "blips", 3, at=10)
         yield one(route, step, "lossy", "phase", at=10)
@@ -1193,6 +1201,8 @@ class Scenario:
             return self.go_notemplate()
         if sc["fault"] == "bootloop":
             return self.go_bootloop()
+        if sc["fault"] == "safemode":
+            return self.go_safemode()
         if step == "C2":
             source, self.target, steps = None, C2_ROUTES[route], {"C2": 20}
         else:
@@ -1397,6 +1407,56 @@ class Scenario:
         time.sleep(15)  # Module restarts the plug; template_ok waits on from there
         return self.finish(results, None)
 
+    def ports_open(self, *ports):
+        """Which of `ports` the plug takes a connection on now."""
+        probe = ("import socket, sys\n"
+                 "for port in sys.argv[1:]:\n"
+                 "    try:\n"
+                 "        socket.create_connection(('192.168.60.50', int(port)), timeout=2).close()\n"
+                 "        print(port)\n"
+                 "    except OSError:\n"
+                 "        pass\n")
+        out = self.ex("python3", "-I", "-c", probe, *map(str, ports)).stdout
+        return {int(port) for port in out.split()}
+
+    def go_safemode(self):
+        """A plug converted to ESPHome, then switched off within a minute of
+        starting ten times in a row: ESPHome takes that for a boot loop and
+        starts in safe mode - Wi-Fi and its update service only, no page, no
+        relay - for five minutes, then restarts as itself. All the network
+        sees is the update service, as the mover has. Then the tool, to
+        ESPHome, Tasmota or Sonoff.
+
+        ESPHome keeps its count in flash, so the emulator keeps it too. Each
+        start counts as it begins, before Wi-Fi: cut once the update service
+        answers. A normal start has its page up by then; safe mode never."""
+        self.target = self.sc["route"].split(">")[1]
+        results = [(self.run_tool("esphome", source="suite-esphome"), None)]
+        results[-1] = (results[-1][0], self.screen_result())
+        if "nothing to convert" not in results[-1][1]:
+            return self.finish(results, "NOT-FIRED")
+        cuts = 0
+        while True:
+            deadline, open_now = time.time() + 50, set()
+            while time.time() < deadline and ESPHOME_OTA_PORT not in open_now:
+                time.sleep(0.5)
+                open_now = self.ports_open(ESPHOME_OTA_PORT, 80)
+            if ESPHOME_OTA_PORT not in open_now:
+                self.say(f"SAFEMODE: ESPHome did not answer within 50 s of starting ({cuts} cuts)")
+                return self.finish(results, "NOT-FIRED")
+            time.sleep(2)
+            if 80 not in open_now and 80 not in self.ports_open(80):
+                break  # in safe mode
+            if cuts == 12:
+                self.say("SAFEMODE: still starting normally after 12 cuts")
+                return self.finish(results, "NOT-FIRED")
+            self.ex(PLUG_CMD, "off"); time.sleep(1); self.ex(PLUG_CMD, "on")
+            cuts += 1
+        self.notes["safemode_cuts"] = cuts
+        self.say(f"SAFEMODE: in safe mode after {cuts} cuts: its update service only")
+        results[-1] = (results[-1][0], "on ESPHome's safe mode")
+        return self.again(results, self.target, [])
+
     def until_page(self, path, words, limit):
         """Whether the plug's page `path` says `words`, in any case, within `limit` seconds."""
         deadline = time.time() + limit
@@ -1573,6 +1633,8 @@ class Scenario:
                      for m, p, t in run_logs(self.state) if m >= self.started
                      for run in self.ours(p, t).split("=== run started")):
                 special = "FAIL-ASKED-AGAIN"  # the go-ahead is asked once a run
+            elif fault == "safemode" and "ESPHome in safe mode" not in ours:
+                special = "FAIL-TAKEN-FOR-MOVER"  # sent the startup firmware, even to stay on ESPHome
             elif fault == "notemplate" and not converted_from_untemplated:
                 special = "FAIL-NOT-UNTEMPLATED"  # taken for something else
             elif fault == "notemplate" and "ESPHome's update service did not answer" in ours:
