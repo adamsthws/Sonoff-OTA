@@ -14,6 +14,25 @@ on that commit, and carries the firmware files the tool installs with
 which `gh release verify vX.Y.Z` and `gh release verify-asset vX.Y.Z FILE`
 check.
 
+## 2.1.3
+
+- A plug converted to Tasmota went on to switch nothing after Tasmota had
+  restarted six times in a row, each within 10 seconds of starting: taking
+  that for a boot loop, Tasmota goes over to its fallback module, Generic,
+  keeping only its Wi-Fi ([#8](https://github.com/adamsthws/Sonoff-OTA/discussions/8)).
+  The plug's template is now its fallback too. The final check (H1) makes it
+  so on a plug converted by an earlier version, and puts the template back
+  on one that has already gone over to Generic.
+- A plug on ESPHome in safe mode - which ESPHome starts after it was stopped
+  within a minute of starting ten times in a row - was taken for one part way
+  through a conversion: to stay on ESPHome, the run sent it the startup
+  firmware and installed ESPHome again. It is now known for ESPHome in safe
+  mode, and the run waits the five minutes until ESPHome restarts as itself.
+
+2.1.2 was withdrawn on the day it was published, from a commit holding work
+not meant for release; its number cannot be used again. 2.1.3 is the tool
+2.1.2 was.
+
 ## 2.1.1
 
 - A plug converted to Tasmota could finish without the plug's template -
