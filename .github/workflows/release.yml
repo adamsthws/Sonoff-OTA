@@ -4,9 +4,11 @@
 # change the number, merge.
 #
 # Only once the unit tests, the final firmware on the emulator, the lint and
-# the leak scan pass on that commit. The release carries the firmware files
-# the tool installs and SHA256SUMS; with the repository's immutable releases,
-# GitHub signs an attestation of them and of the tag (`gh release verify`).
+# the leak scan pass on that commit: on a push, the runs the push started
+# rather than the same again; started any other way, it runs them. The
+# release carries the firmware files the tool installs and SHA256SUMS; with
+# the repository's immutable releases, GitHub signs an attestation of them
+# and of the tag (`gh release verify`).
 name: Release
 
 on:
@@ -45,30 +47,85 @@ jobs:
               echo "tag=$tag" >> "$GITHUB_OUTPUT"
           fi
 
-  tests:
+  # The lint, leak scan and tests the push started, waited for: their results
+  # are the gate. One the push did not start (emulator-check.yml runs only for
+  # some paths) is run below instead. A failed one, run again and passed, is
+  # taken up by running this job again.
+  pushed:
     needs: version
-    if: needs.version.outputs.tag != ''
+    if: github.event_name == 'push' && needs.version.outputs.tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      actions: read
+    outputs:
+      missing: ${{ steps.wait.outputs.missing }}
+    steps:
+      - name: The runs the push started, once they finish
+        id: wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          missing=() failed=0
+          for workflow in lint.yml leak-scan.yml emulator-check.yml; do
+              result="not finished in time" seen='' url=''
+              for i in $(seq 250); do   # 20 s apart
+                  IFS=$'\t' read -r status url conclusion < <(gh run list -R "$GITHUB_REPOSITORY" \
+                      --workflow "$workflow" --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" \
+                      --event push --json status,url,conclusion \
+                      --jq 'first // empty | [.status, .url, .conclusion] | @tsv') || true
+                  [ -z "$status" ] || seen=1
+                  if [ -z "$seen" ] && [ "$i" -gt 3 ]; then result=missing; break; fi
+                  if [ "$status" = completed ]; then result=$conclusion; break; fi
+                  sleep 20
+              done
+              echo "$workflow: $result $url"
+              case $result in
+                  success) ;;
+                  missing) missing+=("$workflow") ;;   # run below
+                  *) echo "::error::$workflow: $result $url"; failed=1 ;;
+              esac
+          done
+          echo "missing=${missing[*]}" >> "$GITHUB_OUTPUT"
+          exit $failed
+
+  tests:
+    needs: [version, pushed]
+    if: >-
+      !cancelled() && needs.version.outputs.tag != ''
+      && contains(fromJSON('["success", "skipped"]'), needs.pushed.result)
+      && (github.event_name != 'push' || contains(needs.pushed.outputs.missing, 'emulator-check.yml'))
     permissions:
       contents: read
       actions: read   # its emulator job looks for the emulator-image workflow's run
     uses: ./.github/workflows/emulator-check.yml
 
   lint:
-    needs: version
-    if: needs.version.outputs.tag != ''
+    needs: [version, pushed]
+    if: >-
+      !cancelled() && needs.version.outputs.tag != ''
+      && contains(fromJSON('["success", "skipped"]'), needs.pushed.result)
+      && (github.event_name != 'push' || contains(needs.pushed.outputs.missing, 'lint.yml'))
     permissions:
       contents: read
     uses: ./.github/workflows/lint.yml
 
   leak-scan:
-    needs: version
-    if: needs.version.outputs.tag != ''
+    needs: [version, pushed]
+    if: >-
+      !cancelled() && needs.version.outputs.tag != ''
+      && contains(fromJSON('["success", "skipped"]'), needs.pushed.result)
+      && (github.event_name != 'push' || contains(needs.pushed.outputs.missing, 'leak-scan.yml'))
     permissions:
       contents: read
     uses: ./.github/workflows/leak-scan.yml
 
   release:
-    needs: [version, tests, lint, leak-scan]
+    needs: [version, pushed, tests, lint, leak-scan]
+    # Each gate passed or, on a push, left to the run the push started.
+    if: >-
+      !cancelled() && needs.version.outputs.tag != ''
+      && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
