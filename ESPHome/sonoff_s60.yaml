@@ -113,10 +113,7 @@ esphome:
             const char *source;
             if (numbers.size() == 20) {
               std::copy(numbers.begin() + 2, numbers.end(), id(calibration).begin());
-              id(calibration_saved) = true;
               source = "stock NVS";
-            } else if (id(calibration_saved)) {
-              source = "saved copy";
             } else {
               source = "missing";
             }
@@ -163,7 +160,8 @@ globals:
     type: std::string
   - id: imprinted_password
     type: std::string
-  # Uncalibrated power (W) of the last meter reading; selects the calibration set
+  # Power (W) of the last meter reading, after the board factor and before
+  # calibration: stock compares this same value with 300 W to pick the set
   - id: raw_power
     type: float
     initial_value: "0.0"
@@ -171,15 +169,10 @@ globals:
     type: float
     initial_value: "1.0"
   # Two sets of [a, b, c] for current, voltage and power: below 300 W, then
-  # from 300 W on. Saved, so it survives if Sonoff's NVS data is ever lost.
+  # from 300 W on. Uncalibrated until read from Sonoff's NVS at boot.
   - id: calibration
     type: std::array<double, 18>
-    restore_value: true
     initial_value: "{0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0}"
-  - id: calibration_saved
-    type: bool
-    restore_value: true
-    initial_value: "false"
   - id: calibration_status
     type: std::string
     initial_value: '"unknown"'
@@ -356,7 +349,7 @@ binary_sensor:
             args: [id(power).state, id(overload_threshold).state]
 
 text_sensor:
-  # Where the calibration came from (stock NVS, saved copy or missing) and the board factor
+  # Where the calibration came from (stock NVS or missing) and the board factor
   - platform: template
     name: "Calibration"
     entity_category: diagnostic

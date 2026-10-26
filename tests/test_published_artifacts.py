@@ -1,3 +1,4 @@
+import re
 import unittest
 
 from tools.safeboot_migration import (
@@ -109,7 +110,44 @@ class PublishedESPHomeTests(unittest.TestCase):
             self.assertNotIn(key, config.replace("password: !lambda", ""), key)
         self.assertIn("package_import_url: github://adamsthws/Sonoff-OTA/ESPHome/sonoff_s60.yaml@main", config)
         # Adoption takes this one file: system headers (<...>) only, no local files
-        self.assertNotRegex(config, r"includes:(?:\s*- <[^>\n]+>)*\s*- [^<\s]")
+        for entry in include_entries(config):
+            self.assertTrue(entry.startswith("<"), entry)
+
+    def test_every_include_form_is_found(self):
+        config = (
+            "esphome:\n"
+            "  includes: my.h\n"
+            "  includes_c: [<nvs.h>, 'other.c']\n"
+            "  includes:\n"
+            "    - <nvs.h>\n"
+            "    # a comment\n"
+            "    - local.h  # trailing\n"
+            "\n"
+            "  on_boot:\n"
+            "    - priority: 600\n"
+        )
+        self.assertEqual(list(include_entries(config)), ["my.h", "<nvs.h>", "other.c", "<nvs.h>", "local.h"])
+
+
+def include_entries(config):
+    """Yield each entry of every includes: and includes_c: key in an ESPHome config."""
+    lines = config.splitlines()
+    for i, line in enumerate(lines):
+        match = re.match(r"(\s*)includes(?:_c)?:(.*)$", line)
+        if not match:
+            continue
+        indent, value = len(match.group(1)), match.group(2).split(" #")[0].strip()
+        if value:
+            for item in value.strip("[]").split(","):
+                yield item.strip().strip("'\"")
+            continue
+        for following in lines[i + 1:]:
+            text = following.strip()
+            if not text or text.startswith("#"):
+                continue
+            if len(following) - len(following.lstrip()) <= indent and not text.startswith("- "):
+                break
+            yield text.removeprefix("- ").split(" #")[0].strip().strip("'\"")
 
 
 class ESPHomeImageCheckTests(unittest.TestCase):
