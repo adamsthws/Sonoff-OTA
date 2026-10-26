@@ -538,6 +538,8 @@ def command_esphome(args: argparse.Namespace) -> int:
               f"({release_version}) say so.")
         if args.mover or replaced:
             by_hand.append("the mover's or bootloader's own rows and paragraphs, which only the image's are written for")
+        if old_image["esphome"] == release:
+            by_hand.append("what the change to the config does, in CHANGELOG.md and artifacts/README.md")
     left_to_do(by_hand + ["python3 -m unittest discover -s tests (tests/test_firmware_pins.py checks the docs)",
                           "the emulator runs in docs/updating-firmware.md, then a real plug"])
     return 0
@@ -610,8 +612,10 @@ def tasmota_doc_texts(old: str, new: str) -> tuple[dict[Path, str], str]:
 def esphome_doc_texts(old: dict[str, Any], new: dict[str, Any], bootloader_same: bool,
                       replaced: bool = False) -> tuple[dict[Path, str], str]:
     """artifacts/README.md, THIRD_PARTY_NOTICES.md, ESPHome/README.md and the
-    changelog for a new image built from the same config - worked out before
-    anything is written, so a passage not found changes nothing."""
+    changelog for a new image: the same config with a new ESPHome release, or,
+    with the same release, a change to the config, which a person describes -
+    worked out before anything is written, so a passage not found changes
+    nothing."""
     old_name, new_name = Path(old["file"]).name, Path(new["file"]).name
     kept = ("Its build's bootloader is the one it starts with now." if replaced else
             "Its build's bootloader is byte for byte the published one." if bootloader_same else
@@ -624,11 +628,14 @@ def esphome_doc_texts(old: dict[str, Any], new: dict[str, Any], bootloader_same:
     readme = substituted(readme, r"(\(its `project` version is the one in the file name\) with ESPHome )\S+( and\s+ESP-IDF )[\d.]+",
                          lambda m: f"{m.group(1)}{new['esphome']}{m.group(2)}{new['esp_idf']}",
                          "the ESPHome release that builds the image, in artifacts/README.md")
+    built = (f"a change to {old['version']}'s config, built with ESPHome {new['esphome']} "
+             f"(ESP-IDF {new['esp_idf']}) as {old['version']} was" if new["esphome"] == old["esphome"] else
+             f"{old['version']}'s config built with ESPHome {new['esphome']} (ESP-IDF {new['esp_idf']}), "
+             f"where {old['version']} was built with {old['esphome']} (ESP-IDF {old['esp_idf']}): the config "
+             "is unchanged but for its version")
     paragraph = textwrap.fill(
-        f"ESPHome {new['version']} is {old['version']}'s config built with ESPHome {new['esphome']} "
-        f"(ESP-IDF {new['esp_idf']}), where {old['version']} was built with {old['esphome']} "
-        f"(ESP-IDF {old['esp_idf']}): the config is unchanged but for its version. {kept} "
-        f"{old['version']} is in the Git history:", width=79, break_long_words=False, break_on_hyphens=False)
+        f"ESPHome {new['version']} is {built}. {kept} {old['version']} is in the Git history:",
+        width=79, break_long_words=False, break_on_hyphens=False)
     texts = {ARTIFACTS_README: readme.rstrip("\n") + f"\n\n{paragraph}\n`git log --all -- {old['file']}`.\n"}
     notices = NOTICES.read_text(encoding="utf-8")
     notices = substituted(notices, r"`artifacts/esphome-sonoff-s60-imprintable-[\d.]+\.bin` is built with ESPHome(\s+)\S+ and ESP-IDF [\d.]+",
@@ -639,10 +646,12 @@ def esphome_doc_texts(old: dict[str, Any], new: dict[str, Any], bootloader_same:
                                  "the image's source release in THIRD_PARTY_NOTICES.md")
     texts[ESPHOME_README] = substituted(ESPHOME_README.read_text(encoding="utf-8"), r"ESPHome \S+ built the current",
                                         f"ESPHome {new['esphome']} built the current", "ESPHome/README.md's release")
+    release = f"[{new['esphome']}](https://github.com/{ESPHOME_REPO}/releases/tag/{new['esphome']})"
     version = changelog_with(
-        f"ESPHome for the S60 is {new['version']}: the same config, built with ESPHome "
-        f"[{new['esphome']}](https://github.com/{ESPHOME_REPO}/releases/tag/{new['esphome']}), where "
-        f"{old['version']} was built with {old['esphome']}."
+        f"ESPHome for the S60 is {new['version']}: "
+        + (f"a change to its config, built with ESPHome {release} as {old['version']} was."
+           if new["esphome"] == old["esphome"] else
+           f"the same config, built with ESPHome {release}, where {old['version']} was built with {old['esphome']}.")
         + ("" if replaced else " Its bootloader is unchanged, so a plug on ESPHome already is not given a new one."),
         texts)
     return texts, version

@@ -148,6 +148,32 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class ESPHomeDocTests(unittest.TestCase):
+    """What an ESPHome update writes, from the image published now to a made-up one."""
+
+    def texts(self, esphome):
+        from unittest import mock
+        old = uf.load_pins()["esphome"]["image"]
+        new = {"file": "artifacts/esphome-sonoff-s60-imprintable-9.9.0.bin", "version": "9.9.0",
+               "esphome": esphome, "esp_idf": "5.5.9", "sha256": "0" * 64}
+        with mock.patch.object(uf, "released", return_value=True):
+            texts, _version = uf.esphome_doc_texts(old, new, bootloader_same=True)
+        return old, texts
+
+    def test_a_new_release_builds_the_same_config(self):
+        old, texts = self.texts("2099.1.0")
+        self.assertIn("ESPHome for the S60 is 9.9.0: the same config, built with ESPHome", texts[uf.CHANGELOG])
+        self.assertIn("the config is unchanged but for its version", " ".join(texts[uf.ARTIFACTS_README].split()))
+
+    def test_the_same_release_builds_a_changed_config(self):
+        old, texts = self.texts(uf.load_pins()["esphome"]["image"]["esphome"])
+        self.assertIn("ESPHome for the S60 is 9.9.0: a change to its config, built with ESPHome", texts[uf.CHANGELOG])
+        self.assertNotIn("the same config", texts[uf.CHANGELOG].split("## ")[1])
+        readme = " ".join(texts[uf.ARTIFACTS_README].split())
+        self.assertIn(f"ESPHome 9.9.0 is a change to {old['version']}'s config", readme)
+        self.assertNotIn("9.9.0 is " + old["version"] + "'s config built", readme)
+
+
 class SettledReleaseTests(unittest.TestCase):
     """The settled-release rule (update_firmware.SETTLE_DAYS), on made-up histories."""
 

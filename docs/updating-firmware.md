@@ -128,6 +128,9 @@ python3 tools/update_firmware.py esphome            # the latest release
 python3 tools/update_firmware.py esphome 2026.10.0 --image-version 1.3.0
 ```
 
+A change to `ESPHome/sonoff_s60.yaml` is published the same way, naming the
+release already pinned, so that only the config changes.
+
 It needs Docker: the image is built in ESPHome's own image for that release
 (`ghcr.io/esphome/esphome:<release>`), pinned by its digest, so the build does
 not depend on what is installed here. It checks, then builds:
@@ -169,6 +172,10 @@ while any of it is missing:
 - `CHANGELOG.md`: a line for each firmware, with a link to its release notes,
   under the release to come - a new section, a minor version on, once the one
   above has been released, with `tools/autoflash/__init__.py` raised to it.
+
+For a change to the config, built with the release already pinned, they say
+the config changed, and what the change does is left to write by hand in
+`CHANGELOG.md` and `artifacts/README.md`.
 
 Each passage is found and rewritten, and if one is not found nothing is
 changed: `--no-docs` leaves them all to be written by hand, as a change to
