@@ -14,6 +14,26 @@ on that commit, and carries the firmware files the tool installs with
 which `gh release verify vX.Y.Z` and `gh release verify-asset vX.Y.Z FILE`
 check.
 
+## 2.2.0
+
+- ESPHome for the S60 is 1.4.0: a change to its config, built with ESPHome
+  [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0) as
+  1.3.0 was. It corrects the meter as Sonoff's firmware does: by the 1.02
+  its board calls for, and by the plug's factory calibration
+  ([#7](https://github.com/adamsthws/Sonoff-OTA/pull/7)) - from Sonoff's
+  settings where the plug still has them, or, on a plug converted through
+  Tasmota, which lost them, from its Sonoff backup, which the tool now
+  gives it. Energy, and the daily, monthly, yearly and total energy, are
+  counted from the meter's own pulses, calibrated the same way, so they
+  agree, and stay right at loads too small for the power reading; the
+  totals carry on from 1.3.0's. Its bootloader is unchanged, so a plug on
+  ESPHome already is not given a new one.
+- A plug converted to Tasmota has its meter calibrated as Sonoff's firmware
+  had it: by its board's factor, which read 2% low on Tasmota before, and
+  by its factory calibration from its Sonoff backup. Tasmota takes one
+  scale for each reading, so the factory calibration's set from 300 W up
+  does not carry over.
+
 ## 2.1.3
 
 - A plug converted to Tasmota went on to switch nothing after Tasmota had

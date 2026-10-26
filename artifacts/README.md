@@ -11,7 +11,7 @@ directory, never here.
 | `autoflash-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `ece36fd964c1443ef9fb74af87a0a257501c9e5ecfb1fb7a1c3aff1744bc29fd` |
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
 | `esphome-sonoff-s60-bootloader-1.2.0.bin` | ESPHome's bootloader, from the build of 1.2.0: it replaces Sonoff's when ESPHome is installed, so ESPHome can roll back an update that fails to start | `3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433` |
-| `esphome-sonoff-s60-imprintable-1.3.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `bc66c0b619e01fa4fd6cd0b72322fbda08168af9df661680b2e5861bd6e28d66` |
+| `esphome-sonoff-s60-imprintable-1.4.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `137da99ba6737d61d78a2c57a390f97c5a010a0e96c730d476a754c55cf4d49d` |
 | `autoflash-mover-1.1.0.bin` | A small ESPHome the run uses for a minute or two when leaving Tasmota: it fits in front of Tasmota in Sonoff's layout, and takes the next firmware as an ordinary ESPHome update; two minutes away from the home Wi-Fi, it raises its own network, whose page takes new Wi-Fi details. Wi-Fi placeholders, like the image above | `f6e131e1599c886d742c151c3ba3f84a285bba462b438c36b611d577e01ad243` |
 | `sonoff-s60-partition-table.bin` | Sonoff's partition table, read from a stock plug: the one every conversion starts from, which the Tasmota route's preflight requires byte for byte. Written back when a plug leaves Tasmota's layout. Holds no secrets | `f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf` |
 
@@ -149,3 +149,13 @@ which starts 1.3.0 - is kept, and no plug is given a new one. The ESP-IDF
 5.5.5 bootloader built again from 1.2.0's config with ESPHome 2026.9.1 came
 out the same, byte for byte. 1.2.0 is in the Git history:
 `git log --all -- artifacts/esphome-sonoff-s60-imprintable-1.2.0.bin`.
+
+ESPHome 1.4.0 is a change to 1.3.0's config, built with ESPHome 2026.10.0
+(ESP-IDF 5.5.6) as 1.3.0 was. It applies the 1.02 board factor and the
+plug's factory calibration, from Sonoff's NVS or, through its
+`autoflash_calibration` action, from the plug's Sonoff backup, as the stock
+firmware does; and counts energy from the meter's pulses, calibrated the
+same way, its totals carrying on from what 1.3.0 saved. The bootloader that build makes (ESP-IDF 5.5.6)
+differs from the published one, which is kept: no plug is given a new one.
+1.3.0 is in the Git history:
+`git log --all -- artifacts/esphome-sonoff-s60-imprintable-1.3.0.bin`.

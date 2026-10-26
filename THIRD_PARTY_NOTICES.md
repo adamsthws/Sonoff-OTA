@@ -31,7 +31,7 @@ configuration, patch, documentation and helper are retained together under
 ESPHome's firmware code is distributed under the GNU General Public License
 v3.0.
 
-`artifacts/esphome-sonoff-s60-imprintable-1.3.0.bin` is built with ESPHome
+`artifacts/esphome-sonoff-s60-imprintable-1.4.0.bin` is built with ESPHome
 2026.10.0 and ESP-IDF 5.5.6 from this project's config
 [`ESPHome/sonoff_s60.yaml`](ESPHome/sonoff_s60.yaml), with `esphome compile`.
 Its corresponding source is the

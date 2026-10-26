@@ -15,7 +15,7 @@ esphome:
   name_add_mac_suffix: true
   project:
     name: adamsthws.sonoff-s60
-    version: "1.3.0"
+    version: "1.4.0"
   # System headers only: adoption takes this one file
   includes:
     - <nvs.h>
