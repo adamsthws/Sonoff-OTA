@@ -338,25 +338,32 @@ finished, so one that fails leaves the layers as they were.
 
 Windows logs on by itself, opens the link and a PowerShell window for the
 conversion - in **OpenConsole**, Windows Terminal's own console, as on Windows
-11, or with `--classic-console` in Windows' classic one, as on Windows 10. Work
-in it in your browser, at **http://localhost:6080** - nothing to install - or
-over Remote Desktop, `localhost:3389`, user `autoflash`, password `Windows-emulator`, or
-with a VNC viewer on `localhost:5900`, or over SSH (below). Only your computer can reach any of them.
-Copy and paste works in all three: in the browser through the clipboard box in
-noVNC's side panel (the browser keeps pages from reading the clipboard
-directly; what you paste stays Windows' clipboard while the page is open), on VNC
-through SPICE's agent in Windows, and on Remote Desktop with
-its own clipboard (`xfreerdp /clipboard`). The browser view is there while
-Windows installs and its layers are set up too. The converted plug's own page is at its
-own address, **http://192.168.60.50**, as the conversion's last link gives it:
-for as long as the run lasts, your computer has a route to the plug's network
-through the emulator, which forwards only your computer's connections to the
-plug (and still nothing to the internet without `--cloud`). It is set and
+11, or with `--classic-console` in Windows' classic one, as on Windows 10.
+Only your computer can reach it, in any of these ways:
+
+- **In your browser**, at **http://localhost:6080** - nothing to install. It
+  is there while Windows installs and its layers are set up too. Copy and
+  paste through the clipboard box in noVNC's side panel: the browser keeps
+  pages from reading the clipboard directly, and what you paste stays
+  Windows' clipboard while the page is open.
+- **Over Remote Desktop**, `localhost:3389`, user `autoflash`, password
+  `Windows-emulator`, with its own clipboard (`xfreerdp /clipboard`).
+- **With a VNC viewer** on `localhost:5900`, with copy and paste through
+  SPICE's agent in Windows.
+- **Over SSH** ([below](#ssh-to-drive-a-run-from-a-terminal)).
+
+The converted plug's own page is at its own address,
+**http://192.168.60.50**, as the conversion's last link gives it: for as long
+as the run lasts, your computer has a route to the plug's network through the
+emulator, which forwards only your computer's connections to the plug (and
+still nothing to the internet without `--cloud`). The route is set and
 removed without sudo, and left out if your computer has a network of its own
-at 192.168.60.0/24 - http://localhost:8080 works either way. The terminal you started from is the emulator's, for `plug
-restart` and the serial log; leaving it shuts Windows down. The conversion's
-captures are kept between runs (`~/.cache/autoflash-emu/windows/captures`), so an
-unfinished one can be resumed.
+at 192.168.60.0/24 - http://localhost:8080 works either way.
+
+The terminal you started from is the emulator's, for `plug restart` and the
+serial log; leaving it shuts Windows down. The conversion's captures are kept
+between runs (`~/.cache/autoflash-emu/windows/captures`), so an unfinished one
+can be resumed.
 
 #### SSH, to drive a run from a terminal
 
