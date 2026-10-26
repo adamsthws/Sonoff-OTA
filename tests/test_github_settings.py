@@ -18,7 +18,7 @@ class FakeGitHub:
         self.toggles = {toggle: False for toggle in gs.TOGGLES}
         self.rulesets = {7: {"id": 7, "name": "Protect Main Branch", "target": "branch",
                              "enforcement": "active", "conditions": gs.MAIN, "bypass_actors": [],
-                             "rules": protect_rules or [{"type": "deletion"}, {"type": "non_fast_forward"}],
+                             "rules": protect_rules or [{"type": "deletion"}],
                              "node_id": "x", "created_at": "2026-10-21"}}
         self.checks_on_main = list(checks_on_main)
         self.sent = []
@@ -76,9 +76,9 @@ class GitHubSettingsTests(unittest.TestCase):
         self.assertIn("set, but for unit (Python 3.12), unit (Python 3.10), lint, not yet run on main", out)
         checks = fake.rulesets[8]["rules"][0]["parameters"]["required_status_checks"]
         self.assertEqual([check["context"] for check in checks], ["emulator", "scan"])
-        # Everything else is set, signed commits on main among it.
+        # Everything else is set, main's protection among it.
         protect = fake.rulesets[7]
-        self.assertIn({"type": "required_signatures"}, protect["rules"])
+        self.assertIn({"type": "non_fast_forward"}, protect["rules"])
         self.assertIn(("PUT", "/immutable-releases", None), fake.sent)
         self.assertIn(("PATCH", "/code-scanning/default-setup", gs.CODE_SCANNING), fake.sent)
         # Asked again: still not as written, until they have run.

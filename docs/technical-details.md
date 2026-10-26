@@ -209,10 +209,10 @@ the repository, refuse pushes with known kinds of token. In examples, use
 ### The repository's settings
 
 What GitHub is set to do for the repository is written down, with why, in
-`tools/github_settings.py`: `main` never deleted or rewritten and every commit
-on it signed; a pull request merged only once the unit tests, the emulator,
-the lint and the leak scan pass (an admin may still push to `main`, which the
-release workflow tests before releasing); pull requests squashed; secret
+`tools/github_settings.py`: `main` never deleted or rewritten; a pull request
+merged only once the unit tests, the emulator, the lint and the leak scan pass
+(an admin may still push to `main`, which the release workflow tests before
+releasing); pull requests squashed; secret
 scanning, Dependabot's security updates, CodeQL and private vulnerability
 reporting on; and immutable releases, so a release's tag and files never
 change once published, and GitHub signs an attestation of them that

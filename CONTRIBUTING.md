@@ -73,8 +73,6 @@ eWeLink accounts and plugs' identities.
 - **One cohesive change per commit**, its message saying what changed and
   why. While a branch is unpushed, fold a fix to its own work into the
   commit it belongs to rather than adding one on top.
-- **Commits to `main` are signed**; GitHub signs the squash merge of a pull
-  request.
 - **A pull request** is squashed into one commit when merged, once the
   required checks pass: the unit tests on Python 3.12 and 3.10, the
   emulator, the lint and the leak scan. A pull request from a fork runs them

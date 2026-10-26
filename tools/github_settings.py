@@ -70,11 +70,12 @@ def checks_ruleset(names: list[str]) -> dict[str, Any]:
 
 
 RULESETS: dict[str, dict[str, Any]] = {
-    # For everyone, admins too: main is never deleted or rewritten, and every
-    # commit on it is signed (GitHub signs the merges it makes).
+    # For everyone, admins too: main is never deleted or rewritten. Signed
+    # commits are not required: GitHub then lets only a pull request's author
+    # squash it, so no one else's could be merged.
     "Protect Main Branch": {
         "target": "branch", "enforcement": "active", "conditions": MAIN, "bypass_actors": [],
-        "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}, {"type": "required_signatures"}],
+        "rules": [{"type": "deletion"}, {"type": "non_fast_forward"}],
     },
     # What reaches main through a pull request has passed the checks. An admin
     # may push to main directly, as releases are made; the release workflow
