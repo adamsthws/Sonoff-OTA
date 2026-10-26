@@ -67,6 +67,16 @@ eWeLink accounts and plugs' identities.
   it; Dependabot moves them, a week after a release.
   [docs/updating-firmware.md](docs/updating-firmware.md) says how the
   firmware-update workflow opens, tests and merges its pull requests.
+- **CI and the hooks stay fast**: Linux runners only, no Windows or macOS
+  matrix.
+- **A pull request or issue opened in another project** because of work
+  here is recorded in
+  [docs/upstream-contributions.md](docs/upstream-contributions.md) the same
+  day: the project, the link, one line on what it fixes.
+- **Editing anything already posted** - a pull request or issue
+  description, a comment - keeps what it replaces: the old text as
+  `~~old~~` followed by the new, new parts marked **Added:**, and an
+  **Edit:** note saying what changed and why. Never a silent rewrite.
 
 ## Code and tests
 
@@ -74,10 +84,16 @@ eWeLink accounts and plugs' identities.
   (the start scripts install 3.12.10 where there is none). Open text files
   with `encoding=`. Install packages only into a virtual environment
   (`.venv`), never the system's.
+- **Where a design could go more than one way, take the idiomatic one**:
+  accepted good practice and the usual way of the language and the code
+  around it, over a clever or one-off way - it is what the next reader
+  expects.
 - **Before a commit**: `python3 tests/run.py` (about 11 s) and
   `python3 tools/lint.py` on what changed - the pre-commit hook runs the
   linters and the leak scan. [docs/testing.md](docs/testing.md)
 - **Every fix has a test that fails without it.**
+- **A failing test or hook is fixed at its cause**: never skipped, loosened
+  or deleted to let a change through.
 - **Tests run side by side and in any order**: one leaves nothing behind,
   keeps a port it picked, and touches nothing of the whole computer's.
   [docs/testing.md](docs/testing.md#side-by-side-in-any-order)
@@ -91,10 +107,8 @@ eWeLink accounts and plugs' identities.
 - **A release**: its section in `CHANGELOG.md` first, then the version in
   `tools/autoflash/__init__.py`. The release workflow tags it once the tests
   pass on `main`.
-- **A pull request or issue opened in another project** because of work
-  here is recorded in
-  [docs/upstream-contributions.md](docs/upstream-contributions.md) the same
-  day: the project, the link, one line on what it fixes.
+- **A version is used once**: a published release and its tag never
+  change, and a failed one is not redone - fix forward in the next version.
 
 ## Writing
 
