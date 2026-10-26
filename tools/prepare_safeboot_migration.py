@@ -21,8 +21,6 @@ try:
         CANONICAL_NVS_SIZE,
         FLASH_SIZE,
         OFFICIAL_URLS,
-        OFFICIAL_INSTALL_COMMIT,
-        OFFICIAL_TASMOTA_COMMIT,
         PUBLISHED_BLUETOOTH_FILE,
         OLD_OTADATA_OFFSET,
         OTADATA_SIZE,
@@ -35,6 +33,7 @@ try:
         TARGET_PARTITIONS,
         TARGET_TABLE_SHA256,
         analyze_canonical_nvs,
+        official_release,
         parse_partition_sector,
         require_exact_partitions,
         require_pinned_artifacts,
@@ -51,8 +50,6 @@ except ModuleNotFoundError:
         CANONICAL_NVS_SIZE,
         FLASH_SIZE,
         OFFICIAL_URLS,
-        OFFICIAL_INSTALL_COMMIT,
-        OFFICIAL_TASMOTA_COMMIT,
         PUBLISHED_BLUETOOTH_FILE,
         OLD_OTADATA_OFFSET,
         OTADATA_SIZE,
@@ -65,6 +62,7 @@ except ModuleNotFoundError:
         TARGET_PARTITIONS,
         TARGET_TABLE_SHA256,
         analyze_canonical_nvs,
+        official_release,
         parse_partition_sector,
         require_exact_partitions,
         require_pinned_artifacts,
@@ -184,10 +182,7 @@ def main() -> int:
         "app": artifact_record(app_path.name, app, str(args.app.resolve()) if args.app else OFFICIAL_URLS["app"]),
         "target_table": artifact_record(target_table_path.name, target_table, str(factory_path)),
     }
-    release = {
-        "install_commit": OFFICIAL_INSTALL_COMMIT,
-        "tasmota_commit": OFFICIAL_TASMOTA_COMMIT,
-    }
+    release = official_release()
     manifest = {
         "schema": 1,
         "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),

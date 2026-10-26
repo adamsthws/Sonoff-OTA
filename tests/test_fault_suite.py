@@ -105,6 +105,16 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn("sonoff>esphome:C2:crash-60", ids)
         self.assertNotIn("tasmota>sonoff:D4:crash-60", ids)
 
+    def test_a_packet_is_changed_only_where_a_step_sends_one(self):
+        # R2 only sees Sonoff's LAN port take a connection: no packet there
+        # carries data, and corrupt-once was always NO-TRAFFIC.
+        ids = {sc["id"] for sc in fs.scenarios()}
+        for route in ("tasmota>sonoff", "esphome>sonoff"):
+            self.assertNotIn(f"{route}:R2:corrupt-once", ids)
+            self.assertIn(f"{route}:R2:outage-5", ids)
+            self.assertIn(f"{route}:R1:corrupt-once", ids)
+        self.assertIn("sonoff>tasmota:H1:corrupt-once", ids)
+
     def test_the_tools_own_handling_at_the_riskiest_steps(self):
         ids = {sc["id"] for sc in fs.scenarios()}
         for fault in ("second-run", "ctrlc-countdown", "ctrlc-apart", "sleep-120"):
@@ -125,6 +135,19 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn("sonoff>tasmota:F4:legacy-v1.2.0+G1off", ids)
         self.assertTrue(fs.needs_cloud({"route": "tasmota>esphome", "step": "start", "fault": "legacy"}))
 
+    def test_runs_left_by_the_release_before_a_firmware_update_are_carried_on(self):
+        # Its bundle pinned to the firmware the tool installed then
+        # (docs/updating-firmware.md): every step from Sonoff, both ways, and
+        # each kind of plug it converted.
+        ids = {sc["id"] for sc in fs.scenarios()}
+        for route, steps in (("sonoff>tasmota", fs.ROUTES["sonoff>tasmota"][2]),
+                             ("sonoff>esphome", fs.ROUTES["sonoff>esphome"][2])):
+            for step in set(steps) - {"C3fb"} | {"C2"}:
+                self.assertIn(f"{route}:{step}:legacy-v2.0.2", ids)
+        for route in ("tasmota>esphome", "tasmota>sonoff", "esphome>tasmota", "esphome>sonoff"):
+            self.assertIn(f"{route}:start:legacy-v2.0.2", ids)
+        self.assertNotIn("sonoff>tasmota:F4:legacy-v2.0.2+G1off", ids)
+
     def test_phases_must_ride_out_blips_by_themselves(self):
         # PR #5: one early blip used up a phase's 20 s of retrying, and a later
         # one failed on its first try - the step then tried again from the start.
@@ -139,7 +162,9 @@ class ScenarioTests(unittest.TestCase):
         self.assertGreaterEqual(sum(gap > 20 for gap in apart.values()), 2, apart)
 
     def test_how_busy_each_phase_kept_the_plug(self):
-        import json, os, time
+        import json
+        import os
+        import time
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
             for name, captures, age in (("new", {"E2.plug_busy_seconds": 31.2, "G1.plug_busy_seconds": 12,
@@ -174,6 +199,31 @@ class ScenarioTests(unittest.TestCase):
             self.assertNotIn("--firmware", old)
             self.assertEqual(new[-2:], ["--firmware", "tasmota"])
 
+    def test_the_cut_in_the_g1_after_a_legacy_run_lands_in_this_checkouts_g1(self):
+        # Timed by 1.2.0's G1 (33 s), it came after this one's (21 s from
+        # 2.0.2) had finished: MISTIMED.
+        sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "F4", "fault": "legacy",
+                              "arg": "v1.2.0+G1off", "at": 40}, "/dev/null")
+        sc.fired = "legacy"
+        with mock.patch.object(fs, "legacy_tree"), mock.patch.object(sc, "run_tool"), \
+             mock.patch.object(sc, "screen_result", return_value="Stopped"), \
+             mock.patch.object(fs.threading, "Thread"), mock.patch.object(sc, "again") as again:
+            sc.go_legacy()
+        self.assertEqual(again.call_args.kwargs["later"],
+                         ("G1", "plugoff", 1, 0.6 * fs.ROUTES["sonoff>tasmota"][2]["G1"]))
+
+    def test_an_earlier_releases_own_error_is_not_this_checkouts(self):
+        # 1.2.0, killed as G1 began, had stopped on a TimeoutError of its own:
+        # this checkout's run carried on in the same run log and converted.
+        sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "G1", "fault": "legacy",
+                              "arg": "v1.2.0", "at": 40}, "/dev/null")
+        old = f"=== run started, tool version 1.2.0 ===\nFAILED: {fs.UNEXPECTED}: TimeoutError\n"
+        log = Path("run.log")
+        sc.earlier_release_wrote = {log: len(old)}
+        self.assertNotIn(fs.UNEXPECTED, sc.ours(log, old + "=== run started ===\nConverted\n"))
+        self.assertIn(fs.UNEXPECTED, sc.ours(log, old + f"FAILED: {fs.UNEXPECTED}: KeyError\n"))
+        self.assertIn(fs.UNEXPECTED, sc.ours(Path("another/run.log"), old))
+
     def test_a_step_with_a_start_of_its_own_needs_no_length(self):
         # F4rs is in STARTS only: its length comes from there.
         sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "F4rs", "fault": "plugoff",
@@ -187,9 +237,10 @@ class ScenarioTests(unittest.TestCase):
     def test_every_step_has_a_length_or_a_start_of_its_own(self):
         for sc in fs.scenarios():
             if sc["fault"] == "legacy":
-                self.assertTrue(sc["step"] == "start" or sc["step"] in fs.LEGACY_STEPS[sc["arg"].partition("+")[0]], sc["id"])
+                steps = fs.LEGACY_STEPS[sc["arg"].partition("+")[0]].get(sc["route"], {})
+                self.assertTrue(sc["step"] == "start" or sc["step"] in steps, sc["id"])
                 continue
-            if sc["fault"] == "lostapp":
+            if sc["fault"] in ("lostapp", "notemplate", "bootloop", "safemode"):
                 self.assertEqual(sc["step"], "start", sc["id"])
                 continue
             if sc["step"] == "C2":

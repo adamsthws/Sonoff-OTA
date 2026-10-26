@@ -36,6 +36,9 @@ KEYS = {
     "AUTOFLASH_ESPHOME_WEB_USER": None,  # a user name, not a secret
     "AUTOFLASH_ESPHOME_WEB_PASSWORD": "esphome-web-password",
     "AUTOFLASH_ESPHOME_API_KEY": "esphome-api-key",
+    # Not for a run: opens the maintainer's sealed Sonoff backup
+    # (tools/private_backup.py). Known, so a .env holding it still loads.
+    "AUTOFLASH_BACKUP_KEY": "backup-key",
 }
 
 # Names read before they took the AUTOFLASH_ prefix, still understood, so that

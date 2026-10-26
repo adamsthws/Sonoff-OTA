@@ -193,7 +193,8 @@ class RouterSafetyTests(unittest.TestCase):
                         .startswith("host 192.168.0.50 and ("))
 
     def test_a_process_that_ignores_terminate_is_killed(self):
-        import subprocess, sys
+        import subprocess
+        import sys
         stubborn = subprocess.Popen([sys.executable, "-c",
                                      "import signal, time\n"
                                      "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"

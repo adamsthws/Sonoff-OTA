@@ -150,6 +150,7 @@ def start(log_path: Path | None, *, verbose: bool) -> None:
         _s.concise = not verbose
         _s.paused = False
         _s.run_waited = 0.0
+        _s.waiting_since = None   # a question left unanswered is not this run's wait
         if _s.concise and sys.stdout.isatty() and _s.ticker is None:
             # Keeps the stage clock moving through waits that print nothing.
             _s.stop_ticker.clear()
@@ -196,6 +197,14 @@ def log_path() -> Path | None:
 
 def concise() -> bool:
     return _s.concise
+
+
+def terminal_size(fallback: tuple[int, int] = (80, 24)) -> os.terminal_size:
+    """shutil.get_terminal_size(), the fallback taken for a side the terminal
+    reports as 0 (a pseudo-terminal nobody sized): Python 3.11 does that
+    itself, 3.10 hands back the 0 - and every row then wraps at 20 columns."""
+    columns, lines = shutil.get_terminal_size(fallback)
+    return os.terminal_size((columns or fallback[0], lines or fallback[1]))
 
 
 def colour_ok() -> bool:
@@ -389,7 +398,7 @@ def transient_end() -> None:
         rows, _s.transient_rows = _s.transient_rows, None
         if rows is None:
             return
-        if rows >= shutil.get_terminal_size((100, 24)).lines:
+        if rows >= terminal_size((100, 24)).lines:
             # Taller than the window (VS Code's terminal panel, say): the cursor
             # cannot go up past the window's top, so erasing would leave the
             # block's start and the stage line above it stranded. Keep it whole.
@@ -420,7 +429,7 @@ def short_window(*, before_start: bool = False) -> int | None:
     `before_start`: as for transient_begin()."""
     if not ((_s.concise or before_start) and sys.stdout.isatty() and colour_ok()):
         return None
-    rows = shutil.get_terminal_size((100, 24)).lines
+    rows = terminal_size((100, 24)).lines
     return rows if rows < MIN_ROWS else None
 
 
@@ -443,7 +452,7 @@ def transient_rewind(mark: tuple[int, bool] | None) -> bool:
         if mark is None or _s.transient_rows is None:
             return False
         rows = _s.transient_rows - mark[0]
-        if rows >= shutil.get_terminal_size((100, 24)).lines:
+        if rows >= terminal_size((100, 24)).lines:
             return False  # the cursor cannot reach their first row
         if _s.live:
             sys.stdout.write("\r\x1b[K")  # a stage line drawn since
@@ -728,7 +737,7 @@ def _draw_stage() -> None:
 
 def _rows(text: str) -> int:
     """Screen rows `text` takes once printed, long lines wrapping."""
-    width = max(1, shutil.get_terminal_size((100, 20)).columns)
+    width = max(1, terminal_size((100, 20)).columns)
     plain = ANSI_RE.sub("", text)
     return sum(max(1, -(-len(line) // width)) for line in plain.split("\n"))
 
@@ -766,7 +775,7 @@ def _screen_width() -> int | None:
     One short of the edge: some consoles start a new row on reaching it."""
     if not sys.stdout.isatty():
         return None
-    return max(20, shutil.get_terminal_size((100, 20)).columns - 1 - len(MARGIN))
+    return max(20, terminal_size((100, 20)).columns - 1 - len(MARGIN))
 
 
 def _clip(line: str) -> str:

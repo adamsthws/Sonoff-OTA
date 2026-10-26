@@ -29,18 +29,23 @@ from pathlib import Path
 from . import imprint, noise
 
 ROOT = Path(__file__).resolve().parents[2]
+# What each is, as firmware.json pins it: tools/update_firmware.py writes it,
+# docs/updating-firmware.md says when.
+PINS = json.loads((ROOT / "firmware.json").read_text(encoding="utf-8"))["esphome"]
 # The published image, the ESPHome made for the Sonoff S60 (kinds.SONOFF_S60),
 # pinned: a changed file is refused, never used unseen.
-IMAGE = ROOT / "artifacts" / "esphome-sonoff-s60-imprintable-1.2.0.bin"
-IMAGE_SHA256 = "bf9863ca68811d871e52e02bf0cdec63571f1baba087b271107a2c45766f45d4"
-IMAGE_SIZE = 955_376
+IMAGE = ROOT / PINS["image"]["file"]
+IMAGE_SHA256 = PINS["image"]["sha256"]
+IMAGE_SIZE = PINS["image"]["size"]
 # ESPHome's bootloader, from the same build, put in place of Sonoff's: Sonoff's
 # (ESP-IDF 4.4) starts ESPHome but cannot roll back an update that fails to
 # start ("Bootloader too old for OTA rollback").  It is all that sits before
 # the partition table at 0x8000, and the one part the plug cannot start without.
-BOOTLOADER = ROOT / "artifacts" / "esphome-sonoff-s60-bootloader-1.2.0.bin"
-BOOTLOADER_SHA256 = "3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433"
-BOOTLOADER_SIZE = 21_088
+# It is replaced only when that is the point: a power cut in the second it
+# takes to write leaves a plug that has to be opened.
+BOOTLOADER = ROOT / PINS["bootloader"]["file"]
+BOOTLOADER_SHA256 = PINS["bootloader"]["sha256"]
+BOOTLOADER_SIZE = PINS["bootloader"]["size"]
 BOOTLOADER_ROOM = 0x8000
 # Sonoff's app slots, which the run leaves as they are: ESPHome goes into ota_0.
 SLOT_ADDRESS = 0x20000
@@ -104,9 +109,9 @@ def published_bootloader() -> bytes:
 
 # The mover (ESPHome/autoflash_mover.yaml): a small ESPHome, run only while a
 # plug leaves Tasmota, that takes the next firmware as an ESPHome update.
-MOVER = ROOT / "artifacts" / "autoflash-mover-1.1.0.bin"
-MOVER_SHA256 = "f6e131e1599c886d742c151c3ba3f84a285bba462b438c36b611d577e01ad243"
-MOVER_SIZE = 756_960
+MOVER = ROOT / PINS["mover"]["file"]
+MOVER_SHA256 = PINS["mover"]["sha256"]
+MOVER_SIZE = PINS["mover"]["size"]
 # Sonoff's partition table, as a stock S60 has it: written back when a plug
 # leaves Tasmota's layout.
 SONOFF_TABLE = ROOT / "artifacts" / "sonoff-s60-partition-table.bin"

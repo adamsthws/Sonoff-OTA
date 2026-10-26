@@ -1,0 +1,41 @@
+# The leak scan (tools/leak_scan.py) on every push and pull request: what
+# the hooks stop on a maintainer's computer, by its shape alone here - a MAC
+# address that could be a real device's, a private key, a token - since the
+# values only a maintainer's computer knows are not here. For a pull request
+# from a fork, or a push past --no-verify.
+name: Leak scan
+
+on:
+  push:
+  pull_request:
+  # On a branch the firmware-update workflow made (its pull requests start no
+  # workflow themselves), and before a release.
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: What it adds
+        env:
+          BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          AFTER: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+              BEFORE=$(git merge-base origin/main HEAD) AFTER=HEAD   # what the branch adds to main
+          fi
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ] \
+                  && git cat-file -e "$BEFORE" 2>/dev/null; then
+              python3 tools/leak_scan.py range "$BEFORE..$AFTER"
+          fi
+      - name: The repository as it stands
+        run: python3 tools/leak_scan.py tree

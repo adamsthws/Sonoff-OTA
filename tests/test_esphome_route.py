@@ -334,7 +334,7 @@ class ApiSignalTests(unittest.TestCase):
         self.assertEqual(af.esphome.api_signal("127.0.0.1", port), -61)
 
     def test_the_dump_names_the_network_with_the_signal(self):
-        dump = self.log("[C][wifi:1297]:   SSID: 'Home-2G'\n  BSSID: 10:01:00:C4:0A:56\n"
+        dump = self.log("[C][wifi:1297]:   SSID: 'Home-2G'\n  BSSID: 02:00:00:C4:0A:56\n"
                         "  Signal strength: -61 dB ▂▄▆_".encode())
         port = self.serve(dump)
         self.assertEqual(af.esphome.api_wifi("127.0.0.1", port), {"signal": -61, "ssid": "Home-2G"})
@@ -349,11 +349,11 @@ class ApiSignalTests(unittest.TestCase):
 
     def test_no_api_at_all_gives_nothing(self):
         import socket
-        unused = socket.socket()
-        unused.bind(("127.0.0.1", 0))
-        port = unused.getsockname()[1]
-        unused.close()
-        self.assertIsNone(af.esphome.api_signal("127.0.0.1", port, timeout=2.0))
+        with socket.socket() as unused:
+            unused.bind(("127.0.0.1", 0))
+            port = unused.getsockname()[1]
+            # Held, not listening, while asked: refused, and no other test can take it.
+            self.assertIsNone(af.esphome.api_signal("127.0.0.1", port, timeout=2.0))
 
 
 class WifiActionTests(unittest.TestCase):
@@ -663,6 +663,10 @@ class FromAConvertedPlugTests(RouteTestCase):
                     # set up as before; H1 would hold its safeboot and bootloader,
                     # whatever made them, to this version's.
                     self.assertEqual(steps, ["A0", "A5", "T1"])
+                    continue
+                if (source, firmware) == ("untemplated", "tasmota"):
+                    # Given its template alone, likewise.
+                    self.assertEqual(steps, ["A0", "A5", "F4"])
                     continue
                 self.assertEqual(steps[-1], last[firmware], (source, firmware))
                 self.assertEqual(len(steps), len(set(steps)), (source, firmware))

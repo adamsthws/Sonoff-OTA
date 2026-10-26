@@ -8,6 +8,8 @@
 #                                    offline (docs/cloud-stub.md). Not with --cloud.
 #   tools/emulator/emu.sh --yes      with --cloud: the real plug is known to be unplugged; don't ask
 #   tools/emulator/emu.sh --plug MAC which backed-up plug to run; asked when there are several
+#   tools/emulator/emu.sh --plug-dir DIR  a plug with no Sonoff backup: a public one
+#                                    (sanitise_plug.py), whose own flash and eFuses are in DIR
 #   tools/emulator/emu.sh --fresh    put the plug back to its Sonoff backup, and forget the run and the account
 #   tools/emulator/emu.sh --pcap     also record the plug's Wi-Fi traffic (captures/emulation/state/logs)
 #   tools/emulator/emu.sh --rebuild  rebuild the image first
@@ -42,12 +44,13 @@ PY=$ROOT/.venv/bin/python
 IMAGE=${AUTOFLASH_EMU_IMAGE:-autoflash-emu}
 NAME=autoflash-emu PORT=8080 LINK_PORT=7860
 
-cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 yes=0 stub=0 tty=-it plug="" instance=""
+cloud=0 fresh=0 pcap=0 rebuild=0 firewall=1 windows=0 yes=0 stub=0 tty=-it plug="" plug_dir="" instance=""
 while [ $# -gt 0 ]; do
     arg=$1
     case "$arg" in
     --plug) [ $# -ge 2 ] || { echo "--plug needs a MAC address" >&2; exit 2; }; plug=$2; shift ;;
     --plug=*) plug=${arg#--plug=} ;;
+    --plug-dir=*) plug_dir=$(cd "${arg#--plug-dir=}" && pwd) ;;
     --instance) [ $# -ge 2 ] || { echo "--instance needs a number, 1-30" >&2; exit 2; }; instance=$2; shift ;;
     --instance=*) instance=${arg#--instance=} ;;
     --cloud) cloud=1 ;;
@@ -77,13 +80,13 @@ fi
 "$PY" -c 'import esp_idf_nvs_partition_gen' 2>/dev/null || {
     venv=$(dirname "$(dirname "$PY")")
     echo "The emulator needs ESP-IDF's NVS generator in $venv:" >&2
-    echo "    python3 -m venv $venv && $PY -m pip install esp-idf-nvs-partition-gen" >&2
+    echo "    python3 -m venv $venv && $PY -m pip install --require-hashes -r $ROOT/requirements/ci.txt" >&2
     exit 1
 }
 # The stub's CA and the trust swap are made with `cryptography`.
 [ "$stub" = 0 ] || "$PY" -c 'import cryptography' 2>/dev/null || {
     echo "--stub-cloud needs the cryptography package in $(dirname "$(dirname "$PY")"):" >&2
-    echo "    $PY -m pip install cryptography" >&2
+    echo "    $PY -m pip install --require-hashes -r $ROOT/requirements/ci.txt" >&2
     exit 1
 }
 if docker ps -q --filter "name=^$NAME$" | grep -q .; then
@@ -92,6 +95,7 @@ if docker ps -q --filter "name=^$NAME$" | grep -q .; then
 fi
 
 # -- which plug ------------------------------------------------------------------
+# shellcheck disable=SC2174  # each folder named is made 0700; its parents need not be
 mkdir -p -m 0700 "$STATE" "$STATE/logs" "$STATE/plugs"
 efuse_mac() {
     "$PY" -I -c 'import sys; d=open(sys.argv[1],"rb").read(); print(":".join(f"{b:02x}" for b in (d[0x18:0x1C]+d[0x1C:0x1E])[::-1]))' "$1"
@@ -105,7 +109,17 @@ elif [ -f "$EMU/efuse.bin" ]; then
 else
     was=""
 fi
-"$PY" -I "$ROOT/tools/emulator/choose_plug.py" --out "$STATE/plug" ${plug:+--plug "$plug"} || exit $?
+if [ -n "$plug_dir" ]; then
+    # A public plug: nothing of Sonoff's anywhere. What reads the Sonoff
+    # backup - the stub's device identity, the log's redaction - is given the
+    # plug's own flash, in which they find nothing; it cannot go back to Sonoff.
+    [ -f "$plug_dir/flash.bin" ] && [ -f "$plug_dir/efuse.bin" ] || {
+        echo "--plug-dir: $plug_dir has no flash.bin and efuse.bin" >&2; exit 2; }
+    [ "$fresh" = 0 ] || { echo "--fresh: a public plug has no Sonoff backup to go back to" >&2; exit 2; }
+    printf '%s\n%s\n' "$plug_dir" "$(efuse_mac "$plug_dir/efuse.bin")" > "$STATE/plug"
+else
+    "$PY" -I "$ROOT/tools/emulator/choose_plug.py" --out "$STATE/plug" ${plug:+--plug "$plug"} || exit $?
+fi
 SRC=$(sed -n 1p "$STATE/plug")
 mac=$(sed -n 2p "$STATE/plug")
 # Another plug than last time: its own flash, kept from its last run, comes
@@ -126,7 +140,8 @@ fi
 # points dispatch at the stub. A plug's flash is the plug as the last run left
 # it, so it is never thrown away to switch: --fresh does that, knowingly.
 # (A flash from before modes were recorded is a cloud one.)
-mode=plain; [ "$stub" = 1 ] && mode=stub
+# A public plug's runs nothing of Sonoff's, so it is the same either way.
+mode=plain; [ "$stub" = 1 ] && mode=stub; [ -n "$plug_dir" ] && mode=public
 built_for=$(cat "$STATE/.flash-mode" 2>/dev/null || echo plain)
 if [ "$fresh" = 0 ] && [ -f "$STATE/flash.bin" ] && [ "$built_for" != "$mode" ]; then
     want=$([ "$stub" = 1 ] && echo "--stub-cloud" || echo "a run without --stub-cloud")
@@ -168,45 +183,12 @@ if [ "$stub" = 1 ]; then
 fi
 
 # -- the image -----------------------------------------------------------------
-# The QEMU fork's source, as emu.Dockerfile pins it (QEMU_SOURCE_SHA256): from
-# this repository's release, downloaded once into captures/emulation/cache and
-# checked, so the image builds from nothing but this repository - and again
-# without a network once it is there.
-QEMU_SOURCE=qemu-lcgamboa-e39508f.tar.xz
-QEMU_SOURCE_URL=${AUTOFLASH_QEMU_SOURCE_URL:-https://github.com/adamsthws/Sonoff-OTA/releases/download/emulator-source/$QEMU_SOURCE}
-qemu_source() {
-    local want cache=$EMU/cache/$QEMU_SOURCE
-    want=$(sed -n 's/^ARG QEMU_SOURCE_SHA256=//p' "$ROOT/tools/emulator/emu.Dockerfile")
-    [ -n "$want" ] || return 0   # a Dockerfile that fetches the source itself
-    mkdir -p "$EMU/cache"
-    if [ ! -f "$cache" ] || [ "$(sha256sum < "$cache" | cut -c1-64)" != "$want" ]; then
-        echo "Downloading the emulator's QEMU source ($QEMU_SOURCE, about 33 MB)..."
-        curl -fsSL --retry 3 -o "$cache.part" "$QEMU_SOURCE_URL" \
-            || { echo "Could not download $QEMU_SOURCE_URL" >&2; exit 1; }
-        mv "$cache.part" "$cache"
-    fi
-    if [ "$(sha256sum < "$cache" | cut -c1-64)" != "$want" ]; then
-        echo "$cache is not the source emu.Dockerfile pins; delete it and run this again" >&2
-        exit 1
-    fi
-    cp "$cache" "$1"
-}
-
-# Labelled with a hash of what it is built from, and rebuilt when that changes:
-# an image from an older checkout would otherwise run unseen.
-built_from=$(cd "$ROOT/tools/emulator" && find emu.Dockerfile fork container -type f -print0 \
-    | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
-if [ "$rebuild" = 1 ] || [ "$(docker image inspect -f '{{index .Config.Labels "autoflash.built-from"}}' \
-        "$IMAGE" 2>/dev/null)" != "$built_from" ]; then
-    context=$(mktemp -d)
-    trap 'rm -rf "$context"' EXIT
-    cp -r "$ROOT/tools/emulator/emu.Dockerfile" "$ROOT/tools/emulator/fork" \
-          "$ROOT/tools/emulator/container" "$context/"
-    qemu_source "$context/qemu-source.tar.xz"
-    echo "Building the emulator image (the first time takes a few minutes)..."
-    docker build -q -t "$IMAGE" --label "autoflash.built-from=$built_from" \
-        -f "$context/emu.Dockerfile" "$context" >/dev/null
-fi
+# The image, labelled with a hash of what it is built from: the published one
+# with that hash, or built here (tools/emulator/image.sh). An image from an
+# older checkout never runs unseen. AUTOFLASH_EMU_NO_PULL=1 always builds.
+ensure=(ensure "$IMAGE")
+[ "$rebuild" = 0 ] || ensure+=(--rebuild)
+"$ROOT/tools/emulator/image.sh" "${ensure[@]}"
 
 # -- the plug's flash and eFuses ---------------------------------------------
 if [ "$fresh" = 1 ]; then
@@ -255,7 +237,9 @@ rm -f "$STATE/work/.env"  # one copied before it was left out: --delete spares e
 # user's would (it downloads the official files: --cloud or --stub-cloud).
 # The eWeLink account email last used here (captures/settings.json) is offered
 # to save typing it - but not with --fresh, which starts as a new user would.
-if [ "$fresh" = 0 ] && [ ! -f "$STATE/work/captures/settings.json" ] && [ -f "$ROOT/captures/settings.json" ]; then
+# Not to a public plug's run, which is kept as public (--plug-dir).
+if [ "$fresh" = 0 ] && [ -z "$plug_dir" ] && [ ! -f "$STATE/work/captures/settings.json" ] \
+        && [ -f "$ROOT/captures/settings.json" ]; then
     cp "$ROOT/captures/settings.json" "$STATE/work/captures/"
 fi
 

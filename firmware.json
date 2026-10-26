@@ -1,0 +1,80 @@
+{
+  "about": "The firmware the tool installs that follows Tasmota's and ESPHome's releases, pinned. Written by tools/update_firmware.py - see docs/updating-firmware.md - never by hand.",
+  "tasmota": {
+    "version": "16.0.0",
+    "tag": "v16.0.0",
+    "commit": "1c2173927cdf1be61759bcc3b064b9511a18e5d7",
+    "cfg_holder": 4617,
+    "files": {
+      "factory": {
+        "name": "tasmota32c3.factory.bin",
+        "size": 3153824,
+        "sha256": "cb9f1ac713119cd32ac7c8040027360a16e92a441bc3bbfd6d7beb7a1ddb3a30"
+      },
+      "safeboot": {
+        "name": "tasmota32c3-safeboot.bin",
+        "size": 819488,
+        "sha256": "93a103c9de4f537ce9d99d9e407ded690cf5324ba5b94fc7c789514a4aaae644"
+      },
+      "app": {
+        "name": "tasmota32c3.bin",
+        "size": 2236320,
+        "sha256": "42be8bc2add07ed845607d26ffd0eea8db8fa3194feb765c271ca1b23d670aba"
+      }
+    },
+    "earlier": [
+      {
+        "version": "15.6.0",
+        "tag": "v15.6.0",
+        "commit": "db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892",
+        "files": {
+          "factory": {
+            "name": "tasmota32c3.factory.bin",
+            "size": 3098496,
+            "sha256": "5c4181c756fb0a98c107a4d53389536f878b69fedbbce47168b07458122f53e8"
+          },
+          "safeboot": {
+            "name": "tasmota32c3-safeboot.bin",
+            "size": 810672,
+            "sha256": "364339a828c243ddf5fee3ed24f8bf352dffc87b2572ca9d7f48736bcb852bdc"
+          },
+          "app": {
+            "name": "tasmota32c3.bin",
+            "size": 2180992,
+            "sha256": "5991d11ad8f8b100b165974e81544594394df1d12d165012a42c002e1985cb1c"
+          }
+        }
+      }
+    ]
+  },
+  "esphome": {
+    "image": {
+      "file": "artifacts/esphome-sonoff-s60-imprintable-1.3.0.bin",
+      "config": "ESPHome/sonoff_s60.yaml",
+      "version": "1.3.0",
+      "esphome": "2026.10.0",
+      "esp_idf": "5.5.6",
+      "builder": "ghcr.io/esphome/esphome:2026.10.0@sha256:1dff19a59070cdb523b76576cdc74d200f862d43c1407809088855920cf57145",
+      "size": 956912,
+      "sha256": "bc66c0b619e01fa4fd6cd0b72322fbda08168af9df661680b2e5861bd6e28d66"
+    },
+    "bootloader": {
+      "file": "artifacts/esphome-sonoff-s60-bootloader-1.2.0.bin",
+      "config": "ESPHome/sonoff_s60.yaml",
+      "version": "1.2.0",
+      "esphome": "2026.9.1",
+      "esp_idf": "5.5.5",
+      "size": 21088,
+      "sha256": "3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433"
+    },
+    "mover": {
+      "file": "artifacts/autoflash-mover-1.1.0.bin",
+      "config": "ESPHome/autoflash_mover.yaml",
+      "version": "1.1.0",
+      "esphome": "2026.9.1",
+      "esp_idf": "5.5.5",
+      "size": 756960,
+      "sha256": "f6e131e1599c886d742c151c3ba3f84a285bba462b438c36b611d577e01ad243"
+    }
+  }
+}

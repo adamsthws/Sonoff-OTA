@@ -357,7 +357,7 @@ class MigrationState:
             except ValueError:
                 staged = load_evidence(evidence_dir / "stage-report.json", "stage", sys.maxsize)
                 if staged.get("staged_sha256") != sha256_bytes(self.safeboot):
-                    raise ValueError("neither commit nor stage evidence matches recovery Safeboot")
+                    raise ValueError("neither commit nor stage evidence matches recovery Safeboot") from None
                 print("  The commit's report was lost; going by the staging's record of the image.")
             else:
                 if self.commit_evidence.get("target_table_sha256") != self.target_table_sha256:

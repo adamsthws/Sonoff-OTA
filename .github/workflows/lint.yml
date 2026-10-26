@@ -1,0 +1,37 @@
+# The linters (tools/lint.py) on every tracked file, as the pre-commit hook
+# runs them on what a commit changes: for a pull request from a fork, a
+# commit made with --no-verify, or one from a computer without them.
+name: Lint
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The linters
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -q --require-hashes -r requirements/lint.txt
+      - name: PSScriptAnalyzer, unless the runner has it
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+              Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          }
+      - name: Lint
+        env:
+          RUFF_OUTPUT_FORMAT: github   # findings marked on the pull request's lines
+          GH_TOKEN: ${{ github.token }}   # zizmor's checks against GitHub
+        run: .venv/bin/python tools/lint.py all

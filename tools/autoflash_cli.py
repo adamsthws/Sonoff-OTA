@@ -80,11 +80,14 @@ from tools.prepare_imprinted_bundle import (  # noqa: E402
 from tools.query_ota import ota_endpoints  # noqa: E402
 from tools.safeboot_migration import (  # noqa: E402
     APP0_OFFSET,
+    OFFICIAL_TASMOTA_VERSION,
     PINNED_ARTIFACTS,
     SAFEBOOT_OFFSET,
     TABLE_OFFSET,
     TABLE_SIZE,
+    earlier_release,
     load_manifest,
+    official_release,
     sha256_bytes,
 )
 
@@ -248,6 +251,11 @@ def esphome_network_hint(ctx: "Context") -> str:
 
 class Abort(RuntimeError):
     pass
+
+
+class NothingWritten(Abort):
+    """A step stopped before it wrote anything to the plug: a run of nothing
+    else does not say what the plug is (past_the_commit)."""
 
 
 # ---------------------------------------------------------------- utilities
@@ -583,6 +591,8 @@ class Context:
         self._given_ewelink_password = credentials.get("EWELINK_PASSWORD")
         self._given_email = credentials.get("EWELINK_EMAIL")
         self._finder: PlugFinder | None = None
+        # The go-ahead to replace the plug's firmware, given in this run.
+        self.consented = False
         # The account's record of the plug A1 chose, for its plug.json.
         self.account_plug: AccountPlug | None = None
         # Held only in memory: the Wi-Fi details, and the recovery image built
@@ -692,7 +702,8 @@ class Context:
                 # A bundle this checkout can no longer use: build it again.
                 say(f"    {first}; preparing the firmware bundle again...")
                 try:
-                    _, image = build_bundle(ssid, password, self.manifest_path.parent)
+                    _, image = build_bundle(ssid, password, self.manifest_path.parent,
+                                            release=release_on_the_plug(self))
                 except BundleError as exc:
                     raise Abort(f"the bundle could not be prepared: {exc}") from exc
         self.remember_wifi(ssid, password, image)
@@ -1332,7 +1343,7 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
         elif outcome == "rejected":
             tell(f"    The plug could not connect to '{ssid}' with the bundle's details.")
         elif outcome == "gone":
-            tell(f"    No word from the plug, but its network has gone: it has most likely")
+            tell("    No word from the plug, but its network has gone: it has most likely")
             tell(f"    joined '{ssid}' with them. It is looked for there.")
         else:
             tell("    The plug did not say whether it connected. If it does not turn up")
@@ -1437,7 +1448,7 @@ def upload_or_prompt_by_hand(ctx: "Context", path: Path, what: str, exc: Excepti
     output.transient_begin()
     tell(f"    Automatic upload failed: {exc}")
     say("")
-    tell(f"    Upload it by hand instead - the file is identical:")
+    tell("    Upload it by hand instead - the file is identical:")
     tell(f"        open http://{device.host}/  ->  Firmware Upgrade  ->  choose file")
     tell(f"        {path}")
     if not confirm(f"{what} uploaded through the web UI?"):
@@ -1480,7 +1491,7 @@ def step_prerequisites(ctx: Context) -> dict[str, Any]:
 def step_check(ctx: Context) -> dict[str, Any]:
     """A5 - offline preconditions, building the bundle if there is none.  Touches no plug."""
     try:
-        manifest = validate_bundle(ctx.manifest_path)
+        manifest = validate_bundle(ctx.manifest_path, current_only=True)
     except ValueError as exc:
         if ctx.manifest_path != (ROOT / DEFAULT_MANIFEST).resolve():
             raise Abort(f"the bundle at {ctx.manifest_path} cannot be used: {exc}") from exc
@@ -1521,11 +1532,45 @@ def make_bundle(ctx: Context, problem: str | None) -> dict[str, Any]:
         "temporary firmware, which has to rejoin your Wi-Fi by itself.",
     ])
     try:
-        build_bundle(output=ctx.manifest_path.parent)
+        build_bundle(output=ctx.manifest_path.parent, release=release_on_the_plug(ctx))
     except BundleError as exc:
         raise Abort(f"the bundle could not be prepared: {exc}") from exc
     say("Bundle ready.")
     return validate_bundle(ctx.manifest_path)
+
+
+def release_on_the_plug(ctx: Context) -> dict[str, Any] | None:
+    """The official release pinned before whose app a run past F2 put on the
+    plug, as the bundle that installed it holds it; None for the one pinned
+    now, or before F2. A bundle built again must be of that release: its
+    Safeboot is G1's, its files are H1's check. One 1.2.0 made, from another
+    startup firmware, is built again (the fault suite's legacy-v1.2.0 at H1)."""
+    if not ctx.state.is_done("F2"):
+        return None
+    try:
+        return earlier_release(load_manifest(ctx.manifest_path))
+    except (ValueError, OSError):
+        return None
+
+
+def bundle_of_this_version(ctx: Context) -> None:
+    """A run carried on past A5 has its bundle checked, as A5 checks it, and
+    built again if this version cannot use it: one an earlier version made
+    before the firmware the tool installs changed, which every phase server
+    refuses (docs/updating-firmware.md). Until F2, nothing on the plug depends
+    on it - the startup firmware it pins is the published one with the same
+    Wi-Fi, written in again when next needed (adopt_wifi), and a step whose
+    checks were made with the old one does them again (of_this_bundle). From
+    F2 the plug runs the official app the bundle holds, and the Safeboot G1
+    writes, and H1's check, must be that release's: a bundle of a release
+    pinned before is kept, or built again of it (release_on_the_plug), and
+    the plug ends on it."""
+    if not ctx.state.is_done("A5") or ctx.manifest_path != (ROOT / DEFAULT_MANIFEST).resolve():
+        return
+    try:
+        validate_bundle(ctx.manifest_path, current_only=not ctx.state.is_done("F2"))
+    except (ValueError, OSError) as exc:
+        make_bundle(ctx, problem=str(exc))
 
 
 def sonoff_backup_wifi(flash: bytes) -> tuple[str, str] | None:
@@ -2274,7 +2319,7 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
         "Only go ahead with a plug you can afford to lose",
     ])
     if not require_word(CONSENT_WORD):
-        raise Abort("not confirmed - nothing has been written to the plug")
+        raise NothingWritten("not confirmed - nothing has been written to the plug")
     output.transient_end()  # agreed: the note and the question have done their job
 
     started = time.monotonic()
@@ -3534,34 +3579,48 @@ def step_configure(ctx: Context) -> dict[str, Any]:
     # under no other name, in that one restart.
     # (SaveData 1 is a default the reset puts back, and a command that saves
     # cannot go in there: see at_next_save.)
-    hooked = device.at_next_save([*([f"Hostname {hostname}"] if hostname else []),
-                                  f"Template {template}", "Module 0"],
-                                 timeout=SLOW_COMMAND)
-    booted, uptime = device.started_at(), device.uptime_seconds()
-    device.command("Reset 4", timeout=SLOW_COMMAND)
-    say("Settings reset to Tasmota's defaults, keeping the Wi-Fi"
-        + (", with the plug's template and name" if hooked else "") + "; the plug restarts")
-    back_after_reset(ctx, booted, uptime)
-    device = ctx.device
-    if hooked and template_in_place(device, template, hostname):
-        say(f"Template applied as {json.loads(template)['NAME']}"
-            + (f", and named {hostname}" if hostname else ""))
-        return {"template": "applied", "wifi_route": route, "restarts": 1}
+    if run_source(ctx.state) != "untemplated":
+        hooked = device.at_next_save([*([f"Hostname {hostname}"] if hostname else []),
+                                      f"Template {template}", "Module2 0", "Module 0"],
+                                     timeout=SLOW_COMMAND)
+        booted, uptime = device.started_at(), device.uptime_seconds()
+        device.command("Reset 4", timeout=SLOW_COMMAND)
+        say("Settings reset to Tasmota's defaults, keeping the Wi-Fi"
+            + (", with the plug's template and name" if hooked else "") + "; the plug restarts")
+        back_after_reset(ctx, booted, uptime)
+        device = ctx.device
+        if hooked and template_in_place(device, template, hostname):
+            say(f"Template applied as {json.loads(template)['NAME']}"
+                + (f", and named {hostname}" if hostname else ""))
+            return {"template": "applied", "wifi_route": route, "restarts": 1}
     # Not taken - a power cut before the save, say, or a Tasmota whose Berry
     # would not have it: put in after the reset, at the cost of a restart.
+    # Or a Tasmota in use that lost its template: put in without the reset,
+    # its other settings (its MQTT, say) kept.
+    give_template(device, template, hostname)
+    return {"template": "applied", "wifi_route": route,
+            "restarts": 1 if run_source(ctx.state) == "untemplated" else 2}
+
+
+def give_template(device: Device, template: str, hostname: str | None) -> None:
+    """The plug's template and name put in, its other settings kept, at the
+    cost of a restart - and asked for after it.  Left without them, the plug
+    switches nothing (seen: a user's Home Assistant showed only its restart
+    button and Wi-Fi)."""
     booted, uptime = device.started_at(), device.uptime_seconds()
     device.command("SaveData 1", timeout=SLOW_COMMAND)
     device.command(f"Template {template}", timeout=SLOW_COMMAND)
     # Named as every converted Tasmota is (tasmota-abcdef), and its own network
     # with it; one restart for both, as each would restart the plug alone.
-    device.command(f"Backlog Hostname {hostname}; Module 0" if hostname else "Module 0",
+    device.command(f"Backlog {f'Hostname {hostname}; ' if hostname else ''}Module2 0; Module 0",
                    timeout=SLOW_COMMAND)
     say(f"Template applied as {json.loads(template)['NAME']}"
         + (f", and named {hostname}" if hostname else "") + "; the plug restarts")
     device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
     # Restarted is not yet answering: the next step asks the plug at once.
     device.wait_reachable(timeout=120)
-    return {"template": "applied", "wifi_route": route, "restarts": 2}
+    if not template_in_place(device, template, hostname):
+        raise Abort("the plug did not keep its template and settings; it is safe to do this step again")
 
 
 def back_after_reset(ctx: Context, booted: str | None, uptime: int | None) -> None:
@@ -3595,21 +3654,31 @@ def back_after_reset(ctx: Context, booted: str | None, uptime: int | None) -> No
 SLOW_COMMAND = 30.0
 
 
-def template_in_place(device: Device, template: str, hostname: str | None = None) -> bool:
+def template_in_place(device: Device, template: str, hostname: str | None = None,
+                      fallback: bool = True) -> bool:
     """Whether F4 has done its work already: the plug's template in use,
-    settings saved, and its name `hostname` (when known)."""
+    settings saved, its name `hostname` (when known) - and, with `fallback`,
+    the template as Tasmota's fallback module too.
+
+    Restarted six times in a row, each within 10 s of starting, Tasmota takes
+    itself for a boot loop and goes over to its fallback module - Generic,
+    by default - keeping its Wi-Fi: a plug that switches nothing (seen: a
+    user's, half an hour after it was converted). Its own template there, it
+    goes on switching."""
     try:
         current = device.command("Template", timeout=SLOW_COMMAND)
         module = device.command("Module", timeout=SLOW_COMMAND)
         saving = device.command("SaveData", timeout=SLOW_COMMAND)
         named = device.command("Hostname", timeout=SLOW_COMMAND) if hostname else {"Hostname": None}
+        fallen = device.command("Module2", timeout=SLOW_COMMAND) if fallback else {"Module2": {"0": ""}}
     except (DeviceError, OSError):
         return False
     name = json.loads(template)["NAME"]
     return (isinstance(current, dict) and current.get("NAME") == name
             and isinstance(module, dict) and "0" in (module.get("Module") or {})
             and isinstance(saving, dict) and saving.get("SaveData") in ("ON", "1", 1)
-            and isinstance(named, dict) and named.get("Hostname") == hostname)
+            and isinstance(named, dict) and named.get("Hostname") == hostname
+            and isinstance(fallen, dict) and "0" in (fallen.get("Module2") or {}))
 
 
 
@@ -3772,6 +3841,26 @@ def step_verify(ctx: Context) -> dict[str, Any]:
         raise Abort("device does not match the pinned artifacts")
     say("")
     say(f"All {'four' if len(expected) == 4 else 'three'} regions match the pinned artifacts.")
+    template = kinds.of_run(ctx.state).tasmota_template(ctx.state.input("product_model"))
+    hostname = final_name(ctx, "tasmota")
+    if not template_in_place(device, template, hostname):
+        if template_in_place(device, template, hostname, fallback=False):
+            # Converted by an earlier version: the fallback alone, no restart.
+            device.command("Module2 0", timeout=SLOW_COMMAND)
+            say("  The plug's template is now its fallback module too, should Tasmota take")
+            say("  itself for a boot loop.")
+            ctx.state.capture("H1.fallback_set", True)
+        else:
+            # A run is not complete on a plug that switches nothing.
+            tell("    The plug's template is not in place: it is put in again, its other settings kept.")
+            ctx.state.capture("H1.template_again", True)
+            give_template(device, template, hostname)
+    earlier = earlier_release(manifest) if manifest.get("official_release") != official_release() else None
+    if earlier is not None:
+        # Begun by an earlier version, which installed that release at F2.
+        tell(f"  The plug has Tasmota {earlier['version']}, the release this conversion began with.")
+        tell(f"  Its own page (Firmware Upgrade) takes it to {OFFICIAL_TASMOTA_VERSION}, the latest.")
+        results["release"] = earlier["version"]
     return results
 
 
@@ -3889,6 +3978,8 @@ def plug_runs_tasmota(state: RunState) -> bool:
         if not state.is_done("T1"):
             return False
         source = "tasmota"
+    if source == "untemplated":
+        source = "tasmota"
     if source not in ("tasmota", "esphome"):
         return True
     if source == "tasmota" and not state.is_done("L1"):
@@ -3897,7 +3988,11 @@ def plug_runs_tasmota(state: RunState) -> bool:
 
 
 def consent_to_leave(ctx: Context, what: str) -> None:
-    """The go-ahead, once, before the first write of a run from Tasmota or ESPHome."""
+    """The go-ahead, once, before the first write of a run from Tasmota or ESPHome.
+    Not asked again as a step that stopped is tried again by itself: seen, a
+    retry asked for it, and Enter stopped the run."""
+    if getattr(ctx, "consented", False):
+        return
     output.transient_begin()
     warning_box("Before going on", [
         f"From here the plug's {what} is replaced. DO NOT UNPLUG IT during the",
@@ -3907,8 +4002,9 @@ def consent_to_leave(ctx: Context, what: str) -> None:
         "Only go ahead with a plug you can afford to lose",
     ])
     if not require_word(CONSENT_WORD):
-        raise Abort("not confirmed - nothing has been written to the plug")
+        raise NothingWritten("not confirmed - nothing has been written to the plug")
     output.transient_end()
+    ctx.consented = True
 
 
 def wait_for(ctx: Context, check: Callable[[str], Any], what: str, timeout: float = 240.0) -> Any:
@@ -4037,7 +4133,7 @@ def set_up_through_own_network(ctx: Context, what: str, check: Callable[[str], A
         except Abort:
             if round_ == 2 or prompts.UNATTENDED:
                 raise Abort(f"{what} did not join '{ssid}' with the details sent through its own "
-                            "network. Check the network's name and password, then run this again")
+                            "network. Check the network's name and password, then run this again") from None
         tell(f"    {what} did not join '{ssid}' with those details: most likely your Wi-Fi's name")
         tell("    or password changed since the plug last joined it.")
         output.transient_begin()
@@ -4172,7 +4268,10 @@ def step_startup_from_esphome(ctx: Context, *, again: bool = False) -> dict[str,
         raise Abort(f"the startup firmware cannot be prepared: {exc}") from exc
     if ctx.dry_run:
         return {"dry_run": True}
-    wait_for(ctx, lambda address: esphome_ota.probe(address), "ESPHome's update service")
+    try:
+        wait_for(ctx, lambda address: esphome_ota.probe(address), "ESPHome's update service")
+    except Abort as exc:
+        raise NothingWritten(str(exc)) from exc
     seconds = send_as_esphome_update(ctx, image, "the startup firmware")
     wait_for(ctx, lambda address: Device(address, timeout=4).is_safeboot(),
              "the startup firmware on your Wi-Fi")
@@ -4418,7 +4517,12 @@ FIRMWARES = {"tasmota": "Tasmota", "esphome": "ESPHome", "sonoff": "Sonoff"}
 # "safeboot": a converted plug on Tasmota's own safeboot, its Tasmota missing -
 # an upload through Tasmota's page that failed part way (another firmware's
 # whole-flash image, say): official Tasmota goes back on, then on from there.
-SOURCES = ("sonoff", "tasmota", "esphome", "midway", "committed", "installer", "safeboot")
+# "untemplated": official Tasmota without the plug's template, on a plug this
+# computer knows, not left past a commit by its runs: a converted plug that
+# lost it, which switches nothing.  It leaves Tasmota as any converted plug;
+# staying on Tasmota, it is given the template.
+SOURCES = ("sonoff", "tasmota", "esphome", "midway", "committed", "installer", "safeboot",
+           "untemplated")
 TASMOTA_BACK_STEP = ("T1", "Official Tasmota back, from Tasmota's safeboot", step_tasmota_back)
 
 
@@ -4447,6 +4551,10 @@ def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Cal
     if source == "safeboot":
         # Tasmota back first, as it was; then on from Tasmota, as any converted plug.
         return START_STEPS + [TASMOTA_BACK_STEP] + steps_for(firmware, "tasmota")[len(START_STEPS):]
+    if source == "untemplated":
+        if firmware == "tasmota":
+            return START_STEPS + [step for step in TASMOTA_FINAL_STEPS if step[0] == "F4"]
+        return steps_for(firmware, "tasmota")
     leave = [LEAVE_TASMOTA_STEP] if source == "tasmota" else []
     return START_STEPS + leave + TO_HUB_STEPS + HUB_STEPS + final  # esphome and midway alike
 
@@ -4530,7 +4638,7 @@ def settle_route(ctx: Context) -> tuple[str, str]:
     ctx.state.set_input("source", source)
     ctx.state.set_input("firmware", firmware)
     say(f"Converting the plug from {detect.NAMES[source]} to {FIRMWARES[firmware]}."
-         if source in ("tasmota", "esphome") else f"Converting the plug to {FIRMWARES[firmware]}.")
+         if source in ("tasmota", "esphome", "untemplated") else f"Converting the plug to {FIRMWARES[firmware]}.")
     return firmware, source
 
 
@@ -4542,7 +4650,10 @@ def ask_firmware(source: str, choices: list[str]) -> str:
     body = (["This plug was left part way through a conversion; it can go on to any",
              "of these from where it is."] if source in ("midway", "committed", "installer") else
             ["Its Tasmota goes back on first, with its settings; choosing Tasmota",
-             "stops there. Or it can go on to either of the others."] if source == "safeboot" else [])
+             "stops there. Or it can go on to either of the others."] if source == "safeboot" else
+            ["It runs Tasmota without the plug's template, so it switches nothing;",
+             "choosing Tasmota gives it the template, keeping its other settings."]
+            if source == "untemplated" else [])
     if source != "sonoff" and "sonoff" not in choices:
         body += [""] * bool(body) + ["Going back to Sonoff's own firmware needs the backup this tool takes",
                                      "when it first converts a plug, and there is none for this one here."]
@@ -4564,6 +4675,12 @@ def sonoff_backup_exists(ctx: Context) -> bool:
     return bool(mac and plugs.find_backup(mac))
 
 
+def known_macs() -> set[str]:
+    """The MACs of the plugs this computer has records of: their backups and their runs."""
+    return {name.replace("-", ":") for name in
+            (path.name for path in plugs.PLUGS.glob("*")) if plugs.MAC_RE.match(name)}
+
+
 def find_current_firmware(ctx: Context) -> str:
     """What the plug runs now: Tasmota or ESPHome if it is one this tool can
     find converted on the network, else Sonoff's firmware (found later,
@@ -4577,20 +4694,25 @@ def find_current_firmware(ctx: Context) -> str:
         elif running == "esphome-login":
             ask_esphome_login(ctx, given)
             running = identify(ctx, given)
+        mover = running == "mover"
         if running in ("mover", "startup", "hub"):
             running = "midway"
-        if running in ("tasmota", "esphome", "midway", "installer"):
-            adopt_plug(ctx, detect.Found(given, running, hostsys.mac_of(given)))
+        mac = hostsys.mac_of(given)
+        if running is None and mac and hostsys.normalise_mac(mac) in known_macs() \
+                and detect.answers_as_tasmota(given):
+            # A Tasmota without the plug's template, as the search finds it.
+            running = "untemplated"
+        if running in ("tasmota", "esphome", "midway", "installer", "untemplated"):
+            adopt_plug(ctx, detect.Found(given, running, mac))
+            if mover:
+                running = esphome_safe_mode(ctx, running)
             return past_the_commit(ctx, running)
         return "sonoff"
     # On screen while it looks - 5-10 s, before any stage line and its clock -
     # and taken off again once it has looked.
     output.transient_begin()
     tell("Looking for plugs already running Tasmota or ESPHome on your network...")
-
-    # Plugs this computer has records of: their backups and their runs.
-    known = {name.replace("-", ":") for name in
-             (path.name for path in plugs.PLUGS.glob("*")) if plugs.MAC_RE.match(name)}
+    known = known_macs()
 
     def search() -> list[detect.Found]:
         try:
@@ -4650,6 +4772,8 @@ def find_current_firmware(ctx: Context) -> str:
         if chosen.firmware in LOCKED:
             chosen = unlocked(ctx, chosen)
     adopt_plug(ctx, chosen)
+    if chosen.firmware == "midway" and chosen.name == "the mover":
+        return past_the_commit(ctx, esphome_safe_mode(ctx, chosen.firmware))
     return past_the_commit(ctx, chosen.firmware)
 
 
@@ -4909,7 +5033,7 @@ def check_esphome_key(ctx: Context, host: str) -> None:
         if prompts.UNATTENDED:
             raise Abort(f"{esphome_ota.WrongKey()}: {ESPHOME_KEY_HINT}")
         secret, value = secret_or_retry("ESPHome's API encryption key", [
-            f"The API encryption key given (--esphome-api-key, or AUTOFLASH_ESPHOME_API_KEY)",
+            "The API encryption key given (--esphome-api-key, or AUTOFLASH_ESPHOME_API_KEY)",
             f"is not the one ESPHome on the plug at {host} has: its YAML config has it, after",
             "key: under api: encryption:. Type that one; or go on without it, when the",
             "plug's Wi-Fi details and its update can be had another way.",
@@ -4961,7 +5085,7 @@ def unlock_tasmota(ctx: Context) -> None:
     leaves it (L1) - every firmware after that is one this tool put on.  A
     run carried on was not asked yet, nor one given the wrong password."""
     source = run_source(ctx.state)
-    if source not in ("tasmota", "safeboot") or ctx.state.is_done("L1"):
+    if source not in ("tasmota", "safeboot", "untemplated") or ctx.state.is_done("L1"):
         return
     if source == "safeboot" and not ctx.state.is_done("T1"):
         return  # its safeboot first: T1 asks for it there
@@ -4973,8 +5097,11 @@ def unlock_tasmota(ctx: Context) -> None:
 def past_the_commit(ctx: Context, running: str) -> str:
     """"committed" for a plug part way that a run of this computer's left past
     its commit: on Tasmota's layout, not Sonoff's, so the way on is official
-    Tasmota first - never the hub's steps, which need Sonoff's two slots."""
-    if running != "midway":
+    Tasmota first - never the hub's steps, which need Sonoff's two slots.
+    An official Tasmota without the plug's template is one too, if a run left
+    it so; any other is "untemplated", never "midway": the hub's steps begin
+    by sending ESPHome an update, which no Tasmota takes."""
+    if running not in ("midway", "untemplated"):
         return running
     mac = ctx.state.input("plug_mac")
     for directory in reversed(run_directories()):
@@ -4996,6 +5123,10 @@ def past_the_commit(ctx: Context, running: str) -> str:
         # starts only once the new layout is in place - as E3's own check says.
         finished_alone = (not committed and state.status("E3") == ATTEMPTED
                           and table_fetched(directory / "live") and ctx.device.is_safeboot())
+        if not (committed or finished_alone) and wrote_nothing(state):
+            # Stopped before it wrote anything - X1 sent to a Tasmota, finding
+            # no update service: seen hiding the run before it.
+            continue
         if (committed or finished_alone) and not state.is_done("H1"):
             if finished_alone:
                 say("    Its last run was stopped as the commit ran, and the plug finished it:")
@@ -5018,6 +5149,65 @@ def past_the_commit(ctx: Context, running: str) -> str:
             return "committed"
         return tasmota_missing(ctx, running)  # its latest run says otherwise
     return tasmota_missing(ctx, running)
+
+
+# ESPHome started ten times in a row, each stopped within a minute, takes that
+# for a boot loop and starts in safe mode: Wi-Fi and its update service, no
+# page and no relay, as the mover has. Five minutes on, it restarts as itself.
+ESPHOME_SAFE_MODE_WAIT = 400.0
+
+
+def left_on_esphome(ctx: Context) -> bool:
+    """Whether this computer's latest run of the plug that wrote to it left
+    it on ESPHome, checked (I2): one past that, the mover is gone for good."""
+    mac = ctx.state.input("plug_mac")
+    for directory in reversed(run_directories()):
+        if directory.resolve() == ctx.dir.resolve() or plugs.mac_of_run(directory) != mac:
+            continue
+        try:
+            state = RunState.open(directory)
+        except (OSError, ValueError):
+            continue
+        if wrote_nothing(state):
+            continue
+        return run_firmware(state) == "esphome" and state.is_done("I2")
+    return False
+
+
+def esphome_safe_mode(ctx: Context, running: str) -> str:
+    """What a plug that answers as the mover runs: ESPHome in safe mode, if
+    a run left it on ESPHome, waited out until it restarts as itself - taken
+    for part way, it was sent the startup firmware, even to stay on ESPHome."""
+    if not left_on_esphome(ctx):
+        return running
+    host = ctx.state.input("plug_ip")
+    say("    It answers only ESPHome's update service, though this computer left it on")
+    say("    ESPHome: ESPHome in safe mode, after starting ten times in a row, each")
+    say("    stopped within a minute. It restarts as itself within five minutes.")
+    say("    Waiting for it - leave it switched on...")
+    started = time.monotonic()
+    while time.monotonic() - started < ESPHOME_SAFE_MODE_WAIT:
+        found = identify(ctx, host)
+        if found == "esphome-login":
+            ask_esphome_login(ctx, host)
+            found = identify(ctx, host)
+        if found == "esphome":
+            say(f"    ESPHome answered after {time.monotonic() - started:.0f}s.")
+            return "esphome"
+        time.sleep(5)
+    raise Abort(
+        "the plug answers only ESPHome's update service, and has not started ESPHome "
+        f"in {ESPHOME_SAFE_MODE_WAIT / 60:.0f} minutes. Leave it switched on for ten "
+        "minutes, then run the same command again")
+
+
+def wrote_nothing(state: RunState) -> bool:
+    """Whether a run wrote nothing to the plug: no step that writes done or
+    part way, and each that failed stopped before writing."""
+    steps = state.data.get("steps", {})
+    return all(state.status(step) == PENDING
+               or (state.status(step) == FAILED and steps.get(step, {}).get("nothing_written"))
+               for step in DESTRUCTIVE_STEPS)
 
 
 # Tasmota's own safeboot, as a build of Tasmota's own says it is - "15.6.0
@@ -5140,7 +5330,7 @@ def _execute(ctx: Context, step: str) -> int:
         # it crashed the run.
         set_up_if_erased(ctx, step)
         if step in DESTRUCTIVE_STEPS:
-            ctx.state.mark(step, ATTEMPTED)
+            ctx.state.mark(step, ATTEMPTED, nothing_written=False)
         captured = handler(ctx)
     except QuitRun:
         output.stage_end("stopped")
@@ -5158,7 +5348,8 @@ def _execute(ctx: Context, step: str) -> int:
         # where the plug can show whether the step finished, the step stays
         # "attempted" and the next run asks it.
         if not (isinstance(exc, PhaseError) and step in ATTEMPTED_EVIDENCE):
-            ctx.state.mark(step, FAILED, error=str(exc))
+            ctx.state.mark(step, FAILED, error=str(exc),
+                           **({"nothing_written": True} if isinstance(exc, NothingWritten) else {}))
         output.stage_end("stopped")
         ctx.last_failure = str(exc)
         ctx.last_failed_step = step
@@ -5706,7 +5897,7 @@ def stop_here_after_ctrl_c(step: str) -> bool:
     interrupt.clear()
     output.transient_begin()
     section("You pressed Ctrl-C", [
-        f"The stage that was under way is done, and everything is recorded, so",
+        "The stage that was under way is done, and everything is recorded, so",
         "stopping here is safe: running this again picks up where it left off.",
     ])
     choice = prompts.countdown_choice("Stop the run here", [
@@ -5745,6 +5936,12 @@ def run_steps(ctx: Context) -> int:
     ctx.state.set_input("stopped_by", None)
     resumed = any(ctx.state.is_done(step) for step, _, _ in STEPS)
     ctx.run_started, ctx.run_resumed = started, resumed
+    if resumed:
+        try:
+            bundle_of_this_version(ctx)
+        except Abort as refused:
+            tell(f"Stopped before anything was done: {refused}.")
+            return 2
     wait_while_plug_busy(ctx)
     for step, title, _ in STEPS:
         if ctx.state.is_done(step):
@@ -5921,7 +6118,8 @@ def stage_timings(ctx: Context, key: str) -> str:
 # What a run's starting point is called in its report: one for each of SOURCES.
 CONVERTED_FROM = {"sonoff": "Sonoff", "tasmota": "Tasmota", "esphome": "ESPHome",
                   "midway": "unfinished conversion", "committed": "unfinished conversion",
-                  "installer": "unfinished conversion", "safeboot": "Tasmota's safeboot"}
+                  "installer": "unfinished conversion", "safeboot": "Tasmota's safeboot",
+                  "untemplated": "Tasmota without its template"}
 
 
 def report_fields(ctx: Context, seconds: float, resumed: bool,
@@ -5961,7 +6159,9 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Plug type / region", kind.region(model) or "__"),
         ("Stock firmware", ctx.state.input("stock_version") or "__"),
         # How it went, never where it is or which plug: the path holds the MAC.
-        ("Sonoff backup", BACKUP_OUTCOMES.get(ctx.state.input("backup_outcome") or "not taken")[1]),
+        # A run from a converted plug takes none: one is there or not.
+        ("Sonoff backup", BACKUP_OUTCOMES[ctx.state.input("backup_outcome")
+                                          or ("existing" if sonoff_backup_exists(ctx) else "not taken")][1]),
         ("Computer", computer_description()),
         ("Python", python_description()),
         ("Time taken", took),

@@ -15,7 +15,7 @@ from pathlib import Path
 
 try:
     from tools.safeboot_migration import (
-        OFFICIAL_TASMOTA_COMMIT,
+        INTERIM_TASMOTA_COMMIT,
         PINNED_ARTIFACTS,
         RECOVERY_KIND,
         RECOVERY_MARKER,
@@ -25,7 +25,7 @@ try:
     )
 except ModuleNotFoundError:
     from safeboot_migration import (
-        OFFICIAL_TASMOTA_COMMIT,
+        INTERIM_TASMOTA_COMMIT,
         PINNED_ARTIFACTS,
         RECOVERY_KIND,
         RECOVERY_MARKER,
@@ -59,7 +59,7 @@ def validate(image: bytes, header: bytes) -> dict[str, object]:
     return {
         "schema": 1,
         "kind": RECOVERY_KIND,
-        "tasmota_commit": OFFICIAL_TASMOTA_COMMIT,
+        "tasmota_commit": INTERIM_TASMOTA_COMMIT,
         "size": len(image),
         "sha256": image_hash,
         "max_size": SAFEBOOT_SIZE,

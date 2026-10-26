@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: How a conversion went
+    url: https://github.com/adamsthws/Sonoff-OTA/discussions/1
+    about: A clean conversion, a run that stopped partway, or only the read-only checks - all of it is useful.
+  - name: A security problem
+    url: https://github.com/adamsthws/Sonoff-OTA/security/advisories/new
+    about: Reported privately, not as an issue - see SECURITY.md.

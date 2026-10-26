@@ -1,0 +1,21 @@
+# Values tools/leak_scan.py lets through: the made-up examples the repository
+# uses that look like something real. Never a real one - a real value goes
+# nowhere near this repository. One per line.
+#
+# Example MACs with a real maker's prefix (a MAC whose first byte is locally
+# administered or multicast - 12:34:56:..., aa:bb:..., 02:... - needs none).
+58:cf:79:01:02:03
+58-cf-79-01-02-03
+58:cf:79:0a:0b:0c
+94:a9:90:00:00:01
+00:11:22:33:44:55
+# The made-up plug and router tests/test_leak_scan.py finds (its own scanner
+# ignores this list).
+58:cf:79:12:34:56
+58:cf:79:99:88:77
+# The placeholders public plugs give the eWeLink device (sanitise_plug.py),
+# and the name copy_plug.py gives a test copy.
+1000abcdef
+Emulator test copy
+# The emulator's sudo password, which is public: it is in the emulator's image.
+autoflash

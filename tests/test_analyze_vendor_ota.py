@@ -1,7 +1,6 @@
 import hashlib
 import struct
 import unittest
-import zlib
 
 from tools.analyze_vendor_ota import analyze, validation_checks
 from tools.build_vendor_ota import build_wrapper

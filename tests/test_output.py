@@ -154,6 +154,20 @@ class ConciseTests(OutputTestCase):
         screen, log = self.run_with(FakeTerminal(), False, body)
         self.assertIn("Discovering the plug - complete (10s)", log)
 
+    def test_a_question_left_unanswered_is_not_the_next_runs_wait(self):
+        now = [100.0]
+        with mock.patch.object(output.time, "monotonic", side_effect=lambda: now[0]):
+            output.before_input("The plug's address: ")   # never answered
+            now[0] += 1000
+            def body():
+                output.stage_begin(3, 14, "Discovering the plug")
+                output.before_input("The plug's address: ")
+                now[0] += 60
+                self.assertEqual(output.waited(), 60)
+                output.answered("192.168.0.50")
+                output.stage_end("complete")
+            self.run_with(FakeTerminal(), False, body)
+
     def test_no_clock_drawn_in_an_open_block(self):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True), \
@@ -450,6 +464,16 @@ class NarrowTerminalTests(OutputTestCase):
         self.assertTrue(drawn.endswith("..."))
         self.assertLessEqual(len(drawn), 39)
 
+    def test_a_terminal_that_reports_no_size_is_not_taken_as_narrow(self):
+        # Python 3.10 hands back the 0 a pseudo-terminal nobody sized reports.
+        def body():
+            with mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((0, 0))):
+                output.stage_begin(6, 14, "Installing the official startup firmware")
+                output.stage_end("complete")
+        screen, _ = self.run_with(FakeTerminal(), False, body)
+        self.assertIn("Installing the official startup firmware", screen)
+        self.assertNotIn("...", screen)
+
 
 class FallbackScreenTests(OutputTestCase):
     """The Wi-Fi fallbacks still say everything the person has to read or do."""
@@ -687,7 +711,9 @@ class ReportTests(OutputTestCase):
         import tools.autoflash_cli as af
         from tools.autoflash.state import DONE
         # Values other tests made private ("wrong", as a password) are not this run's.
-        self.enterContext(mock.patch.dict(af.output._private, {}, clear=True))
+        patcher = mock.patch.dict(af.output._private, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         ctx = self.ctx()
         ctx.last_failure = ""
         for step, _, _ in af.STEPS[:9]:
@@ -709,7 +735,9 @@ class ReportTests(OutputTestCase):
         # stopped at the commit.
         import tools.autoflash_cli as af
         from tools.autoflash.state import DONE
-        self.enterContext(mock.patch.dict(af.output._private, {}, clear=True))
+        patcher = mock.patch.dict(af.output._private, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         ctx = self.ctx()
         for step, _, _ in af.STEPS:
             if step == "E3":
@@ -787,6 +815,17 @@ class ReportTests(OutputTestCase):
         # A run from before the backup existed.
         self.assertEqual(dict(af.report_fields(self.ctx(backup_outcome=""), 441, False))["Sonoff backup"],
                          "Not taken")
+
+    def test_a_run_from_a_converted_plug_reports_its_backup_from_before(self):
+        # Seen: "Not taken" in the report of a run whose log said the plug
+        # was backed up already - a run from Tasmota never reaches C3.
+        from unittest import mock
+        import tools.autoflash_cli as af
+        ctx = self.ctx(source="tasmota", plug_mac="12:34:56:ab:cd:ef")
+        with mock.patch.object(af.plugs, "find_backup", return_value=object()):
+            self.assertEqual(dict(af.report_fields(ctx, 441, False))["Sonoff backup"], "Taken by an earlier run")
+        with mock.patch.object(af.plugs, "find_backup", return_value=None):
+            self.assertEqual(dict(af.report_fields(ctx, 441, False))["Sonoff backup"], "Not taken")
 
     def test_hardware_that_was_not_checked_says_so(self):
         import tools.autoflash_cli as af

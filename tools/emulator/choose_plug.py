@@ -13,11 +13,19 @@ The backups are only read: emu.sh boots a working copy in its state directory.
 
 With one plug it is chosen without asking; with several, a menu asks - or,
 with nobody at the keyboard, the plug chosen last time is used.
+
+With none here - captures/ is only ever a working copy - the maintainer's
+sealed backup is fetched from its private package and filed here first
+(tools/private_backup.py restore, docs/private-backup.md), given its key and
+a login that can read the package; and a test copy asked for by --plug that
+is not here yet is made from it (copy_plug.py). AUTOFLASH_NO_RESTORE=1 says
+not to.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,6 +91,25 @@ def choose(found: list[Choice], wanted: str | None, last: str | None, interactiv
                      + ", ".join(c.mac for c in found))
 
 
+def restored(wanted: str | None) -> list[Choice]:
+    """The plugs here once the sealed backup is - and the test copy asked for."""
+    from tools import private_backup
+    from tools.emulator import copy_plug
+    try:
+        mac = private_backup.restore()
+    except private_backup.SealError as exc:
+        print(f"The sealed Sonoff backup could not be restored: {exc}\n"
+              "(it needs AUTOFLASH_BACKUP_KEY and a GitHub login that can read the package:\n"
+              "docs/private-backup.md)", file=sys.stderr)
+        return choices()
+    print(f"Restored the sealed Sonoff backup of {mac} (tools/private_backup.py).")
+    if wanted and plugs.folder_name(wanted) != plugs.folder_name(mac) and \
+            not (plugs.PLUGS / plugs.folder_name(wanted)).exists():
+        copy_plug.copy(mac, wanted)
+        print(f"Made the test copy {wanted} from it (copy_plug.py).")
+    return choices()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, required=True)
@@ -90,6 +117,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     found = choices()
+    try:
+        wanted = plugs.folder_name(args.plug) if args.plug else None
+    except ValueError:
+        wanted = None  # choose() says what is wrong with it
+    missing = not found or (wanted is not None and all(plugs.folder_name(c.mac) != wanted for c in found))
+    if missing and os.environ.get("AUTOFLASH_NO_RESTORE") != "1":
+        found = restored(args.plug)
     if not found:
         print("No Sonoff backup to emulate yet. A conversion keeps one for each plug, in\n"
               "captures/plugs/<MAC>/sonoff-backup/; tools/flash_readout.py takes one without\n"

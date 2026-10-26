@@ -92,7 +92,7 @@ def _locked(directory: Path):
     except ImportError:  # not POSIX: the emulator runs under Linux or WSL anyway
         yield
         return
-    with open(directory / ".lock", "w") as handle:
+    with open(directory / ".lock", "w", encoding="utf-8") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         yield
 

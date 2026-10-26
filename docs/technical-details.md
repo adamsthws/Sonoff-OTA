@@ -11,7 +11,8 @@ For a plain-English account of what happens to the plug, read
 ## The firmware bundle
 
 The first run prepares a bundle: it downloads the official Tasmota release
-files, checks every one against a pinned SHA-256, and writes the bundle into
+files - the release [`firmware.json`](../firmware.json) pins, from its page on
+GitHub - checks every one against a pinned SHA-256, and writes the bundle into
 `captures/`, which git ignores. It asks nothing: the bundle is built without
 your Wi-Fi details, which are added later in the run. To rebuild it on its own:
 
@@ -26,7 +27,7 @@ part of the ordinary release download:
 
 - [`artifacts/tasmota32c3-bluetooth.bin`](../artifacts/tasmota32c3-bluetooth.bin)
   is the Berry-capable ESP32-C3 build used while the old partition map is still
-  active. It is pinned byte-for-byte and includes its upstream source revision
+  active. It is pinned and includes its upstream source revision
   in [the artifact notes](../artifacts/README.md).
 - [`artifacts/autoflash-recovery-safeboot-imprintable.bin`](../artifacts/autoflash-recovery-safeboot-imprintable.bin)
   is the small temporary startup firmware. It contains placeholders, not a
@@ -147,6 +148,77 @@ be read by your user only, `cleanup` keeps them, and they never belong in
 an issue or a discussion. Delete them if you do not want them, or convert
 with `--no-backup` to keep none. Reading the flash takes under a minute.
 
+### What captures/ holds
+
+`captures/` is ignored by Git: what the tool and its tests keep on this
+computer. **Your Sonoff backups are the one thing in it that cannot be made
+again** - keep a copy of `captures/plugs/` somewhere safe; everything else is
+remade as needed:
+
+| In `captures/` | What it is | Made again by |
+|---|---|---|
+| `plugs/<MAC>/sonoff-backup/`, `plug.json` | your plug's Sonoff firmware and settings, and its record | nothing: **back it up** |
+| `plugs/<MAC>/runs/`, `unattended/` | each run's state and log, and recordings of unattended runs | the next run |
+| `safeboot-recovery-migration/` | the firmware bundle | the next run (A5) |
+| `settings.json`, `.autoflash-current`, `.safety-locks/` | the eWeLink email offered next time, the run in progress, the locks' state | the next run |
+| `esphome-build/` | ESP-IDF and its tools, for `update_firmware.py esphome` | its next build |
+| `emulation/state*/` | each emulator's plug and computer | the emulator, from the backup |
+| `emulation/saved/` | plugs kept part way (`--save`), the fault suite's and the public ones | `fault_suite.py prep`, `public_plugs.py make` |
+| `emulation/suite*/`, `emulation/public-plugs/` | the fault suite's results and logs, the public plugs' | their next run; what they found is in [testing.md](testing.md) |
+| `emulation/legacy/`, `emulation/cache/`, `emulation/stub-cloud/` | earlier releases' trees, the QEMU fork's source, the cloud stub's own CA | the suite, `emu.sh` (a new CA means the saved stub plugs are made again) |
+
+The maintainer's own backup is sealed in a private package, and the emulator
+restores it when it is not here ([private-backup.md](private-backup.md)): in
+the maintainer's checkout nothing in `captures/` needs backing up.
+
+### Keeping secrets out of Git
+
+`tools/leak_scan.py` stops a commit or a push that would put a secret or a
+real identifier into the repository. Set it up once in a clone:
+
+```sh
+python3 tools/leak_scan.py install
+```
+
+which points Git at the hooks in `.githooks/`: before each commit it looks at
+what is staged, then at the commit's message, and before each push at every
+commit the push would send - so a commit made with `--no-verify` is still
+caught on its way out. It finds two kinds of thing:
+
+- **Your own, by value** - only this computer knows them: every value in
+  `.env`; the eWeLink account and each plug's eWeLink id and name; each plug's
+  MAC (from `captures/plugs/`: its folder, its record, its backup's eFuses), in
+  any form, and as raw bytes in any file; the Sonoff settings in each backup
+  that say which plug, account or network it is (its eWeLink keys, the Wi-Fi it
+  was set up on); the addresses real runs - not the emulator's - found plugs
+  and this computer at; and each line of `.leak-scan.local`, a file Git
+  ignores, for anything else of yours (a router's name, a public address).
+- **Anyone's, by shape**: a MAC address that could be a real device's - one
+  not locally administered, so not `12:34:56:...` or `aa:bb:...`, and not a
+  made-up example listed in `.leak-scan-allow` - a private key, or a GitHub,
+  AWS, Google or Slack token.
+
+It says where each finding is and what kind, never the value. Take it out, or
+for something meant to be there - a new made-up example MAC, say, which
+belongs in `.leak-scan-allow` - `git commit --no-verify` lets it through. The
+repository's `leak-scan` workflow runs the shape checks on every push and
+pull request, and GitHub's own secret scanning and push protection, on for
+the repository, refuse pushes with known kinds of token. In examples, use
+`12:34:56:ab:cd:ef`, and addresses that are nobody's.
+
+### The repository's settings
+
+What GitHub is set to do for the repository is written down, with why, in
+`tools/github_settings.py`: `main` never deleted or rewritten and every commit
+on it signed; a pull request merged only once the unit tests, the emulator,
+the lint and the leak scan pass (an admin may still push to `main`, which the
+release workflow tests before releasing); pull requests squashed; secret
+scanning, Dependabot's security updates, CodeQL and private vulnerability
+reporting on; and immutable releases, so a release's tag and files never
+change once published, and GitHub signs an attestation of them that
+`gh release verify` checks. As an admin, `python3 tools/github_settings.py`
+says what differs from that, and `... apply` sets it.
+
 ### What crosses the network
 
 Not written to disk is not the same as never exposed. The password crosses
@@ -255,7 +327,7 @@ procedure - is in **[archive/docs/reference/](../archive/docs/reference/)**.
 The tests check the tool against itself; nothing touches the plug:
 
 ```sh
-python3 -m unittest discover -s tests
+python3 tests/run.py
 ```
 
 To try a change against a plug without converting a real one, the emulator in

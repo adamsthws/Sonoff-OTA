@@ -1,0 +1,51 @@
+name: A conversion went wrong
+description: A run that stopped, failed or left the plug in a state it should not be in.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting it. [docs/troubleshooting.md](https://github.com/adamsthws/Sonoff-OTA/blob/main/docs/troubleshooting.md) covers what has happened before - worth a look first.
+
+        A run that **worked**, or one you only want to tell about, is just as welcome in [Conversions In The Wild](https://github.com/adamsthws/Sonoff-OTA/discussions/1).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what the screen said, and where it stopped.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: The computer it ran on
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Something else (say above)
+    validations:
+      required: true
+  - type: dropdown
+    id: firmware
+    attributes:
+      label: The firmware it was converting to
+      options:
+        - Tasmota
+        - ESPHome
+        - It had not asked yet
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: The run's log
+      description: |
+        Drag `run.log` in here: the tool prints where it is, and its first line says the tool's version. It is safe to share - your account, network and plug are written in it as `<email>`, `<wifi-name>`, `<device-id>` and so on. **Its folder's name is your plug's MAC address**: attach the file, but do not paste its path.
+  - type: checkboxes
+    id: private
+    attributes:
+      label: Nothing private
+      options:
+        - label: I have not pasted my eWeLink login, my Wi-Fi's name or password, or my plug's MAC address here.
+          required: true

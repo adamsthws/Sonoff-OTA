@@ -12,15 +12,96 @@ Three layers, each catching what the one before cannot:
 ## Unit tests
 
 ```sh
-python3 -m unittest discover -s tests
+python3 tests/run.py
 ```
 
-Unit tests complete in under a minute. They cover the decisions the tool makes - which
+That runs them side by side, in about 11 seconds on six cores, where
+`python3 -m unittest discover -s tests` - the same tests, one after another -
+takes a minute: most of their time is spent waiting, not computing. It shows
+only what fails, with what the test printed; `python3 tests/run.py test_output`
+runs some, and `--shuffle` runs them in a random order, to find a test that
+passes only after another.
+
+They cover the decisions the tool makes - which
 route to take, what to ask, when to try again, what counts as done - with the
 plug and the network stood in for; and the parts that have to be exact - the
 plans the plug carries out, the update protocols, image checks and pins, what
 is kept and what never is. Every bug found below has a test that fails without
-its fix.
+its fix. The `emulator-check` workflow runs them on Python 3.12.10 - the
+portable Python the start scripts install, which most conversions run on -
+and, beside it, on 3.10, the oldest the tool runs on: a Mac's own Python may
+be older than 3.12, and so may one already installed where the portable one
+cannot be had.
+
+### Side by side, in any order
+
+`tests/run.py` runs each test in its own turn on one of many processes, in
+an order unittest never uses, so a test must pass whatever ran before it in
+its process and whatever runs beside it in the others. A test still running
+after 60 seconds (`--timeout`; the longest takes 10) is stopped, reported
+with where each of its threads was, and the run fails, rather than waiting
+for ever.
+
+On 2026-10-24 that was tested to exhaustion: 2,000 runs in a row passed,
+each in a new random order, on Python 3.10, 3.12 and 3.14 and on 2 to 64
+processes, after five problems the first hundred runs found had been fixed:
+
+| Found | What it was | Fixed by |
+|---|---|---|
+| A test saw a sleep hold another had just taken | the awake tests check this computer's systemd inhibitors, which one takes while another checks none is left | running them as one (`TOGETHER` in `tests/run.py`) |
+| "recovery_safeboot size changed" | bundle tests left the recovery image in memory, for the next test's bundle | each starting and ending with none |
+| A wait of -1,000,000 s | a question left unanswered by one test was taken as the next's wait | `output.start()` beginning with no question pending |
+| "Address already in use" | a port picked free, let go, then taken by another test before the server bound it | the server started again on another |
+| A clean-up waiting for ever, once | a test server's `shutdown()`; never seen again, so not known | the time limit, which would now show where it was |
+
+Writing a test that keeps it so:
+
+- **Leave nothing behind** in a module, a class or the environment: patch it
+  for the test (`mock.patch...start()` with `addCleanup`), and put back what
+  the code under test keeps for the life of a process.
+- **Keep a port** picked as free: a server picked one for is started again
+  on another if it cannot bind; a check that nobody answers keeps the socket
+  bound, not listening - refused at once, and no one else's meanwhile.
+- **Nothing of the whole computer's** - its sleep inhibitors, a fixed port, a
+  file outside the test's own temporary directory - unless the tests sharing
+  it are in `TOGETHER`, with why.
+
+To soak them again, after a change to how tests share anything:
+
+```sh
+for i in $(seq 200); do python3 tests/run.py --shuffle -j 24 > soak.txt 2>&1 || { grep -m1 seed soak.txt; break; }; done
+```
+
+stops at the first failure and says its seed: `--seed N` with the same `-j`
+runs that order again.
+
+## Linters
+
+```sh
+.venv/bin/python -m pip install --require-hashes -r requirements/lint.txt   # once
+python3 tools/lint.py all
+```
+
+Before the tests, what is likely wrong in the code as written. The
+pre-commit hook (`python3 tools/leak_scan.py install` sets it up) runs them on
+the files a commit changes, and the `lint` workflow on every file:
+
+| Linter | On | Looks for |
+|---|---|---|
+| [ruff](https://docs.astral.sh/ruff/) | Python (`ruff.toml`) | undefined or unused names, likely bugs, a text file opened without `encoding=`, syntax newer than Python 3.10 |
+| [shellcheck](https://www.shellcheck.net/) | shell scripts | unquoted expansions, mistakes in tests and traps, what `sh` does not have |
+| [actionlint](https://github.com/rhysd/actionlint) | the workflows | wrong keys, expressions and types; shellcheck on each `run:` script |
+| [zizmor](https://docs.zizmor.sh/) | the workflows, `dependabot.yml` | what an attacker could use: write access a job does not need, a value expanded into a script, a token left in the checkout; with `GH_TOKEN` set (the workflow sets it), a pinned commit that is not the action's own, or a version with an advisory |
+| [PSScriptAnalyzer](https://learn.microsoft.com/powershell/utility-modules/psscriptanalyzer/overview) | PowerShell (`PSScriptAnalyzerSettings.psd1`) | syntax Windows PowerShell 5.1 does not have, which every Windows runs `start.ps1` with; likely mistakes |
+| `esphome config` | the ESPHome configs `firmware.json` builds | what ESPHome would refuse to build, checked by the ESPHome image the next build uses (Docker) |
+
+The linters come from `requirements/lint.txt`, pinned with their hashes,
+but for two: PSScriptAnalyzer needs PowerShell 7.4.6 or newer (`pwsh`), then
+`pwsh -Command Install-Module PSScriptAnalyzer -Scope CurrentUser`; `esphome
+config` needs Docker, and pulls the image the first time. A
+commit on a computer without one is not stopped - the hook says it skipped
+it, and the workflow runs it - and `git commit --no-verify` skips them all.
+`archive/` is not linted: it is kept as it was.
 
 ## The emulator
 
@@ -49,7 +130,7 @@ person converting it again would have.
 ## The fault suite
 
 `tools/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,345 scenarios:
+every direction - 1,380 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
   Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
@@ -67,7 +148,9 @@ every direction - 1,345 scenarios:
     beginning (`--new`), or choosing the other firmware; the terminal window
     closed;
   - a packet changed on its way, its checksum made good, so that only the
-    tool's and the plug's own checks can tell;
+    tool's and the plug's own checks can tell - at each step but R2, which
+    only sees that Sonoff's firmware takes a connection, and sends nothing
+    to change;
   - the tool's own handling, the same at every step, so tried at the riskiest
     steps and where each firmware is first written from (C2, L1, X1): a second
     run started while the first works, which must be refused without
@@ -88,7 +171,9 @@ every direction - 1,345 scenarios:
     Tasmota that cannot join the home Wi-Fi (`seven-times`, `seven-advised`);
   - F4's Berry driver refused, so F4 falls back to two restarts
     (`nohook-run`), and a power cut or crash at F4's reset itself, at 10, 50
-    and 90% of it (step `F4rs`).
+    and 90% of it (step `F4rs`); and that fallback cut off by a second's
+    power cut as the plug restarts to save the template it sent (`nohook-cut`,
+    step `F4tp`), which can leave it without one.
 - **Runs left by an earlier release** (`legacy-v1.2.0`): release 1.2.0 itself
   - its tagged files, with only `tools/emulator/legacy/v1.2.0.patch` on top,
   which points it at the cloud stub - converting a plug fresh from Sonoff,
@@ -98,7 +183,12 @@ every direction - 1,345 scenarios:
   `start`). And 1.2.0 killed at F4, then the plug switched off part way
   through G1 of the run after (`legacy-v1.2.0+G1off`): G1 writes over 1.2.0's
   startup firmware without checking it, which it cannot rebuild, and the next
-  run must carry on after the sectors already written. `unattended-test.sh
+  run must carry on after the sectors already written. And the same for the
+  release before the firmware the tool installs last changed (`legacy-v2.0.2`),
+  whose runs - their bundle pinned to the firmware before - this checkout
+  must finish with its own: killed at each of its steps, to Tasmota and to
+  ESPHome, and each kind of plug it converted, taken on from there
+  ([updating-firmware.md](updating-firmware.md)). `unattended-test.sh
   --code=DIR` runs the tool from another tree.
 - **A converted plug left on Tasmota's own safeboot** (`lostapp-factory`): an
   ESPHome factory image - bootloader, partition table and app, for a serial
@@ -108,6 +198,31 @@ every direction - 1,345 scenarios:
   to Tasmota, ESPHome or Sonoff. And one only switched to its safeboot, its
   Tasmota unharmed (`lostapp-switched`), which must be started again, never
   written over (FAIL-REPLACED).
+- **A converted plug that lost its template** (`notemplate-generic`): the
+  saved Tasmota given Tasmota's generic template and an MQTT host, as a person
+  might, so it switches nothing - as a user's plug did. Then the tool, to
+  Tasmota, ESPHome or Sonoff: it must know the plug for one that lost its
+  template (FAIL-NOT-UNTEMPLATED), never send it the hub's steps, whose first
+  is an ESPHome update no Tasmota takes (FAIL-X1-ON-TASMOTA), and staying on
+  Tasmota, give it the template alone, the MQTT host kept
+  (FAIL-SETTINGS-LOST).
+- **A converted plug in a boot loop** (`bootloop-fallback`, to Tasmota):
+  Tasmota started a sixth time in a row within 10 s of the last start goes
+  over to its fallback module - Generic, unless the plug's template is set
+  there - and switches nothing, as a user's plug did. The plug is put on its
+  fallback module just as Tasmota would, since the emulator loses Tasmota's
+  count of those starts at every restart; it must still run its template
+  (BAD-TEMPLATE). Restarting it for real would also cost its settings:
+  Tasmota counts each start that ends before 8 s as a quick power cycle, and
+  at the seventh erases everything, its Wi-Fi too.
+- **A converted plug in ESPHome's safe mode** (`safemode-ten`): the saved
+  ESPHome switched off as soon as it answers, until it starts in safe mode -
+  ESPHome stopped within a minute of starting ten times in a row does, its
+  count kept in flash, so the emulator keeps it too. Safe mode has only Wi-Fi
+  and the update service for five minutes, as the mover has. Then the tool,
+  to ESPHome, Tasmota or Sonoff: it must know the plug for ESPHome in safe
+  mode and wait for it (FAIL-TAKEN-FOR-MOVER), never take it for one left
+  part way - to stay on ESPHome, that sent it the startup firmware.
 - **A Berry phase riding out the network by itself** (`blips-3`,
   `lossy-phase`, at E2, G1, I1, L1 and R1): two 3 s outages from 10% to 90%
   of the phase - further apart than its 20 s of retrying - or one packet in
@@ -133,7 +248,12 @@ plug went by a name it never should (the names are made from its MAC:
 its own, or did not end under its converted name; every name it had is kept
 with the result. It is **FAIL-UNEXPECTED** when a run stopped with
 "something unexpected went wrong" - an error the tool did not see coming, a
-bug whatever the fault - even if the next run converts the plug.
+bug whatever the fault - even if the next run converts the plug. It is
+**BAD-TEMPLATE** when a plug converted to Tasmota does not answer with the
+plug's template - a Tasmota that switches nothing; **FAIL-ASKED-AGAIN** when a
+run asked for the go-ahead twice, as a step tried again by itself once did;
+and **FAIL-BACKUP-LINE** when a run from a converted plug reported no Sonoff
+backup though the run that converted it took one.
 
 The emulated computer's list of networks keeps one the plug put out for a
 minute after it has gone or been renamed, as a real computer's does (the

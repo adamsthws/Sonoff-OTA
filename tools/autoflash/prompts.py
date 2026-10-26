@@ -15,7 +15,6 @@ import getpass
 import ipaddress
 import os
 import select
-import shutil
 import socket
 import sys
 import time
@@ -251,7 +250,7 @@ def _echo_off():
 def _secret_field_below(prompt: str) -> bool:
     """Whether the password field goes on the row below its prompt, so the
     whole field fits on one row and a carriage return can redraw it."""
-    return len(prompt) + 65 >= shutil.get_terminal_size().columns
+    return len(prompt) + 65 >= output.terminal_size().columns
 
 
 def _read_secret(prompt: str, reveal_seconds: float) -> str:

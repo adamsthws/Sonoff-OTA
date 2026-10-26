@@ -12,7 +12,6 @@ Only log text changes. No code, no data, no addresses.
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
@@ -64,7 +63,7 @@ def main() -> int:
     output.write_bytes(cleaned)
     print(f"\nWrote {output}")
     print(f"  {len(cleaned):,} bytes, checksum and SHA-256 repaired, no paths remaining")
-    print(f"\nConfirm before publishing:")
+    print("\nConfirm before publishing:")
     print(f"  python3 tools/validate_imprintable_safeboot.py {output}")
     return 0
 

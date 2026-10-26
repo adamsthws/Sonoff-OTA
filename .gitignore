@@ -14,6 +14,10 @@ bridge/.pio/
 
 # Generated build configuration and caches.
 sdkconfig.*
+# The unit tests' coverage (python -m coverage run).
+.coverage
+# How long each unit test took last time, for tests/run.py's order.
+.test-times.json
 # Generated configs stay out; the bridge's chosen settings must not.
 !sdkconfig.defaults
 __pycache__/
@@ -31,7 +35,7 @@ __pycache__/
 !artifacts/autoflash-recovery-safeboot-imprintable.bin
 !artifacts/tasmota32c3-bluetooth.bin
 !artifacts/esphome-sonoff-s60-bootloader-1.2.0.bin
-!artifacts/esphome-sonoff-s60-imprintable-1.2.0.bin
+!artifacts/esphome-sonoff-s60-imprintable-1.3.0.bin
 !artifacts/autoflash-mover-1.1.0.bin
 !artifacts/sonoff-s60-partition-table.bin
 
@@ -45,3 +49,6 @@ REPARTITION_LOCK.owner-authorized*
 # Accidental/temporary files from development.
 0
 *.bak
+
+# tools/leak_scan.py: your own values to keep out of Git.
+.leak-scan.local

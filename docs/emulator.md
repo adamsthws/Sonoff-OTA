@@ -25,11 +25,17 @@ another regional version's power meter.
   `captures/emulation/`, is offered too. Each plug's emulated flash is kept
   in `captures/emulation/state/` between runs, so switching plugs and back
   carries on where each was; `--fresh` puts the chosen one back to its
-  backup.
-- **The NVS partition generator** in the repository's `.venv`:
+  backup. With none here, the maintainer's sealed backup is fetched from its
+  private package and filed here first, and a test copy `--plug` asks for
+  that is not here yet is made from it (`copy_plug.py`): given its key and a
+  login that can read the package, a checkout with an empty `captures/` runs
+  the emulator ([private-backup.md](private-backup.md)).
+  `AUTOFLASH_NO_RESTORE=1` says not to.
+- **The NVS partition generator** (and `cryptography`, for the cloud stub)
+  in the repository's `.venv`, as the workflows pin them:
 
   ```sh
-  .venv/bin/python -m pip install esp-idf-nvs-partition-gen
+  .venv/bin/python -m pip install --require-hashes -r requirements/ci.txt
   ```
 
 ### Hardware
@@ -57,7 +63,7 @@ laptop with 8 GB, from 2020 - or faster. A faster one is nearer the low end.
 
 | Step | Takes |
 |---|---|
-| Building the emulator's image (QEMU from source) | 2-3 minutes |
+| Downloading the emulator's image, or building it (QEMU from source) where it is not published | under a minute; 2-3 minutes to build |
 | Building the Windows VM's image | about a minute |
 | Downloading Microsoft's ISO, 8.2 GB | depends on the connection: about 20 minutes at 50 Mbit/s, 2-3 at 500 Mbit/s |
 | Installing Windows (layer `installed`) | 5-10 minutes |
@@ -207,6 +213,59 @@ otherwise, as in a CI log, the final screen is printed at the end, colours
 and all. The recording stays in
 `captures/emulation/state/work/captures/unattended/<time>/`, beside the run's
 own `run.log`. The exit code is the run's: 0 when the plug was converted.
+
+### Public plugs
+
+Every plug above starts from your Sonoff backup, and a plug kept with `--save`
+holds Sonoff's settings and a copy of the backup. A **public plug** holds
+nothing of Sonoff's or of your plug's, so it can go where your backup must
+not. Past D5 a plug runs none of Sonoff's code - the installer and the interim
+Tasmota have taken its app slots, and D5 its bootloader - so from there on
+nothing of Sonoff's is needed: that is what tests the firmware a conversion
+ends on ([updating-firmware.md](updating-firmware.md)).
+
+`tools/emulator/sanitise_plug.py` makes one from a plug kept past D5, on a test
+copy's made-up MAC (`copy_plug.py`). It rebuilds the flash from blank and
+copies in only what it shows to be public: the bootloader, partition table and
+app images byte for byte the published files in `artifacts/`, the startup
+firmware the published one with the emulator's open network written in, the
+boot selection, and the interim Tasmota's settings alone, naming only that
+network. Sonoff's settings - its eWeLink keys, the Wi-Fi it was set up with,
+its calibration - the copy of them the repartition keeps, and any leftover are
+not copied. Of the eFuses it keeps the MAC, and what every chip of the kind shares - its
+revision and package, which the bootloader checks, and the flash's type - and
+nothing measured on the one chip (its calibration and factory ID); of the computer's files the run's state and its steps' reports,
+with the account and eWeLink device made placeholders, not the Sonoff backup,
+the logs or the firmware bundle. Then it searches everything it wrote for any
+256-byte block of your dump, every identifying value of Sonoff's settings in
+it, the real MAC in any form, and the eWeLink account and devices on this
+computer, and writes nothing if it finds one (`--explain` says which setting
+a value came from, never the value).
+
+`tools/emulator/public_plugs.py` makes the two the final-firmware test starts
+from - after E3 on the way to Tasmota, after D5 on the way to ESPHome - from
+the fault suite's plugs saved after D1, and runs that test:
+
+```sh
+tools/emulator/fault_suite.py --plug=12:34:56:ab:cd:ef --stub-cloud prep   # once, with your backup
+python -I tools/emulator/public_plugs.py make --plug 12:34:56:ab:cd:ef \
+    --stock captures/plugs/<your plug's MAC>/sonoff-backup
+python -I tools/emulator/public_plugs.py test                              # no backup, no cloud
+```
+
+They are made again only when what runs before the final firmware changes: an
+interim firmware, or what a run keeps of itself. Then `public_plugs.py publish
+--stock <backup>` shows them public once more and uploads them, as one
+tarball named by its hash, to the repository's
+[`emulator-public-plugs`](https://github.com/adamsthws/Sonoff-OTA/releases/tag/emulator-public-plugs)
+pre-release, and prints the pin for `PUBLISHED` in `public_plugs.py`;
+`public_plugs.py fetch` puts the pinned ones in `captures/`, checked - which
+is how a checkout with no backup, such as a GitHub Actions runner, tests from
+them (the `emulator-check` workflow). `unattended-test.sh
+--from=public-...` runs one offline, with no cloud, real or stub, and no
+`.env`; a plug kept from that run (`--save`) is public too, and `emu.sh
+--plug-dir=DIR` starts one with no backup at all. A public plug cannot go
+back to Sonoff: it has nothing of Sonoff's to go back to.
 
 ## On Windows
 
@@ -435,7 +494,13 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
   against the SHA-256 in `emu.Dockerfile`, and the image is built from it with
   no network - so building needs nothing outside this repository. QEMU is
   GPL-2.0: the archive is its unmodified source, and this project's changes
-  to it are the patches in `tools/emulator/fork/`.
+  to it are the patches in `tools/emulator/fork/`. The image is labelled with
+  a hash of what it is built from (`tools/emulator/image.sh tag`), and the
+  repository's `emulator-image` workflow publishes each one as
+  `ghcr.io/adamsthws/autoflash-emu:<that hash>`: `emu.sh` pulls that, and
+  builds only where it is not published (`AUTOFLASH_EMU_NO_PULL=1`, or
+  `--rebuild`, always builds). Either way it runs only an image labelled
+  with its own checkout's hash.
 - **The home network.** `tap0` is the home network, and the container is its
   router: dnsmasq hands out addresses (the plug's MAC always gets
   192.168.60.50), and mDNS discovery works as on a real LAN. Without

@@ -12,7 +12,7 @@ recalculated afterwards.
 
 Nothing here relaxes a check. The patched image is validated exactly as any
 downloaded artifact is, and the migration still refuses it unless the plug reads
-back byte-for-byte what was sent.
+back what was sent.
 """
 
 from __future__ import annotations

@@ -1,6 +1,12 @@
 # Sonoff S60 → Tasmota or ESPHome, OTA
 ***Flash it, don't smash it.***
 
+[![Runs on Linux, macOS and Windows](https://img.shields.io/badge/Runs%20on-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#what-it-has-been-run-on)
+
+[![Installs Tasmota](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.tasmota.version&label=Installs%20Tasmota&color=blue)](docs/updating-firmware.md) [![Installs ESPHome](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.esphome.image.esphome&label=Installs%20ESPHome&color=blue)](docs/updating-firmware.md)
+
+[![Release](https://img.shields.io/github/v/release/adamsthws/Sonoff-OTA?label=Release)](https://github.com/adamsthws/Sonoff-OTA/releases/latest) [![Downloads](https://img.shields.io/github/downloads/adamsthws/Sonoff-OTA/total?label=Downloads)](https://github.com/adamsthws/Sonoff-OTA/releases) [![Tests](https://img.shields.io/github/actions/workflow/status/adamsthws/Sonoff-OTA/emulator-check.yml?branch=main&label=Tests)](https://github.com/adamsthws/Sonoff-OTA/actions/workflows/emulator-check.yml) [![Lint](https://img.shields.io/github/actions/workflow/status/adamsthws/Sonoff-OTA/lint.yml?branch=main&label=Lint)](https://github.com/adamsthws/Sonoff-OTA/actions/workflows/lint.yml) [![License: GPL-3.0](https://img.shields.io/github/license/adamsthws/Sonoff-OTA?label=License)](LICENSE) [![Discussions](https://img.shields.io/github/discussions/adamsthws/Sonoff-OTA?label=Discussions)](https://github.com/adamsthws/Sonoff-OTA/discussions) [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/adamsthws)
+
 <br>
 <br>
 
@@ -32,7 +38,7 @@ flash it over USB-serial - hard work, because the case is plastic-welded shut.
 
 ### Indistinguishable
 
-Converted plugs end up byte-for-byte identical to a plug flashed over USB
+Converted plugs end up identical to a plug flashed over USB
 > The final automated checks verify this by reading their flash back at the end of the conversion. Every block of it is read back before the plug switches to it.
 
 <br>
@@ -99,7 +105,13 @@ cd Sonoff-OTA
 
 ## What you'll see
 
-![A successful conversion run](docs/SuccessRun.svg)
+**Tasmota:**
+
+![A successful conversion to Tasmota](docs/SuccessRun.svg)
+
+**ESPHome:**
+
+![A successful conversion to ESPHome](docs/SuccessRunESPHome.svg)
 
 <br>
 
@@ -117,12 +129,11 @@ was interrupted, it checks the plug to work out where to resume from.
 
 **Tasmota:** Official Tasmota
 
-**ESPHome:** Official ESPHome, ready for Home Assistant to find.
+**ESPHome:** Official ESPHome
 
 **Sonoff:** A full backup of the plug's Sonoff firmware to restore later.
 
-> The firmware is laid out in memory exactly as if the plug had been flashed
-over USB. That means normal upgrades from then on.
+> Afterward, Tasmota and ESPhome updates are applied as normal.
 
 <br>
 
@@ -159,6 +170,10 @@ report back on how it went here:
   nobody at the keyboard - for testing.
 - **[docs/testing.md](docs/testing.md)** - how the tool is tested: unit tests,
   the emulator, every fault in the way of every step, and real plugs.
+- **[docs/updating-firmware.md](docs/updating-firmware.md)** - how the
+  Tasmota and ESPHome the tool installs are moved to each new release.
+- **[docs/private-backup.md](docs/private-backup.md)** - for the maintainer:
+  how their own Sonoff backup is kept sealed and private, off their computer.
 - **[docs/device-names.md](docs/device-names.md)** - the name the plug goes by
   at each stage, where each is set, and how to change them.
 - **[docs/upstream-contributions.md](docs/upstream-contributions.md)** - bugs
@@ -172,11 +187,8 @@ report back on how it went here:
 
 ## Thanks
 
-This is a fork of [HG0161/SonoffS60OTA](https://github.com/HG0161/SonoffS60OTA),
-which did the groundwork of working out the OTA route.
-
-A big thank you to [HG0161](https://github.com/HG0161) and the original
-[SonoffS60OTA](https://github.com/HG0161/SonoffS60OTA) repository for working out the update mechanism, decoding the firmware format
+A big thank you to [HG0161](https://github.com/HG0161) and the
+[SonoffS60OTA](https://github.com/HG0161/SonoffS60OTA) repository for laying the groundwork; working out the update mechanism, decoding the firmware format
 and proving the OTA route on real plugs. This repository carries that work on.
 
 Thanks to [p1otr](https://github.com/p1otr) for the ESPHome option and its

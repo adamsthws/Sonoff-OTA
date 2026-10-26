@@ -24,6 +24,7 @@ NAMES = {
     "tasmota": "Tasmota",
     "esphome": "ESPHome",
     "midway": "a firmware part way through a conversion",
+    "untemplated": "Tasmota without the plug's template",
     "installer": "this tool's installer, part way from Sonoff's firmware",
     "safeboot": "Tasmota's safeboot, its Tasmota missing",
     "locked": "Tasmota with a web password",
@@ -169,7 +170,7 @@ def _esphome(host: str, timeout: float, login: tuple[str, str] | None) -> str | 
     return "esphome" if esphome.relay(host) is not None else "other"
 
 
-def _answers_as_tasmota(host: str, timeout: float) -> bool:
+def answers_as_tasmota(host: str, timeout: float = 3.0) -> bool:
     try:
         status = Device(host, timeout=timeout).command("Status 0")
     except Exception:  # noqa: BLE001 - anything but Tasmota answering
@@ -218,7 +219,7 @@ def converted_plugs(near: str, *, known_macs: set[str] = frozenset(), timeout: f
     device on the subnet of `near` (an address on it) what it is.  A Tasmota
     safeboot counts only with one of `known_macs`: a plug this computer was
     converting, left on the startup firmware - any Tasmota mid-update looks
-    the same.  A Tasmota whose web password `password` is not is "locked",
+    the same; and the mover likewise, as any ESPHome without a web page.  A Tasmota whose web password `password` is not is "locked",
     and an ESPHome whose web login `esphome_login` is not "esphome-login":
     whether it is a plug this tool converts each says only once given its own."""
     hostsys.sweep(near)
@@ -227,8 +228,10 @@ def converted_plugs(near: str, *, known_macs: set[str] = frozenset(), timeout: f
     def ask(item: tuple[str, str]) -> Found | None:
         host, mac = item
         if not _port_open(host, 80, timeout):
-            # The mover has no web page, only ESPHome's update service.
-            if esphome_ota.probe(host, timeout=timeout) is not None:
+            # The mover has no web page, only ESPHome's update service - as
+            # has any ESPHome built without one: only a plug this computer knows.
+            if (hostsys.normalise_mac(mac) in known_macs
+                    and esphome_ota.probe(host, timeout=timeout) is not None):
                 return Found(host, "midway", mac, "the mover")
             return None
         found = _esphome(host, timeout, esphome_login)
@@ -247,9 +250,10 @@ def converted_plugs(near: str, *, known_macs: set[str] = frozenset(), timeout: f
         known = hostsys.normalise_mac(mac) in known_macs
         if not found:
             # Official Tasmota put on by a run stopped before it gave it the
-            # plug's template: any Tasmota, so only a plug this computer knows.
-            if known and _answers_as_tasmota(host, timeout):
-                return Found(host, "midway", mac, "Tasmota, without the plug's template yet")
+            # plug's template, or one that lost it since: any Tasmota, so only
+            # a plug this computer knows.
+            if known and answers_as_tasmota(host, timeout):
+                return Found(host, "untemplated", mac)
             return None
         if found[0] == "startup":
             if hostsys.normalise_mac(mac) not in known_macs:

@@ -11,8 +11,6 @@ from pathlib import Path
 
 from tools.safeboot_migration import (
     MD5_MAGIC,
-    OFFICIAL_INSTALL_COMMIT,
-    OFFICIAL_TASMOTA_COMMIT,
     PARTITION_MAGIC,
     PINNED_ARTIFACTS,
     RECOVERY_MODE,
@@ -21,6 +19,7 @@ from tools.safeboot_migration import (
     SOURCE_TABLE_SHA256,
     TARGET_PARTITIONS,
     analyze_canonical_nvs,
+    official_release,
     parse_partition_sector,
     require_pinned_artifacts,
     sector_aligned_size,
@@ -270,10 +269,7 @@ class MigrationValidationTests(unittest.TestCase):
 
     def test_pinned_artifact_gate_rejects_manifest_substitution(self):
         manifest = {
-            "official_release": {
-                "install_commit": OFFICIAL_INSTALL_COMMIT,
-                "tasmota_commit": OFFICIAL_TASMOTA_COMMIT,
-            },
+            "official_release": official_release(),
             "artifacts": {
                 name: dict(expected) for name, expected in PINNED_ARTIFACTS.items()
             },
@@ -282,6 +278,30 @@ class MigrationValidationTests(unittest.TestCase):
         manifest["artifacts"]["safeboot"]["sha256"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "safeboot sha256 differs"):
             require_pinned_artifacts(manifest)
+
+    def test_a_bundle_of_a_release_pinned_before_is_taken_unless_current_only(self):
+        # A run that installed that release at F2, carried on by a version
+        # that pins a later one, finishes with its bundle.
+        from unittest import mock
+        from tools import safeboot_migration as sm
+        earlier = {"version": "1.0.0", "files": {
+            name: {"name": name, "size": 10 + index, "sha256": f"{index}" * 64}
+            for index, name in enumerate(("factory", "safeboot", "app"))}}
+        manifest = {
+            "official_release": {"install_commit": "abc", "tasmota_commit": "def"},
+            "artifacts": {"bluetooth": dict(PINNED_ARTIFACTS["bluetooth"]),
+                          **{name: {"size": f["size"], "sha256": f["sha256"]}
+                             for name, f in earlier["files"].items()}},
+        }
+        with mock.patch.dict(sm.FIRMWARE["tasmota"], {"earlier": [earlier]}):
+            self.assertEqual(sm.earlier_release(manifest), earlier)
+            require_pinned_artifacts(manifest)
+            with self.assertRaisesRegex(ValueError, "identity differs"):
+                require_pinned_artifacts(manifest, current_only=True)
+            manifest["artifacts"]["app"]["sha256"] = "f" * 64
+            self.assertIsNone(sm.earlier_release(manifest))
+            with self.assertRaisesRegex(ValueError, "identity differs"):
+                require_pinned_artifacts(manifest)
 
     def test_report_parser_rejects_ambiguous_input(self):
         self.assertEqual(parse_report(b"status=PASS\nvalue=1\n"), {"status": "PASS", "value": "1"})

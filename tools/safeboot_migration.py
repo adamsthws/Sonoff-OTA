@@ -88,22 +88,34 @@ INTERIM_PARTITIONS = (
 )
 INTERIM_TABLE_SHA256 = "cfb1e1c46fa209a6c1eada92123a02847ab8e72f67c0044afbcb1c29ead4c936"
 
-OFFICIAL_INSTALL_COMMIT = "dcfc2bd2d958add881e4ecb2ccc182a15602be1d"
-# Changing this release, or the Bluetooth build pinned below?  The Tasmota
-# settings template (artifacts/tasmota-settings-template-*.bin), which lets
-# D1 give Tasmota the Wi-Fi without its setup network, was checked against
-# both.  See tools/autoflash/tasmota_settings.py: until it is re-checked and
-# re-captured, D1 falls back to the setup network and the tests say so.
-OFFICIAL_TASMOTA_COMMIT = "db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892"
-OFFICIAL_RELEASE_BASE = (
-    "https://raw.githubusercontent.com/tasmota/install/"
-    f"{OFFICIAL_INSTALL_COMMIT}/firmware/release"
+# The official Tasmota release a converted plug ends on, as firmware.json pins
+# it: tools/update_firmware.py writes it, docs/updating-firmware.md says when.
+# The files come from the release's own page on GitHub, which keeps them as
+# they were released (tasmota/install, where they were taken from up to 15.6.0,
+# folds its history away).
+FIRMWARE = json.loads(
+    (Path(__file__).resolve().parents[1] / "firmware.json").read_text(encoding="utf-8")
 )
-OFFICIAL_URLS = {
-    "factory": f"{OFFICIAL_RELEASE_BASE}/tasmota32c3.factory.bin",
-    "safeboot": f"{OFFICIAL_RELEASE_BASE}/tasmota32c3-safeboot.bin",
-    "app": f"{OFFICIAL_RELEASE_BASE}/tasmota32c3.bin",
-}
+OFFICIAL_TASMOTA_VERSION = FIRMWARE["tasmota"]["version"]
+OFFICIAL_TASMOTA_TAG = FIRMWARE["tasmota"]["tag"]
+OFFICIAL_TASMOTA_COMMIT = FIRMWARE["tasmota"]["commit"]
+
+
+def release_urls(release: dict[str, Any]) -> dict[str, str]:
+    """Where each file of an official release (firmware.json's, now or before) is."""
+    base = f"https://github.com/arendst/Tasmota/releases/download/{release['tag']}"
+    return {name: f"{base}/{file['name']}" for name, file in release["files"].items()}
+
+
+OFFICIAL_URLS = release_urls(FIRMWARE["tasmota"])
+# The Tasmota the interim firmware is made from, which need not follow the
+# official release: the recovery Safeboot is built from this source with this
+# project's patches, and the settings template D1 gives the Berry build below
+# is this release's defaults.  Changing it, or the Bluetooth build?  The
+# template was checked against both: see tools/autoflash/tasmota_settings.py.
+# Until it is re-checked and re-captured, D1 falls back to the setup network
+# and the tests say so.
+INTERIM_TASMOTA_COMMIT = "db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892"  # 15.6.0
 PUBLISHED_BLUETOOTH_FILE = (
     Path(__file__).resolve().parents[1] / "artifacts" / "tasmota32c3-bluetooth.bin"
 )
@@ -117,17 +129,9 @@ PINNED_ARTIFACTS = {
         "size": 1_807_040,
         "sha256": "a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708",
     },
-    "factory": {
-        "size": 3_098_496,
-        "sha256": "5c4181c756fb0a98c107a4d53389536f878b69fedbbce47168b07458122f53e8",
-    },
-    "safeboot": {
-        "size": 810_672,
-        "sha256": "364339a828c243ddf5fee3ed24f8bf352dffc87b2572ca9d7f48736bcb852bdc",
-    },
-    "app": {
-        "size": 2_180_992,
-        "sha256": "5991d11ad8f8b100b165974e81544594394df1d12d165012a42c002e1985cb1c",
+    **{
+        name: {"size": file["size"], "sha256": file["sha256"]}
+        for name, file in FIRMWARE["tasmota"]["files"].items()
     },
 }
 
@@ -278,21 +282,46 @@ def interim_table(source: bytes | None = None) -> bytes:
     return bytes(table)
 
 
-def require_pinned_artifacts(manifest: dict[str, Any]) -> None:
-    """Refuse substitution of the frozen Bluetooth/official firmware set."""
+def official_release(release: dict[str, Any] | None = None) -> dict[str, str]:
+    """The official release a bundle is made for, as its manifest names it:
+    the one pinned now, or `release`, one pinned before."""
+    release = release or FIRMWARE["tasmota"]
+    return {"tag": release["tag"], "tasmota_commit": release["commit"]}
+
+
+def earlier_release(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    """The official release the tool installed before this one whose files a
+    bundle holds (firmware.json keeps each, by its files' hashes): a run that
+    installed it finishes with that bundle, its app and Safeboot a pair."""
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return None
+    for earlier in FIRMWARE["tasmota"].get("earlier", []):
+        if all(isinstance(artifacts.get(name), dict)
+               and (artifacts[name].get("size"), artifacts[name].get("sha256")) == (file["size"], file["sha256"])
+               for name, file in earlier["files"].items()):
+            return earlier
+    return None
+
+
+def require_pinned_artifacts(manifest: dict[str, Any], current_only: bool = False) -> None:
+    """Refuse substitution of the frozen Bluetooth/official firmware set: the
+    official release pinned now, or (unless `current_only`) one pinned before."""
     release = manifest.get("official_release")
-    expected_release = {
-        "install_commit": OFFICIAL_INSTALL_COMMIT,
-        "tasmota_commit": OFFICIAL_TASMOTA_COMMIT,
-    }
-    if release != expected_release:
-        raise ValueError(
-            "manifest official-release identity differs from the reviewed frozen set"
-        )
+    pinned = PINNED_ARTIFACTS
+    if release != official_release():
+        earlier = None if current_only else earlier_release(manifest)
+        if earlier is None:
+            raise ValueError(
+                "manifest official-release identity differs from the reviewed frozen set"
+            )
+        pinned = {"bluetooth": PINNED_ARTIFACTS["bluetooth"],
+                  **{name: {"size": file["size"], "sha256": file["sha256"]}
+                     for name, file in earlier["files"].items()}}
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, dict):
         raise ValueError("manifest has no artifact map")
-    for name, expected in PINNED_ARTIFACTS.items():
+    for name, expected in pinned.items():
         record = artifacts.get(name)
         if not isinstance(record, dict):
             raise ValueError(f"manifest has no pinned {name} artifact")
@@ -380,7 +409,7 @@ def require_recovery_manifest(manifest_path: Path, manifest: dict[str, Any]) -> 
         raise ValueError("recovery manifest has no recovery_safeboot provenance")
     if recovery.get("artifact") != RECOVERY_ARTIFACT:
         raise ValueError("recovery manifest selects an unexpected artifact")
-    if recovery.get("tasmota_commit") != OFFICIAL_TASMOTA_COMMIT:
+    if recovery.get("tasmota_commit") != INTERIM_TASMOTA_COMMIT:
         raise ValueError("recovery Safeboot uses an unexpected Tasmota commit")
     try:
         patch_hash = sha256_bytes(RECOVERY_PATCH.read_bytes())
@@ -413,7 +442,7 @@ def require_recovery_manifest(manifest_path: Path, manifest: dict[str, Any]) -> 
     expected = {
         "schema": 1,
         "kind": RECOVERY_KIND,
-        "tasmota_commit": OFFICIAL_TASMOTA_COMMIT,
+        "tasmota_commit": INTERIM_TASMOTA_COMMIT,
         "size": len(image),
         "sha256": sha256_bytes(image),
         "max_size": SAFEBOOT_SIZE,

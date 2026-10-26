@@ -7,7 +7,77 @@ removes an option.
 
 The version is set in one place, `tools/autoflash/__init__.py`. Merging a new
 one to `main` tags it and publishes a release with its notes from here, so add
-the section below before changing the number.
+the section below before changing the number. The release waits for the unit
+tests, the final firmware on the emulator, the lint and the leak scan to pass
+on that commit, and carries the firmware files the tool installs with
+`SHA256SUMS`; GitHub signs an attestation of the release, its tag and files,
+which `gh release verify vX.Y.Z` and `gh release verify-asset vX.Y.Z FILE`
+check.
+
+## 2.1.3
+
+- A plug converted to Tasmota went on to switch nothing after Tasmota had
+  restarted six times in a row, each within 10 seconds of starting: taking
+  that for a boot loop, Tasmota goes over to its fallback module, Generic,
+  keeping only its Wi-Fi ([#8](https://github.com/adamsthws/Sonoff-OTA/discussions/8)).
+  The plug's template is now its fallback too. The final check (H1) makes it
+  so on a plug converted by an earlier version, and puts the template back
+  on one that has already gone over to Generic.
+- A plug on ESPHome in safe mode - which ESPHome starts after it was stopped
+  within a minute of starting ten times in a row - was taken for one part way
+  through a conversion: to stay on ESPHome, the run sent it the startup
+  firmware and installed ESPHome again. It is now known for ESPHome in safe
+  mode, and the run waits the five minutes until ESPHome restarts as itself.
+
+2.1.2 was withdrawn on the day it was published, from a commit holding work
+not meant for release; its number cannot be used again. 2.1.3 is the tool
+2.1.2 was.
+
+## 2.1.1
+
+- A plug converted to Tasmota could finish without the plug's template -
+  when it did not go in with Tasmota's reset and the second try did not take
+  either - and so switch nothing: Home Assistant showed only its restart
+  button and Wi-Fi ([#8](https://github.com/adamsthws/Sonoff-OTA/discussions/8)).
+  The run now checks the template is in place before it calls the plug
+  converted, and puts it back if not. The final check (H1) does the same, so
+  running it on a finished plug puts a missing template back, keeping the
+  plug's other settings.
+- A converted plug that had lost its template was taken for one part way
+  through a conversion, and sent an update only ESPHome takes: the run
+  waited 4 minutes, and stopped. It is now known for a Tasmota without its
+  template - found on the network, or given with `--plug-ip` - and goes on as
+  any converted plug does; choosing Tasmota gives it the template alone,
+  keeping its other settings, such as MQTT.
+- A device with ESPHome's update service and no web page was listed as a
+  plug part way through a conversion, whatever it was - another ESPHome
+  device on the network, say. Only a plug this computer has a record of is
+  listed so now.
+- A run stopped before it wrote anything no longer hides, from the next run,
+  the run before it that knew where the plug had got to.
+- The go-ahead to replace a plug's Tasmota or ESPHome is asked once a run,
+  not again when a step is tried again by itself.
+- The report of a run from a converted plug said "Sonoff backup: Not taken"
+  although this computer had the plug's backup; it now says it was taken by
+  an earlier run.
+- On Python 3.10, a terminal that reports no size - ssh without one, some
+  IDE consoles - was taken as 20 columns wide, and every line wrapped or cut.
+
+## 2.1.0
+
+- A converted plug ends on Tasmota
+  [16.0.0](https://github.com/arendst/Tasmota/releases/tag/v16.0.0), the
+  latest release, where it ended on 15.6.0. Its files now come from the
+  release's own page on GitHub. A run left part way by an earlier version
+  carries on by itself: with 16.0.0, or - if it had installed 15.6.0 already -
+  on 15.6.0, checked byte for byte as ever, which Tasmota's own page updates.
+- ESPHome for the S60 is 1.3.0: the same config, built with ESPHome
+  [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0),
+  the latest release, where 1.2.0 was built with 2026.9.1. Its bootloader is
+  unchanged, so a plug on ESPHome already is not given a new one.
+- The firmware the tool installs is moved to each new Tasmota and ESPHome
+  release one way, written down in
+  [docs/updating-firmware.md](docs/updating-firmware.md).
 
 ## 2.0.2
 

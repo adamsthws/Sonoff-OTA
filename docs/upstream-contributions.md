@@ -28,11 +28,13 @@ several other HTTP clients, and following it led to a few more bugs nearby.
 - [HTTP clients that waited for ever](#http-clients-that-waited-for-ever) -
   Tasmota, arduino-esp32, ESPEasy, LibreTiny
 - [Firmware updates that never gave up](#firmware-updates-that-never-gave-up) -
-  arduino-esp32, ESP-IDF
+  arduino-esp32, ESP-IDF, Tasmota
 - [A build failure, followed to its root](#a-build-failure-followed-to-its-root) -
   LibreTiny, SCons
 - [The emulator's Wi-Fi](#the-emulators-wi-fi) - QEMU (lcgamboa's fork)
 - [Smaller fixes found along the way](#smaller-fixes-found-along-the-way) - Tasmota
+- [Other people's reports, reproduced on the emulator](#other-peoples-reports-reproduced-on-the-emulator) -
+  Tasmota
 
 ## HTTP clients that waited for ever
 
@@ -51,6 +53,7 @@ for the headers. A body that keeps arriving, however slowly, still completes.
 | arduino-esp32 | [#12990](https://github.com/espressif/arduino-esp32/pull/12990) | `HTTPClient` waited for ever for the rest of a body, and polled without pause between TLS packets |
 | ESPEasy | [#5649](https://github.com/letscontrolit/ESPEasy/pull/5649) | Its copy of `HttpClientLight` had the same unbounded wait |
 | LibreTiny | [#420](https://github.com/libretiny-eu/libretiny/pull/420) | Its `HTTPClient` had the same unbounded wait |
+| Tasmota | [#25180](https://github.com/arendst/Tasmota/pull/25180) | A read timeout over 65.5 s wrapped round: `webclient.set_timeouts(80000)` gave up after 14.5 s |
 
 The details differed enough that each needed its own work:
 
@@ -63,6 +66,8 @@ The details differed enough that each needed its own work:
   and a race the maintainer spotted in review.
 - **ESPEasy and LibreTiny** carry the original loop, so the fix carried over
   almost as it was.
+- **ESPEasy's review** found its timeout kept in 16 bits, so one longer than
+  65.5 s wrapped round. Tasmota's clients had the same, fixed in #25180.
 
 **Related:** Berry's `webclient` had a `connected()` method that was written
 but never exposed to scripts, which came up while fixing #25141; Tasmota's
@@ -70,7 +75,7 @@ maintainer exposed it in [#25145](https://github.com/arendst/Tasmota/pull/25145)
 
 ## Firmware updates that never gave up
 
-With the HTTP clients done, we checked the two other ways ESP32 firmware
+With the HTTP clients done, we checked the other ways ESP32 firmware
 commonly downloads an update:
 
 - **arduino-esp32's `HTTPUpdate`** did give up, but only after 300 empty reads,
@@ -81,15 +86,25 @@ commonly downloads an update:
   retrying after 35 minutes. ESP-IDF retries timeouts on purpose, so the fix
   changes only the one-call wrapper, leaving step-by-step callers free to
   retry.
+- **Tasmota's own OTA** (`Upgrade`) uses its copy of arduino-esp32's updater,
+  with the same miscount: a stalled attempt blocked for 40 min 31 s on the
+  emulator, and Tasmota tries 4 times, so about 2 h 40 min in safeboot. With
+  the fix, each attempt gives up after about 33 s.
 
 Testing that led to one more ESP-IDF bug: telling `esp_https_ota()` to write
-into the same partition it downloads to crashed it on a NULL pointer.
+into the same partition it downloads to crashed it on a NULL pointer. And
+testing Tasmota's OTA showed its web server stuck for minutes after a long
+download: requests that had given up while the device was busy were then
+answered one by one, each piece of the page waiting 10 s on a client that no
+longer answered. The cause was in arduino-esp32's `NetworkClient`.
 
 | Project | Pull request | What it fixes |
 |---|---|---|
 | arduino-esp32 | [#12991](https://github.com/espressif/arduino-esp32/pull/12991) | A stalled `HTTPUpdate` blocked for about 40 minutes, not the 30 s its code intended |
+| Tasmota | [#25177](https://github.com/arendst/Tasmota/pull/25177) | The same in Tasmota's own OTA, attempted 4 times: about 2 h 40 min |
 | ESP-IDF | [#19246](https://github.com/espressif/esp-idf/pull/19246) | `esp_https_ota()` retried a stalled download for ever |
 | ESP-IDF | [#19243](https://github.com/espressif/esp-idf/pull/19243) | `esp_https_ota()` crashed when the staging and final partitions were the same |
+| arduino-esp32 | [#13015](https://github.com/espressif/arduino-esp32/pull/13015) | A write that gave up left the connection open, so a page sent to a client that had stopped answering held the device 10 s per piece |
 
 **Related:** the endless retry had been reported before, in ESP-IDF issue
 [#6364](https://github.com/espressif/esp-idf/issues/6364), which was closed
@@ -115,17 +130,20 @@ test.
 
 The [emulator](emulator.md) runs on [lcgamboa's QEMU fork](https://github.com/lcgamboa/qemu),
 the one QEMU that emulates the ESP32-C3's Wi-Fi. Making an emulated plug behave
-on its network as a real one does took three changes to that Wi-Fi emulation,
-each found because a conversion went wrong on the emulator where it would not
-on a plug. They are kept in this repository as patches, and offered back:
+on its network as a real one does took four changes to that Wi-Fi emulation,
+and one to its pins, each found because something went wrong on the emulator
+where it would not on a plug. They are kept in this repository as patches, and
+offered back:
 
 | Project | Pull request | What it fixes |
 |---|---|---|
 | QEMU (lcgamboa) | [#13](https://github.com/lcgamboa/qemu/pull/13) | A received frame was written into a buffer the guest's driver had taken back, corrupting its heap - a crash when the guest stopped its Wi-Fi |
 | QEMU (lcgamboa) | [#14](https://github.com/lcgamboa/qemu/pull/14) | On a tap or bridged network, the guest's frames carried the emulated access point's address, not its own: the host could not tell it apart, nor give it an address by its MAC |
 | QEMU (lcgamboa) | [#15](https://github.com/lcgamboa/qemu/pull/15) | The host could not join a network the guest raised itself - Tasmota's or ESPHome's setup network - nor could the guest stay a station while it did |
+| QEMU (lcgamboa) | [#16](https://github.com/lcgamboa/qemu/pull/16) | The signal strength reached the firmware 96 too high: Tasmota reported its Wi-Fi at +71 to +78 dBm |
+| QEMU (lcgamboa) | [#17](https://github.com/lcgamboa/qemu/pull/17) | Run on its own, every input pin read low, so Tasmota saw its button held and reset itself; the levels can now be set |
 
-The last one let the emulator test what a person does when a plug falls back
+#15 let the emulator test what a person does when a plug falls back
 to its own setup network: join it, and let the conversion carry on through it.
 
 ## Smaller fixes found along the way
@@ -134,6 +152,22 @@ to its own setup network: join it, and let the conversion carry on through it.
 |---|---|---|
 | Tasmota | [#25163](https://github.com/arendst/Tasmota/pull/25163) | Berry's `webclient` logged a connection timeout's error code as its time: "Connection timeout after -1 ms" |
 | Tasmota | [#25169](https://github.com/arendst/Tasmota/pull/25169) | Its setup network went out under the chip's default name (`ESP_` and its MAC) for its first tenth of a second, which phones and computers then list beside the real one |
+
+## Other people's reports, reproduced on the emulator
+
+With the emulator built, we went through Tasmota's open reports for problems
+it could reproduce, and picked those an S60 owner could meet. Two came from
+one person changing an ESP32-C3 plug's Wi-Fi (discussions
+[#24591](https://github.com/arendst/Tasmota/discussions/24591) and
+[#24585](https://github.com/arendst/Tasmota/discussions/24585)), as someone
+might after converting a plug. Both were in Tasmota's own setup and settings
+pages, beside [#25169](https://github.com/arendst/Tasmota/pull/25169) above.
+
+| Project | Pull request | What it fixes |
+|---|---|---|
+| Tasmota | [#25183](https://github.com/arendst/Tasmota/pull/25183) | On ESP32, `WifiConfig 2` gave a setup network whose page was the normal main page within a second: no captive portal, and Wi-Fi details sent to it were not taken |
+| Tasmota | [#25184](https://github.com/arendst/Tasmota/pull/25184) | A Wi-Fi, web or MQTT password with a `;` saved from a settings page was cut there and the rest run as a command; an unpaired `{` took in the rest of the page |
+| Tasmota | [#25185](https://github.com/arendst/Tasmota/pull/25185) | Matter could not encode a string longer than 255 bytes (a typo another user spotted in issue [#24624](https://github.com/arendst/Tasmota/issues/24624)) |
 
 ## How each fix was proven
 

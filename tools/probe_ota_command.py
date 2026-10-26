@@ -135,7 +135,7 @@ def main() -> int:
         print(f"Refusing: recovery lock is active at {recovery_lock}", file=sys.stderr)
         return 2
 
-    if not getattr(args, "i_understand_this_sends_an_upgrade_command"):
+    if not args.i_understand_this_sends_an_upgrade_command:
         print(f"Refusing to run without {SAFETY_FLAG}", file=sys.stderr)
         return 2
     address = ipaddress.ip_address(args.listen_ip)

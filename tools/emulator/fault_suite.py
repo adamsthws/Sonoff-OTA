@@ -85,8 +85,12 @@ def saved(name):
 
 
 MAC = None  # --plug: the backed-up plug the emulators run copies of
+PLUG_URL = "http://192.168.60.50"
+# An MQTT host for a plug set up by its owner (notemplate): nobody's (RFC 5737).
+NOTEMPLATE_MQTT_HOST = "192.0.2.10"
 APP0_OFFSET = 0xE0000  # Tasmota's own firmware, on its layout (tools/safeboot_migration.py)
 PLUG_CMD = "/opt/autoflash-emu/bin/plug"
+ESPHOME_OTA_PORT = 3232
 MAX_RUNS = 4
 TOOL = "tools/autoflash_cli.py"
 HELPERS = ("serve_safeboot_migration.py", "serve_tasmota_ota.py")
@@ -129,9 +133,12 @@ OTHER = {"tasmota": "esphome", "esphome": "tasmota"}
 # F4rs is the moment F4's reset restarts the plug and saves the defaults it
 # rebuilt, with the plug's name and template put in (one restart): a fault
 # there may cut it off before the save, or after.
+# F4tp is the restart after F4's fallback sent the template itself (the
+# reset's save did not take it): cut off before Tasmota saves, the plug comes
+# back without it.
 STARTS = {"C3": (r"Backing up the plug's Sonoff firmware", 12), "C3fb": (r"\] C3  ", 14),
-          "F4rs": (r"Settings reset to Tasmota's defaults", 3)}
-STEP_OF = {"C3fb": "C3", "F4rs": "F4"}  # the tool's own name for a step
+          "F4rs": (r"Settings reset to Tasmota's defaults", 3), "F4tp": (r"Template applied as", 2)}
+STEP_OF = {"C3fb": "C3", "F4rs": "F4", "F4tp": "F4"}  # the tool's own name for a step
 
 # Each length where it can lead somewhere the others do not (2026-10-21): an
 # outage of 5 s is within every timeout of the tool's (8 s and up) and takes
@@ -145,6 +152,10 @@ CORE = ([("outage", s) for s in (5, 15, 30, 60, 120, 180)]
         + [("cancel", "continue"), ("cancel", "new"), ("ctrlc", "once")])
 NEW = [("hangup", "continue"), ("sleep", 600), ("weak", 60),
        ("pcoff", 30), ("pcoff", 120), ("corrupt", "once")]
+# Steps that send nothing a changed packet could reach: R2 knows Sonoff's
+# firmware by its LAN port taking a connection, and reads nothing over it, so
+# corrupt-once there only ever came back NO-TRAFFIC.
+NOTHING_TO_CORRUPT = {"R2"}
 # Where a firmware raises its own network when it loses the home one: the
 # installer (C3, D1: after 45 s), the mover and ESPHome (L1, M1, X1, I2: after
 # 1.5 to 2 minutes). There the person joins it before being asked, and the run
@@ -173,7 +184,7 @@ def step_faults(step):
         faults += [("crash", 60)]
     if step == "C3fb":
         return faults
-    faults += NEW
+    faults += [fault for fault in NEW if not (fault[0] == "corrupt" and step in NOTHING_TO_CORRUPT)]
     if step in OWN_HANDLING_STEPS:
         faults += OWN_HANDLING
     if step in OWN_HANDLING_STEPS or step in FALLBACK_STEPS:
@@ -200,7 +211,7 @@ def scenarios():
             if step in FALLBACK_STEPS:
                 yield dict(id=sid(route, step, "fallback", 150), route=route, step=step,
                            fault="fallback", arg=150, at=40)
-    for route, target in C2_ROUTES.items():
+    for route in C2_ROUTES:
         for fault, arg in step_faults("C2") + [("cancel", "switch"), ("token", "login")]:
             yield dict(id=sid(route, "C2", fault, arg), route=route, step="C2", fault=fault, arg=arg, at=40)
     yield from composite_scenarios()
@@ -218,11 +229,14 @@ def composite_scenarios():
         erases a Tasmota's settings; seven-advised (D1): Tasmota cannot join
         the home Wi-Fi, and that is done when the run advises it.
     nohook-run (F4): Tasmota will not take F4's name and template at the save.
+    nohook-cut (F4tp): that, and the plug switched off for a second at 10, 50
+        and 90% of the restart after F4 sent the template itself.
     F4rs: a power cut or crash at F4's reset, at 10, 50 and 90% of it.
-    legacy-v1.2.0: a run of release 1.2.0 (legacy_tree) killed at 40% of
-        each of its steps, then this checkout's tool, over the same captures,
-        as a person updating their checkout would; and (step "start") a plug
-        1.2.0 converted to Tasmota, then taken to ESPHome or back to Sonoff.
+    legacy-v1.2.0, legacy-v2.0.2 (LEGACY_STEPS): a run of that release
+        (legacy_tree) killed at 40% of each of its steps from Sonoff, then
+        this checkout's tool, over the same captures, as a person updating
+        their checkout would - its bundle and pins that release's; and (step
+        "start") a plug that release converted, then taken on by this one.
     blips-3, lossy-phase (BLIP_STEPS): two 3 s outages from 10% to 90% of a
         Berry phase, or one packet in ten lost for all of it: converted with
         no step tried again, or FAIL-RETRIED.
@@ -230,7 +244,18 @@ def composite_scenarios():
         factory image uploaded through Tasmota's page (go_lostapp), then the
         tool, to Tasmota, ESPHome or Sonoff; lostapp-switched: only switched
         to its safeboot, its Tasmota unharmed, which must be started again,
-        never replaced."""
+        never replaced.
+    notemplate-generic: a converted plug's template replaced with Tasmota's
+        generic one, and an MQTT host set, as a person might (go_notemplate);
+        then the tool, to Tasmota, ESPHome or Sonoff.
+    bootloop-fallback: a plug converted to Tasmota, then put on its
+        fallback module, as Tasmota does in a boot loop (go_bootloop): it
+        must still run its own template (BAD-TEMPLATE).
+    safemode-ten: a plug converted to ESPHome, switched off within a minute
+        of starting ten times, which ESPHome takes for a boot loop and starts
+        in safe mode (go_safemode); then the tool, to ESPHome, Tasmota or
+        Sonoff: it must know the plug for ESPHome in safe mode, not the mover
+        (FAIL-TAKEN-FOR-MOVER)."""
     def one(route, step, fault, arg, at=40):
         return dict(id=sid(route, step, fault, arg, at), route=route, step=step, fault=fault, arg=arg, at=at)
 
@@ -244,21 +269,31 @@ def composite_scenarios():
         for step in ("F4", "G1"):
             yield one(route, step, "seven", "times")
         yield one(route, "F4", "nohook", "run")
+        for at in (10, 50, 90):
+            yield one(route, "F4tp", "nohook", "cut", at)
         for at, fault, arg in ((10, "plugoff", 1), (50, "plugoff", 1), (90, "plugoff", 1),
                                (50, "plugoff", 5), (50, "crash", 1)):
             yield one(route, "F4rs", fault, arg, at)
-    for tag, steps in LEGACY_STEPS.items():
-        for step in steps:
-            yield one("sonoff>tasmota", step, "legacy", tag)
-        # Killed at F4, past its commit; then the plug switched off part way
-        # through G1 of the run after, writing over that release's startup firmware.
-        yield one("sonoff>tasmota", "F4", "legacy", f"{tag}+G1off")
-        for route in ("tasmota>esphome", "tasmota>sonoff"):
+    for tag, routes in LEGACY_STEPS.items():
+        for route, steps in routes.items():
+            for step in steps:
+                yield one(route, step, "legacy", tag)
+        for route in LEGACY_STARTS[tag]:
             yield one(route, "start", "legacy", tag)
+    # Killed at F4, past its commit; then the plug switched off part way
+    # through G1 of the run after, writing over 1.2.0's startup firmware,
+    # which it cannot rebuild.
+    yield one("sonoff>tasmota", "F4", "legacy", "v1.2.0+G1off")
     for route in ("tasmota>tasmota", "tasmota>esphome", "tasmota>sonoff"):
         yield one(route, "start", "lostapp", "factory")
     for route in ("tasmota>tasmota", "tasmota>esphome"):
         yield one(route, "start", "lostapp", "switched")
+    for route in ("tasmota>tasmota", "tasmota>esphome", "tasmota>sonoff"):
+        yield one(route, "start", "notemplate", "generic")
+    for route in ("sonoff>tasmota", "esphome>tasmota"):
+        yield one(route, "start", "bootloop", "fallback")
+    for route in ("esphome>esphome", "esphome>tasmota", "esphome>sonoff"):
+        yield one(route, "start", "safemode", "ten")
     for route, step in BLIP_STEPS:
         yield one(route, step, "blips", 3, at=10)
         yield one(route, step, "lossy", "phase", at=10)
@@ -274,10 +309,25 @@ BLIP_STEPS = (("sonoff>tasmota", "E2"), ("esphome>tasmota", "G1"), ("sonoff>esph
               ("tasmota>esphome", "L1"), ("tasmota>sonoff", "R1"))
 
 
-# The releases whose runs this checkout must carry on: each one's steps (from
-# Sonoff to Tasmota, its only way) and their usual lengths on the emulator.
-LEGACY_STEPS = {"v1.2.0": {"C2": 20, "C3": 14, "D1": 18, "D4": 31, "E1": 2, "E2": 29, "E3": 5,
-                           "F2": 35, "F4": 31, "G1": 33, "H1": 2}}
+# The releases whose runs this checkout must carry on: each one's steps from
+# Sonoff, by route, and their usual lengths on the emulator then.  1.2.0 is
+# the last before 2.0.0's renames; the latest release is the one people have
+# when the firmware the tool installs changes (docs/updating-firmware.md),
+# its runs pinned to the firmware before.
+LEGACY_STEPS = {
+    "v1.2.0": {"sonoff>tasmota": {"C2": 20, "C3": 14, "D1": 18, "D4": 31, "E1": 2, "E2": 29,
+                                  "E3": 5, "F2": 35, "F4": 31, "G1": 33, "H1": 2}},
+    "v2.0.2": {"sonoff>tasmota": {"C2": 20, "C3": 14, "D1": 18, "D4": 31, "D5": 2, "E1": 2,
+                                  "E2": 17, "E3": 5, "F2": 35, "F4": 10, "G1": 21, "H1": 2},
+               "sonoff>esphome": {"C2": 20, "C3": 14, "D1": 18, "D4": 31, "D5": 2, "I1": 30,
+                                  "I2": 5}},
+}
+# Plugs each release converted, then taken on by this checkout ("start").
+# Before 2.0.0 the tool installed only Tasmota.
+LEGACY_STARTS = {
+    "v1.2.0": ("tasmota>esphome", "tasmota>sonoff"),
+    "v2.0.2": ("tasmota>esphome", "tasmota>sonoff", "esphome>tasmota", "esphome>sonoff"),
+}
 LEGACY = EMU / "legacy"
 LEGACY_TOOL = "tools/s60_autoflash.py"  # its name until 2.0.0
 # What a run says when an error it did not expect stops it (autoflash_cli._main).
@@ -288,8 +338,9 @@ _legacy_lock = threading.Lock()
 
 def legacy_tree(tag):
     """The tool as release `tag` shipped, to run in the emulator: its tagged
-    files, and only tools/emulator/legacy/<tag>.patch on top - which points it
-    at the cloud stub, as this checkout's AUTOFLASH_EWELINK_API_BASE does."""
+    files, and only tools/emulator/legacy/<tag>.patch on top, where it has
+    one - 1.2.0's points it at the cloud stub, as AUTOFLASH_EWELINK_API_BASE
+    has done since 2.0.0."""
     tree = LEGACY / tag
     with _legacy_lock:
         if not (tree / ".complete").exists():
@@ -298,8 +349,9 @@ def legacy_tree(tag):
             archive = subprocess.run(["git", "-C", str(REPO), "archive", tag], capture_output=True,
                                      check=True).stdout
             subprocess.run(["tar", "-x", "-C", str(tree)], input=archive, check=True)
-            subprocess.run(["patch", "-s", "-p1", "-d", str(tree), "-i",
-                            str(REPO / f"tools/emulator/legacy/{tag}.patch")], check=True)
+            patch = REPO / f"tools/emulator/legacy/{tag}.patch"
+            if patch.exists():
+                subprocess.run(["patch", "-s", "-p1", "-d", str(tree), "-i", str(patch)], check=True)
             (tree / ".complete").write_text(f"{tag}\n")
     return tree
 
@@ -433,7 +485,7 @@ class Tuner:
     def note(self, text):
         line = f"{time.strftime('%T')} TUNER {text} (workers {self.workers}, pause {self.cool_down:.0f}s)"
         print(line, flush=True)
-        with open(OUT / "tuning.log", "a") as f:
+        with open(OUT / "tuning.log", "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
     def finished(self, row, log, started):
@@ -451,7 +503,7 @@ class Tuner:
                 # Sonoff's firmware stays away from eWeLink after one, which
                 # would read as the cloud's fault.
                 try:
-                    text = Path(log).read_text(errors="replace")
+                    text = Path(log).read_text(encoding="utf-8", errors="replace")
                     ok = not self.TROUBLE.search(text) or bool(self.NOT_THE_CLOUD.search(text))
                 except OSError:
                     pass
@@ -627,7 +679,7 @@ class PlugMonitor:
                     ended = now_ended
                 elif now_ended > ended:
                     break
-                with open(uart, errors="replace") as f:
+                with open(uart, encoding="utf-8", errors="replace") as f:
                     f.seek(pos); boots = f.read(); pos = f.tell()
                 if any(m.lastgroup != "sonoff" for m in BOOTS.finditer(boots)):
                     break
@@ -685,9 +737,15 @@ class Scenario:
         self.fired = None
         self.notes = {}
         self.step_length = 60  # the step under test's usual length (go_watched)
+        self.earlier_release_wrote = {}  # each run log, as far as a legacy run left it
+
+    def ours(self, log, text):
+        """What this checkout's runs wrote to a run log: past what an earlier
+        release's run (go_legacy), carried on in the same run, wrote first."""
+        return text[self.earlier_release_wrote.get(log, 0):]
 
     def say(self, text):
-        with open(self.log, "a") as f:
+        with open(self.log, "a", encoding="utf-8") as f:
             f.write(f"{time.strftime('%T')} {text}\n")
 
     def ex(self, *args, timeout=60):
@@ -714,7 +772,7 @@ class Scenario:
             env["AUTOFLASH_EMULATOR_COUNTDOWN"] = "30"
         if self.sc["fault"] == "nohook":
             env["AUTOFLASH_EMULATOR_NO_AT_SAVE"] = "1"
-        with open(self.log, "a") as out:
+        with open(self.log, "a", encoding="utf-8") as out:
             out.write(f"--- {' '.join(args[1:])}\n")
             out.flush()
             try:
@@ -779,7 +837,7 @@ class Scenario:
         elif fault == "crash":
             self.signal("KILL", *HELPERS, TOOL)
         elif fault == "legacy":
-            self.signal("KILL", *HELPERS, LEGACY_TOOL)
+            self.signal("KILL", *HELPERS, LEGACY_TOOL, TOOL)
         elif fault == "cancel":
             self.signal("INT"); time.sleep(1); self.signal("INT")
         elif fault == "ctrlc" and arg == "once":
@@ -983,7 +1041,7 @@ class Scenario:
                     pass
 
     def screen_result(self):
-        text = Path(self.log).read_text(errors="replace")
+        text = Path(self.log).read_text(encoding="utf-8", errors="replace")
         runs = text.split("--- ")[-1]
         clean = re.sub(r"\x1b\[[0-9;]*m", "", runs)
         if "there is nothing to convert" in clean:
@@ -1139,6 +1197,12 @@ class Scenario:
             return self.go_legacy()
         if sc["fault"] == "lostapp":
             return self.go_lostapp()
+        if sc["fault"] == "notemplate":
+            return self.go_notemplate()
+        if sc["fault"] == "bootloop":
+            return self.go_bootloop()
+        if sc["fault"] == "safemode":
+            return self.go_safemode()
         if step == "C2":
             source, self.target, steps = None, C2_ROUTES[route], {"C2": 20}
         else:
@@ -1153,7 +1217,8 @@ class Scenario:
             # its usual time (X1's upload), and a short step's in seconds.
             delay = 0.3
         fault, arg = sc["fault"], sc["arg"]
-        first_fault = (arg.split("-")[0], int(arg.split("-")[1])) if fault == "double" else (fault, arg)
+        first_fault = ((arg.split("-")[0], int(arg.split("-")[1])) if fault == "double" else
+                       ("plugoff", 1) if (fault, arg) == ("nohook", "cut") else (fault, arg))
         stop = threading.Event()
         since = time.time()
         injector = threading.Thread(target=self.inject, args=(since, None, delay, stop, *first_fault),
@@ -1174,29 +1239,34 @@ class Scenario:
     def go_legacy(self):
         """An earlier release's run (sc["arg"]) on a plug fresh from Sonoff,
         killed at 40% of the step under test - or, at "start", let convert it
-        to Tasmota - then this checkout's tool again and again, as a person
-        would, until the plug is converted (to the route's target)."""
+        to the route's first firmware - then this checkout's tool again and
+        again, as a person would, until the plug is converted (to the route's
+        target)."""
         sc = self.sc
-        step, self.target = sc["step"], sc["route"].split(">")[1]
+        step, (source, self.target) = sc["step"], sc["route"].split(">")
         # "+G1off": the plug switched off, too, part way through G1 of the
         # first run after - G1 then writing over that release's startup
         # firmware, unproven (step_restore), and carrying on after a cut.
+        # That G1 is this checkout's, and as long as its.
         tag, _, then = sc["arg"].partition("+")
-        later = ("G1", "plugoff", 1, 0.6 * 33) if then == "G1off" else None
+        steps = LEGACY_STEPS[tag].get(sc["route"], {})
+        later = ("G1", "plugoff", 1, 0.6 * ROUTES[sc["route"]][2]["G1"]) if then == "G1off" else None
         old = legacy_tree(tag)
         stop = threading.Event()
         if step != "start":
-            self.step_length = LEGACY_STEPS[tag][step]
+            self.step_length = steps[step]
             threading.Thread(target=self.inject, args=(time.time(), None, 0.4 * self.step_length, stop,
                                                        "legacy", sc["arg"]), daemon=True).start()
-        results = [(self.run_tool("tasmota", fresh=True, code=old), None)]
+        first = source if step == "start" else self.target
+        results = [(self.run_tool(first, fresh=True, code=old), None)]
         results[-1] = (results[-1][0], self.screen_result())
         stop.set()
+        self.earlier_release_wrote = {log: len(text) for _, log, text in run_logs(self.state)}
         if step == "start":
             if "Converted" not in results[-1][1]:
                 return self.finish(results, "OLD-RUN-FAILED")
             # Its starting point, not the end: the conversion under test is next.
-            results[-1] = (results[-1][0], f"on Tasmota, by {sc['arg']}")
+            results[-1] = (results[-1][0], f"on {dict(tasmota='Tasmota', esphome='ESPHome')[source]}, by {sc['arg']}")
         elif self.fired is None:
             return self.finish(results, "NOT-FIRED")
         return self.again(results, self.target, [], code=REPO, later=later)
@@ -1255,6 +1325,138 @@ class Scenario:
         results[-1] = (results[-1][0], "on Tasmota's safeboot, Tasmota missing")
         return self.again(results, self.target, [])
 
+    def tasmota(self, command):
+        """What the plug's Tasmota answers to `command`, as JSON - or None."""
+        out = self.ex("curl", "-s", "-m", "10", "-G", "-e", f"{PLUG_URL}/",
+                      "--data-urlencode", f"cmnd={command}", f"{PLUG_URL}/cm").stdout
+        try:
+            return json.loads(out)
+        except ValueError:
+            return None
+
+    def template_ok(self):
+        """Whether the plug runs Tasmota with the S60's template, asked a few
+        times: it may still be starting."""
+        for _ in range(6):
+            template, module = self.tasmota("Template"), self.tasmota("Module")
+            if isinstance(template, dict) and isinstance(module, dict):
+                self.notes["template"] = template.get("NAME")
+                return "S60" in str(template.get("NAME")) and "0" in (module.get("Module") or {})
+            time.sleep(5)
+        return False
+
+    def go_notemplate(self):
+        """A converted plug on Tasmota whose template a person replaced with
+        Tasmota's generic one - which switches nothing (Sonoff-OTA discussion
+        #8) - having set it up for themselves (an MQTT host). Then the tool:
+        to Tasmota it gives the template alone, the MQTT host kept; to the
+        others it leaves Tasmota as from any converted plug, never by X1."""
+        self.target = self.sc["route"].split(">")[1]
+        results = [(self.run_tool("tasmota", source="suite-tasmota"), None)]
+        results[-1] = (results[-1][0], self.screen_result())
+        if "nothing to convert" not in results[-1][1]:
+            return self.finish(results, "NOT-FIRED")
+        generic = json.dumps({"NAME": "Generic", "GPIO": [0] * 22, "FLAG": 0, "BASE": 1}, separators=(",", ":"))
+        self.say("NOTEMPLATE: the generic template and an MQTT host set, as a person might")
+        self.tasmota(f"Backlog MqttHost {NOTEMPLATE_MQTT_HOST}; Template {generic}; Module 0")
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            time.sleep(5)
+            template = self.tasmota("Template")
+            if isinstance(template, dict) and template.get("NAME") == "Generic":
+                break
+        else:
+            self.say("NOTEMPLATE: the plug did not take the generic template")
+            return self.finish(results, "NOT-FIRED")
+        results[-1] = (results[-1][0], "on Tasmota, without the plug's template")
+        return self.again(results, self.target, [])
+
+    def go_bootloop(self):
+        """A plug converted to Tasmota, then put through what Tasmota does
+        at the sixth start in a row within 10 s of the last: taking that for
+        a boot loop, it goes over to its fallback module - Generic, unless
+        the plug's own template is set there - keeping its Wi-Fi. Left on
+        Generic, the plug switches nothing (Sonoff-OTA discussion #8).
+
+        Done here as Tasmota would, by `Module` to the fallback `Module2`
+        names: Tasmota counts those starts in RTC memory, which the emulator
+        loses at every restart (plug-supervisor starts QEMU afresh). The
+        restarts themselves would also do harm a real plug may not: each
+        start ending before 8 s counts as a quick power cycle, kept in flash,
+        and at the seventh Tasmota erases every setting, its Wi-Fi too."""
+        route = self.sc["route"]
+        source, self.target, _ = ROUTES[route]
+        source = AFTER_D1.get(route, source)
+        results = [(self.run_tool(self.target, source=source), None)]
+        results[-1] = (results[-1][0], self.screen_result())
+        while "Converted" not in results[-1][1] and len(results) < MAX_RUNS:
+            results.append((self.run_tool(self.target), None))
+            results[-1] = (results[-1][0], self.screen_result())
+        self.target_final = self.target
+        if "Converted" not in results[-1][1]:
+            return self.finish(results, None)
+        fallback = self.tasmota("Module2")
+        fallback = fallback.get("Module2") if isinstance(fallback, dict) else None
+        if not isinstance(fallback, dict) or len(fallback) != 1:
+            self.say(f"BOOTLOOP: the plug did not say its fallback module ({fallback})")
+            return self.finish(results, "NOT-FIRED")
+        (number, name), = fallback.items()
+        self.notes["fallback_module"] = name
+        self.say(f"BOOTLOOP: the plug goes over to its fallback module, {name} ({number})")
+        self.tasmota(f"Module {number}")
+        time.sleep(15)  # Module restarts the plug; template_ok waits on from there
+        return self.finish(results, None)
+
+    def ports_open(self, *ports):
+        """Which of `ports` the plug takes a connection on now."""
+        probe = ("import socket, sys\n"
+                 "for port in sys.argv[1:]:\n"
+                 "    try:\n"
+                 "        socket.create_connection(('192.168.60.50', int(port)), timeout=2).close()\n"
+                 "        print(port)\n"
+                 "    except OSError:\n"
+                 "        pass\n")
+        out = self.ex("python3", "-I", "-c", probe, *map(str, ports)).stdout
+        return {int(port) for port in out.split()}
+
+    def go_safemode(self):
+        """A plug converted to ESPHome, then switched off within a minute of
+        starting ten times in a row: ESPHome takes that for a boot loop and
+        starts in safe mode - Wi-Fi and its update service only, no page, no
+        relay - for five minutes, then restarts as itself. All the network
+        sees is the update service, as the mover has. Then the tool, to
+        ESPHome, Tasmota or Sonoff.
+
+        ESPHome keeps its count in flash, so the emulator keeps it too. Each
+        start counts as it begins, before Wi-Fi: cut once the update service
+        answers. A normal start has its page up by then; safe mode never."""
+        self.target = self.sc["route"].split(">")[1]
+        results = [(self.run_tool("esphome", source="suite-esphome"), None)]
+        results[-1] = (results[-1][0], self.screen_result())
+        if "nothing to convert" not in results[-1][1]:
+            return self.finish(results, "NOT-FIRED")
+        cuts = 0
+        while True:
+            deadline, open_now = time.time() + 50, set()
+            while time.time() < deadline and ESPHOME_OTA_PORT not in open_now:
+                time.sleep(0.5)
+                open_now = self.ports_open(ESPHOME_OTA_PORT, 80)
+            if ESPHOME_OTA_PORT not in open_now:
+                self.say(f"SAFEMODE: ESPHome did not answer within 50 s of starting ({cuts} cuts)")
+                return self.finish(results, "NOT-FIRED")
+            time.sleep(2)
+            if 80 not in open_now and 80 not in self.ports_open(80):
+                break  # in safe mode
+            if cuts == 12:
+                self.say("SAFEMODE: still starting normally after 12 cuts")
+                return self.finish(results, "NOT-FIRED")
+            self.ex(PLUG_CMD, "off"); time.sleep(1); self.ex(PLUG_CMD, "on")
+            cuts += 1
+        self.notes["safemode_cuts"] = cuts
+        self.say(f"SAFEMODE: in safe mode after {cuts} cuts: its update service only")
+        results[-1] = (results[-1][0], "on ESPHome's safe mode")
+        return self.again(results, self.target, [])
+
     def until_page(self, path, words, limit):
         """Whether the plug's page `path` says `words`, in any case, within `limit` seconds."""
         deadline = time.time() + limit
@@ -1275,7 +1477,7 @@ class Scenario:
         sc = self.sc
         fault, arg = sc["fault"], sc["arg"]
         while "Converted" not in results[-1][1] and len(results) < MAX_RUNS:
-            said = re.sub(r"\s+", " ", Path(self.log).read_text(errors="replace").split("--- ")[-1])
+            said = re.sub(r"\s+", " ", Path(self.log).read_text(encoding="utf-8", errors="replace").split("--- ")[-1])
             if "switch the plug off and on" in said or "switch it off and on" in said:
                 self.say("following the run's advice: the plug switched off and on")
                 self.ex(PLUG_CMD, "restart")
@@ -1293,16 +1495,20 @@ class Scenario:
             if later and len(results) == 1:
                 step, later_fault, later_arg, later_delay = later
 
-                def later_inject(since=time.time(), headers=self.headers_now()):
-                    self.inject(since, headers, later_delay, stop2, later_fault, later_arg, False, step)
-                    if not stop2.is_set():
-                        self.notes["later_fired"] = f"{later_fault}-{later_arg} at {step}"
-                threading.Thread(target=later_inject, daemon=True).start()
+                # Given its stop event, not reading stop2 when done: by then the
+                # loop may have made a new one, never set, for the next run.
+                def later_inject(since, headers, stop, step, fault, arg, delay):
+                    self.inject(since, headers, delay, stop, fault, arg, False, step)
+                    if not stop.is_set():
+                        self.notes["later_fired"] = f"{fault}-{arg} at {step}"
+                threading.Thread(target=later_inject, daemon=True,
+                                 args=(time.time(), self.headers_now(), stop2, step,
+                                       later_fault, later_arg, later_delay)).start()
             results.append((self.run_tool(target, extra, code=code), None))
             results[-1] = (results[-1][0], self.screen_result())
             stop2.set()
             extra, code = [], None
-            said = re.sub(r"\s+", " ", Path(self.log).read_text(errors="replace").split("--- ")[-1])
+            said = re.sub(r"\s+", " ", Path(self.log).read_text(encoding="utf-8", errors="replace").split("--- ")[-1])
             if (fault, arg) == ("cancel", "switch") and "cannot switch to" in said:
                 # Refused, as it should be: started again for the other one, as it says.
                 self.notes["switch_refused"] = True
@@ -1372,13 +1578,26 @@ class Scenario:
             self.notes["restore_carried_on_after"] = int(found[-1]) if found else 0
             if not self.notes.get("later_fired") and not special:
                 special = "NOT-FIRED"
+        ours = re.sub(r"\s+", " ", "".join(self.ours(p, t) for m, p, t in run_logs(self.state)
+                                           if m >= self.started))
+        converted_from_untemplated = "Converting the plug from Tasmota without the plug's template" in ours
+        target_final = getattr(self, "target_final", self.target)
+        template_bad = converted and target_final == "tasmota" and not self.template_ok()
+        # The report of the last run, from a converted plug (its backup taken
+        # by the run that converted it): not a legacy release's.
+        line = re.findall(r"Sonoff backup:\s+(.*)", re.sub(r"\x1b\[[0-9;]*m", "", Path(self.log).read_text(
+            encoding="utf-8", errors="replace").split("--- ")[-1]))
+        backup_line = (line[-1].strip() if line and not sc["route"].startswith("sonoff>")
+                       and fault != "legacy" else None)
         if not special:
             if self.notes.get("mistimed"):
                 special = "MISTIMED"
-            elif any(UNEXPECTED in t for m, _, t in run_logs(self.state) if m >= self.started):
+            elif any(UNEXPECTED in self.ours(p, t) for m, p, t in run_logs(self.state) if m >= self.started):
                 # A run stopped by an error the tool did not see coming - a bug,
                 # whatever the fault - though the next run may convert the plug
                 # (seen: a report that could not be made, KeyError: 'safeboot').
+                # Not an earlier release's, which is out already (1.2.0's
+                # TimeoutError as G1 starts).
                 special = "FAIL-UNEXPECTED"
             elif fault == "corrupt" and not self.notes.get("corrupted_packets"):
                 special = "NO-TRAFFIC"
@@ -1410,6 +1629,24 @@ class Scenario:
             elif fault == "nohook" and "Settings reset to Tasmota's defaults, keeping the Wi-Fi; the plug" \
                     not in re.sub(r"\s+", " ", "".join(t for _, _, t in run_logs(self.state))):
                 special = "NOT-FIRED"  # F4 took the name and template at the save after all
+            elif any(len(re.findall(r"Type PROCEED to go ahead", run)) > 1
+                     for m, p, t in run_logs(self.state) if m >= self.started
+                     for run in self.ours(p, t).split("=== run started")):
+                special = "FAIL-ASKED-AGAIN"  # the go-ahead is asked once a run
+            elif fault == "safemode" and "ESPHome in safe mode" not in ours:
+                special = "FAIL-TAKEN-FOR-MOVER"  # sent the startup firmware, even to stay on ESPHome
+            elif fault == "notemplate" and not converted_from_untemplated:
+                special = "FAIL-NOT-UNTEMPLATED"  # taken for something else
+            elif fault == "notemplate" and "ESPHome's update service did not answer" in ours:
+                special = "FAIL-X1-ON-TASMOTA"  # sent the hub's steps, as in #8
+            elif fault == "notemplate" and self.target == "tasmota" and converted and (
+                    "Settings reset to Tasmota's defaults" in ours
+                    or (self.tasmota("MqttHost") or {}).get("MqttHost") != NOTEMPLATE_MQTT_HOST):
+                special = "FAIL-SETTINGS-LOST"  # its owner's settings reset with the template
+            elif converted and template_bad:
+                special = "BAD-TEMPLATE"  # a Tasmota that switches nothing
+            elif converted and backup_line and backup_line != "Taken by an earlier run":
+                special = "FAIL-BACKUP-LINE"  # its backup is on this computer
             elif converted and (unknown or final):
                 # A name this plug should never have, or not its converted
                 # one at the end (docs/device-names.md).
@@ -1432,11 +1669,11 @@ class Scenario:
                "results": [r for _, r in results], "codes": [c for c, _ in results],
                "notes": self.notes, "leftovers": left, "log": str(self.log),
                "finished": time.strftime("%Y-%m-%d %H:%M:%S"), "host": os.uname().nodename}
-        with open(RESULTS, "a") as f:
+        with open(RESULTS, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         if verdict != "PASS":
             # This scenario's own screens: the run's log goes back further.
-            if STRANDED.search(re.sub(r"\s+", " ", Path(self.log).read_text(errors="replace"))):
+            if STRANDED.search(re.sub(r"\s+", " ", Path(self.log).read_text(encoding="utf-8", errors="replace"))):
                 try:
                     self.probe()
                 except Exception as exc:  # noqa: BLE001 - a look, never the verdict
@@ -1515,7 +1752,7 @@ def worker(n, todo, lock, cloud=False, room=None):
         skip = OUT / "skip.txt"
         if skip.exists() and sc["id"] in skip.read_text().split():
             continue
-        while int(re.search(r"MemAvailable:\s+(\d+)", Path("/proc/meminfo").read_text()).group(1)) < 350_000:
+        while int(re.search(r"MemAvailable:\s+(\d+)", Path("/proc/meminfo").read_text(encoding="utf-8")).group(1)) < 350_000:
             time.sleep(10)
         log = LOGS / (key(sc["id"]) + ".log")
         log.unlink(missing_ok=True)
@@ -1525,7 +1762,7 @@ def worker(n, todo, lock, cloud=False, room=None):
         except Exception as exc:  # noqa: BLE001
             row = {**sc, "instance": n, "verdict": "HARNESS-ERROR", "error": repr(exc), "trace": traceback.format_exc(),
                    "finished": time.strftime("%Y-%m-%d %H:%M:%S")}
-            with open(RESULTS, "a") as f:
+            with open(RESULTS, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + "\n")
             sh("docker", "stop", name(n), timeout=120)
         with lock:
@@ -1541,7 +1778,7 @@ def batch(ids_file=None):
     known = {sc["id"]: sc for sc in scenarios()}
     done = {i for i, row in latest().items() if row["verdict"] in ("PASS", "EMULATOR-LIMIT", "NO-TRAFFIC")}
     cloud, anywhere = queue.Queue(), queue.Queue()
-    ids = Path(ids_file).read_text().split() if ids_file else list(known)
+    ids = Path(ids_file).read_text(encoding="utf-8").split() if ids_file else list(known)
     for i in ids:
         if i in done:
             continue
@@ -1601,7 +1838,7 @@ def prep():
         if stop_after:
             threading.Thread(target=stopped_after, args=(stop_after, sc, since), daemon=True).start()
         stub = ["--stub-cloud"] if STUB_CLOUD else []
-        with open(log, "w") as out:
+        with open(log, "w", encoding="utf-8") as out:
             subprocess.call([unattended, f"--instance={n}", f"--plug={MAC}", f"--save={saved(save)}",
                              *stub, *args], stdout=out, stderr=subprocess.STDOUT)
         monitor.stop.set()

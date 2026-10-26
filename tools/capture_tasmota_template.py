@@ -36,7 +36,7 @@ if __package__ in (None, ""):
 from tools.autoflash import tasmota_settings as ts  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
 from tools.autoflash.prompts import QuitRun, ask_yes_no, section  # noqa: E402
-from tools.safeboot_migration import OFFICIAL_TASMOTA_COMMIT, PINNED_ARTIFACTS  # noqa: E402
+from tools.safeboot_migration import INTERIM_TASMOTA_COMMIT, PINNED_ARTIFACTS  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -66,8 +66,8 @@ def capture(device: Device, saved: bytes | None = None) -> bytes:
     wanted = ".".join(ts.version_text(ts.TEMPLATE_VERSION).split(".")[:3])
     if not firmware.startswith(wanted + "("):
         raise ts.SettingsError(f"the plug runs Tasmota {firmware or 'unknown'}, not {wanted}")
-    if OFFICIAL_TASMOTA_COMMIT != ts.TEMPLATE_SOURCE_COMMIT:
-        raise ts.SettingsError("the bundle no longer pins the Tasmota release this supports")
+    if INTERIM_TASMOTA_COMMIT != ts.TEMPLATE_SOURCE_COMMIT:
+        raise ts.SettingsError("the tool no longer pins the interim Tasmota this supports")
 
     say("1. Backing up the plug's configuration (kept in memory only)...")
     original_backup = device.download_settings()

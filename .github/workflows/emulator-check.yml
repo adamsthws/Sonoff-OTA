@@ -1,0 +1,170 @@
+# The tool's unit tests, then the firmware a conversion ends on, run on the
+# emulator from the published public plugs (tools/emulator/public_plugs.py):
+# each final firmware installed, then each plug taken to the other. Nothing of
+# Sonoff's, no cloud and no secret: it runs on any runner, and a pull request
+# from a fork runs it as it is.
+name: Final firmware on the emulator
+
+on:
+  push:
+    paths:
+      - firmware.json
+      - artifacts/**
+      - ESPHome/**
+      - tools/**
+      - tests/**
+      - .github/workflows/emulator-check.yml
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # On the portable Python start.sh and tools/windows-python.ps1 install where
+  # there is no other - what most conversions run on (tests/test_release.py
+  # keeps the two the same).
+  unit:
+    name: unit (Python 3.12)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: python
+        with:
+          python-version: "3.12.10"
+      - name: Unit tests
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: |
+          "$PYTHON" -m venv .venv
+          .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
+          status=0
+          PYTHONUNBUFFERED=1 .venv/bin/python -m coverage run --source=tools \
+              -m unittest discover -s tests > unit.txt 2>&1 || status=$?
+          # Each failure with its traceback, then the count; the whole is kept below.
+          awk '/^(FAIL|ERROR): /{show=1} /^Ran [0-9]+ tests/{show=1} show' unit.txt | tail -400
+          grep -E "^(Ran [0-9]+ tests|OK|FAILED)" unit.txt >> "$GITHUB_STEP_SUMMARY" || true
+          # What of tools/ they run, to see what they miss: a report, not a gate.
+          {
+            echo
+            echo "The unit tests run $(.venv/bin/python -m coverage report --format=total)% of the lines in tools/."
+            echo
+            echo "<details><summary>By file, least first</summary>"
+            echo
+            .venv/bin/python -m coverage report --format=markdown --sort=cover
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY" || true
+          exit $status
+      - name: Keep the unit tests' output
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-tests
+          path: unit.txt
+          retention-days: 30
+
+  # The same on the oldest Python the tool runs on, 3.10: what a Mac's own
+  # Python may be, or one already installed where the portable Python cannot
+  # be had (start.sh, windows-python.ps1). Beside the job above, so no longer
+  # to wait for.
+  unit-oldest-python:
+    name: unit (Python 3.10)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        id: python
+        with:
+          python-version: "3.10"
+      - name: Unit tests
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
+        run: |
+          "$PYTHON" -m venv .venv
+          .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
+          status=0
+          PYTHONUNBUFFERED=1 .venv/bin/python -m unittest discover -s tests > unit.txt 2>&1 || status=$?
+          awk '/^(FAIL|ERROR): /{show=1} /^Ran [0-9]+ tests/{show=1} show' unit.txt | tail -400
+          grep -E "^(Ran [0-9]+ tests|OK|FAILED)" unit.txt >> "$GITHUB_STEP_SUMMARY" || true
+          exit $status
+      - name: Keep the unit tests' output
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-tests-python-3.10
+          path: unit.txt
+          retention-days: 30
+
+  emulator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read   # whether the emulator-image workflow is building the image
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The emulator's tools
+        run: |
+          command -v rsync >/dev/null || sudo apt-get install -y -q rsync
+          python3 -m venv .venv
+          .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
+      - name: The emulator image, once the emulator-image workflow has published it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # A push that changes what the image is built from starts the
+          # emulator-image workflow beside this one: wait for the image it
+          # publishes rather than build the same one here, as emu.sh does when
+          # none is published. The one waited for is the one emu.sh pulls.
+          published="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/autoflash-emu"
+          echo "AUTOFLASH_EMU_PUBLISHED=$published" >> "$GITHUB_ENV"
+          image="$published:$(tools/emulator/image.sh tag)"
+          echo "Emulator image: $image"
+          for _ in $(seq 60); do
+              if docker manifest inspect "$image" >/dev/null 2>&1; then
+                  echo "Published."; exit 0
+              fi
+              building=$(gh run list --workflow emulator-image.yml --commit "$COMMIT" --json status \
+                  --jq '[.[] | select(.status != "completed")] | length')
+              if [ "$building" = 0 ]; then
+                  echo "Not published, nor being built: emu.sh builds it here."; exit 0
+              fi
+              echo "The emulator-image workflow is building it: waiting..."
+              sleep 20
+          done
+          echo "Still not published after 20 minutes: emu.sh builds it here."
+      - name: The public plugs
+        run: .venv/bin/python -I tools/emulator/public_plugs.py fetch
+      - name: The final firmware, from them
+        run: |
+          set -o pipefail
+          .venv/bin/python -I tools/emulator/public_plugs.py test | tee test.txt
+          {
+            echo "### The final firmware on the emulator"
+            echo
+            echo '```'
+            cat test.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: emulator-logs
+          path: |
+            captures/emulation/public-plugs/
+            captures/emulation/state-*/work/captures/plugs/*/runs/*/run.log
+          if-no-files-found: ignore
+          retention-days: 30

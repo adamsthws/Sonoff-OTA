@@ -389,6 +389,31 @@ After a new router or a changed Wi-Fi password, the plug cannot join any more.
   `tasmota-abcdef`, or `ESP_` and six characters). Join it, browse to `http://192.168.4.1`
   and choose your Wi-Fi.
 
+## A converted plug that switches nothing
+
+Tasmota answers and stays on your Wi-Fi, but has no relay or power meter: in
+Home Assistant's Tasmota integration it shows only a restart button and its
+Wi-Fi. Tasmota restarted six times in a row, each within 10 seconds of
+starting, took that for a boot loop and went over to its fallback module,
+which knows nothing of the plug. A plug converted by 2.1.2 or later has its
+own template as that fallback and goes on switching; for one converted
+before, the check below puts the template back and makes it the fallback.
+Or, in the plug's web page under **Tools → Console**:
+
+```
+Backlog Template {"NAME":"Sonoff S60TPG","GPIO":[1,1,1,1,224,544,1,3104,1,32,1,0,0,0,0,0,0,0,1,1,1,1],"FLAG":0,"BASE":1}; Module2 0; Module 0
+```
+
+(`S60TPF` in the name for a European plug: the pins are the same.)
+
+## An ESPHome plug with no page and no relay
+
+ESPHome stopped within a minute of starting ten times in a row - switched
+off and on, say - takes that for a boot loop and starts in safe mode: on
+your Wi-Fi with only its update service, no page, no relay, nothing in Home
+Assistant. Five minutes on, it restarts as itself, with nothing lost; leave
+it switched on. The tool, run meanwhile, says so and waits for it.
+
 ## Checking a finished plug at any time
 
 ```sh
@@ -396,5 +421,8 @@ python3 tools/autoflash_cli.py step H1 --plug-ip 192.168.1.50
 ```
 
 Reads four areas of the plug's memory - the bootloader, the memory map, Safeboot
-and Tasmota - and compares them against the pinned files. Read-only - safe to
-run whenever you want reassurance.
+and Tasmota - and compares them against the pinned files, and checks Tasmota
+has the plug's template, as its fallback module too. Read-only but for that:
+a plug without its template (which switches nothing) is given it again, its
+other settings kept, and one without it as the fallback is given that. Safe
+to run whenever you want reassurance.

@@ -3,7 +3,7 @@
 ## Scope and present status
 
 This runbook migrates the one captured 4 MiB S60TPG from its Sonoff dual-OTA
-layout to the byte-for-byte partition table embedded in the pinned official
+layout to the partition table embedded in the pinned official
 `tasmota32c3.factory.bin`.
 
 The Python validators, host server and rendered Berry syntax are tested

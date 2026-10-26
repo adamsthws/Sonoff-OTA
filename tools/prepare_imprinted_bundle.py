@@ -41,8 +41,6 @@ try:
         APP0_OFFSET,
         APP0_SIZE,
         IMPRINTED_MODE,
-        OFFICIAL_INSTALL_COMMIT,
-        OFFICIAL_TASMOTA_COMMIT,
         OFFICIAL_URLS,
         PUBLISHED_BLUETOOTH_FILE,
         PUBLISHED_RECOVERY_FILE,
@@ -57,6 +55,8 @@ try:
         artifact_bytes,
         is_imprinted_manifest,
         load_manifest,
+        official_release,
+        release_urls,
         provide_in_memory,
         parse_partition_sector,
         require_exact_partitions,
@@ -76,8 +76,6 @@ except ModuleNotFoundError:  # running from inside tools/
         APP0_OFFSET,
         APP0_SIZE,
         IMPRINTED_MODE,
-        OFFICIAL_INSTALL_COMMIT,
-        OFFICIAL_TASMOTA_COMMIT,
         OFFICIAL_URLS,
         PUBLISHED_BLUETOOTH_FILE,
         PUBLISHED_RECOVERY_FILE,
@@ -92,6 +90,8 @@ except ModuleNotFoundError:  # running from inside tools/
         artifact_bytes,
         is_imprinted_manifest,
         load_manifest,
+        official_release,
+        release_urls,
         provide_in_memory,
         parse_partition_sector,
         require_exact_partitions,
@@ -145,8 +145,13 @@ def build_bundle(
     factory: Path | None = None,
     safeboot: Path | None = None,
     app: Path | None = None,
+    release: dict[str, Any] | None = None,
 ) -> tuple[Path, bytes | None]:
     """Build and validate the bundle; return the manifest path and recovery image.
+
+    The official files are those of the release pinned now, or of `release`,
+    one pinned before (firmware.json's "earlier"): a run past F2 has its app
+    on the plug, and ends on it.
 
     The recovery image carries the Wi-Fi password, so it is never written:
     the manifest pins its size and SHA-256, and the caller keeps the bytes in
@@ -180,10 +185,11 @@ def build_bundle(
     factory_path = output / "tasmota32c3.factory.bin"
     safeboot_path = output / "tasmota32c3-safeboot.bin"
     app_path = output / "tasmota32c3.bin"
+    urls = release_urls(release) if release else OFFICIAL_URLS
     try:
-        factory_bytes = obtain(factory, OFFICIAL_URLS["factory"], factory_path)
-        safeboot_bytes = obtain(safeboot, OFFICIAL_URLS["safeboot"], safeboot_path)
-        app_bytes = obtain(app, OFFICIAL_URLS["app"], app_path)
+        factory_bytes = obtain(factory, urls["factory"], factory_path)
+        safeboot_bytes = obtain(safeboot, urls["safeboot"], safeboot_path)
+        app_bytes = obtain(app, urls["app"], app_path)
     except OSError as exc:
         if isinstance(getattr(exc, "reason", None), ssl.SSLCertVerificationError):
             raise BundleError("could not download the official release files: "
@@ -217,18 +223,15 @@ def build_bundle(
 
     artifacts: dict[str, Any] = {
         "bluetooth": artifact_record(bluetooth_path.name, bluetooth, str(PUBLISHED_BLUETOOTH_FILE)),
-        "factory": artifact_record(factory_path.name, factory_bytes, str(factory.resolve()) if factory else OFFICIAL_URLS["factory"]),
-        "safeboot": artifact_record(safeboot_path.name, safeboot_bytes, str(safeboot.resolve()) if safeboot else OFFICIAL_URLS["safeboot"]),
-        "app": artifact_record(app_path.name, app_bytes, str(app.resolve()) if app else OFFICIAL_URLS["app"]),
+        "factory": artifact_record(factory_path.name, factory_bytes, str(factory.resolve()) if factory else urls["factory"]),
+        "safeboot": artifact_record(safeboot_path.name, safeboot_bytes, str(safeboot.resolve()) if safeboot else urls["safeboot"]),
+        "app": artifact_record(app_path.name, app_bytes, str(app.resolve()) if app else urls["app"]),
         "target_table": artifact_record(target_table_path.name, target_table, str(factory_path)),
     }
     manifest = {
         "schema": 1,
         "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "official_release": {
-            "install_commit": OFFICIAL_INSTALL_COMMIT,
-            "tasmota_commit": OFFICIAL_TASMOTA_COMMIT,
-        },
+        "official_release": official_release(release),
         "migration_mode": IMPRINTED_MODE,
         "imprinted_safeboot": {
             "artifact": RECOVERY_ARTIFACT,
@@ -292,11 +295,13 @@ def pin_wifi(manifest_path: Path, ssid: str, password: str) -> bytes:
     return image
 
 
-def validate_bundle(manifest_path: Path, recovery: bytes | None = None) -> dict[str, Any]:
+def validate_bundle(manifest_path: Path, recovery: bytes | None = None,
+                    current_only: bool = False) -> dict[str, Any]:
     """The gates the migration server applies to a bundle; returns the manifest.
 
     Without `recovery` - the Wi-Fi not known yet - the memory-only image is
-    skipped and everything else is checked.
+    skipped and everything else is checked. `current_only` refuses a bundle
+    of an official release pinned before this one, which the servers take.
     """
     manifest = load_manifest(manifest_path)
     if is_imprinted_manifest(manifest) and \
@@ -305,7 +310,7 @@ def validate_bundle(manifest_path: Path, recovery: bytes | None = None) -> dict[
     if recovery is not None:
         provide_in_memory(RECOVERY_ARTIFACT, recovery)
     verify_manifest_files(manifest_path, manifest, allow_unprovided=recovery is None)
-    require_pinned_artifacts(manifest)
+    require_pinned_artifacts(manifest, current_only=current_only)
     if recovery is not None or not (is_memory_only(manifest) or awaits_wifi(manifest)):
         require_recovery_manifest(manifest_path, manifest)
     return manifest

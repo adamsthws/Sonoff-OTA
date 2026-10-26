@@ -86,8 +86,12 @@ class PublishedESPHomeTests(unittest.TestCase):
         bootloader = esphome.published_bootloader()  # refuses a changed or broken file
         line = f"{sha256_bytes(bootloader)}  {esphome.BOOTLOADER.relative_to(ROOT).as_posix()}"
         self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
-        version = esphome.IMAGE.name.rsplit("-", 1)[1]
-        self.assertTrue(esphome.BOOTLOADER.name.endswith("-" + version), "built with the image")
+        # Named for the image whose build made it: this one's, or an earlier
+        # one's, kept when a later build's differed (docs/updating-firmware.md).
+        built = esphome.PINS["bootloader"]["version"]
+        self.assertTrue(esphome.BOOTLOADER.name.endswith(f"-{built}.bin"), "named for its build")
+        as_numbers = lambda version: tuple(int(part) for part in version.split("."))  # noqa: E731
+        self.assertLessEqual(as_numbers(built), as_numbers(esphome.PINS["image"]["version"]))
 
     def test_the_esphome_image_can_have_the_wifi_written_in(self):
         from tools.autoflash import esphome, imprint
