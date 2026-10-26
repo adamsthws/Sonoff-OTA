@@ -110,10 +110,15 @@ esphome:
               }
             }
 
+            // Else the one the conversion tool gave from the plug's Sonoff
+            // backup (autoflash_calibration), once Sonoff's NVS has none.
             const char *source;
             if (numbers.size() == 20) {
               std::copy(numbers.begin() + 2, numbers.end(), id(calibration).begin());
               source = "stock NVS";
+            } else if (id(calibration_given)) {
+              id(calibration) = id(calibration_from_backup);
+              source = "from backup";
             } else {
               source = "missing";
             }
@@ -182,13 +187,24 @@ globals:
     type: float
     initial_value: "1.0"
   # Two sets of [a, b, c] for current, voltage and power: below 300 W, then
-  # from 300 W on. Uncalibrated until read from Sonoff's NVS at boot.
+  # from 300 W on. Uncalibrated until read at boot from Sonoff's NVS, or
+  # from what the conversion tool gave.
   - id: calibration
     type: std::array<double, 18>
     initial_value: "{0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0}"
   - id: calibration_status
     type: std::string
     initial_value: '"unknown"'
+  # The factory calibration the conversion tool gave from the plug's Sonoff
+  # backup, for a plug whose Sonoff NVS no longer has it.
+  - id: calibration_from_backup
+    type: std::array<double, 18>
+    restore_value: true
+    initial_value: "{0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0, 0, 1e6, 0}"
+  - id: calibration_given
+    type: bool
+    restore_value: true
+    initial_value: "false"
   # The energy totals (Wh), counted from the meter's pulses. Doubles: a float
   # would drop a small load's few mWh once a total is large.
   - id: energy_daily_wh
@@ -242,6 +258,31 @@ api:
             data: !lambda |-
               root["ssid"] = wifi::global_wifi_component->get_sta().get_ssid();
               root["password"] = wifi::global_wifi_component->get_sta().get_password();
+    # The plug's factory calibration (the 18 numbers of calib_coefficient0
+    # after its two 1s), which the conversion tool gives from the plug's
+    # Sonoff backup: saved, and used when Sonoff's NVS has none - on a plug
+    # converted through Tasmota. The tool then reads the Calibration sensor.
+    # (No answer: ESPHome 2026.10.0 builds no action with a list that answers.)
+    - action: autoflash_calibration
+      variables:
+        coefficients: float[]
+      then:
+        - lambda: |-
+            if (coefficients.size() == 18) {
+              std::copy(coefficients.begin(), coefficients.end(), id(calibration_from_backup).begin());
+              id(calibration_given) = true;
+              if (id(calibration_status).rfind("stock NVS", 0) != 0) {
+                id(calibration) = id(calibration_from_backup);
+                id(calibration_status) = std::string("from backup, factor ") +
+                                         (id(meter_factor) == 1.0f ? "1.00" : "1.02");
+              }
+            }
+        - component.update: calibration_sensor
+        # Written to flash now, once the globals have saved themselves (each
+        # loop), not up to a minute later: unplugged in that minute, the plug
+        # would forget it.
+        - delay: 1s
+        - lambda: global_preferences->sync();
 
 ota:
   - platform: esphome
@@ -387,9 +428,11 @@ binary_sensor:
             args: [id(power).state, id(overload_threshold).state]
 
 text_sensor:
-  # Where the calibration came from (stock NVS or missing) and the board factor
+  # Where the calibration came from (stock NVS, from backup or missing) and
+  # the board factor
   - platform: template
     name: "Calibration"
+    id: calibration_sensor
     entity_category: diagnostic
     lambda: return id(calibration_status);
     update_interval: 60s

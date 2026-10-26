@@ -534,33 +534,67 @@ def api_wifi_details(host: str, port: int = API_PORT, timeout: float = 8.0,
     """The Wi-Fi the plug is on, name and password, from ESPHome itself - its
     Wi-Fi action, which ours has from 1.1.0. None from an ESPHome without
     it; ApiLocked from one whose API is encrypted and `key` is not its key."""
+    details = _action_answer(host, WIFI_ACTIONS, b"", port, timeout, key)
+    ssid = details.get("ssid") if details else None
+    if isinstance(ssid, str) and ssid:
+        return ssid, str(details.get("password") or "")
+    return None
+
+
+# Our ESPHome's action that takes the plug's factory calibration, from 1.4.0.
+CALIBRATION_ACTION = "autoflash_calibration"
+
+
+def api_give_calibration(host: str, coefficients: list[float], port: int = API_PORT,
+                         timeout: float = 8.0, key: bytes | None = None) -> bool:
+    """The plug's factory calibration (its 18 numbers) given to ESPHome; its
+    Calibration sensor then says what it made of it (calibration_state).
+    False from an ESPHome without the action; ApiLocked as api_wifi_details."""
+    # One argument, a list of floats: each its own field 8, as ESPHome sends them.
+    argument = b"".join(b"\x45" + struct.pack("<f", number) for number in coefficients)
+    return _action_answer(host, (CALIBRATION_ACTION,), b"\x12" + _varint(len(argument)) + argument,
+                          port, timeout, key, answered=False) is not None
+
+
+def calibration_state(host: str) -> str | None:
+    """What our ESPHome's Calibration sensor says (from 1.4.0): where its
+    calibration came from, and the board's factor."""
+    value = _state(host, "/text_sensor/Calibration")
+    return value if isinstance(value, str) else None
+
+
+def _action_answer(host: str, names: tuple[str, ...], arguments: bytes, port: int, timeout: float,
+                   key: bytes | None, answered: bool = True) -> dict | None:
+    """What one of our ESPHome's actions (the first of `names` it has)
+    answers, called with `arguments` (encoded): None from an ESPHome without
+    it, or that does not answer.  One not `answered` gives {} once called."""
     try:
         api = _Api(host, port, timeout, key)
     except OSError:
         return None
     try:
         api.send((_LIST, b""))
-        key = None
+        action_key = None
         for kind, payload in api.messages():
             if kind == _ACTION:
                 action = _fields(payload)
-                if action.get(1) in {name.encode() for name in WIFI_ACTIONS} and isinstance(action.get(2), int):
-                    key = action[2]
+                if action.get(1) in {name.encode() for name in names} and isinstance(action.get(2), int):
+                    action_key = action[2]
             elif kind == _LISTED:
-                if key is None:
+                if action_key is None:
                     return None
-                # Called with no arguments, as call 1, its answer wanted.
-                api.send((_CALL, b"\x0d" + struct.pack("<I", key) + b"\x18\x01\x20\x01"))
+                if not answered:
+                    api.send((_CALL, b"\x0d" + struct.pack("<I", action_key) + arguments))
+                    return {}
+                # Called as call 1, its answer wanted.
+                api.send((_CALL, b"\x0d" + struct.pack("<I", action_key) + arguments + b"\x18\x01\x20\x01"))
             elif kind == _ANSWER:
                 answer = _fields(payload)
                 if answer.get(1) != 1:
                     continue
                 data = answer.get(4)
                 details = json.loads(data) if answer.get(2) and isinstance(data, bytes) else {}
-                ssid = details.get("ssid") if isinstance(details, dict) else None
-                if isinstance(ssid, str) and ssid:
-                    return ssid, str(details.get("password") or "")
-                return None
+                return details if isinstance(details, dict) else None
     except (OSError, ValueError, IndexError):  # json.JSONDecodeError is a ValueError
         return None
     finally:

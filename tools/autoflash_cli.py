@@ -36,7 +36,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import credentials, hostsys, output, prompts, setup_network  # noqa: E402
 from tools.autoflash import __version__, esphome, imprint, plugs, tasmota_settings  # noqa: E402
-from tools.autoflash import awake, detect, esphome_ota, ewelink_lan, interrupt, kinds, noise, plans, safety_locks  # noqa: E402
+from tools.autoflash import awake, calibration, detect, esphome_ota, ewelink_lan, interrupt, kinds, noise, plans, safety_locks  # noqa: E402
 from tools.autoflash.device import Device, DeviceError, NeedsPassword, PASSWORD_HINT, UploadRefused  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.phases import (  # noqa: E402
@@ -1584,6 +1584,32 @@ def sonoff_backup_wifi(flash: bytes) -> tuple[str, str] | None:
             if isinstance(ssid, str) and ssid:
                 return ssid, str(params.get("passwd") or "")
     return None
+
+
+def sonoff_backup_calibration(flash: bytes) -> list[float] | None:
+    """The plug's factory meter calibration, from a backup of its Sonoff
+    firmware: calib_coefficient0 in its user_unusual (calibration says how
+    it is read)."""
+    names, values = inspect_stock_nvs.parse(flash[0x9000:0x19000])
+    for (namespace, key), value in values.items():
+        if names.get(namespace) == "user_unusual" and key == "content":
+            content = json.loads(value.data.split(b"\x00", 1)[0])
+            text = content.get("calib_coefficient0") if isinstance(content, dict) else None
+            return calibration.parse(text) if isinstance(text, str) else None
+    return None
+
+
+def backup_calibration(ctx: "Context") -> list[float] | None:
+    """The factory calibration in the plug's Sonoff backup on this computer;
+    None without a backup, or one that has none."""
+    mac = ctx.state.input("plug_mac")
+    backup = plugs.find_backup(mac) if mac else None
+    if backup is None:
+        return None
+    try:
+        return sonoff_backup_calibration((backup.directory / "flash.bin").read_bytes())
+    except (OSError, ValueError, KeyError):
+        return None
 
 
 def wifi_from_esphome(ctx: "Context") -> tuple[str, str] | None:
@@ -3535,7 +3561,34 @@ def startup_settings_report(device: Device) -> str | None:
 
 
 def step_configure(ctx: Context) -> dict[str, Any]:
-    """F3/F4 - Wi-Fi, settings persistence and the plug's template."""
+    """F3/F4 - Wi-Fi, settings persistence and the plug's template; then the
+    meter calibrated, which the template's reset put back to the chip's own."""
+    result = configure_tasmota(ctx)
+    result["meter"] = calibrate_tasmota_meter(ctx)
+    return result
+
+
+def calibrate_tasmota_meter(ctx: Context) -> dict[str, Any]:
+    """Tasmota's meter calibrated as Sonoff's firmware calibrates it: by the
+    board's factor and, from the plug's Sonoff backup, its own factory
+    calibration (calibration says what carries over).  Never fails the step:
+    a plug left as Tasmota calibrates it still works."""
+    try:
+        outcome = calibration.calibrate_tasmota(lambda text: ctx.device.command(text, timeout=SLOW_COMMAND),
+                                                backup_calibration(ctx))
+    except (DeviceError, OSError, ValueError) as exc:
+        outcome = {"skipped": str(exc)}
+    if "skipped" in outcome:
+        tell(f"    The meter is left as Tasmota calibrates it: {outcome['skipped']}.")
+    else:
+        say("Meter calibrated as Sonoff's firmware had it"
+            + (", with the plug's factory calibration from its backup" if outcome["factory"] else "")
+            + f" (board factor {outcome['factor']:.2f})")
+    return outcome
+
+
+def configure_tasmota(ctx: Context) -> dict[str, Any]:
+    """Wi-Fi, settings persistence and the plug's template (step_configure)."""
     if ctx.finder.poll():
         route = "joined by itself"
         say("Official Tasmota joined your Wi-Fi by itself, with the details the")
@@ -4388,7 +4441,45 @@ ESPHOME_CONFIRMS_AFTER = 70.0
 
 
 def step_esphome_check(ctx: Context, wait: float = 180.0) -> dict[str, Any]:
-    """I2 - ESPHome started from what was written, and joined the home Wi-Fi.
+    """I2 - ESPHome started from what was written, and joined the home Wi-Fi;
+    then given the plug's factory calibration, where its backup has it."""
+    result = wait_for_esphome(ctx, wait)
+    if not result.get("dry_run"):
+        result["meter"] = calibrate_esphome_meter(ctx)
+    return result
+
+
+def calibrate_esphome_meter(ctx: Context) -> dict[str, Any]:
+    """The plug's factory calibration, from its Sonoff backup, given to
+    ESPHome, which uses it when Sonoff's NVS has none: on a plug converted
+    through Tasmota.  ESPHome reads the board's factor itself."""
+    coefficients = backup_calibration(ctx)
+    if coefficients is None:
+        return {"skipped": "no factory calibration in a backup of the plug"}
+    host = ctx.state.input("plug_ip")
+    try:
+        given = esphome.api_give_calibration(host, coefficients, key=ctx.esphome_key)
+    except esphome.ApiLocked:
+        given = False
+    if not given:
+        tell("    ESPHome did not take the plug's factory calibration from its backup")
+        tell("    (one older than 1.4.0, or whose API key is not known).")
+        return {"skipped": "ESPHome did not take it"}
+    # Its sensor says what it made of it once the action has run.
+    state = None
+    for _ in range(10):
+        state = esphome.calibration_state(host)
+        if state and not state.startswith("missing"):
+            break
+        time.sleep(0.5)
+    if state and state.startswith("from backup"):
+        say("Gave ESPHome the plug's factory calibration, from its Sonoff backup")
+    return {"calibration": state}
+
+
+def wait_for_esphome(ctx: Context, wait: float) -> dict[str, Any]:
+    """ESPHome started from what was written, and joined the home Wi-Fi
+    (step_esphome_check).
 
     ESPHome sent to the mover as an update (from Tasmota) is not confirmed
     until it has run a minute: a power cut before then takes the plug back to

@@ -3877,7 +3877,8 @@ class ConfigureStepTests(unittest.TestCase):
         inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
                               state=SimpleNamespace(input=inputs.get))
-        with mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "back_after_reset") as back:
+        with mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "back_after_reset") as back, \
+             mock.patch.object(autoflash, "calibrate_tasmota_meter", return_value={}):
             result = autoflash.step_configure(ctx)
         self.assertEqual(hooked, [["Hostname tasmota-abcdef", f"Template {template}", "Module2 0", "Module 0"]])
         self.assertEqual([c for c in sent if " " in c], ["Reset 4"])  # nothing after it

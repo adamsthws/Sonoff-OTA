@@ -178,8 +178,11 @@ advance); steps 1-7 are the same for both.
    few milliseconds, twice each time - would leave a plug that has to be
    opened.
 9. **Install official Tasmota**, which joins your Wi-Fi by itself, apply the
-   plug's template and settings, and check the result. Only if it does not appear on your
-   network are you asked to join its setup network.
+   plug's template and settings, and check the result. Only if it does not
+   appear on your network are you asked to join its setup network. Then
+   **calibrate its meter** as Sonoff's firmware did: by the factor the plug's
+   board calls for, read from three of its pins, and by its own factory
+   calibration, from its Sonoff backup.
 
 At the end it checks the finished plug against the official Tasmota release,
 tells you whether every byte matches, and removes the temporary firewall rule
@@ -196,7 +199,9 @@ For **ESPHome**, after the bootloader, steps 8 and 9 are instead:
    still starts Tasmota. The memory layout itself is not changed.
 9. **Check ESPHome is running** and has joined your Wi-Fi. If it cannot, it
    puts up its own network, named like `esphome-abcdef`, where its page
-   asks for your Wi-Fi.
+   asks for your Wi-Fi. Then give it the plug's factory calibration from its
+   Sonoff backup, which it uses where the plug's own memory has lost it (on
+   a plug converted through Tasmota first).
 
 It then switches the relay off and on again through ESPHome to check it, and
 gives you the plug's ESPHome page.

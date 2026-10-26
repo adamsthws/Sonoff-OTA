@@ -18,10 +18,13 @@ them, and the diagnostic `Calibration` sensor says how:
 - `stock NVS, factor 1.02` (or `1.00`): the plug's factory calibration, read
   at start-up from what Sonoff's firmware left in its memory, and the factor
   its board calls for, read from three of its pins.
-- `missing, factor 1.02` (or `1.00`): no factory calibration is left, so only
-  the board's factor applies. This is expected on a plug converted through
-  Tasmota, whose new layout clears that memory, and costs little: on the
-  plugs examined so far the factory calibration changes nothing below 300 W.
+- `from backup, factor 1.02` (or `1.00`): Sonoff's memory has lost it - on a
+  plug converted through Tasmota, whose new layout clears it - so the
+  conversion tool gave it back from the plug's Sonoff backup.
+- `missing, factor 1.02` (or `1.00`): no factory calibration is left, and the
+  tool had no backup to give it from, so only the board's factor applies.
+  That costs little: on the plugs examined so far the factory calibration
+  changes nothing below 300 W.
 
 `Energy` is what the meter has counted since the plug started, in Wh,
 calibrated the same way. `Daily energy`, `Monthly energy`, `Yearly energy` and
@@ -53,6 +56,8 @@ signal - unless the API has an encryption key, when it is not read there.
 
 Keep the names of the four energy totals: the first boot after 1.3.0 finds
 what each had saved by its name, and Home Assistant keeps its history by it.
+Keep the `autoflash_calibration` action's name too: the tool gives the plug's
+factory calibration through it (from 1.4.0).
 
 The `autoflash_wifi` action (`s60_wifi` up to 1.1.0) gives the tool the
 plug's Wi-Fi name and password when the plug leaves ESPHome: the next

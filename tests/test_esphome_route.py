@@ -440,6 +440,49 @@ class WifiActionTests(unittest.TestCase):
         self.assertFalse(locked.exception.wrong)  # no key given: none to be wrong
 
 
+class CalibrationActionTests(unittest.TestCase):
+    """Our ESPHome takes the plug's factory calibration through its
+    calibration action, called with the 18 numbers as a list of floats and
+    no answer wanted."""
+
+    serve, LIST = WifiActionTests.serve, WifiActionTests.LIST
+    listed, answer, call = (staticmethod(WifiActionTests.listed), staticmethod(WifiActionTests.answer),
+                            staticmethod(WifiActionTests.call))
+    NUMBERS = [0.0, 1010000.0, 0.0] * 6
+
+    def test_the_numbers_go_as_one_list_of_floats(self):
+        import socket
+        import struct
+        import threading
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        self.addCleanup(server.close)
+        received = bytearray()
+
+        def run():
+            connection, _ = server.accept()
+            with connection:
+                while self.LIST not in received:
+                    received.extend(connection.recv(4096))
+                connection.sendall(self.listed((b"autoflash_wifi", 1), (b"autoflash_calibration", 0xCAFEF00D)))
+                while chunk := connection.recv(4096):
+                    received.extend(chunk)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        self.assertTrue(af.esphome.api_give_calibration("127.0.0.1", self.NUMBERS, server.getsockname()[1],
+                                                        timeout=3.0))
+        thread.join(3)
+        argument = b"".join(b"\x45" + struct.pack("<f", n) for n in self.NUMBERS)
+        self.assertIn(self.call(0xCAFEF00D) + b"\x12" + bytes([len(argument)]) + argument, bytes(received))
+
+    def test_an_esphome_without_the_action_gives_nothing(self):
+        # 1.3.0 and before.
+        port = self.serve((self.LIST, self.listed((b"autoflash_wifi", 1))))
+        self.assertFalse(af.esphome.api_give_calibration("127.0.0.1", self.NUMBERS, port, timeout=2.0))
+
+
 class EncryptedApiTests(unittest.TestCase):
     """An ESPHome whose API has an encryption key, spoken to as ESPHome's
     api_frame_helper_noise.cpp answers: the hello, the handshake, then each
