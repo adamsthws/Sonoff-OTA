@@ -6,9 +6,29 @@ installs the pre-built image in [`../artifacts/`](../artifacts/README.md) and
 writes the plug's Wi-Fi into it, in memory only.
 
 It is also the config Home Assistant takes when it adopts a converted plug
-(`dashboard_import`), so it is kept as one self-contained file: no includes,
-and no partition file - an app image does not contain the partition table,
-and the plug keeps Sonoff's.
+(`dashboard_import`), so it is kept as one self-contained file: no files of
+its own included (system headers only), and no partition file - an app image
+does not contain the partition table, and the plug keeps Sonoff's.
+
+## What it reports
+
+Power, voltage and current are corrected as Sonoff's own firmware corrects
+them, and the diagnostic `Calibration` sensor says how:
+
+- `stock NVS, factor 1.02` (or `1.00`): the plug's factory calibration, read
+  at start-up from what Sonoff's firmware left in its memory, and the factor
+  its board calls for, read from three of its pins.
+- `missing, factor 1.02` (or `1.00`): no factory calibration is left, so only
+  the board's factor applies. This is expected on a plug converted through
+  Tasmota, whose new layout clears that memory, and costs little: on the
+  plugs examined so far the factory calibration changes nothing below 300 W.
+
+`Energy` is what the meter has counted since the plug started, in Wh,
+calibrated the same way. `Daily energy`, `Monthly energy`, `Yearly energy` and
+`Total energy` are counted from the same pulses, so they agree with it, and
+are kept through restarts and updates; the first three start again at
+midnight, on the first of the month and on 1 January. From 1.3.0 or earlier,
+they carry on from where they were.
 
 ## Changing it
 
@@ -31,13 +51,17 @@ no such sensor (one built before 1.1.0, or from a config without it), the tool
 asks the native API for the configuration dump instead, which prints the
 signal - unless the API has an encryption key, when it is not read there.
 
-The `autoflash_wifi` action (`s60_wifi` up to 1.1.0) gives the tool the plug's Wi-Fi name and password when
-the plug leaves ESPHome: the next firmware needs them written in, and ESPHome
-says neither otherwise. Keep its name. Anything that can use the API can call
-it - anything on the home network, while the API has no encryption key - just
-as it could send the plug new firmware while OTA has no password. Giving the
-API a key closes it; the tool then takes the details from the plug's Sonoff
-backup, if your computer has it, or asks for them.
+Keep the names of the four energy totals: the first boot after 1.3.0 finds
+what each had saved by its name, and Home Assistant keeps its history by it.
+
+The `autoflash_wifi` action (`s60_wifi` up to 1.1.0) gives the tool the
+plug's Wi-Fi name and password when the plug leaves ESPHome: the next
+firmware needs them written in, and ESPHome says neither otherwise. Keep its
+name. Anything that can use the API can call it - anything on the home
+network, while the API has no encryption key - just as it could send the plug
+new firmware while OTA has no password. Giving the API a key closes it; the
+tool then takes the details from the plug's Sonoff backup, if your computer
+has it, or asks for them.
 
 An update password added later (`password:` under `ota:`) is asked for when
 the tool takes the plug off ESPHome, or given with `--esphome-ota-password`
