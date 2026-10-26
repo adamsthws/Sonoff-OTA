@@ -97,7 +97,7 @@ The stub replaces **both**, per instance, locally.
 A nuance confirmed in [test 4](#test-4--end-to-end---stub-cloud-conversion-through-c2):
 the bridge image is **not** delivered through the cloud. The conversion's
 `serve_tasmota_ota.py` connects to the IoT WebSocket as the *app* and sends an
-`upgrade` command carrying a download URL on **this computer**; the cloud relays
+`upgrade` command carrying a download URL on **your computer**; the cloud relays
 it to the device, which then fetches the image over plain **LAN HTTP**. So the
 OTA bytes never go through the cloud (no cloud OTA, no router redirect) — the
 cloud only carries the small `upgrade` message that triggers the LAN fetch.
@@ -440,7 +440,7 @@ stub logs every message, secret values redacted, so each run is also a capture.
 The examples are one stub run's (2026-10-19), from its log, in the order they
 came. Values that identify the plug or the account are shown as `<…>`: the device
 id is 10 hex digits starting `10`, the apikey and the LAN key are UUIDs, and the
-chip id is 12 hex digits. `192.168.60.1` is the emulator's router, where this
+chip id is 12 hex digits. `192.168.60.1` is the emulator's router, where your
 computer and the stub both are; the plug is `192.168.60.50`.
 
 **The plug and the stub**, each time the plug starts:
@@ -500,7 +500,7 @@ after the list.
   identity from its dump in-container, and starts the stub (non-fatally — a stub
   problem can't take the emulator down). It also exports `AUTOFLASH_EWELINK_API_BASE` /
   `SSL_CERT_FILE` for an interactive conversion.
-- **The internet** is handled like a `--cloud` run with one difference: this
+- **The internet** is handled like a `--cloud` run with one difference: your
   computer may reach the internet (so the conversion downloads the official
   firmware files as any new user's run does), but eWeLink's own hostnames resolve
   to `0.0.0.0` and lead nowhere, and the plug stays on its own network. Nothing
@@ -541,7 +541,7 @@ plug. Each parallel instance builds its own flash from the read-only stock dump.
 `step_check` (A5) builds the conversion bundle from the official Tasmota files
 unless a valid one is already present, and `emu.sh` excludes the host's bundle
 from the container (it is set up for the real home Wi-Fi). Since stub mode lets
-this computer reach the firmware CDN, A5 just downloads them as a new user's run
+your computer reach the firmware CDN, A5 just downloads them as a new user's run
 would — no pre-staging needed. The eWeLink-gated part of the conversion (up to
 and including C2) reaches no internet at all: the bridge image is a local
 artifact, delivered over LAN.
@@ -671,7 +671,7 @@ and an `upgrade` the cloud passes to the device. So the stub gained
 **app↔device relay**: until then it answered each socket on its own, and the
 command never reached the plug. Run: `emu.sh --stub-cloud`, then `autoflash_cli.py step
 {A0,A5,A1,A2,C2}` pointed at the stub. A5 built the Tasmota bundle by downloading
-the official files (stub mode lets this computer reach the firmware CDN while
+the official files (stub mode lets your computer reach the firmware CDN while
 eWeLink stays blocked). **Result:** A1 discover, A2 device key from the stub,
 **C2 complete in ~18 s** — the stub log shows the app dispatch and
 `relay app->device (upgrade)`, and the plug fetched the bridge over LAN and
@@ -868,7 +868,7 @@ X1 too, from its configuration dump: X1 -23, D4 -19, E1 -22, reported -23.
 - Stock dump untouched; all edits are on the per-instance working copy.
 - The real eWeLink is never reached in stub mode: its hostnames resolve to
   `0.0.0.0`, the tool is pointed at the local stub, and the plug stays on its own
-  network (this computer may reach the internet for the firmware downloads, as a
+  network (your computer may reach the internet for the firmware downloads, as a
   `--cloud` run does). The real cloud and real plugs cannot be affected.
 - `--fresh` restores the plug copy from the backup.
 - The CA private key stays in `captures/emulation/stub-cloud/` (git-ignored) and

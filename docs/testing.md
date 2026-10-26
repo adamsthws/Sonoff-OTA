@@ -48,7 +48,7 @@ processes, after five problems the first hundred runs found had been fixed:
 
 | Found | What it was | Fixed by |
 |---|---|---|
-| A test saw a sleep hold another had just taken | the awake tests check this computer's systemd inhibitors, which one takes while another checks none is left | running them as one (`TOGETHER` in `tests/run.py`) |
+| A test saw a sleep hold another had just taken | the awake tests check the computer's systemd inhibitors, which one takes while another checks none is left | running them as one (`TOGETHER` in `tests/run.py`) |
 | "recovery_safeboot size changed" | bundle tests left the recovery image in memory, for the next test's bundle | each starting and ending with none |
 | A wait of -1,000,000 s | a question left unanswered by one test was taken as the next's wait | `output.start()` beginning with no question pending |
 | "Address already in use" | a port picked free, let go, then taken by another test before the server bound it | the server started again on another |
@@ -116,7 +116,7 @@ plug and network. Only the eWeLink stages (up to C2) cannot: every emulated
 plug is a copy of the same real one, and eWeLink keeps one connection per
 plug - so those run one at a time.
 
-A plug can be kept as a run left it, with what this computer recorded about
+A plug can be kept as a run left it, with what your computer recorded about
 it (its backup, its runs), and started from again:
 
 ```sh
@@ -177,7 +177,7 @@ every direction - 1,380 scenarios:
 - **Runs left by an earlier release** (`legacy-v1.2.0`): release 1.2.0 itself
   - its tagged files, with only `tools/emulator/legacy/v1.2.0.patch` on top,
   which points it at the cloud stub - converting a plug fresh from Sonoff,
-  killed at 40% of each of its steps; then this checkout's tool over the same
+  killed at 40% of each of its steps; then your checkout's tool over the same
   captures, as a person who updated their checkout would run it. And a plug
   1.2.0 converted to Tasmota, then taken to ESPHome or back to Sonoff (step
   `start`). And 1.2.0 killed at F4, then the plug switched off part way
@@ -185,7 +185,7 @@ every direction - 1,380 scenarios:
   startup firmware without checking it, which it cannot rebuild, and the next
   run must carry on after the sectors already written. And the same for the
   release before the firmware the tool installs last changed (`legacy-v2.0.2`),
-  whose runs - their bundle pinned to the firmware before - this checkout
+  whose runs - their bundle pinned to the firmware before - your checkout
   must finish with its own: killed at each of its steps, to Tasmota and to
   ESPHome, and each kind of plug it converted, taken on from there
   ([updating-firmware.md](updating-firmware.md)). `unattended-test.sh
@@ -379,9 +379,9 @@ plugs turned connections away - four of six in the morning, one by midday:
 fresh conversions to each firmware, and two faults at C2. Sonoff to ESPHome
 converted (2 min 45 s), and Sonoff to Tasmota on its third run after an
 outage at C2; a fresh Sonoff to Tasmota never got the installer to the plug,
-in four tries, as the plug's connection to eWeLink, or this computer's, kept
-failing. The run put some of that down to this computer's firewall (fixed,
-below).
+in four tries, as the plug's connection to eWeLink, or the test computer's,
+kept failing. The run put some of that down to the test computer's firewall
+(fixed, below).
 
 **2.0.2.** Its steps that write firmware check each block on the plug rather
 than sending it back, so they are shorter (below), and every fault the suite
@@ -414,10 +414,10 @@ same two with nothing to corrupt.
   eWeLink at A1 did not answer the LAN discovery at A2 for half a minute. Both
   passed when run again.
 - **More than one emulator per core.** Then the emulated plug can slow down
-  enough to fail where nothing is wrong - once leaving it unable to reach this
-  computer until it restarted - so the suite is run at one per core or fewer.
+  enough to fail where nothing is wrong - once leaving it unable to reach the
+  tool until it restarted - so the suite is run at one per core or fewer.
   On 22 October it happened once at one per core, on a VM whose host was
-  busy: after a fault at E2, the plug's own requests to this computer stalled
+  busy: after a fault at E2, the plug's own requests to the tool stalled
   at G1 and none got through for four runs, while it still answered. Run
   again, it passed.
 - **A Tasmota that stopped.** Once, the interim Tasmota, testing the Wi-Fi
@@ -443,8 +443,8 @@ Each fixed, with a test, and the scenario run again. On 22 October:
   minutes for it to be joined, then crashed: 6 scenarios. The plug is now
   given a minute first, and that look's errors stop only its step.
 - Against the real eWeLink, a send of the installer that failed before the
-  plug was told to fetch it - eWeLink dropping this computer's connection -
-  was put down to this computer's firewall. It now says what happened.
+  plug was told to fetch it - eWeLink dropping the tool's connection -
+  was put down to the computer's firewall. It now says what happened.
 - Wi-Fi drops just before a phase began, rather than during it: G1's check
   that the plug runs official Tasmota stopped the step as if it had failed;
   the command that starts a phase, lost before it reached the plug, left the
@@ -521,7 +521,7 @@ Before that:
 - On a busy plug, setting Tasmota up (F4) gave up on a slow answer, then
   restarted the plug again on every try, and left the next step asking a
   plug not answering yet - which asked the person for the Wi-Fi.
-- With this computer stopped part way through sending the installer, the
+- With the tool stopped part way through sending the installer, the
   plug stays away from eWeLink; the run refused at once and blamed the
   firewall. It now waits for it, then says to switch it off and on.
 - A power cut, or Ctrl-C then a run started again, during D1 left a plug

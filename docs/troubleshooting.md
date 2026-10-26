@@ -18,11 +18,11 @@ before writing anything.
 
 ---
 
-## This computer
+## Your computer
 
 **"the plug did not fetch the ... instructions from this computer"**
 
-The plug could not reach this computer. The tool adds a firewall rule itself
+The plug could not reach your computer. The tool adds a firewall rule itself
 when it can see a firewall (ufw or firewalld on Linux, Windows Defender
 Firewall, the macOS firewall), so this usually means a firewall it cannot see -
 security software, or rules managed some other way - or that the addition was
@@ -69,7 +69,7 @@ journalctl -k | grep "SRC=192.168.1.50"
 
 **The computer's address changed mid-run**
 
-A cable unplugged, or a move from wired to Wi-Fi. The tool works out this
+A cable unplugged, or a move from wired to Wi-Fi. The tool works out your
 computer's address afresh each time and says when it has changed, so nothing
 needs doing. If it chooses the wrong connection, name the address yourself:
 
@@ -147,7 +147,7 @@ it found:
   network but LAN Control is off. Turn it on in the plug's settings in the
   eWeLink app, then choose *Look again*.
 - **"is online in eWeLink but was not seen on this computer's network"** -
-  this computer is on a different network from the plug, such as the 5 GHz
+  your computer is on a different network from the plug, such as the 5 GHz
   or guest Wi-Fi, a different router, or a VPN. The message names the network
   the plug is on.
 
@@ -160,7 +160,7 @@ account does have; choose *Use a different eWeLink account*.
 
 The tool could not sign in to see your account, so it lists every Sonoff plug
 that answers on the network instead. The next stage needs eWeLink too, and
-checks there that the plug you chose is one it converts, so check this
+checks there that the plug you chose is one it converts, so check your
 computer's internet connection first.
 
 **"did not answer within 180s"**
@@ -202,7 +202,7 @@ sees one.)
 That means it worked. The installer firmware does not talk to eWeLink, so the
 cloud reports the plug offline, and the tool refuses to send the update twice.
 The tool checks for the installer's `autoflash-recovery-XXXX` network and, when it
-can see it, carries on by itself. If this computer's Wi-Fi is off it cannot
+can see it, carries on by itself. If your computer's Wi-Fi is off it cannot
 look; turn it on and run again.
 
 **"Device model is ..., not one this tool converts"**
@@ -252,7 +252,7 @@ tool named, not the `.factory.bin`.
 ## When a migration stage stops
 
 The stages that check, stage and rewrite the plug's memory run on the plug
-itself, and report back to this computer. When one stops, the plug says why,
+itself, and report back to your computer. When one stops, the plug says why,
 and the tool shows it:
 
 **"... did not pass: the plug says: ..."**
@@ -263,7 +263,7 @@ The plug's own reason. Two kinds:
   changed", and the like. Nothing was written. Something changed on the plug
   between stages; run again, and the earlier checks are done again first. If
   the same refusal comes back, report it rather than forcing past it.
-- **"... returned HTTP -1 after N attempts"** - the plug could not reach this
+- **"... returned HTTP -1 after N attempts"** - the plug could not reach your
   computer. Usually security software or a firewall that changed mid-run, the
   computer going to sleep, or a weak Wi-Fi signal (the tool warns when it is
   below -75 dBm). These stages are safe to repeat, so the tool tries them
@@ -272,7 +272,7 @@ The plug's own reason. Two kinds:
 **"the plug stopped the ... without reaching this computer"** or **"the plug
 has sent nothing for 2 minutes"**
 
-The plug lost its connection to this computer, so its reason could not arrive.
+The plug lost its connection to your computer, so its reason could not arrive.
 The tool then reads the plug's own console and shows the last lines, marked
 `The plug's console:`, and gives the plug's reason from there ("its console
 says: ..."). Then as above.
@@ -293,7 +293,7 @@ time limit.
 **"The plug is not answering at all"**
 
 A plug can be left answering nothing - not even its web page - though it
-still answers ping: kept busy too long, or left waiting on this computer when
+still answers ping: kept busy too long, or left waiting on your computer when
 the tool was stopped mid-stage. Give it two minutes; if its web page still does
 not answer, switch it off and on. At every point this can happen that is safe: staging
 writes only the spare half of memory, the rewrite downloads what it needs
@@ -331,7 +331,7 @@ startup firmware saves your details where it reads them. If it could not (it
 saves nothing when its own settings write fails, and the plug then behaves as
 before), Tasmota starts up asking to be configured. The tool names its setup
 network; join it (open, no password) and the tool sends your Wi-Fi details
-itself. If this computer cannot see Wi-Fi networks, the tool cannot spot it
+itself. If your computer cannot see Wi-Fi networks, the tool cannot spot it
 either: when it asks what to do about a plug it cannot find, choose *It is
 showing its own Wi-Fi network*.
 If the plug cannot connect with them it says so and leaves the plug waiting -
@@ -349,11 +349,12 @@ image - an ESPHome `factory.bin`, say - was uploaded through Tasmota's own
 which writes it over Tasmota - whether it then says "Upload Failed" or
 "Upload Successful" - so the plug comes back on Safeboot every time, even
 switched off and on; `SetOption78` makes no difference. Its settings are
-still there. Run the tool on this computer, or with `--plug-ip` and the
-plug's address: it sees Tasmota's own Safeboot, puts official Tasmota back
-with those settings, and goes on to the firmware you choose - or stops
-there, if you choose Tasmota. By hand, upload the ordinary `tasmota32c3.bin`
-(not a `factory.bin`) on Safeboot's *Firmware Upgrade* page.
+still there. Run the tool on the computer that converted the plug, or with
+`--plug-ip` and the plug's address: it sees Tasmota's own Safeboot, puts
+official Tasmota back with those settings, and goes on to the firmware you
+choose - or stops there, if you choose Tasmota. By hand, upload the ordinary
+`tasmota32c3.bin` (not a `factory.bin`) on Safeboot's *Firmware Upgrade*
+page.
 
 To move a converted plug to ESPHome, run the tool and choose ESPHome rather
 than uploading ESPHome yourself: Tasmota's layout has a single place for its

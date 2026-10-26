@@ -133,7 +133,8 @@ release already pinned, so that only the config changes.
 
 It needs Docker: the image is built in ESPHome's own image for that release
 (`ghcr.io/esphome/esphome:<release>`), pinned by its digest, so the build does
-not depend on what is installed here. It checks, then builds:
+not depend on what is installed on the computer building it. It checks, then
+builds:
 
 - the parts of ESPHome that `ESPHome/sonoff_s60.yaml` reaches into beyond its
   options - the fixed key its last `on_boot` lambda saves the Wi-Fi under, and

@@ -37,7 +37,7 @@ says neither otherwise. Keep its name. Anything that can use the API can call
 it - anything on the home network, while the API has no encryption key - just
 as it could send the plug new firmware while OTA has no password. Giving the
 API a key closes it; the tool then takes the details from the plug's Sonoff
-backup, if this computer has it, or asks for them.
+backup, if your computer has it, or asks for them.
 
 An update password added later (`password:` under `ota:`) is asked for when
 the tool takes the plug off ESPHome, or given with `--esphome-ota-password`

@@ -238,7 +238,7 @@ nothing measured on the one chip (its calibration and factory ID); of the comput
 with the account and eWeLink device made placeholders, not the Sonoff backup,
 the logs or the firmware bundle. Then it searches everything it wrote for any
 256-byte block of your dump, every identifying value of Sonoff's settings in
-it, the real MAC in any form, and the eWeLink account and devices on this
+it, the real MAC in any form, and the eWeLink account and devices on your
 computer, and writes nothing if it finds one (`--explain` says which setting
 a value came from, never the value).
 
@@ -328,7 +328,7 @@ to the one below:
 | `rig` | what only the tests need: Remote Desktop, SSH, the clipboard over VNC (virtio-win's guest tools, pinned), no Windows Update or SConfig, and for the link OpenVPN's TAP driver, the "Autoflash emulator" adapter and a Python of its own, from the same `windows-bootstrap.ps1` a Windows computer uses | `rig.ps1` | a few min |
 | `tool` | what the tool's own first run leaves: its portable Python - set up with progress bars on, as in a person's window, and failed if any shows | `tool.ps1` | about a min |
 
-Every run starts from a throwaway layer on `tool`, with this checkout in
+Every run starts from a throwaway layer on `tool`, with your checkout in
 `C:\Autoflash\repo`, in about a minute. `--first-run` starts it on `rig` instead:
 Windows has never seen the tool, so `start.cmd` gets its Python itself, as on
 a new computer. When a layer's scripts change, the next run sets it up again
@@ -341,7 +341,7 @@ conversion - in **OpenConsole**, Windows Terminal's own console, as on Windows
 11, or with `--classic-console` in Windows' classic one, as on Windows 10. Work
 in it in your browser, at **http://localhost:6080** - nothing to install - or
 over Remote Desktop, `localhost:3389`, user `autoflash`, password `Windows-emulator`, or
-with a VNC viewer on `localhost:5900`, or over SSH (below). Only this computer can reach any of them.
+with a VNC viewer on `localhost:5900`, or over SSH (below). Only your computer can reach any of them.
 Copy and paste works in all three: in the browser through the clipboard box in
 noVNC's side panel (the browser keeps pages from reading the clipboard
 directly; what you paste stays Windows' clipboard while the page is open), on VNC
@@ -349,10 +349,10 @@ through SPICE's agent in Windows, and on Remote Desktop with
 its own clipboard (`xfreerdp /clipboard`). The browser view is there while
 Windows installs and its layers are set up too. The converted plug's own page is at its
 own address, **http://192.168.60.50**, as the conversion's last link gives it:
-for as long as the run lasts, this computer has a route to the plug's network
-through the emulator, which forwards only this computer's connections to the
+for as long as the run lasts, your computer has a route to the plug's network
+through the emulator, which forwards only your computer's connections to the
 plug (and still nothing to the internet without `--cloud`). It is set and
-removed without sudo, and left out if this computer has a network of its own
+removed without sudo, and left out if your computer has a network of its own
 at 192.168.60.0/24 - http://localhost:8080 works either way. The terminal you started from is the emulator's, for `plug
 restart` and the serial log; leaving it shuts Windows down. The conversion's
 captures are kept between runs (`~/.cache/autoflash-emu/windows/captures`), so an

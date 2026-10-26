@@ -150,7 +150,7 @@ with `--no-backup` to keep none. Reading the flash takes under a minute.
 
 ### What captures/ holds
 
-`captures/` is ignored by Git: what the tool and its tests keep on this
+`captures/` is ignored by Git: what the tool and its tests keep on your
 computer. **Your Sonoff backups are the one thing in it that cannot be made
 again** - keep a copy of `captures/plugs/` somewhere safe; everything else is
 remade as needed:
@@ -185,13 +185,13 @@ what is staged, then at the commit's message, and before each push at every
 commit the push would send - so a commit made with `--no-verify` is still
 caught on its way out. It finds two kinds of thing:
 
-- **Your own, by value** - only this computer knows them: every value in
+- **Your own, by value** - only your computer knows them: every value in
   `.env`; the eWeLink account and each plug's eWeLink id and name; each plug's
   MAC (from `captures/plugs/`: its folder, its record, its backup's eFuses), in
   any form, and as raw bytes in any file; the Sonoff settings in each backup
   that say which plug, account or network it is (its eWeLink keys, the Wi-Fi it
   was set up on); the addresses real runs - not the emulator's - found plugs
-  and this computer at; and each line of `.leak-scan.local`, a file Git
+  and your computer at; and each line of `.leak-scan.local`, a file Git
   ignores, for anything else of yours (a router's name, a public address).
 - **Anyone's, by shape**: a MAC address that could be a real device's - one
   not locally administered, so not `12:34:56:...` or `aa:bb:...`, and not a

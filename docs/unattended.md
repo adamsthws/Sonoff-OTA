@@ -16,8 +16,8 @@ chmod 600 .env
 |---|---|
 | `EWELINK_EMAIL` | the eWeLink account the plug is in |
 | `EWELINK_PASSWORD` | its password |
-| `AUTOFLASH_SUDO_PASSWORD` | Linux and macOS: this computer's password, only if sudo asks for one (for the temporary firewall rule) |
-| `AUTOFLASH_WIFI_SSID`, `AUTOFLASH_WIFI_PASSWORD` | only for a plug on an ESPHome that cannot say its Wi-Fi password (one older than this project's 1.1.0, or whose API has an encryption key not given as `AUTOFLASH_ESPHOME_API_KEY`), when this computer has no Sonoff backup of the plug to take it from: the network it is on, and its password (none for an open network) |
+| `AUTOFLASH_SUDO_PASSWORD` | Linux and macOS: your computer's password, only if sudo asks for one (for the temporary firewall rule) |
+| `AUTOFLASH_WIFI_SSID`, `AUTOFLASH_WIFI_PASSWORD` | only for a plug on an ESPHome that cannot say its Wi-Fi password (one older than this project's 1.1.0, or whose API has an encryption key not given as `AUTOFLASH_ESPHOME_API_KEY`), when your computer has no Sonoff backup of the plug to take it from: the network it is on, and its password (none for an open network) |
 | `AUTOFLASH_TASMOTA_PASSWORD` | only for a plug on Tasmota with a web password: that password. Without it, the run stops when it finds the plug |
 | `AUTOFLASH_ESPHOME_OTA_PASSWORD` | only for a plug on ESPHome with an update password (the `password:` line under `ota:` in its ESPHome YAML config): that password. Without it, the run stops before the go-ahead to leave ESPHome |
 | `AUTOFLASH_ESPHOME_WEB_USER`, `AUTOFLASH_ESPHOME_WEB_PASSWORD` | only for a plug on ESPHome with a web login (`username:` and `password:` under `web_server:` `auth:` in its ESPHome YAML config): both. Without them, the run stops when it finds the plug |

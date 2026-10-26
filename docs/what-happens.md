@@ -236,9 +236,9 @@ first half, checks them, and switches to them.
   ESPHome update, with your Wi-Fi written in. This project's ESPHome gives
   its Wi-Fi name and password from 1.1.0, through its native API - encrypted,
   where the API has an encryption key, with that key. From an ESPHome that
-  does not, they come from the plug's Sonoff backup on this computer - the
+  does not, they come from the plug's Sonoff backup on your computer - the
   Wi-Fi it was set up with - when that is shown to be the plug's network
-  still: the firmware bundle on this computer was set up for exactly those
+  still: the firmware bundle on your computer was set up for exactly those
   details, or ESPHome says it is on that network. Otherwise they are asked
   for - or, from an ESPHome whose API is encrypted, its key, and then it
   gives them. The startup firmware joins your Wi-Fi, saves it for Tasmota,

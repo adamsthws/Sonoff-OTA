@@ -27,7 +27,7 @@ data, so any AES-GCM implementation can open it, and any change to any byte is
 found. Sealing proves the result opens to the backup before writing it;
 opening checks every file against the manifest sealed with it.
 
-Only the sealed file ever leaves this computer: `upload` refuses anything else.
+Only the sealed file ever leaves your computer: `upload` refuses anything else.
 
 The firmware in `artifacts/` is not compressed, nor needs to be: Git already
 stores every file compressed, and the tool and its tests use those files as
@@ -37,8 +37,8 @@ they are, pinned byte for byte.
 
 A random 256-bit key, made once by `tools/private_backup.py key`, which writes
 it into `.env` as `AUTOFLASH_BACKUP_KEY` and never shows it. Without it the
-sealed backup cannot be opened, by anyone - so keep a copy **off this
-computer**, in a password manager: a `.env` lost with the laptop takes the
+sealed backup cannot be opened, by anyone - so keep a copy **off your
+computer**, in a password manager: a `.env` lost with the computer takes the
 original backup and the only key with it. A new key is never written over an
 old one, which would leave the sealed copy unopenable.
 
@@ -112,7 +112,7 @@ three say so:
 
 `upload` runs it straight after uploading.
 
-### If this computer is lost
+### If your computer is lost
 
 On any computer with this repository, Docker and the GitHub CLI logged in as
 the maintainer (with `read:packages`): put the key from the password manager in
