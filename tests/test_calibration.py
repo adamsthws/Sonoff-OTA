@@ -117,6 +117,20 @@ class CalibrateTasmotaTests(unittest.TestCase):
         self.assertEqual(outcome["skipped"], "the meter did not report")
         self.assertEqual(tasmota.settings, before)
 
+    def test_one_calibrated_by_hand_is_left_as_it_was(self):
+        # PowerSet against a meter, say: neither the chip's numbers nor ours.
+        tasmota = FakeTasmota()
+        tasmota.settings = {"VoltageCal": 1870, "CurrentCal": 15500, "PowerCal": 5100}
+        outcome = calibration.calibrate_tasmota(tasmota, sleep=lambda _: None)
+        self.assertEqual(outcome["kept"], {"VoltageCal": 1870, "CurrentCal": 15500, "PowerCal": 5100})
+        self.assertIn("calibrated another way", outcome["skipped"])
+        self.assertEqual(tasmota.settings, outcome["kept"])
+
+    def test_it_says_whether_it_changed_anything(self):
+        tasmota = FakeTasmota()
+        self.assertTrue(calibration.calibrate_tasmota(tasmota, sleep=lambda _: None)["changed"])
+        self.assertFalse(calibration.calibrate_tasmota(tasmota, sleep=lambda _: None)["changed"])
+
     def test_a_tasmota_without_berry_is_not_touched(self):
         tasmota = FakeTasmota(berry=False)
         outcome = calibration.calibrate_tasmota(tasmota, sleep=lambda _: None)
@@ -171,7 +185,24 @@ class StepTests(unittest.TestCase):
              mock.patch.object(autoflash, "tell") as told:
             outcome = autoflash.calibrate_tasmota_meter(self.ctx(command))
         self.assertEqual(outcome, {"skipped": "no answer"})
-        self.assertIn("left as Tasmota calibrates it", told.call_args.args[0])
+        self.assertIn("left as it is", told.call_args.args[0])
+
+    def test_a_rerun_on_tasmota_checks_its_meter(self):
+        import tools.autoflash_cli as autoflash
+        with mock.patch.object(autoflash, "unlock_tasmota") as unlocked, \
+             mock.patch.object(autoflash, "calibrate_tasmota_meter") as calibrated, \
+             mock.patch.object(autoflash, "say"):
+            self.assertEqual(autoflash.rerun_on_tasmota(self.ctx()), 0)
+        unlocked.assert_called_once()
+        calibrated.assert_called_once()
+
+    def test_a_rerun_needing_a_password_not_given_stops_untouched(self):
+        import tools.autoflash_cli as autoflash
+        with mock.patch.object(autoflash, "unlock_tasmota", side_effect=autoflash.Abort("no password")), \
+             mock.patch.object(autoflash, "calibrate_tasmota_meter") as calibrated, \
+             mock.patch.object(autoflash, "tell"):
+            self.assertEqual(autoflash.rerun_on_tasmota(self.ctx()), 2)
+        calibrated.assert_not_called()
 
     def test_esphome_is_given_the_backups_numbers(self):
         import tools.autoflash_cli as autoflash

@@ -71,8 +71,10 @@ def calibrate_tasmota(command: Callable[[str], Any], coefficients: list[float] |
                       wait: float = 10.0, sleep: Callable[[float], None] = time.sleep) -> dict[str, Any]:
     """Tasmota's meter calibrated as Sonoff's firmware calibrated it, through
     its console (`command`).  Done again, it comes out the same: the chip's
-    own numbers are taken afresh each time.  What was set, or why nothing
-    was ("skipped")."""
+    own numbers are taken afresh each time.  One calibrated another way -
+    by hand, against a meter (PowerSet and the like) - is left as it is.
+    What was set, and whether that "changed" it; or why nothing was
+    ("skipped")."""
     levels = []
     for pin in BOARD_PINS:
         command(f"Br gpio.pin_mode({pin}, gpio.INPUT_PULLUP)")
@@ -109,9 +111,14 @@ def calibrate_tasmota(command: Callable[[str], Any], coefficients: list[float] |
             return {"skipped": "the meter did not report", "factor": factor}
         sleep(0.5)
     values = tasmota_values(chip, factor, coefficients)
+    if before not in (chip, values, TASMOTA_DEFAULTS):
+        _set(command, before)
+        return {"skipped": "it was calibrated another way already",
+                "factor": factor, "kept": before}
     if not _set(command, values):
         return {"skipped": "Tasmota did not take its calibration", "factor": factor}
-    return {"factor": factor, "factory": coefficients is not None, "chip": chip, **values}
+    return {"factor": factor, "factory": coefficients is not None, "chip": chip, "changed": before != values,
+            **values}
 
 
 def _set(command: Callable[[str], Any], values: dict[str, int]) -> bool:

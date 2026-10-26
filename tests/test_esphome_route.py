@@ -674,10 +674,18 @@ class FromAConvertedPlugTests(RouteTestCase):
             route = af.settle_route(ctx)
         return route, (asked.call_args.args[1] if asked.called else None)
 
-    def test_from_tasmota_the_other_two_are_offered(self):
-        (firmware, source), offered = self.settle("tasmota", answer=1)
-        self.assertEqual(offered, ["ESPHome", "Sonoff's own firmware (back to eWeLink, from its backup)"])
+    def test_from_tasmota_the_other_two_are_offered_and_staying(self):
+        (firmware, source), offered = self.settle("tasmota", answer=2)
+        self.assertEqual(offered, ["Tasmota, as it is (its meter calibrated, if it is not)", "ESPHome",
+                                   "Sonoff's own firmware (back to eWeLink, from its backup)"])
         self.assertEqual((firmware, source), ("sonoff", "tasmota"))
+
+    def test_staying_on_tasmota_converts_nothing(self):
+        # Its meter is checked instead (rerun_on_tasmota), asked or given.
+        with self.assertRaisesRegex(af.NothingToDo, "already runs Tasmota"):
+            self.settle("tasmota", answer=0)
+        with self.assertRaisesRegex(af.NothingToDo, "already runs Tasmota"):
+            self.settle("tasmota", given="tasmota")
 
     def test_without_its_backup_sonoff_is_not_offered(self):
         (firmware, _), offered = self.settle("esphome", backup=False)

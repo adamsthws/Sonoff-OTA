@@ -231,6 +231,11 @@ Sonoff's firmware. The run finds it on the network by what it answers as,
 says what it runs, and offers the other two (Sonoff's only where the plug's
 backup is on the computer). Every route has the same checks as above.
 
+On Tasmota it also offers keeping Tasmota (`--firmware tasmota` chooses it in
+advance), which changes nothing but its meter: calibrated as step 9 does it,
+if it is not already - on a plug converted before the tool did that, say. A
+meter calibrated by hand, against another meter, is left as it is.
+
 Most routes pass through the same place the first conversion does: Sonoff's
 memory layout, with a full Tasmota running from its second half. From there
 the steps above finish the job for Tasmota or ESPHome, and going back to

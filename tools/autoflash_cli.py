@@ -3568,7 +3568,7 @@ def step_configure(ctx: Context) -> dict[str, Any]:
     return result
 
 
-def calibrate_tasmota_meter(ctx: Context) -> dict[str, Any]:
+def calibrate_tasmota_meter(ctx: Context, show: bool = False) -> dict[str, Any]:
     """Tasmota's meter calibrated as Sonoff's firmware calibrates it: by the
     board's factor and, from the plug's Sonoff backup, its own factory
     calibration (calibration says what carries over).  Never fails the step:
@@ -3579,11 +3579,13 @@ def calibrate_tasmota_meter(ctx: Context) -> dict[str, Any]:
     except (DeviceError, OSError, ValueError) as exc:
         outcome = {"skipped": str(exc)}
     if "skipped" in outcome:
-        tell(f"    The meter is left as Tasmota calibrates it: {outcome['skipped']}.")
+        tell(f"    The meter is left as it is: {outcome['skipped']}.")
+    elif not outcome["changed"]:
+        say("The meter is calibrated as Sonoff's firmware had it already", show=show)
     else:
         say("Meter calibrated as Sonoff's firmware had it"
             + (", with the plug's factory calibration from its backup" if outcome["factory"] else "")
-            + f" (board factor {outcome['factor']:.2f})")
+            + f" (board factor {outcome['factor']:.2f})", show=show)
     return outcome
 
 
@@ -4689,6 +4691,13 @@ def settle_firmware(ctx: Context) -> str:
     return settle_route(ctx)[0]
 
 
+def nothing_to_convert(ctx: Context, source: str) -> None:
+    """Asked for what it runs: nothing to do, and nothing left unfinished."""
+    ctx.state.set_input("source", source)
+    ctx.state.set_input("firmware", source)
+    raise NothingToDo(f"The plug already runs {detect.NAMES[source]}: there is nothing to convert.")
+
+
 def settle_route(ctx: Context) -> tuple[str, str]:
     """What the plug runs now and which firmware it is to have: kept from the
     run's start, given on the command line, or found out and asked - once,
@@ -4709,15 +4718,13 @@ def settle_route(ctx: Context) -> tuple[str, str]:
         source = "sonoff"  # begun before a plug could be found on another firmware
     else:
         source = find_current_firmware(ctx)
-    choices = [name for name in FIRMWARES if name != source]
+    # Tasmota stays a choice on Tasmota: its meter checked (rerun_on_tasmota).
+    choices = [name for name in FIRMWARES if name != source or source == "tasmota"]
     if source != "sonoff" and not sonoff_backup_exists(ctx):
         choices.remove("sonoff")  # going back needs this plug's backup
     if given:
         if given == source:
-            # Asked for what it runs: nothing to do, and nothing left unfinished.
-            ctx.state.set_input("source", source)
-            ctx.state.set_input("firmware", source)
-            raise NothingToDo(f"The plug already runs {detect.NAMES[source]}: there is nothing to convert.")
+            nothing_to_convert(ctx, source)
         if given not in choices:
             raise Abort(f"this plug cannot go to {FIRMWARES[given]}: there is no backup of its "
                         "Sonoff firmware on this computer")
@@ -4726,6 +4733,8 @@ def settle_route(ctx: Context) -> tuple[str, str]:
         firmware = "tasmota"  # begun before there was a choice: it was Tasmota then
     else:
         firmware = ask_firmware(source, choices)
+        if firmware == source:
+            nothing_to_convert(ctx, source)
     ctx.state.set_input("source", source)
     ctx.state.set_input("firmware", firmware)
     say(f"Converting the plug from {detect.NAMES[source]} to {FIRMWARES[firmware]}."
@@ -4749,8 +4758,8 @@ def ask_firmware(source: str, choices: list[str]) -> str:
         body += [""] * bool(body) + ["Going back to Sonoff's own firmware needs the backup this tool takes",
                                      "when it first converts a plug, and there is none for this one here."]
     section("Choose the plug's new firmware", body)
-    labels = {"tasmota": "Tasmota", "esphome": "ESPHome",
-              "sonoff": "Sonoff's own firmware (back to eWeLink, from its backup)"}
+    labels = {"tasmota": "Tasmota" if source != "tasmota" else "Tasmota, as it is (its meter calibrated, if it is not)",
+              "esphome": "ESPHome", "sonoff": "Sonoff's own firmware (back to eWeLink, from its backup)"}
     try:
         choice = ask_choice("Which firmware would you like", [labels[name] for name in choices])
     except prompts.NoOneToAnswer:
@@ -6003,6 +6012,20 @@ def stop_here_after_ctrl_c(step: str) -> bool:
     return False
 
 
+def rerun_on_tasmota(ctx: Context) -> int:
+    """A plug kept on Tasmota: its meter calibrated, as F4 would have, if it
+    is not - a plug converted before the tool did, or whose calibration was
+    lost with its settings.  One calibrated by hand is left as it is."""
+    try:
+        unlock_tasmota(ctx)
+    except Abort as refused:
+        tell(f"Stopped before anything was done: {refused}.")
+        return 2
+    tell("Checking its meter's calibration...")
+    calibrate_tasmota_meter(ctx, show=True)
+    return 0
+
+
 def run_steps(ctx: Context) -> int:
     started = time.monotonic()
     restore_left_locks()  # a resumed run skips A5, which looks too
@@ -6018,7 +6041,7 @@ def run_steps(ctx: Context) -> int:
         unlock_tasmota(ctx)
     except NothingToDo as nothing:
         tell(str(nothing))
-        return 0
+        return rerun_on_tasmota(ctx) if run_source(ctx.state) == "tasmota" else 0
     except Abort as refused:
         tell(f"Stopped before anything was done: {refused}.")
         return 2

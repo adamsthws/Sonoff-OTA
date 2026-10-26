@@ -32,7 +32,9 @@ check.
   had it: by its board's factor, which read 2% low on Tasmota before, and
   by its factory calibration from its Sonoff backup. Tasmota takes one
   scale for each reading, so the factory calibration's set from 300 W up
-  does not carry over.
+  does not carry over. A plug converted before is calibrated by running
+  the tool on it and keeping Tasmota (`--firmware tasmota`); one calibrated
+  by hand is left as it is.
 
 ## 2.1.3
 
