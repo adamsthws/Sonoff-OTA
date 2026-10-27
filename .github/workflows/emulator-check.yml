@@ -46,15 +46,16 @@ jobs:
           "$PYTHON" -m venv .venv
           .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
           status=0
-          PYTHONUNBUFFERED=1 .venv/bin/python -m coverage run --source=tools \
+          PYTHONUNBUFFERED=1 .venv/bin/python -m coverage run --branch --source=tools \
               -m unittest discover -s tests > unit.txt 2>&1 || status=$?
           # Each failure with its traceback, then the count; the whole is kept below.
           awk '/^(FAIL|ERROR): /{show=1} /^Ran [0-9]+ tests/{show=1} show' unit.txt | tail -400
           grep -E "^(Ran [0-9]+ tests|OK|FAILED)" unit.txt >> "$GITHUB_STEP_SUMMARY" || true
           # What of tools/ they run, to see what they miss: a report, not a gate.
+          # --branch counts each way an if can go, not only each line.
           {
             echo
-            echo "The unit tests run $(.venv/bin/python -m coverage report --format=total)% of the lines in tools/."
+            echo "The unit tests run $(.venv/bin/python -m coverage report --format=total)% of the lines and branches in tools/."
             echo
             echo "<details><summary>By file, least first</summary>"
             echo
