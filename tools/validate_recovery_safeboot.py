@@ -37,7 +37,7 @@ except ModuleNotFoundError:
 
 def header_value(header: bytes, name: str) -> bytes:
     text = header.decode("ascii")
-    match = re.search(rf"^#define {re.escape(name)} \"((?:\\x[0-9a-f]{{2}})+)\"$", text, re.MULTILINE)
+    match = re.search(rf"^#define {re.escape(name)} \"((?:\\x[0-9a-f]{{2}})*)\"$", text, re.MULTILINE)
     if not match:
         raise ValueError(f"private header has no encoded {name}")
     return bytes.fromhex(match.group(1).replace("\\x", ""))
@@ -47,6 +47,8 @@ def validate(image: bytes, header: bytes) -> dict[str, object]:
     report = validate_native_image(image, SAFEBOOT_SIZE, "recovery Safeboot")
     ssid = header_value(header, "STA_SSID1")
     password = header_value(header, "STA_PASS1")
+    if not ssid:
+        raise ValueError("private header has an empty STA_SSID1")
     if RECOVERY_MARKER not in image:
         raise ValueError("recovery marker is absent from the image")
     if ssid not in image:

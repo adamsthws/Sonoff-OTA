@@ -105,6 +105,11 @@ class RecoverySafebootTests(unittest.TestCase):
         self.assertNotIn(self.SSID.decode(), written)
         self.assertNotIn(self.PASSWORD.decode(), written)
 
+    def test_an_open_network_needs_no_password(self):
+        # configure_recovery_safeboot.py takes an empty password, as STA_PASS1 "".
+        built = imprint(PUBLISHED, self.SSID.decode(), "")
+        self.assertFalse(validate_recovery_safeboot.validate(built, header(self.SSID, b""))["password_present"])
+
     def test_a_build_without_what_it_should_hold_is_refused(self):
         for case, image, given, said in (
                 ("another network", self.BUILT, header(b"Other-5G", self.PASSWORD), "SSID was not linked"),
@@ -112,6 +117,8 @@ class RecoverySafebootTests(unittest.TestCase):
                 ("no recovery marker", with_marker_replaced(self.BUILT, b"x"), header(self.SSID, self.PASSWORD),
                  "recovery marker is absent"),
                 ("a header without the network", self.BUILT, b'#define STA_PASS1 "\\x61"\n', "no encoded STA_SSID1"),
+                ("an empty network name", self.BUILT, b'#define STA_SSID1 ""\n#define STA_PASS1 ""\n',
+                 "empty STA_SSID1"),
                 ("not an image", b"\0" * 1024, header(self.SSID, self.PASSWORD), "")):
             with self.assertRaisesRegex(ValueError, said, msg=case):
                 validate_recovery_safeboot.validate(image, given)
