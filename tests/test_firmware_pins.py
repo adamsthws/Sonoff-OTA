@@ -144,10 +144,6 @@ class UpdateHelperTests(unittest.TestCase):
             uf.check_tasmota_files({"factory": blank, "safeboot": b"", "app": b""})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class ESPHomeDocTests(unittest.TestCase):
     """What an ESPHome update writes, from the image published now to a made-up one."""
 
@@ -264,3 +260,7 @@ class ChangelogTests(unittest.TestCase):
     def test_a_passage_not_found_changes_nothing(self):
         with self.assertRaisesRegex(uf.UpdateError, "nothing was changed"):
             uf.substituted("no such text", r"ESPHome \S+ built the current", "x", "the release")
+
+
+if __name__ == "__main__":
+    unittest.main()
