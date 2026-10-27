@@ -143,5 +143,93 @@ class BackToSonoffTests(unittest.TestCase):
             plans.back_to_sonoff(bytes(broken), running=1)
 
 
+class PlanCheckTests(unittest.TestCase):
+    """Plan.check, the last word before a plan reaches the plug: each refusal
+    for its own reason, and each limit allowed up to it and refused past it."""
+
+    FLASH = 0x400000
+
+    @staticmethod
+    def plan(*steps, name="x", **blobs):
+        return plans.Plan(name, "x", plans.SONOFF_TABLE_SHA256, 1, steps=list(steps), blobs=blobs)
+
+    def refused(self, plan, reason):
+        with self.assertRaises(plans.PlanError) as refusal:
+            plan.check()
+        self.assertEqual(str(refusal.exception), reason)
+
+    def allowed(self, plan):
+        self.assertIs(plan.check(), plan)
+
+    def test_a_name_that_is_not_a_plain_word(self):
+        self.refused(self.plan(name="two words"), "plan name 'two words' is not a plain word")
+
+    def test_a_write_of_data_it_does_not_have(self):
+        self.refused(self.plan(plans.Write("b", 0x20000), a=b"\xe9"), "x: no data called b")
+
+    def test_a_write_off_a_sector(self):
+        data = b"\xe9" * (2 * SECTOR)
+        self.refused(self.plan(plans.Write("a", 0x20001), a=data), "x: a is not sector-aligned")
+        self.refused(self.plan(plans.Write("a", 0x20000, start=1), a=data), "x: a is not sector-aligned")
+        self.allowed(self.plan(plans.Write("a", 0x20000, start=SECTOR), a=data))
+
+    def test_a_write_of_nothing_or_past_its_data(self):
+        data = b"\xe9" * (SECTOR + 100)
+        self.refused(self.plan(plans.Write("a", 0x20000, length=0), a=data), "x: a slice is outside it")
+        self.allowed(self.plan(plans.Write("a", 0x20000, length=1), a=data))
+        self.refused(self.plan(plans.Write("a", 0x20000, start=SECTOR, length=101), a=data),
+                     "x: a slice is outside it")
+        self.allowed(self.plan(plans.Write("a", 0x20000, start=SECTOR, length=100), a=data))
+
+    def test_a_whole_write_held_in_the_plugs_memory(self):
+        self.allowed(self.plan(plans.Write("a", 0x20000, whole=True), a=b"\xe9" * plans.WHOLE_LIMIT))
+        self.refused(self.plan(plans.Write("a", 0x20000, whole=True), a=b"\xe9" * (plans.WHOLE_LIMIT + 1)),
+                     "x: a is too big to write whole")
+
+    def test_an_erase_off_a_sector_or_of_nothing(self):
+        for erase in (plans.Erase(0x20001, SECTOR), plans.Erase(0x20000, SECTOR + 1), plans.Erase(0x20000, 0)):
+            self.refused(self.plan(erase), "x: an erase is not sector-aligned")
+        self.allowed(self.plan(plans.Erase(0x20000, SECTOR)))
+
+    def test_a_copy_off_a_sector_or_of_nothing(self):
+        for copy in (plans.Copy(0x20001, 0x30000, SECTOR), plans.Copy(0x20000, 0x30001, SECTOR),
+                     plans.Copy(0x20000, 0x30000, SECTOR + 1), plans.Copy(0x20000, 0x30000, 0)):
+            self.refused(self.plan(copy), "x: a copy is not sector-aligned")
+        self.allowed(self.plan(plans.Copy(0x20000, 0x30000, SECTOR)))
+
+    def test_a_step_of_no_known_kind(self):
+        self.refused(self.plan("erase it"), "x: unknown step 'erase it'")
+
+    def test_steps_that_overlap(self):
+        erase, write = plans.Erase(0x20000, 2 * SECTOR), plans.Write("a", 0x21000)
+        self.refused(self.plan(erase, write, a=b"\xe9"), f"x: {erase} and {write} overlap")
+        self.allowed(self.plan(plans.Erase(0x20000, SECTOR), write, a=b"\xe9"))
+
+    def test_a_step_outside_the_flash(self):
+        self.allowed(self.plan(plans.Write("a", self.FLASH - SECTOR), a=b"\xe9" * SECTOR))
+        for step in (plans.Erase(self.FLASH, SECTOR), plans.Erase(-SECTOR, SECTOR)):
+            self.refused(self.plan(step), "x: a step is outside the 4 MiB flash")
+
+    def test_a_copy_from_outside_the_flash(self):
+        self.allowed(self.plan(plans.Copy(self.FLASH - SECTOR, 0x20000, SECTOR)))
+        self.refused(self.plan(plans.Copy(self.FLASH, 0x20000, SECTOR)),
+                     "x: a copy is from outside the 4 MiB flash")
+
+    def test_a_copy_from_beside_a_region_written_is_allowed(self):
+        # Only a copy from where the plan writes is refused
+        # (test_a_copy_from_where_the_plan_writes_is_refused): one next to it is not.
+        self.allowed(self.plan(plans.Copy(0x20000, 0x9000, SECTOR), plans.Erase(0x21000, SECTOR)))
+        self.allowed(self.plan(plans.Copy(0x21000, 0x9000, SECTOR), plans.Erase(0x20000, SECTOR)))
+
+    def test_a_plan_keeping_the_plug_busy_too_long(self):
+        from unittest import mock
+        plan = self.plan(plans.Write("a", 0x20000), a=b"\xe9" * 0x100000)
+        with mock.patch.object(plans, "BUSY_LIMIT", plan.busy_estimate()):
+            self.allowed(plan)
+        with mock.patch.object(plans, "BUSY_LIMIT", plan.busy_estimate() - 0.01):
+            with self.assertRaisesRegex(plans.PlanError, "keeps the plug busy past .* s; split it"):
+                plan.check()
+
+
 if __name__ == "__main__":
     unittest.main()
