@@ -1849,6 +1849,107 @@ class RebootDetectionTests(unittest.TestCase):
         self.wait_on_clock(Fake("10.0.0.5"), clock, before=10)
 
 
+class PhaseRunTests(unittest.TestCase):
+    """PhaseRunner.run against a stand-in for serve_safeboot_migration.py: a
+    script printing what the server prints, and exiting as it would."""
+
+    URL = "http://10.0.0.5:8089/berry/{phase}.be"
+    FETCH = '10.0.0.54 - - "GET /berry/{phase}.be HTTP/1.1" 200 -'
+    CHUNK = '10.0.0.54 - - "GET /chunk/1 HTTP/1.1" 200 -'
+    SERVER = """
+import sys, time
+received = sys.stdin.buffer.read() if {piped} else b""
+open({stdin_file!r}, "w").write(str(len(received)))
+for line in {lines!r}:
+    if line.startswith("sleep "):
+        time.sleep(float(line[6:]))
+    else:
+        print(line, flush=True)
+sys.exit({code})
+"""
+
+    def setUp(self):
+        from tools.autoflash import output
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.logged = []
+        self.device = mock.Mock(host="10.0.0.54", console_log=mock.Mock(return_value=[]),
+                                answers=mock.Mock(return_value=True))
+        mock.patch.dict(output._private, {}, clear=True).start()
+        mock.patch.object(output, "raw_progress").start()
+        self.addCleanup(mock.patch.stopall)
+
+    def run_phase(self, phase, lines, code=0, confirm=None, plan=None, recovery=None):
+        import sys
+        server = self.root / "server.py"
+        server.write_text(self.SERVER.format(piped=bool(plan or recovery), stdin_file=str(self.root / "stdin"),
+                                             lines=[line.format(phase=phase, url=self.URL.format(phase=phase))
+                                                    for line in lines], code=code), encoding="utf-8")
+        runner = PhaseRunner(repo_root=self.root, manifest=self.root / "m.json", evidence_dir=self.root / "live",
+                             listen_ip="10.0.0.5", device=self.device, log=self.logged.append, recovery=recovery)
+        with mock.patch.object(PhaseRunner, "_command", return_value=[sys.executable, "-u", str(server)]):
+            result = runner.run(phase, confirm=confirm, plan=plan)
+        return result, runner
+
+    def loader(self):
+        return "autoflash_urlbeload('{url}')"
+
+    def test_a_phase_runs_and_its_log_keeps_nothing_private(self):
+        from tools.autoflash import output
+        output.private("Home-2G-made-up", "wifi-name")
+        plan = mock.Mock(bundle=mock.Mock(return_value=b"x" * 1234), title="the plan", blocks=lambda: 1)
+        plan.name = "move"
+        (code, said), runner = self.run_phase(
+            "plan", [self.loader(), "sleep 0.6", self.FETCH, "sleep 0.6", self.CHUNK, "joined Home-2G-made-up"],
+            plan=plan)
+        self.assertEqual(code, 0)
+        self.assertIn("joined Home-2G-made-up", said)
+        self.assertEqual((self.root / "stdin").read_text(encoding="utf-8"), "1234")  # the plan, piped
+        log = (self.root / "live" / "plan-move-server.log").read_text(encoding="utf-8")
+        self.assertIn("joined <wifi-name>", log)
+        self.assertNotIn("Home-2G-made-up", log)
+        self.assertIsNotNone(runner.busy_seconds)  # the plug's last request came after the start
+        self.assertIn("compile(", self.device.berry.call_args.args[0])
+
+    def test_a_server_with_no_loader_stops_the_phase_with_what_it_said(self):
+        with self.assertRaisesRegex(PhaseError, "did not print a loader URL:\nport in use"):
+            self.run_phase("stage", ["port in use"], code=1)
+        self.device.berry.assert_not_called()
+
+    def test_an_armed_phase_not_confirmed_is_never_started(self):
+        confirm = mock.Mock(return_value=False)
+        with self.assertRaisesRegex(PhaseError, "not confirmed; nothing was armed"):
+            self.run_phase("commit", [self.loader(), 'autoflash_commit("t0ken")', self.FETCH, "sleep 30"],
+                           confirm=confirm)
+        confirm.assert_called_once_with("commit")
+        self.device.berry_fire.assert_called_once()   # the instructions went, ...
+        self.device.berry.assert_not_called()         # ... the start never did
+
+    def test_an_armed_phase_confirmed_is_started_with_its_token(self):
+        (code, _), _ = self.run_phase("commit", [self.loader(), 'autoflash_commit("t0ken")', self.FETCH, "sleep 0.5"],
+                                      confirm=lambda phase: True)
+        self.assertEqual(code, 0)
+        self.assertIn("autoflash_commit=", self.device.berry_fire.call_args.args[0])
+        self.device.berry.assert_called_once()
+        self.assertEqual(self.device.berry.call_args.args[0], 'autoflash_commit("t0ken")')
+
+    def test_an_armed_phase_with_no_arm_command_is_never_started(self):
+        with self.assertRaisesRegex(PhaseError, "did not print an arm command"):
+            self.run_phase("restore", [self.loader()], confirm=lambda phase: True)
+        self.device.berry_fire.assert_not_called()
+        self.device.berry.assert_not_called()
+
+    def test_a_failed_phase_carries_the_plugs_own_reason(self):
+        self.device.console_log.return_value = [
+            'RSL: RESULT = {"Br":"[migration_refused] the staged image did not verify"}']
+        (code, said), _ = self.run_phase("stage", [self.loader(), self.FETCH], code=3, recovery=b"image")
+        self.assertEqual(code, 3)
+        self.assertEqual((self.root / "stdin").read_text(encoding="utf-8"), "5")  # the recovery image, piped
+        self.assertTrue(said.endswith("THE PLUG SAYS: the staged image did not verify"), said)
+        self.assertTrue(any("stage-server.log" in line for line in self.logged), self.logged)
+
+
 class PhaseDisplayTests(unittest.TestCase):
     """Hundreds of server request lines become a few readable ones."""
 
