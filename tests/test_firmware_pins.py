@@ -4,6 +4,7 @@ tools/update_firmware.py writes firmware.json and the files; the rest is by
 hand (docs/updating-firmware.md), and these say what was missed.
 """
 
+import io
 import json
 import unittest
 from pathlib import Path
@@ -260,6 +261,201 @@ class ChangelogTests(unittest.TestCase):
     def test_a_passage_not_found_changes_nothing(self):
         with self.assertRaisesRegex(uf.UpdateError, "nothing was changed"):
             uf.substituted("no such text", r"ESPHome \S+ built the current", "x", "the release")
+
+
+class UpdateCommandTests(unittest.TestCase):
+    """update_firmware.py's tasmota and esphome commands, on a made-up checkout
+    and releases: what each refuses, and what it writes."""
+
+    CONFIG = 'esphome:\n  name: {name}\n  project:\n    name: x\n    version: "{version}"\n'
+
+    def setUp(self):
+        import tempfile
+        from unittest import mock
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = root = Path(directory.name)
+        (root / "ESPHome").mkdir()
+        (root / "artifacts").mkdir()
+        for key, version in (("image", "1.4.0"), ("mover", "1.1.0")):
+            (root / uf.ESPHOME_BUILDS[key][0]).write_text(self.CONFIG.format(name=key, version=version),
+                                                          encoding="utf-8")
+        pins = {"tasmota": self.tasmota_pin("15.0.0", earlier=[self.tasmota_pin("14.0.0")]), "esphome": {}}
+        for key, file, version in (("image", "artifacts/esphome-sonoff-s60-imprintable-1.4.0.bin", "1.4.0"),
+                                   ("bootloader", "artifacts/esphome-sonoff-s60-bootloader-1.2.0.bin", "1.2.0"),
+                                   ("mover", "artifacts/autoflash-mover-1.1.0.bin", "1.1.0")):
+            (root / file).write_bytes(f"{key} {version}".encode())
+            pins["esphome"][key] = {"file": file, "version": version, "esphome": "2026.1.0", "esp_idf": "5.5.5"}
+        (root / "firmware.json").write_text(json.dumps(pins), encoding="utf-8")
+        (root / "SHA256SUMS").write_text("".join(f"{sha256_bytes(b'x')}  {pin['file']}\n"
+                                                 for pin in pins["esphome"].values()), encoding="utf-8")
+        (root / ".gitignore").write_text("*.bin\n" + "".join(f"!{pin['file']}\n" for pin in pins["esphome"].values()),
+                                         encoding="utf-8")
+        self.before = self.snapshot()
+        for name, value in (("ROOT", root), ("FIRMWARE_JSON", root / "firmware.json"),
+                            ("SHA256SUMS", root / "SHA256SUMS"), ("GITIGNORE", root / ".gitignore"),
+                            ("BUILD_CACHE", root / "build")):
+            mock.patch.object(uf, name, value).start()
+        mock.patch.object(uf.shutil, "which", return_value="/usr/bin/docker").start()
+        self.addCleanup(mock.patch.stopall)
+
+    @staticmethod
+    def tasmota_pin(version, earlier=None):
+        pin = {"version": version, "tag": f"v{version}", "commit": version * 4,
+               "files": {key: {"name": name, "size": 1, "sha256": "0" * 64} for key, name in uf.TASMOTA_FILES.items()}}
+        return pin | ({"cfg_holder": tasmota_settings.CFG_HOLDER, "earlier": earlier} if earlier is not None else {})
+
+    def snapshot(self):
+        return {path.relative_to(self.root).as_posix(): path.read_bytes()
+                for path in self.root.rglob("*") if path.is_file()}
+
+    def pins(self):
+        return json.loads((self.root / "firmware.json").read_text(encoding="utf-8"))
+
+    def before_pins(self):
+        return json.loads(self.before["firmware.json"])["esphome"]
+
+    def run_main(self, *argv):
+        import contextlib
+        errors = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(errors):
+            code = uf.main(list(argv))
+        return code, errors.getvalue()
+
+    # -- Tasmota
+
+    def tasmota(self, *argv, version="16.0.0", files=None, sizes=None, holder=tasmota_settings.CFG_HOLDER,
+                check=None):
+        from unittest import mock
+        files = files if files is not None else {name: name.encode() for name in uf.TASMOTA_FILES.values()}
+        sizes = sizes or {}
+        release = {"tag_name": f"v{version}", "html_url": "https://example.invalid/release",
+                   "assets": [{"name": name, "size": sizes.get(name, len(data)), "browser_download_url": name}
+                              for name, data in files.items()]}
+        downloads = dict(files)
+        downloads[f"https://raw.githubusercontent.com/{uf.TASMOTA_REPO}/{'c' * 40}/tasmota/my_user_config.h"] = \
+            f"#define CFG_HOLDER {holder}\n".encode()
+        with mock.patch.object(uf, "stable_release", return_value=release), \
+             mock.patch.object(uf, "tag_commit", return_value="c" * 40), \
+             mock.patch.object(uf, "download", side_effect=downloads.__getitem__), \
+             mock.patch.object(uf, "check_tasmota_files", side_effect=check) as checked:
+            code, errors = self.run_main("tasmota", *argv)
+        return code, errors, checked
+
+    def test_tasmota_pins_the_release_and_keeps_the_one_before(self):
+        code, _, checked = self.tasmota("--no-docs")
+        self.assertEqual(code, 0)
+        checked.assert_called_once()
+        pin = self.pins()["tasmota"]
+        self.assertEqual((pin["version"], pin["tag"], pin["commit"]), ("16.0.0", "v16.0.0", "c" * 40))
+        self.assertEqual(pin["files"]["app"], {"name": "tasmota32c3.bin", "size": len(b"tasmota32c3.bin"),
+                                               "sha256": sha256_bytes(b"tasmota32c3.bin")})
+        self.assertEqual([entry["version"] for entry in pin["earlier"]], ["15.0.0", "14.0.0"])
+        self.assertNotIn("earlier", pin["earlier"][0])
+
+    def test_tasmota_pinned_again_is_not_kept_as_its_own_earlier_release(self):
+        self.assertEqual(self.tasmota("--no-docs", version="15.0.0")[0], 0)
+        self.assertEqual([entry["version"] for entry in self.pins()["tasmota"]["earlier"]], ["14.0.0"])
+
+    def test_tasmota_going_back_to_an_earlier_release_takes_it_out_of_earlier(self):
+        self.assertEqual(self.tasmota("--no-docs", version="14.0.0")[0], 0)
+        self.assertEqual([entry["version"] for entry in self.pins()["tasmota"]["earlier"]], ["15.0.0"])
+
+    def test_tasmota_dry_run_changes_nothing(self):
+        self.assertEqual(self.tasmota("--dry-run")[0], 0)
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_tasmota_refusals_change_nothing(self):
+        files = {name: name.encode() for name in uf.TASMOTA_FILES.values()}
+        for case, kwargs, said in (
+                ("a file short", {"sizes": {"tasmota32c3.bin": 999}}, "came down as"),
+                ("a file missing", {"files": {k: v for k, v in files.items() if k != "tasmota32c3.bin"}},
+                 "has no tasmota32c3.bin"),
+                ("another CFG_HOLDER", {"holder": 1234}, "CFG_HOLDER is 1234")):
+            code, errors, _ = self.tasmota("--no-docs", **kwargs)
+            self.assertEqual(code, 1, case)
+            self.assertIn(said, errors, case)
+            self.assertEqual(self.snapshot(), self.before, case)
+
+    def test_tasmota_files_the_conversion_cannot_take_change_nothing(self):
+        code, errors, _ = self.tasmota("--no-docs", check=uf.UpdateError("another partition table"))
+        self.assertEqual(code, 1)
+        self.assertIn("another partition table", errors)
+        self.assertEqual(self.snapshot(), self.before)
+
+    # -- ESPHome
+
+    def esphome(self, *argv, bootloader=b"bootloader 1.2.0", check=None):
+        from unittest import mock
+        built = []
+
+        def build(builder, config_path, version, workdir):
+            built.append((config_path.name, version))
+            return f"app {config_path.name} {version}".encode(), bootloader
+
+        with mock.patch.object(uf, "stable_release", return_value={"tag_name": "2099.1.0"}), \
+             mock.patch.object(uf, "esphome_builder", return_value="esphome:2099.1.0@sha256:d"), \
+             mock.patch.object(uf, "check_esphome_internals"), \
+             mock.patch.object(uf, "build", side_effect=build), \
+             mock.patch.object(uf, "check_esphome_app",
+                               side_effect=check or (lambda image, label, release: {"esp_idf": "5.5.9"})):
+            code, errors = self.run_main("esphome", *argv)
+        return code, errors, built
+
+    def test_esphome_publishes_the_image_at_the_next_minor_in_place_of_the_old(self):
+        code, _, built = self.esphome("--no-docs")
+        self.assertEqual(code, 0)
+        self.assertEqual(built, [("sonoff_s60.yaml", "1.5.0")])
+        new = "artifacts/esphome-sonoff-s60-imprintable-1.5.0.bin"
+        pin = self.pins()["esphome"]["image"]
+        self.assertEqual((pin["file"], pin["version"], pin["esphome"], pin["builder"]),
+                         (new, "1.5.0", "2099.1.0", "esphome:2099.1.0@sha256:d"))
+        self.assertEqual(pin["sha256"], sha256_bytes((self.root / new).read_bytes()))
+        self.assertFalse((self.root / "artifacts/esphome-sonoff-s60-imprintable-1.4.0.bin").exists())
+        self.assertIn(f"{pin['sha256']}  {new}", (self.root / "SHA256SUMS").read_text(encoding="utf-8"))
+        self.assertNotIn("imprintable-1.4.0", (self.root / "SHA256SUMS").read_text(encoding="utf-8"))
+        self.assertIn(f"!{new}\n", (self.root / ".gitignore").read_text(encoding="utf-8"))
+        self.assertIn('version: "1.5.0"', (self.root / "ESPHome/sonoff_s60.yaml").read_text(encoding="utf-8"))
+        # Neither the mover nor the bootloader, byte for byte the same, is touched.
+        self.assertEqual(self.pins()["esphome"]["mover"], self.before_pins()["mover"])
+        self.assertEqual(self.pins()["esphome"]["bootloader"]["version"], "1.2.0")
+
+    def test_esphome_builds_the_mover_and_the_version_asked_for(self):
+        code, _, built = self.esphome("--no-docs", "--mover", "--image-version", "2.0.0")
+        self.assertEqual(code, 0)
+        self.assertEqual(built, [("sonoff_s60.yaml", "2.0.0"), ("autoflash_mover.yaml", "1.2.0")])
+        self.assertEqual(self.pins()["esphome"]["mover"]["file"], "artifacts/autoflash-mover-1.2.0.bin")
+
+    def test_esphome_keeps_the_published_bootloader_unless_told(self):
+        self.assertEqual(self.esphome("--no-docs", bootloader=b"another")[0], 0)
+        self.assertEqual(self.pins()["esphome"]["bootloader"], self.before_pins()["bootloader"])
+        self.assertTrue((self.root / "artifacts/esphome-sonoff-s60-bootloader-1.2.0.bin").exists())
+
+    def test_esphome_replaces_a_changed_bootloader_when_told(self):
+        self.assertEqual(self.esphome("--no-docs", "--new-bootloader", bootloader=b"another")[0], 0)
+        pin = self.pins()["esphome"]["bootloader"]
+        self.assertEqual((pin["file"], pin["sha256"]),
+                         ("artifacts/esphome-sonoff-s60-bootloader-1.5.0.bin", sha256_bytes(b"another")))
+        self.assertFalse((self.root / "artifacts/esphome-sonoff-s60-bootloader-1.2.0.bin").exists())
+
+    def test_esphome_dry_run_changes_nothing(self):
+        self.assertEqual(self.esphome("--dry-run", "--mover", "--new-bootloader", bootloader=b"another")[0], 0)
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_esphome_a_build_that_fails_its_checks_changes_nothing(self):
+        def check(image, label, release):
+            raise uf.UpdateError(f"{label} has no untouched Wi-Fi placeholders")
+        code, errors, _ = self.esphome("--no-docs", check=check)
+        self.assertEqual(code, 1)
+        self.assertIn("placeholders", errors)
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_esphome_without_docker_stops_at_once(self):
+        from unittest import mock
+        with mock.patch.object(uf.shutil, "which", return_value=None):
+            code, errors, built = self.esphome("--no-docs")
+        self.assertEqual((code, built), (2, []))
+        self.assertIn("Docker is needed", errors)
 
 
 if __name__ == "__main__":
