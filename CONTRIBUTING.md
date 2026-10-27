@@ -59,7 +59,9 @@ python3 tools/lint.py all     # every linter on every file
 Every fix comes with a test that fails without it. The tests run side by
 side and in any order, so a new one leaves nothing behind, keeps a port it
 picked, and touches nothing of the whole computer's:
-[docs/testing.md](docs/testing.md#side-by-side-in-any-order). The emulator -
+[docs/testing.md](docs/testing.md#side-by-side-in-any-order). Coverage and
+mutation testing show where the tests are thin - a guide, not a target:
+[docs/testing.md](docs/testing.md#how-much-they-test). The emulator -
 a virtual S60 running the plug's own firmware - tests whole conversions:
 [docs/emulator.md](docs/emulator.md). Never try a change on a plug you
 cannot afford to lose.

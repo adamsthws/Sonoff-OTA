@@ -75,6 +75,64 @@ for i in $(seq 200); do python3 tests/run.py --shuffle -j 24 > soak.txt 2>&1 || 
 stops at the first failure and says its seed: `--seed N` with the same `-j`
 runs that order again.
 
+### How much they test
+
+Neither measure below is a gate, and no number is a target: a test written
+to raise one tends to test the stand-ins, not the tool. They say where to
+look - a decision no test takes both ways, or a check whose reason no test
+asks - and a person decides what is worth a test there. What only the
+emulator or a plug can show is tested there.
+
+**Coverage** says what the tests run. The `emulator-check` workflow writes
+it into its summary, by file; to see it here, with what each file misses:
+
+```sh
+.venv/bin/python -m coverage run --branch --source=tools -m unittest discover -s tests
+.venv/bin/python -m coverage report --sort=cover -m
+```
+
+`--branch` counts each way an `if` can go, not only each line: a line that
+ran once counts as covered however its condition went.
+
+**Mutation testing** says whether the tests would notice a mistake. A tool
+([mutmut](https://mutmut.readthedocs.io/)) changes the code one small way at
+a time - `>` to `>=`, `or` to `and`, an error's message to `None` - and runs
+the tests on each change. A change some test fails on is caught; one they
+all still pass is a mistake nobody would see. It takes minutes and asks for
+judgement, so it is run by hand, on a module that decides something costly,
+after its tests are written - never in a hook. It runs in a copy of the
+checkout, from its own virtual environment (mutmut needs pytest, which
+runs unittest's tests as they are):
+
+```sh
+work=$(mktemp -d)
+git archive HEAD | tar -x -C "$work"
+python3 -m venv "$work/.venv"
+"$work/.venv/bin/pip" install mutmut==3.8.0 pytest
+cat > "$work/pyproject.toml" <<EOF
+[tool.mutmut]
+source_paths = ["tools"]
+only_mutate = ["tools/autoflash/plans.py"]
+pytest_add_cli_args_test_selection = ["tests/test_plans.py", "tests/test_autoflash.py"]
+also_copy = [$(git ls-files | cut -d/ -f1 | sort -u | grep -vx -e tools -e tests | sed 's/.*/"&"/' | paste -sd, -)]
+EOF
+cd "$work" && .venv/bin/mutmut run && .venv/bin/mutmut results
+```
+
+`only_mutate` is the module; the tests are every file that uses it
+(`grep -l` its name in `tests/`) - one left out leaves the code only it
+reaches "no tests". `mutmut results` lists each change that survived, and
+`mutmut show NAME` what it changed. Some can never be caught, because they
+change nothing: in `Plan.check`, `length <= 0` and `length <= 1` never
+differ, every length being whole sectors. Say so in the tests' commit, so the
+next run's reader need not work it out again.
+
+On 2026-10-27, `plans.py`, its lines 92% covered, had 144 of 634 changes
+survive - 31 in `Plan.check`, whose refusals were tested only as some
+`PlanError`, and its limits only past them. Its tests now ask each
+refusal's reason and each limit from both sides; 117 survive, most in the
+plans it builds, which the emulator runs whole.
+
 ## Linters
 
 ```sh
