@@ -196,6 +196,188 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(leftovers, [], "temporary files must not survive a write")
 
 
+class ConfirmSkipTests(unittest.TestCase):
+    """A step recorded as done is skipped only as far as the plug agrees."""
+
+    def skip(self, verifier, rerun=False):
+        from types import SimpleNamespace
+        import tools.autoflash_cli as autoflash
+        verifiers = {} if verifier is None else {"D1": verifier}
+        with mock.patch.dict(autoflash.STEP_VERIFIERS, verifiers, clear=True), \
+             mock.patch.object(autoflash, "ask_yes_no", return_value=rerun) as asked, \
+             mock.patch.object(autoflash, "say") as said, mock.patch.object(autoflash, "tell"), \
+             mock.patch.object(autoflash, "output"):
+            skipped = autoflash.confirm_skip(SimpleNamespace(), "D1", "Install Tasmota")
+        return skipped, asked, said.call_args.args[0] if said.called else ""
+
+    def test_a_step_with_no_check_is_taken_at_its_record(self):
+        skipped, asked, said = self.skip(None)
+        self.assertTrue(skipped)
+        asked.assert_not_called()
+        self.assertIn("recorded as done", said)
+
+    def test_a_step_the_plug_agrees_with_is_skipped(self):
+        skipped, asked, said = self.skip(lambda ctx: (True, ""))
+        self.assertTrue(skipped)
+        asked.assert_not_called()
+        self.assertIn("the plug still agrees", said)
+
+    def test_a_check_that_cannot_run_leaves_the_record_standing(self):
+        import tools.autoflash_cli as autoflash
+        for error in (autoflash.DeviceError("refused"), OSError("unreachable"), ValueError("bad reply")):
+            def check(ctx, error=error):
+                raise error
+            skipped, asked, said = self.skip(check)
+            self.assertTrue(skipped, error)
+            asked.assert_not_called()
+            self.assertIn("could not re-check", said)
+
+    def test_a_plug_that_disagrees_is_asked_about_and_kept_by_default(self):
+        skipped, asked, _ = self.skip(lambda ctx: (False, "the plug runs Sonoff"))
+        self.assertTrue(skipped)
+        self.assertFalse(asked.call_args.kwargs["default"])
+
+    def test_the_step_runs_again_when_asked(self):
+        skipped, _, _ = self.skip(lambda ctx: (False, "the plug runs Sonoff"), rerun=True)
+        self.assertFalse(skipped)
+
+
+class RunStepsTests(unittest.TestCase):
+    """The run's loop: what it skips, carries on, asks about and stops at."""
+
+    STEPS = [("S1", "First", None), ("S2", "Second", None), ("S3", "Third", None)]
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.state = RunState.open(self.root)
+
+    def run_steps(self, *, codes=None, evidence=None, answer=0, unattended=False, skip=True, **overrides):
+        """run_steps over STEPS, each step's code from `codes` (0 if not
+        given), S2's evidence if interrupted, and the operator's answer:
+        what it returned, the steps it ran, and the stand-ins, each of which
+        `overrides` can replace."""
+        from types import SimpleNamespace
+        import tools.autoflash_cli as autoflash
+        codes = codes or {}
+        ran = []
+        stand_ins = {
+            "restore_left_locks": mock.Mock(), "hold_plug": mock.Mock(), "unlock_tasmota": mock.Mock(),
+            "settle_route": mock.Mock(return_value=("tasmota", "sonoff")), "apply_target": mock.Mock(),
+            "bundle_of_this_version": mock.Mock(), "wait_while_plug_busy": mock.Mock(),
+            "begin_stage": mock.Mock(), "confirm_skip": mock.Mock(return_value=skip),
+            "execute_with_retries": mock.Mock(side_effect=lambda ctx, step: ran.append(step) or codes.get(step, 0)),
+            "stop_here_after_ctrl_c": mock.Mock(return_value=False), "close_firewall_rules": mock.Mock(),
+            "tell_how_to_carry_on": mock.Mock(), "invite_report": mock.Mock(),
+            "plug_page_url": mock.Mock(return_value=None), "rerun_on_tasmota": mock.Mock(return_value=0),
+            "ask_choice": mock.Mock(return_value=answer),
+            "say": mock.Mock(), "tell": mock.Mock(), "section": mock.Mock(),
+            "output": mock.Mock(waited=mock.Mock(return_value=0.0)),
+        } | overrides
+        with contextlib.ExitStack() as patches:
+            for name, stand_in in stand_ins.items():
+                patches.enter_context(mock.patch.object(autoflash, name, stand_in))
+            patches.enter_context(mock.patch.object(autoflash, "STEPS", self.STEPS))
+            patches.enter_context(mock.patch.dict(autoflash.ATTEMPTED_EVIDENCE,
+                                                  {} if evidence is None else {"S2": evidence}, clear=True))
+            patches.enter_context(mock.patch.object(autoflash.prompts, "UNATTENDED", unattended))
+            patches.enter_context(mock.patch.object(autoflash.prompts, "answered_unattended"))
+            code = autoflash.run_steps(SimpleNamespace(state=self.state, research_bridge=False))
+        return code, ran, stand_ins
+
+    def test_every_step_runs_in_turn_and_the_rules_are_closed(self):
+        code, ran, stand_ins = self.run_steps()
+        self.assertEqual((code, ran), (0, ["S1", "S2", "S3"]))
+        stand_ins["close_firewall_rules"].assert_called_once()
+        stand_ins["invite_report"].assert_called_once()
+        stand_ins["bundle_of_this_version"].assert_not_called()  # a new run's bundle is the one built
+
+    def test_a_route_refused_stops_before_anything_is_done(self):
+        import tools.autoflash_cli as autoflash
+        code, ran, stand_ins = self.run_steps(settle_route=mock.Mock(side_effect=autoflash.Abort("no plug")))
+        self.assertEqual((code, ran), (2, []))
+        stand_ins["apply_target"].assert_not_called()
+
+    def test_nothing_to_do_on_tasmota_checks_its_meter(self):
+        import tools.autoflash_cli as autoflash
+        code, ran, stand_ins = self.run_steps(settle_route=mock.Mock(side_effect=autoflash.NothingToDo("on Tasmota")),
+                                              run_source=mock.Mock(return_value="tasmota"))
+        self.assertEqual((code, ran), (0, []))
+        stand_ins["rerun_on_tasmota"].assert_called_once()
+
+    def test_steps_done_and_agreed_with_are_skipped(self):
+        self.state.mark("S1", DONE)
+        code, ran, stand_ins = self.run_steps()
+        self.assertEqual((code, ran), (0, ["S2", "S3"]))
+        stand_ins["confirm_skip"].assert_called_once()
+        stand_ins["bundle_of_this_version"].assert_called_once()  # a resumed run's bundle is checked
+
+    def test_a_step_done_but_doubted_runs_again(self):
+        self.state.mark("S1", DONE)
+        _, ran, _ = self.run_steps(skip=False)
+        self.assertEqual(ran, ["S1", "S2", "S3"])
+
+    def test_a_resumed_run_whose_bundle_is_refused_stops_there(self):
+        import tools.autoflash_cli as autoflash
+        self.state.mark("S1", DONE)
+        code, ran, _ = self.run_steps(bundle_of_this_version=mock.Mock(side_effect=autoflash.Abort("changed")))
+        self.assertEqual((code, ran), (2, []))
+
+    def test_an_interrupted_step_the_plug_shows_finished_is_not_run_again(self):
+        self.state.mark("S2", ATTEMPTED)
+        code, ran, stand_ins = self.run_steps(evidence=lambda ctx: (True, "it answers as Tasmota"))
+        self.assertEqual((code, ran), (0, ["S1", "S3"]))
+        self.assertTrue(RunState.open(self.root).is_done("S2"))
+        stand_ins["ask_choice"].assert_not_called()
+
+    def test_an_interrupted_step_shown_unfinished_is_recommended_again(self):
+        self.state.mark("S2", ATTEMPTED)
+        _, ran, stand_ins = self.run_steps(evidence=lambda ctx: (False, "it still runs Sonoff"))
+        self.assertEqual(ran, ["S1", "S2", "S3"])
+        self.assertIn("recommended", stand_ins["ask_choice"].call_args.args[1][0])
+
+    def test_an_interrupted_step_the_operator_says_finished_is_moved_past(self):
+        self.state.mark("S2", ATTEMPTED)
+        _, ran, stand_ins = self.run_steps(answer=1)
+        self.assertEqual(ran, ["S1", "S3"])
+        self.assertEqual(RunState.open(self.root).data["steps"]["S2"]["note"], "operator confirmed it completed")
+        self.assertNotIn("recommended", stand_ins["ask_choice"].call_args.args[1][0])
+
+    def test_an_interrupted_step_whose_check_fails_is_asked_about(self):
+        import tools.autoflash_cli as autoflash
+        self.state.mark("S2", ATTEMPTED)
+
+        def check(ctx):
+            raise autoflash.DeviceError("no answer")
+        _, ran, stand_ins = self.run_steps(evidence=check)
+        self.assertEqual(ran, ["S1", "S2", "S3"])
+        stand_ins["ask_choice"].assert_called_once()
+
+    def test_unattended_an_interrupted_step_is_done_again_without_asking(self):
+        self.state.mark("S2", ATTEMPTED)
+        _, ran, stand_ins = self.run_steps(unattended=True)
+        self.assertEqual(ran, ["S1", "S2", "S3"])
+        stand_ins["ask_choice"].assert_not_called()
+
+    def test_a_failing_step_stops_the_run_and_says_how_to_carry_on(self):
+        code, ran, stand_ins = self.run_steps(codes={"S2": 1})
+        self.assertEqual((code, ran), (1, ["S1", "S2"]))
+        stand_ins["close_firewall_rules"].assert_called_once()
+        stand_ins["tell_how_to_carry_on"].assert_called_once()
+        stand_ins["invite_report"].assert_not_called()
+
+    def test_quitting_leaves_the_clean_up_to_main(self):
+        code, ran, stand_ins = self.run_steps(codes={"S2": 130})
+        self.assertEqual((code, ran), (130, ["S1", "S2"]))
+        stand_ins["close_firewall_rules"].assert_not_called()
+
+    def test_a_ctrl_c_confirmed_after_a_stage_stops_there(self):
+        code, ran, stand_ins = self.run_steps(stop_here_after_ctrl_c=mock.Mock(side_effect=lambda step: step == "S1"))
+        self.assertEqual((code, ran), (130, ["S1"]))
+        stand_ins["close_firewall_rules"].assert_called_once()
+
+
 class NetworkCheckTests(unittest.TestCase):
     """The plug's live network must be the one the bundle's firmware will join."""
 
@@ -2178,6 +2360,41 @@ class RemoveRunTests(RunChoiceTests):
         self.assertEqual(len(remaining), 1)
         self.assertEqual(menu.call_args_list[1].args[0], "Which run should be removed")
         self.assertNotIn(name, ("first", "second"))
+
+    def remove(self, closes, current=False):
+        """remove_run on a run that left two firewall rules, `closes` saying
+        whether each could be removed: whether it was, what was told."""
+        from unittest import mock
+        rules = [self.autoflash.FirewallRule("ufw", "10.0.0.54", [8088]),
+                 self.autoflash.FirewallRule("ufw", "10.0.0.54", [8089])]
+        state = RunState.open(self.root / "half")
+        state.set_input("firewall_rules", [rule.to_json() for rule in rules])
+        pointer = self.root / ".autoflash-current"
+        pointer.write_text("half\n", encoding="utf-8")
+        with mock.patch.object(self.autoflash, "ask_yes_no", return_value=True), \
+             mock.patch.object(self.autoflash, "read_current", return_value="half" if current else "other"), \
+             mock.patch.object(self.autoflash, "run_name", return_value="half"), \
+             mock.patch.object(self.autoflash, "CURRENT_POINTER", pointer), \
+             mock.patch.object(self.autoflash.hostsys, "close_firewall", side_effect=closes) as close, \
+             mock.patch.object(self.autoflash, "tell") as told:
+            self.assertTrue(self.autoflash.remove_run(self.root / "half"))
+        self.assertFalse((self.root / "half").exists())
+        self.assertEqual(close.call_args_list, [mock.call(rule) for rule in rules])
+        return "\n".join(call.args[0] for call in told.call_args_list), pointer.exists()
+
+    def test_the_firewall_rules_a_run_left_are_removed_with_it(self):
+        told, _ = self.remove([True, True])
+        self.assertEqual(told, "")
+
+    def test_a_rule_that_cannot_be_removed_is_left_to_remove_by_hand(self):
+        told, _ = self.remove([True, False])
+        self.assertIn("Remove it yourself:", told)
+        self.assertIn("8089", told)
+        self.assertNotIn("8088", told)
+
+    def test_removing_the_current_run_forgets_it(self):
+        self.assertFalse(self.remove([True, True], current=True)[1])
+        self.assertTrue(self.remove([True, True], current=False)[1])
 
 
 class BridgeOnHomeNetworkTests(unittest.TestCase):
