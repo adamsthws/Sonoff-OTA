@@ -3,6 +3,14 @@
 # (docs/technical-details.md#keeping-secrets-out-of-git). Installed by
 # python3 tools/leak_scan.py install; --no-verify skips it, for what is meant to be there.
 root=$(git rev-parse --show-toplevel) || exit 1
-python=$root/.venv/bin/python
-[ -x "$python" ] || python=python3
+# The same Python as pre-commit's: this checkout's .venv, then the main
+# checkout's (a linked worktree has none of its own), then python3.
+unset CDPATH   # so cd prints nothing when the path matches a CDPATH entry
+main=$(cd "$(git rev-parse --git-common-dir)/.." && pwd) || exit 1
+python=python3
+for venv in "$root/.venv" "$main/.venv"; do
+    for candidate in "$venv/bin/python" "$venv/Scripts/python.exe"; do
+        [ -x "$candidate" ] && { python=$candidate; break 2; }
+    done
+done
 exec "$python" -I "$root/tools/leak_scan.py" push

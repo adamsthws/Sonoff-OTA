@@ -17,9 +17,15 @@ Each linter is handed the files of its kind:
     esphome config    the ESPHome configs firmware.json builds, in the ESPHome
                       image it pins (Docker): what ESPHome itself would refuse
 
-The first four come from requirements/lint.txt, in the repository's .venv:
+The first four come from requirements/lint.txt, in the repository's .venv, which
+tools/setup-dev creates and fills:
 
+    tools/setup-dev
+    # or by hand:
     .venv/bin/python -m pip install --require-hashes -r requirements/lint.txt
+
+A linked worktree has no .venv of its own; it reuses the main checkout's (found
+beside the shared git dir), so the linters do not silently skip there.
 
 PSScriptAnalyzer needs PowerShell 7.4.6 or newer (pwsh), and then:
 
@@ -48,13 +54,27 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOL_DIRS = [Path(sys.executable).parent, ROOT / ".venv" / "bin", ROOT / ".venv" / "Scripts"]
 
 
+def shared_venv_dirs() -> list[Path]:
+    """The .venv beside the shared git dir, so a linked worktree (which has no
+    .venv of its own) reuses the main checkout's linters. Same as ROOT/.venv in
+    the main checkout, harmlessly."""
+    try:
+        common = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=ROOT,
+                                 capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    base = (ROOT / common).resolve().parent
+    return [base / ".venv" / "bin", base / ".venv" / "Scripts"]
+
+
 @dataclass(frozen=True)
 class Linter:
     name: str
     wants: Callable[[Path], bool]       # whether it lints this file
     command: Callable[[list[str]], list[str]]
     needs: str                          # the program it runs
-    install: str = "requirements/lint.txt"
+    install: str = ("run tools/setup-dev, or in .venv: "
+                    "pip install --require-hashes -r requirements/lint.txt")
     ready: Callable[[str], bool] | None = None   # given PATH: more than `needs` there
 
 
@@ -121,8 +141,10 @@ LINTERS = [
            "zizmor"),
     Linter("PSScriptAnalyzer", powershell,
            lambda files: ["pwsh", "-NoProfile", "-NonInteractive", "-File", "tools/lint_powershell.ps1", *files],
-           "pwsh", "pwsh, then Install-Module PSScriptAnalyzer", has_psscriptanalyzer),
-    Linter("esphome config", esphome_config, esphome_command, "docker", "Docker"),
+           "pwsh", "install pwsh 7.4.6+, then: Install-Module PSScriptAnalyzer -Scope CurrentUser",
+           has_psscriptanalyzer),
+    Linter("esphome config", esphome_config, esphome_command, "docker",
+           "install Docker (its image is pulled on first use)"),
 ]
 
 
@@ -140,7 +162,8 @@ def tracked() -> list[str]:
 
 
 def run(paths: list[str], strict: bool) -> int:
-    env = dict(os.environ, PATH=os.pathsep.join([*map(str, TOOL_DIRS), os.environ.get("PATH", "")]))
+    tool_dirs = [*TOOL_DIRS, *shared_venv_dirs()]
+    env = dict(os.environ, PATH=os.pathsep.join([*map(str, tool_dirs), os.environ.get("PATH", "")]))
     files = [Path(p) for p in paths if (ROOT / p).is_file()]
     failed = []
     for linter in LINTERS:
@@ -148,7 +171,7 @@ def run(paths: list[str], strict: bool) -> int:
         if not mine:
             continue
         if not shutil.which(linter.needs, path=env["PATH"]) or (linter.ready and not linter.ready(env["PATH"])):
-            print(f"lint: {linter.name} skipped, not installed ({linter.install})", file=sys.stderr)
+            print(f"lint: {linter.name} skipped - {linter.install}", file=sys.stderr)
             if strict:
                 failed.append(linter.name)
             continue

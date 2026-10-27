@@ -78,7 +78,7 @@ runs that order again.
 ## Linters
 
 ```sh
-.venv/bin/python -m pip install --require-hashes -r requirements/lint.txt   # once
+tools/setup-dev               # once: creates .venv, installs the linters (and test helpers)
 python3 tools/lint.py all
 ```
 

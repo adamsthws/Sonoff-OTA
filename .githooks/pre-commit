@@ -4,7 +4,16 @@
 # tools/lint.py (docs/testing.md#linters). Installed by
 # python3 tools/leak_scan.py install; --no-verify skips it, for what is meant to be there.
 root=$(git rev-parse --show-toplevel) || exit 1
-python=$root/.venv/bin/python
-[ -x "$python" ] || python=python3
+# Prefer this checkout's .venv, then the main checkout's (beside the shared git
+# dir): a linked worktree has no .venv of its own, so without this it would skip
+# the linters silently. tools/setup-dev creates it; Scripts/ is Windows' layout.
+unset CDPATH   # so cd prints nothing when the path matches a CDPATH entry
+main=$(cd "$(git rev-parse --git-common-dir)/.." && pwd) || exit 1
+python=python3
+for venv in "$root/.venv" "$main/.venv"; do
+    for candidate in "$venv/bin/python" "$venv/Scripts/python.exe"; do
+        [ -x "$candidate" ] && { python=$candidate; break 2; }
+    done
+done
 "$python" -I "$root/tools/leak_scan.py" staged || exit 1
 exec "$python" -I "$root/tools/lint.py" staged

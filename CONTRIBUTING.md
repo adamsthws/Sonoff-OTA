@@ -22,16 +22,26 @@ tools more - the test helpers and the linters - which go in a virtual
 environment in the checkout, never into the system's Python:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install --require-hashes -r requirements/ci.txt -r requirements/lint.txt
+tools/setup-dev                       # creates .venv, installs both files below
 python3 tools/leak_scan.py install
 ```
 
-The last line points Git at the hooks in `.githooks/`: before each commit
-they scan what is staged for secrets and real identifiers, and lint it;
-before each push they scan every commit it sends.
+`tools/setup-dev` is the one-command form of:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install --require-hashes -r requirements/ci.txt -r requirements/lint.txt
+```
+
 [uv](https://docs.astral.sh/uv/) works as well and faster, from the same
 files: `uv venv` and `uv pip install --require-hashes -r ...`.
+
+The leak-scan line points Git at the hooks in `.githooks/`: before each commit
+they scan what is staged for secrets and real identifiers, and lint it; before
+each push they scan every commit it sends. A linked worktree reuses this
+checkout's `.venv`, so run `tools/setup-dev` once in the main checkout - and
+in the worktree as well when its branch changes `requirements/`, or it lints
+with the main checkout's versions.
 
 Optional, for what they check: Docker, for the ESPHome configs' check and
 the emulator; PowerShell 7.4.6 or newer (`pwsh`), with

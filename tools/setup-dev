@@ -1,0 +1,25 @@
+#!/bin/sh
+# Create the repository's .venv and install the development dependencies - the
+# test helpers (requirements/ci.txt) and the linters (requirements/lint.txt:
+# ruff, shellcheck, actionlint, zizmor) the pre-commit hook and tools/lint.py
+# use - pinned with their hashes. Safe to re-run. Run it in the main checkout: a
+# linked worktree has no .venv of its own and reuses this one. PSScriptAnalyzer
+# (pwsh) and the esphome config check (Docker) are set up separately - see
+# docs/testing.md.
+set -eu
+unset CDPATH   # so cd prints nothing when the path matches a CDPATH entry
+
+root=$(cd -- "$(dirname -- "$0")/.." && pwd)
+venv=$root/.venv
+python=${PYTHON:-python3}
+
+if [ ! -x "$venv/bin/python" ]; then
+    echo "setup-dev: creating virtual environment at $venv"
+    "$python" -m venv "$venv"
+fi
+
+echo "setup-dev: installing test helpers and linters (requirements/ci.txt + lint.txt)"
+"$venv/bin/python" -m pip install --require-hashes \
+    -r "$root/requirements/ci.txt" -r "$root/requirements/lint.txt"
+
+echo "setup-dev: done - the tests and ruff/shellcheck/actionlint/zizmor are in $venv"
