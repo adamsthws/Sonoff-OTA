@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<!-- Every page of the site: the rendered Markdown in GitHub's own styling,
+     dark unless the reader chose light with the button, which the browser
+     remembers. Both stylesheets are loaded; the button swaps which is on. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% if page.title and page.title != site.title %}{{ page.title }} · {{ site.title }}{% else %}{{ site.title }}{% endif %}</title>
+<meta name="description" content="{{ site.description }}">
+<!-- Safari takes the PNG, as it ignores SVG icons; the others prefer the
+     SVG, listed last and for any size, whose colour follows their theme. -->
+<link rel="icon" href="{{ '/assets/favicon.png' | relative_url }}" type="image/png" sizes="128x128">
+<link rel="icon" href="{{ '/assets/favicon.svg' | relative_url }}" type="image/svg+xml" sizes="any">
+<link rel="apple-touch-icon" href="{{ '/assets/apple-touch-icon.png' | relative_url }}">
+<link rel="stylesheet" href="{{ '/assets/github-markdown-dark.css' | relative_url }}" id="dark">
+<link rel="stylesheet" href="{{ '/assets/github-markdown-light.css' | relative_url }}" id="light" disabled>
+<style>
+  :root { color-scheme: dark; --bg: #0d1117; --fg: #e6edf3; --line: #30363d; }
+  :root[data-theme="light"] { color-scheme: light; --bg: #ffffff; --fg: #1f2328; --line: #d0d7de; }
+  body { margin: 0; background: var(--bg); }
+  .markdown-body { box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 45px; }
+  @media (max-width: 767px) { .markdown-body { padding: 15px; } }
+  #theme { position: fixed; top: 12px; right: 12px; width: 36px; height: 36px; border: 1px solid var(--line);
+           border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 18px; line-height: 1; cursor: pointer; }
+</style>
+<script>
+  function setTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    document.getElementById("dark").disabled = theme === "light";
+    document.getElementById("light").disabled = theme !== "light";
+  }
+  var theme = "dark";
+  try { theme = localStorage.getItem("theme") || theme; } catch (e) {}
+  setTheme(theme);
+</script>
+</head>
+<body>
+<button id="theme" type="button" aria-label="Switch between dark and light">&#x263E;&#xFE0E;</button>
+<article class="markdown-body">
+{{ content }}
+</article>
+<script>
+  var button = document.getElementById("theme");
+  function label() { button.innerHTML = document.documentElement.dataset.theme === "light" ? "&#x263E;&#xFE0E;" : "&#x2600;&#xFE0E;"; }
+  button.onclick = function () {
+    var theme = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    setTheme(theme);
+    label();
+    try { localStorage.setItem("theme", theme); } catch (e) {}
+  };
+  label();
+</script>
+</body>
+</html>

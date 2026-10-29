@@ -1,0 +1,32 @@
+# The web page at firmwareliberator.com: GitHub's own Jekyll builds main,
+# rendering the README as the front page and the docs beside it, in the
+# layout under _layouts. The tool, its tests, the firmware and the
+# archive's code stay off the site; its research and docs are linked to.
+title: FirmwareLiberator
+description: Sonoff S60 to Tasmota or ESPHome, over the air - flash it, don't smash it.
+exclude:
+  - AGENTS.md
+  - CLAUDE.md
+  - ESPHome/
+  - PSScriptAnalyzerSettings.psd1
+  - RECOVERY_LOCK
+  - REPARTITION_LOCK
+  - SHA256SUMS
+  - archive/__init__.py
+  - archive/artifacts/
+  - archive/bridge/
+  - archive/repartition/
+  - archive/requirements.txt
+  - archive/tasmota-s60/
+  - archive/tests/
+  - archive/tools/
+  - artifacts/
+  - firmware.json
+  - repartition/
+  - requirements/
+  - ruff.toml
+  - start.cmd
+  - start.ps1
+  - start.sh
+  - tests/
+  - tools/
