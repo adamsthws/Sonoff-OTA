@@ -20,13 +20,15 @@ from obk_config import build_config, CFG_SIZE
 
 
 def read_stock_creds(stock_path):
+    """The stored wifi-ssid and wifi-pass as bytes, without their terminators -
+    not decoded, so the config carries exactly the bytes the plug joined with."""
     data = open(stock_path, "rb").read()
     kv = ef40.parse_store(data)
     ssid = kv.get("wifi-ssid")
     pw = kv.get("wifi-pass")
     if ssid is None or pw is None:
         return None, None
-    return bytes(ssid).rstrip(b"\x00").decode("latin1"), bytes(pw).rstrip(b"\x00").decode("latin1")
+    return bytes(ssid).rstrip(b"\x00"), bytes(pw).rstrip(b"\x00")
 
 
 def migrate(stock_path, obk_path, out_path, cfg_offset, template_path=None):

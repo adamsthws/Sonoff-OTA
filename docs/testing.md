@@ -108,7 +108,7 @@ runs unittest's tests as they are):
 work=$(mktemp -d)
 git archive HEAD | tar -x -C "$work"
 python3 -m venv "$work/.venv"
-"$work/.venv/bin/pip" install mutmut==3.8.0 pytest
+"$work/.venv/bin/pip" install mutmut==3.8.0 "pytest<9"   # 3.8.0 reads a pytest 8 attribute
 cat > "$work/pyproject.toml" <<EOF
 [tool.mutmut]
 source_paths = ["tools"]
@@ -118,6 +118,12 @@ also_copy = [$(git ls-files | cut -d/ -f1 | sort -u | grep -vx -e tools -e tests
 EOF
 cd "$work" && .venv/bin/mutmut run && .venv/bin/mutmut results
 ```
+
+mutmut names a mutant by its file's path (`tools.autoflash.plans...`), and
+matches it to what the tests import. A module the tests import by bare name -
+the Beken tools in `tools/beken`, which `tests/beken/test_tools.py` puts on
+`sys.path` - is mutated from a copy at `src/<name>.py` in the work copy, with
+the test's path to them changed to `src`, so the two names agree.
 
 `only_mutate` is the module; the tests are every file that uses it
 (`grep -l` its name in `tests/`) - one left out leaves the code only it

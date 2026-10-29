@@ -56,9 +56,11 @@ def encode_node(name, value):
 
 def provision(data, creds, region=APP_STORE):
     """Append wifi-ssid/wifi-pass KV40 nodes into free (0xff) space of the store.
-    data is a mutable bytearray of the whole flash. creds = {key: value}."""
+    data is a mutable bytearray of the whole flash. creds = {key: value}.
+    Raises ValueError if the store has no room for them; data is then unchanged."""
     store_lo, store_hi = region
-    # find end of the last KV40 node (append after it, into 0xff space)
+    # find end of the last well-formed KV40 node (append after it, into 0xff
+    # space); "KV40" inside a value, with nonsense lengths, does not count
     blob = bytes(data[store_lo:store_hi])
     last = 0
     i = 0
@@ -67,14 +69,21 @@ def provision(data, creds, region=APP_STORE):
         if j < 0:
             break
         i = j + 4
-        name_len = blob[j + 12] if j + 12 < len(blob) else 0
-        value_len = struct.unpack_from("<I", blob, j + 16)[0] if j + 20 <= len(blob) else 0
+        if j + 20 > len(blob):
+            break
+        name_len = blob[j + 12]
+        value_len = struct.unpack_from("<I", blob, j + 16)[0]
+        if name_len == 0 or name_len > 64 or value_len > 0x2000:
+            continue
         end = j + 20 + name_len + value_len + 8
-        if end > last:
+        if end <= len(blob) and end > last:
             last = end
     pos = store_lo + ((last + 3) & ~3)  # 4-byte align
-    for name, value in creds.items():
-        node = encode_node(name, value)
+    nodes = [encode_node(name, value) for name, value in creds.items()]
+    if pos + sum((len(node) + 3) & ~3 for node in nodes) > store_hi:
+        raise ValueError("no room for %d bytes of nodes at 0x%x in the store 0x%x-0x%x"
+                         % (sum(len(node) for node in nodes), pos, store_lo, store_hi))
+    for node in nodes:
         data[pos:pos + len(node)] = node
         pos += (len(node) + 3) & ~3
     return data

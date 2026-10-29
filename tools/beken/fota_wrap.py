@@ -27,7 +27,7 @@ Usage:
 
 With --serve it hosts the container over HTTP (206 ranged, keep-alive) exactly as
 the plug fetches it, and prints the `upgrade` command params (downloadUrl + digest)
-to push over the IoT WebSocket (see tools/probe_ota_command.py for the S60 push).
+to push over the IoT WebSocket (see tools/ewelink/probe_ota_command.py for the S60 push).
 Standard library only.
 """
 import argparse
@@ -37,6 +37,9 @@ import sys
 import zlib
 
 STAGING_NAME = "FWSW-01-S61-BK7238"   # the image-type name the staging handler matches
+# The version is written NUL-terminated into the trailer (bytes 2..20, before its
+# CRC) and the descriptor (0x20..0x30, before the file offset): 15 characters at most.
+VERSION_MAX = 15
 
 
 def _rbl_version(rbl: bytes) -> str:
@@ -50,7 +53,10 @@ def wrap(rbl: bytes, name: str = STAGING_NAME, version: str | None = None) -> by
     """Build the FOTA container around one .rbl payload."""
     if version is None:
         version = _rbl_version(rbl)
-    ver = version.encode("ascii")[:23]
+    ver = version.encode("ascii")
+    if not ver or len(ver) > VERSION_MAX:
+        raise ValueError("version %r must be 1 to %d ASCII characters to fit the container's fields"
+                         % (version, VERSION_MAX))
 
     header = bytearray(16)
     struct.pack_into("<I", header, 0, 0x1beef11e)
@@ -73,7 +79,8 @@ def wrap(rbl: bytes, name: str = STAGING_NAME, version: str | None = None) -> by
     return bytes(header) + bytes(trailer) + bytes(desc) + rbl
 
 
-def _serve(container: bytes, host: str, port: int, path: str = "/user1.bin") -> None:
+def _server(container: bytes, host: str, port: int):
+    """An HTTP server answering every GET with a 206 range of the container, keep-alive."""
     import http.server
     import socketserver
 
@@ -107,7 +114,11 @@ def _serve(container: bytes, host: str, port: int, path: str = "/user1.bin") -> 
         allow_reuse_address = True
         daemon_threads = True
 
-    srv = Server((host, port), Handler)
+    return Server((host, port), Handler)
+
+
+def _serve(container: bytes, host: str, port: int, path: str = "/user1.bin") -> None:
+    srv = _server(container, host, port)
     bound = srv.server_address
     digest = hashlib.sha256(container).hexdigest()
     url = "http://%s:%d%s" % (bound[0], bound[1], path)
