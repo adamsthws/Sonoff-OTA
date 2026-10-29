@@ -133,10 +133,10 @@ class SenderOutputTests(unittest.TestCase):
 
 class ControlTests(unittest.TestCase):
     def test_controls_are_the_pinned_published_bridges(self):
-        sums = (flash_readout.ROOT / "SHA256SUMS").read_text()
+        sums = (flash_readout.ROOT / "artifacts" / "SHA256SUMS").read_text()
         for path, digest in flash_readout.CONTROL_FILES.values():
             flash_readout.check_control_file(flash_readout.ROOT / path, digest)
-            self.assertIn(f"{digest}  {Path(path).as_posix()}", sums)
+            self.assertIn(f"{digest}  {Path(path).name}", sums)
 
     def test_the_default_control_is_what_the_conversion_sends(self):
         from tools.autoflash import cli

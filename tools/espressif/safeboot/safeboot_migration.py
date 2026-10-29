@@ -94,7 +94,7 @@ INTERIM_TABLE_SHA256 = "cfb1e1c46fa209a6c1eada92123a02847ab8e72f67c0044afbcb1c29
 # they were released (tasmota/install, where they were taken from up to 15.6.0,
 # folds its history away).
 FIRMWARE = json.loads(
-    (Path(__file__).resolve().parents[3] / "firmware.json").read_text(encoding="utf-8")
+    (Path(__file__).resolve().parents[3] / "artifacts" / "firmware.json").read_text(encoding="utf-8")
 )
 OFFICIAL_TASMOTA_VERSION = FIRMWARE["tasmota"]["version"]
 OFFICIAL_TASMOTA_TAG = FIRMWARE["tasmota"]["tag"]

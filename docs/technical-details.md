@@ -11,7 +11,7 @@ For a plain-English account of what happens to the plug, read
 ## The firmware bundle
 
 The first run prepares a bundle: it downloads the official Tasmota release
-files - the release [`firmware.json`](../firmware.json) pins, from its page on
+files - the release [`firmware.json`](../artifacts/firmware.json) pins, from its page on
 GitHub - checks every one against a pinned SHA-256, and writes the bundle into
 `captures/`, which git ignores. It asks nothing: the bundle is built without
 your Wi-Fi details, which are added later in the run. To rebuild it on its own:

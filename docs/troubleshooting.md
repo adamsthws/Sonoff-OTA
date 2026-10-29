@@ -246,7 +246,7 @@ uploading by hand, use the plug's own web page rather than a bare `curl`.
 **"the plug rejected the firmware"**
 
 The message includes what the plug said. Usually it means the file is wrong -
-check `sha256sum -c SHA256SUMS` passes and that you are uploading the file the
+check `sha256sum -c SHA256SUMS` passes in `artifacts/` and that you are uploading the file the
 tool named, not the `.factory.bin`.
 
 ## When a migration stage stops

@@ -41,7 +41,7 @@ the repository root.
 
 ## `artifacts/`
 
-Firmware from earlier stages, pinned in `SHA256SUMS`: bridge v2 (published in
+Firmware from earlier stages, pinned in `archive/artifacts/SHA256SUMS`: bridge v2 (published in
 response to [issue #1](https://github.com/HG0161/SonoffS60OTA/issues/1)) and
 v3's unwrapped image, and the custom Tasmota builds from `tasmota-s60/`.
 `s60-ota-bridge-v2-idf5.3.1.elf` is bridge v2's debug symbols, 8 MB, useful

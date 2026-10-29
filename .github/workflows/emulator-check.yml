@@ -10,7 +10,7 @@ on:
   push:
     branches: [main]
     paths:
-      - firmware.json
+      - artifacts/firmware.json
       - artifacts/**
       - ESPHome/**
       - tools/**

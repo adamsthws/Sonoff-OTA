@@ -31,7 +31,7 @@ from . import imprint, noise
 ROOT = Path(__file__).resolve().parents[2]
 # What each is, as firmware.json pins it: tools/repo/update_firmware.py writes it,
 # docs/updating-firmware.md says when.
-PINS = json.loads((ROOT / "firmware.json").read_text(encoding="utf-8"))["esphome"]
+PINS = json.loads((ROOT / "artifacts" / "firmware.json").read_text(encoding="utf-8"))["esphome"]
 # The published image, the ESPHome made for the Sonoff S60 (kinds.SONOFF_S60),
 # pinned: a changed file is refused, never used unseen.
 IMAGE = ROOT / PINS["image"]["file"]

@@ -140,8 +140,9 @@ jobs:
           TAG: ${{ needs.version.outputs.tag }}
         run: |
           python3 tools/repo/release_notes.py "${TAG#v}" > notes.md
-          # The files SHA256SUMS pins that the tool sends (archive/ is history).
-          mapfile -t files < <(awk '$2 ~ /^artifacts\// { print $2 }' SHA256SUMS)
-          sha256sum --check --strict SHA256SUMS
+          # The files artifacts/SHA256SUMS pins, which the tool sends; it names them
+          # bare, so a download checks with sha256sum -c in one directory.
+          mapfile -t files < <(awk '{ print "artifacts/" $2 }' artifacts/SHA256SUMS)
+          (cd artifacts && sha256sum --check --strict SHA256SUMS)
           gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md \
-              SHA256SUMS "${files[@]}"
+              artifacts/SHA256SUMS "${files[@]}"

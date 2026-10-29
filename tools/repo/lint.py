@@ -112,7 +112,7 @@ def has_psscriptanalyzer(path: str) -> bool:
 
 @functools.cache
 def esphome_pins() -> dict:
-    return json.loads((ROOT / "firmware.json").read_text(encoding="utf-8"))["esphome"]
+    return json.loads((ROOT / "artifacts" / "firmware.json").read_text(encoding="utf-8"))["esphome"]
 
 
 def esphome_config(path: Path) -> bool:

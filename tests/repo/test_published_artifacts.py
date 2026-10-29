@@ -28,8 +28,8 @@ class PublishedArtifactTests(unittest.TestCase):
     def test_the_run_installs_the_pinned_bridge(self):
         from tools.autoflash.cli import BRIDGE_OTA, ROOT
         self.assertEqual(BRIDGE_OTA.name, "autoflash-bridge-sonoff-s60-4.4.4.ota")
-        line = f"{sha256_bytes((ROOT / BRIDGE_OTA).read_bytes())}  {BRIDGE_OTA.as_posix()}"
-        self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
+        line = f"{sha256_bytes((ROOT / BRIDGE_OTA).read_bytes())}  {BRIDGE_OTA.name}"
+        self.assertIn(line, (ROOT / "artifacts" / "SHA256SUMS").read_text().splitlines())
 
     def test_the_bridge_carries_one_version_everywhere(self):
         import re
@@ -78,15 +78,15 @@ class PublishedESPHomeTests(unittest.TestCase):
         from tools.autoflash import esphome
         from tools.autoflash.cli import ROOT
         image = esphome.published_image()  # refuses a changed file
-        line = f"{sha256_bytes(image)}  {esphome.IMAGE.relative_to(ROOT).as_posix()}"
-        self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
+        line = f"{sha256_bytes(image)}  {esphome.IMAGE.name}"
+        self.assertIn(line, (ROOT / "artifacts" / "SHA256SUMS").read_text().splitlines())
 
     def test_its_bootloader_is_pinned_and_comes_from_the_same_build(self):
         from tools.autoflash import esphome
         from tools.autoflash.cli import ROOT
         bootloader = esphome.published_bootloader()  # refuses a changed or broken file
-        line = f"{sha256_bytes(bootloader)}  {esphome.BOOTLOADER.relative_to(ROOT).as_posix()}"
-        self.assertIn(line, (ROOT / "SHA256SUMS").read_text().splitlines())
+        line = f"{sha256_bytes(bootloader)}  {esphome.BOOTLOADER.name}"
+        self.assertIn(line, (ROOT / "artifacts" / "SHA256SUMS").read_text().splitlines())
         # Named for the image whose build made it: this one's, or an earlier
         # one's, kept when a later build's differed (docs/updating-firmware.md).
         built = esphome.PINS["bootloader"]["version"]
@@ -175,7 +175,8 @@ class PublishedFilesAreInGitTests(unittest.TestCase):
         from tools.autoflash.cli import ROOT
         if shutil.which("git") is None or not (ROOT / ".git").exists():
             self.skipTest("not a Git checkout")
-        pinned = [line.split()[1] for line in (ROOT / "SHA256SUMS").read_text().splitlines() if line.strip()]
+        pinned = [f"artifacts/{line.split()[1]}" for line in (ROOT / "artifacts" / "SHA256SUMS").read_text().splitlines()
+                  if line.strip()]
         tracked = set(subprocess.run(["git", "ls-files", "--", *pinned], cwd=ROOT, check=True,
                                      capture_output=True, text=True).stdout.split())
         self.assertEqual([path for path in pinned if path not in tracked], [])

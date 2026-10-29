@@ -1,6 +1,6 @@
 # Published firmware artifacts
 
-Every file here is pinned in [`../SHA256SUMS`](../SHA256SUMS). Per-device
+Every file here is pinned in [`SHA256SUMS`](SHA256SUMS) beside it (`sha256sum -c SHA256SUMS` in this directory), and the versions the tool installs in [`firmware.json`](firmware.json). Per-device
 credentials and flash captures belong under the Git-ignored `captures/`
 directory, never here.
 

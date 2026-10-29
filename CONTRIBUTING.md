@@ -115,7 +115,7 @@ eWeLink accounts and plugs' identities.
 
 - The tool uses Python's standard library only, on Python 3.10 or newer.
   Open text files with `encoding=`.
-- `firmware.json`, `artifacts/` and `SHA256SUMS` change only through
+- `artifacts/` - its firmware, `firmware.json` and `SHA256SUMS` - changes only through
   `tools/repo/update_firmware.py` - most often run by the weekly firmware-update
   workflow: [docs/updating-firmware.md](docs/updating-firmware.md).
 - Where things go: `tools/autoflash/` is the conversion tool (`python3 -m

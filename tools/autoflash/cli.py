@@ -1501,7 +1501,7 @@ def step_check(ctx: Context) -> dict[str, Any]:
         # at E1, and the bundle is rebuilt then if they are for another network.
         say("bundle and pinned artifacts: OK")
 
-    problems = hostsys.check_sha256sums(ROOT / "SHA256SUMS")
+    problems = hostsys.check_sha256sums(ROOT / "artifacts" / "SHA256SUMS")
     if problems:
         raise Abort("artifact checksums failed: " + "; ".join(problems))
     say("published artifact checksums: OK")

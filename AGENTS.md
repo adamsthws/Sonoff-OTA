@@ -112,7 +112,7 @@ eWeLink accounts and plugs' identities.
 
 ## Firmware and releases
 
-- **`firmware.json`, `artifacts/` and `SHA256SUMS`** change only through
+- **`artifacts/`** - its firmware, `firmware.json` and `SHA256SUMS` - changes only through
   `tools/repo/update_firmware.py`, never by hand.
   [docs/updating-firmware.md](docs/updating-firmware.md)
 - **A release**: its section in `CHANGELOG.md` first, then the version in

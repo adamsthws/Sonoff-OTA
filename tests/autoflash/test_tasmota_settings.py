@@ -120,8 +120,8 @@ class PinnedReleaseTests(unittest.TestCase):
         from tools.espressif.safeboot.safeboot_migration import PINNED_ARTIFACTS
         template, reason = ts.load_template(ROOT, PINNED_ARTIFACTS["bluetooth"]["sha256"])
         self.assertIsNotNone(template, reason)
-        name = ts.template_path(ROOT).relative_to(ROOT).as_posix()
-        self.assertIn(name, (ROOT / "SHA256SUMS").read_text())
+        name = ts.template_path(ROOT).name
+        self.assertIn(name, (ROOT / "artifacts" / "SHA256SUMS").read_text())
 
 
 @unittest.skipUnless(shutil.which("cc"), "needs a C compiler")

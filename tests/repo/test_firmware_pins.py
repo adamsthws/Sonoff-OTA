@@ -14,7 +14,7 @@ from tools.autoflash import tasmota_settings
 from tools.espressif.safeboot.safeboot_migration import OFFICIAL_URLS, PINNED_ARTIFACTS, sha256_bytes
 
 ROOT = Path(__file__).resolve().parents[2]
-PINS = json.loads((ROOT / "firmware.json").read_text(encoding="utf-8"))
+PINS = json.loads((ROOT / "artifacts" / "firmware.json").read_text(encoding="utf-8"))
 
 
 class TasmotaPinTests(unittest.TestCase):
@@ -43,11 +43,11 @@ class TasmotaPinTests(unittest.TestCase):
 
 class ESPHomePinTests(unittest.TestCase):
     def test_each_file_is_the_one_pinned_and_in_sha256sums(self):
-        sums = (ROOT / "SHA256SUMS").read_text().splitlines()
+        sums = (ROOT / "artifacts" / "SHA256SUMS").read_text().splitlines()
         for key, pin in PINS["esphome"].items():
             data = (ROOT / pin["file"]).read_bytes()
             self.assertEqual((len(data), sha256_bytes(data)), (pin["size"], pin["sha256"]), key)
-            self.assertIn(f"{pin['sha256']}  {pin['file']}", sums)
+            self.assertIn(f"{pin['sha256']}  {Path(pin['file']).name}", sums)
 
     def test_each_app_was_built_as_firmware_json_says(self):
         for key in ("image", "mover"):
@@ -286,14 +286,14 @@ class UpdateCommandTests(unittest.TestCase):
                                    ("mover", "artifacts/autoflash-mover-1.1.0.bin", "1.1.0")):
             (root / file).write_bytes(f"{key} {version}".encode())
             pins["esphome"][key] = {"file": file, "version": version, "esphome": "2026.1.0", "esp_idf": "5.5.5"}
-        (root / "firmware.json").write_text(json.dumps(pins), encoding="utf-8")
-        (root / "SHA256SUMS").write_text("".join(f"{sha256_bytes(b'x')}  {pin['file']}\n"
+        (root / "artifacts" / "firmware.json").write_text(json.dumps(pins), encoding="utf-8")
+        (root / "artifacts" / "SHA256SUMS").write_text("".join(f"{sha256_bytes(b'x')}  {Path(pin['file']).name}\n"
                                                  for pin in pins["esphome"].values()), encoding="utf-8")
         (root / ".gitignore").write_text("*.bin\n" + "".join(f"!{pin['file']}\n" for pin in pins["esphome"].values()),
                                          encoding="utf-8")
         self.before = self.snapshot()
-        for name, value in (("ROOT", root), ("FIRMWARE_JSON", root / "firmware.json"),
-                            ("SHA256SUMS", root / "SHA256SUMS"), ("GITIGNORE", root / ".gitignore"),
+        for name, value in (("ROOT", root), ("FIRMWARE_JSON", root / "artifacts" / "firmware.json"),
+                            ("SHA256SUMS", root / "artifacts" / "SHA256SUMS"), ("GITIGNORE", root / ".gitignore"),
                             ("BUILD_CACHE", root / "build")):
             mock.patch.object(uf, name, value).start()
         mock.patch.object(uf.shutil, "which", return_value="/usr/bin/docker").start()
@@ -310,10 +310,10 @@ class UpdateCommandTests(unittest.TestCase):
                 for path in self.root.rglob("*") if path.is_file()}
 
     def pins(self):
-        return json.loads((self.root / "firmware.json").read_text(encoding="utf-8"))
+        return json.loads((self.root / "artifacts" / "firmware.json").read_text(encoding="utf-8"))
 
     def before_pins(self):
-        return json.loads(self.before["firmware.json"])["esphome"]
+        return json.loads(self.before["artifacts/firmware.json"])["esphome"]
 
     def run_main(self, *argv):
         import contextlib
@@ -412,8 +412,9 @@ class UpdateCommandTests(unittest.TestCase):
                          (new, "1.5.0", "2099.1.0", "esphome:2099.1.0@sha256:d"))
         self.assertEqual(pin["sha256"], sha256_bytes((self.root / new).read_bytes()))
         self.assertFalse((self.root / "artifacts/esphome-sonoff-s60-imprintable-1.4.0.bin").exists())
-        self.assertIn(f"{pin['sha256']}  {new}", (self.root / "SHA256SUMS").read_text(encoding="utf-8"))
-        self.assertNotIn("imprintable-1.4.0", (self.root / "SHA256SUMS").read_text(encoding="utf-8"))
+        sums = (self.root / "artifacts" / "SHA256SUMS").read_text(encoding="utf-8")
+        self.assertIn(f"{pin['sha256']}  {Path(new).name}", sums)
+        self.assertNotIn("imprintable-1.4.0", sums)
         self.assertIn(f"!{new}\n", (self.root / ".gitignore").read_text(encoding="utf-8"))
         self.assertIn('version: "1.5.0"', (self.root / "ESPHome/sonoff_s60.yaml").read_text(encoding="utf-8"))
         # Neither the mover nor the bootloader, byte for byte the same, is touched.

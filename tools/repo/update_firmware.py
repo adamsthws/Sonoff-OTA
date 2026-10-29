@@ -59,8 +59,9 @@ from tools.espressif.safeboot.safeboot_migration import (  # noqa: E402
     validate_native_image,
 )
 
-FIRMWARE_JSON = ROOT / "firmware.json"
-SHA256SUMS = ROOT / "SHA256SUMS"
+FIRMWARE_JSON = ROOT / "artifacts" / "firmware.json"
+# Beside the files it lists, which it names bare: `sha256sum -c` runs in artifacts/.
+SHA256SUMS = ROOT / "artifacts" / "SHA256SUMS"
 GITIGNORE = ROOT / ".gitignore"
 TASMOTA_REPO = "arendst/Tasmota"
 ESPHOME_REPO = "esphome/esphome"
@@ -469,7 +470,8 @@ def publish(pins: dict[str, Any], key: str, file: str, data: bytes, record: dict
             other["file"] == old for name, other in pins["esphome"].items() if name != key):
         (ROOT / old).unlink()
     SHA256SUMS.write_text(replace_sums_line(SHA256SUMS.read_text(encoding="utf-8"),
-                                            old if old != file else None, file, data), encoding="utf-8")
+                                            Path(old).name if old != file else None, Path(file).name, data),
+                          encoding="utf-8")
     GITIGNORE.write_text(with_ignore_exception(GITIGNORE.read_text(encoding="utf-8"), old, file),
                          encoding="utf-8")
     pins["esphome"][key] = {"file": file, **record, "size": len(data), "sha256": sha256_bytes(data)}
