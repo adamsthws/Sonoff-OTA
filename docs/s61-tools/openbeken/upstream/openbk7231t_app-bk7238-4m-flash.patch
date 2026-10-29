@@ -1,0 +1,154 @@
+diff --git a/BUILDING.md b/BUILDING.md
+index 8b17824..2f423ae 100644
+--- a/BUILDING.md
++++ b/BUILDING.md
+@@ -45,6 +45,25 @@ The output binaries can be found at `apps/<appname>/output/<appversion>`.
+ Same as for BK7231T, but use BK7231N SDK and you also might need to rename project directory from OpenBK7231T_App to OpenBK7231N_App:
+ https://github.com/openshwprojects/OpenBK7231N
+ 
++## Building for BK7238
++
++```
++make APP_NAME=OpenBK7238 OpenBK7238
++```
++
++builds for a 2 MB flash, the common case. BK7238 modules with a 4 MB flash
++(Sonoff's S61 plugs, for one) use the SDK's 4 MB partition table instead, so
++their OTA slot, config sector and RF-calibration partition sit where the
++module's stock image and bootloader keep them:
++
++```
++make APP_NAME=OpenBK7238 FLASH_SIZE=4M OpenBK7238
++```
++
++The outputs then carry a `_4M` suffix, and the QIO image is packed with the 4 MB
++bootloader (the shipped one with the 4 MB table in its tail; see
++`tools/beken_packager/make_bootloader_4m.py` in the SDK).
++
+ ## Building for XR809
+ 
+ Get XR809 SDK:
+diff --git a/Makefile b/Makefile
+index 991394e..4b49dcb 100644
+--- a/Makefile
++++ b/Makefile
+@@ -732,11 +732,25 @@ OpenRTL8720E: prebuild_OpenRTL8720E
+ 	cp sdk/ameba-rtos/amebalite_gcc_project/ota_all.bin output/$(APP_VERSION)/OpenRTL8720E_$(APP_VERSION)_ota.img
+ 
+ .PHONY: OpenBK7238
+-OpenBK7238: prebuild_OpenBK7238
++# The SDK's sys_config_bk7238.h hard-wires the 2 MB partition table. BK7238 boards
++# with 4 MB flash (e.g. Sonoff's S61 plugs) are built with FLASH_SIZE=4M, which
++# selects the SDK's 4 MB table: the OTA slot, config sector and RF-calibration
++# partition then sit where a 4 MB stock image (and its bootloader) keep them.
++# The edits are made on a copy of the header for the build and undone after.
++BK7238_SED =
++BK7238_SUFFIX =
+ ifeq ($(OBK_VARIANT), 8)
++BK7238_SED += -e 's/\#if 0\/\/BTPROXY/\#if 1/'
++endif
++ifeq ($(FLASH_SIZE), 4M)
++BK7238_SED += -e 's/^\(\#define CFG_FLASH_SELECTION_TYPE[ \t]*\)FLASH_SELECTION_TYPE_2M/\1FLASH_SELECTION_TYPE_4M/'
++BK7238_SUFFIX = _4M
++endif
++OpenBK7238: prebuild_OpenBK7238
++ifneq ($(strip $(BK7238_SED)),)
+ 	cd sdk/beken_freertos_sdk && \
+ 	cp -f beken378/app/config/sys_config_bk7238.h beken378/app/config/sys_config_bk7238.h.bak && \
+-	sed -i 's/#if 0\/\/BTPROXY/#if 1/' beken378/app/config/sys_config_bk7238.h && \
++	sed -i $(BK7238_SED) beken378/app/config/sys_config_bk7238.h && \
+ 	ARM_GCC_TOOLCHAIN=$(PWD)/sdk/beken_freertos_sdk/toolchain/arm-none-eabi/bin/ OBK_VARIANT=$(OBK_VARIANT) sh build.sh bk7238 $(APP_VERSION); \
+ 	rc=$$?; \
+ 	mv -f beken378/app/config/sys_config_bk7238.h.bak beken378/app/config/sys_config_bk7238.h; \
+@@ -745,10 +759,10 @@ else
+ 	cd sdk/beken_freertos_sdk && ARM_GCC_TOOLCHAIN=$(PWD)/sdk/beken_freertos_sdk/toolchain/arm-none-eabi/bin/ OBK_VARIANT=$(OBK_VARIANT) sh build.sh bk7238 $(APP_VERSION)
+ endif
+ 	mkdir -p output/$(APP_VERSION)
+-	cp sdk/beken_freertos_sdk/out/bk7238.bin output/$(APP_VERSION)/OpenBK7238_${APP_VERSION}.bin
+-	cp sdk/beken_freertos_sdk/out/bk7238_QIO.bin output/$(APP_VERSION)/OpenBK7238_QIO_${APP_VERSION}.bin
+-	cp sdk/beken_freertos_sdk/out/app.rbl output/$(APP_VERSION)/OpenBK7238_${APP_VERSION}.rbl
+-	cp sdk/beken_freertos_sdk/out/bk7238_UA.bin output/$(APP_VERSION)/OpenBK7238_UA_${APP_VERSION}.bin
++	cp sdk/beken_freertos_sdk/out/bk7238.bin output/$(APP_VERSION)/OpenBK7238$(BK7238_SUFFIX)_${APP_VERSION}.bin
++	cp sdk/beken_freertos_sdk/out/bk7238_QIO.bin output/$(APP_VERSION)/OpenBK7238$(BK7238_SUFFIX)_QIO_${APP_VERSION}.bin
++	cp sdk/beken_freertos_sdk/out/app.rbl output/$(APP_VERSION)/OpenBK7238$(BK7238_SUFFIX)_${APP_VERSION}.rbl
++	cp sdk/beken_freertos_sdk/out/bk7238_UA.bin output/$(APP_VERSION)/OpenBK7238$(BK7238_SUFFIX)_UA_${APP_VERSION}.bin
+ 
+ .PHONY: OpenBK7231U
+ OpenBK7231U: prebuild_OpenBK7231U
+diff --git a/src/hal/bk7231/hal_ota_bk7231.c b/src/hal/bk7231/hal_ota_bk7231.c
+index b00872f..2bec3d1 100644
+--- a/src/hal/bk7231/hal_ota_bk7231.c
++++ b/src/hal/bk7231/hal_ota_bk7231.c
+@@ -10,8 +10,28 @@
+ #include "../../httpserver/new_http.h"
+ #include "../../driver/drv_public.h"
+ #include "../../driver/drv_bl_shared.h"
++#include "BkDriverFlash.h"
+ 
+ static unsigned char *sector = (void *)0;
++
++unsigned int HAL_Beken_OTAPartitionStart(void) {
++	bk_logic_partition_t *pt = bk_flash_get_info(BK_PARTITION_OTA);
++	if (pt == NULL || pt->partition_length == 0)
++		return 0x132000;    // the 2 MB layout, as before
++	return pt->partition_start_addr;
++}
++
++unsigned int HAL_Beken_FlashLength(void) {
++	unsigned int end = 0, size = 0x100000;
++	for (int i = 0; i < BK_PARTITION_MAX; i++) {
++		bk_logic_partition_t *pt = bk_flash_get_info((bk_partition_t)i);
++		if (pt && pt->partition_length && pt->partition_start_addr + pt->partition_length > end)
++			end = pt->partition_start_addr + pt->partition_length;
++	}
++	while (size < end)
++		size <<= 1;
++	return size;
++}
+ int sectorlen = 0;
+ unsigned int addr = 0xff000;
+ #define SECTOR_SIZE 0x1000
+diff --git a/src/hal/hal_ota.h b/src/hal/hal_ota.h
+index a2f9fb7..3975efd 100644
+--- a/src/hal/hal_ota.h
++++ b/src/hal/hal_ota.h
+@@ -1,13 +1,17 @@
+ #ifndef __OTA_H__
+ #define __OTA_H__
+ 
+-// NOTE: this offset was taken from BkDriverFlash.c
+-// search for BK_PARTITION_OTA
+-
+-#if PLATFORM_BK7231T
+-#define START_ADR_OF_BK_PARTITION_OTA 0x132000
+-#elif PLATFORM_BK7231N
+-#define START_ADR_OF_BK_PARTITION_OTA 0x12A000
++#if PLATFORM_BEKEN
++// The Beken SDK keeps one partition table per flash size (BkDriverFlash.c) and
++// selects it by CFG_FLASH_SELECTION_TYPE, so the OTA slot is not one address:
++// 0x132000 on the 2 MB table, 0x286000 on the 4 MB one. Read it from the table
++// the firmware was built with rather than hard-coding a layout.
++unsigned int HAL_Beken_OTAPartitionStart(void);
++// The flash size the partition table implies (end of the highest partition,
++// rounded up to a power of two). The flash-ID table is not used for this: it
++// does not know every part and answers 2 MB for the ones it does not.
++unsigned int HAL_Beken_FlashLength(void);
++#define START_ADR_OF_BK_PARTITION_OTA (HAL_Beken_OTAPartitionStart())
+ #else
+ // TODO
+ #define START_ADR_OF_BK_PARTITION_OTA 0x132000
+diff --git a/src/httpserver/rest_interface.c b/src/httpserver/rest_interface.c
+index 695c602..4e36fc3 100644
+--- a/src/httpserver/rest_interface.c
++++ b/src/httpserver/rest_interface.c
+@@ -23,6 +23,10 @@
+ extern uint8_t flash_size_8720;
+ #undef DEFAULT_FLASH_LEN
+ #define DEFAULT_FLASH_LEN (flash_size_8720 << 20)
++#elif PLATFORM_BEKEN
++// 1, 2 or 4 MB, whichever partition table the firmware was built with
++#undef DEFAULT_FLASH_LEN
++#define DEFAULT_FLASH_LEN (HAL_Beken_FlashLength())
+ #endif
+ 
+ #include "../new_cfg.h"

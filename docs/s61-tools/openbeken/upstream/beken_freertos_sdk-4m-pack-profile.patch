@@ -1,0 +1,163 @@
+diff --git a/application.mk b/application.mk
+index 89488b7..09ea9f3 100644
+--- a/application.mk
++++ b/application.mk
+@@ -41,6 +41,17 @@ endif
+ 
+ -include .config
+ 
++# The packager stamps image names with the flash size (1M/2M/4M/8M) it was given;
++# it falls back to 2M for DYNAMIC (0) or an unset CFG_FLASH_SELECTION_TYPE.
++FLASH_SIZE_TAG := 2M
++ifeq ($(CFG_FLASH_SELECTION_TYPE),0x100000)
++FLASH_SIZE_TAG := 1M
++else ifeq ($(CFG_FLASH_SELECTION_TYPE),0x400000)
++FLASH_SIZE_TAG := 4M
++else ifeq ($(CFG_FLASH_SELECTION_TYPE),0x800000)
++FLASH_SIZE_TAG := 8M
++endif
++
+ ifeq ($(CFG_SOC_NAME), 7)
+ ENCRYPT_ARGS = 0 0 0 0 0
+ else ifeq ($(CFG_SOC_NAME), 2)
+@@ -676,25 +687,25 @@ endif
+ #	$(Q)-rm -rf $(BLE_PUB_LIB) $(OS_LIB) $(LWIP_LIB) $(WOLFSSL_LIB) $(MBEDTLS_LIB) $(DRIVER_LIB) $(FUNC_LIB) $(MISC_LIB) $(SRC_S_LIB)
+ ifeq ($(SOC_BK7231T), 1)
+ 	$(Q)(cd ./tools/beken_packager; $(ECHO) "  $(GREEN)PACK $(SOC_NAME_BSP_BIN)$(NC)"; if [ "$(Q)" = "@" ]; then python ./beken_packager_wrapper -i 1 -s $(CFG_FLASH_SELECTION_TYPE); else python ./beken_packager_wrapper -i 1 -s $(CFG_FLASH_SELECTION_TYPE); fi)
+-	$(Q)mv $(BIN_DIR)/bk7231_2M.1220.bin $(BIN_DIR)/bk7231t_QIO.bin
+-	$(Q)mv $(BIN_DIR)/bk7231_bsp_uart_2M.1220.bin $(BIN_DIR)/bk7231t_UA.bin
++	$(Q)mv $(BIN_DIR)/bk7231_$(FLASH_SIZE_TAG).1220.bin $(BIN_DIR)/bk7231t_QIO.bin
++	$(Q)mv $(BIN_DIR)/bk7231_bsp_uart_$(FLASH_SIZE_TAG).1220.bin $(BIN_DIR)/bk7231t_UA.bin
+ else
+ 	$(Q)(cd ./tools/beken_packager; $(ECHO) "  $(GREEN)PACK $(SOC_NAME_BSP_BIN)$(NC)"; if [ "$(Q)" = "@" ]; then python ./beken_packager_wrapper -i $(CFG_SOC_NAME) -s $(CFG_FLASH_SELECTION_TYPE); else python ./beken_packager_wrapper -i $(CFG_SOC_NAME) -s $(CFG_FLASH_SELECTION_TYPE); fi)
+-	$(Q)mv $(BIN_DIR)/$(CFG_SOC_NAME_STR)_2M.1220.bin $(BIN_DIR)/$(CFG_SOC_NAME_STR)_QIO.bin
+-	$(Q)mv $(BIN_DIR)/$(CFG_SOC_NAME_STR)_bsp_uart_2M.1220.bin $(BIN_DIR)/$(CFG_SOC_NAME_STR)_UA.bin
++	$(Q)mv $(BIN_DIR)/$(CFG_SOC_NAME_STR)_$(FLASH_SIZE_TAG).1220.bin $(BIN_DIR)/$(CFG_SOC_NAME_STR)_QIO.bin
++	$(Q)mv $(BIN_DIR)/$(CFG_SOC_NAME_STR)_bsp_uart_$(FLASH_SIZE_TAG).1220.bin $(BIN_DIR)/$(CFG_SOC_NAME_STR)_UA.bin
+ endif
+ ifeq ($(CFG_SOC_NAME), 5)
+ 	$(Q)rm $(BIN_DIR)/bk7231_bsp.bin
+ 	$(Q)cp $(BIN_DIR)/bsp_enc.bin $(BIN_DIR)/bk7231_bsp.bin
+ 	$(Q)(cd ./tools/beken_packager; $(ECHO) "  $(GREEN)PACK BK7231M$(NC)"; if [ "$(Q)" = "@" ]; then python ./beken_packager_wrapper -i 9 -s $(CFG_FLASH_SELECTION_TYPE); else python ./beken_packager_wrapper -i 9 -s $(CFG_FLASH_SELECTION_TYPE); fi)
+-	$(Q)mv $(BIN_DIR)/bk7231m_2M.1220.bin $(BIN_DIR)/BK7231M_QIO.bin
++	$(Q)mv $(BIN_DIR)/bk7231m_$(FLASH_SIZE_TAG).1220.bin $(BIN_DIR)/BK7231M_QIO.bin
+ endif
+ ifeq ($(CFG_SOC_NAME), 3)
+ 	$(Q)rm $(BIN_DIR)/bk7231_bsp.bin
+ 	$(Q)cp $(BIN_DIR)/bsp_enc.bin $(BIN_DIR)/bk7231_bsp.bin
+ 	$(Q)(cd ./tools/beken_packager; $(ECHO) "  $(GREEN)PACK $(CFG_SOC_NAME_STR)_Tuya$(NC)"; if [ "$(Q)" = "@" ]; then python ./beken_packager_wrapper -i 10 -s $(CFG_FLASH_SELECTION_TYPE); else python ./beken_packager_wrapper -i 10 -s $(CFG_FLASH_SELECTION_TYPE); fi)
+-	$(Q)mv $(BIN_DIR)/bk7252_tuya_2M.1220.bin $(BIN_DIR)/$(CFG_SOC_NAME_STR)_Tuya_QIO.bin
+-	$(Q)mv $(BIN_DIR)/bk7252_tuya_bsp_uart_2M.1220.bin $(BIN_DIR)/$(CFG_SOC_NAME_STR)_Tuya_UA.bin
++	$(Q)mv $(BIN_DIR)/bk7252_tuya_$(FLASH_SIZE_TAG).1220.bin $(BIN_DIR)/$(CFG_SOC_NAME_STR)_Tuya_QIO.bin
++	$(Q)mv $(BIN_DIR)/bk7252_tuya_bsp_uart_$(FLASH_SIZE_TAG).1220.bin $(BIN_DIR)/$(CFG_SOC_NAME_STR)_Tuya_UA.bin
+ endif
+ 
+ 
+diff --git a/tools/beken_packager/beken_packager_wrapper b/tools/beken_packager/beken_packager_wrapper
+index 7f8fbe8..7a96993 100755
+--- a/tools/beken_packager/beken_packager_wrapper
++++ b/tools/beken_packager/beken_packager_wrapper
+@@ -69,7 +69,7 @@ out_json_4M = {
+             "version": "4M.1220",
+             "partition": "app",
+             "start_addr": "0x00011000",
+-            "size": "2890K"
++            "size": "2516K"
+         }
+     ]
+ }
+@@ -117,7 +117,8 @@ default_info = {
+     'bk7251':  {'boot': 'bootloader_bk7251_uart2_v1.0.15.bin', 'firmware': '../../out/bk7231_bsp.bin'},
+     'bk7271':  {'boot': 'bootloader_bk7271_uart2_v1.0.11.bin', 'firmware': '../../out/bk7231_bsp.bin'},
+     'bk7236':  {'boot': 'bootloader_bk7236_uart2_v1.0.11.bin', 'firmware': '../../out/bk7231_bsp.bin'},
+-    'bk7238':  {'boot': 'bootloader_bk7238_uart1_v1.0.15.bin', 'firmware': '../../out/bk7231_bsp.bin'},
++    # boot_4M: the same bootloader with the 4 MB partition table in its tail (see make_bootloader_4m.py)
++    'bk7238':  {'boot': 'bootloader_bk7238_uart1_v1.0.15.bin', 'boot_4M': 'bootloader_bk7238_uart1_v1.0.15_4M.bin', 'firmware': '../../out/bk7231_bsp.bin'},
+     'bk7252n': {'boot': 'bootloader_bk7252n_uart1_v1.0.15.bin', 'firmware': '../../out/bk7231_bsp.bin'},
+     'bk7253': {'boot': 'bootloader_bk7253_uart2_v1.0.15.bin', 'firmware': '../../out/bk7231_bsp.bin'},
+     'bk7252_tuya':  {'boot': 'bootloader_bk7251_uart2_v1.0.15_enc.bin', 'firmware': '../../out/bk7231_bsp.bin'},
+@@ -156,6 +157,15 @@ if args.size.startswith("0x"):
+     args.size = int(args.size.replace("0x", ""),16)
+ else:
+     args.size = int(args.size)
++# a chip's bootloader carries its own partition table, so a 4 MB image needs the
++# 4 MB one: the shipped bootloader with the 4 MB table in its tail, made here
++# from it when it is not there yet (make_bootloader_4m.py)
++if not args.boot and args.size >= 0x400000 and 'boot_4M' in default_info[chip]:
++    bootloader_str = default_info[chip]['boot_4M']
++    if not os.path.exists(bootloader_str):
++        import make_bootloader_4m
++        make_bootloader_4m.convert(default_info[chip]['boot'], bootloader_str)
++
+ #select json with flash size
+ if args.size >= 0x800000:
+     out_json = out_json_8M
+diff --git a/tools/beken_packager/make_bootloader_4m.py b/tools/beken_packager/make_bootloader_4m.py
+new file mode 100644
+index 0000000..7d4876a
+--- /dev/null
++++ b/tools/beken_packager/make_bootloader_4m.py
+@@ -0,0 +1,63 @@
++#!/usr/bin/env python3
++"""Make a 4 MB-flash variant of a Beken BK7231/BK7238 bootloader.
++
++The bootloader binary ends in its FAL partition table: three 64-byte entries
++("01PE", name[24], flash device[24], offset, length, crc32 of the first 60
++bytes). The shipped bootloader_bk7238_uart1_v1.0.15.bin carries the 2 MB table
++(download at 0x132000). Rewriting that table for the SDK's 4 MB layout
++(application 0x10000+0x250000, download 0x286000+0x15A000) gives the bootloader
++a 4 MB chip needs. Checked against a Sonoff S61 (4 MB BK7238): its factory
++bootloader is exactly this file with exactly this table.
++
++  python3 make_bootloader_4m.py bootloader_bk7238_uart1_v1.0.15.bin bootloader_bk7238_uart1_v1.0.15_4M.bin
++"""
++import struct
++import sys
++import zlib
++
++MAGIC = b"01PE"
++ENTRY = 64
++TABLE_4M = (
++    (b"bootloader", b"beken_onchip_crc", 0x000000, 0x010000),
++    (b"app",        b"beken_onchip_crc", 0x010000, 0x250000),
++    (b"download",   b"beken_onchip",     0x286000, 0x15A000),
++)
++
++
++def entry(name, dev, offset, length):
++    e = MAGIC + name.ljust(24, b"\0") + dev.ljust(24, b"\0") + struct.pack("<II", offset, length)
++    return e + struct.pack("<I", zlib.crc32(e) & 0xFFFFFFFF)
++
++
++def valid_entry(e):
++    return len(e) == ENTRY and e[:4] == MAGIC and \
++        struct.unpack_from("<I", e, 60)[0] == zlib.crc32(e[:60]) & 0xFFFFFFFF
++
++
++def table_start(blob):
++    """The partition table is the run of valid 64-byte entries that ends the file."""
++    start = None
++    pos = len(blob) - ENTRY
++    while pos >= 0 and valid_entry(blob[pos:pos + ENTRY]):
++        start = pos
++        pos -= ENTRY
++    if start is None:
++        raise SystemExit("no partition table found at the end of the bootloader")
++    return start
++
++
++def convert(src, dst):
++    blob = open(src, "rb").read()
++    start = table_start(blob)
++    table = b"".join(entry(*e) for e in TABLE_4M)
++    out = blob[:start] + table
++    open(dst, "wb").write(out)
++    print("%s: table at 0x%x (%d entries) -> %s (%d bytes)" % (src, start, (len(blob) - start) // ENTRY, dst, len(out)))
++
++
++def main():
++    convert(sys.argv[1], sys.argv[2])
++
++
++if __name__ == "__main__":
++    main()
