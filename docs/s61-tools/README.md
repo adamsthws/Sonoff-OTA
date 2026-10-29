@@ -170,6 +170,11 @@ signed-char `Tiny_CRC8`, the `0x1e1000` config offset).
   changes across releases — then carries the factory meter calibration over and
   applies the S61's wiring. Reads the stock store only (reversible). Build recipe
   and the `S61RevertToStock` command in [`openbeken/README.md`](openbeken/README.md).
+- **`esphome/README.md`** — the **ESPHome route**: how
+  [`ESPHome/sonoff_s61.yaml`](../../ESPHome/sonoff_s61.yaml) (LibreTiny) reads
+  the stock Wi-Fi and meter calibration from the EF40 store at boot, its 4 MB
+  flash layout, the build, the reversion through ESPHome's own OTA, and what
+  the emulator validated.
 - **`s61_stock_app.py`** — extract the stock app from a dump, verified against the
   FNV-1a hash in its RBL header, ready to repackage with the SDK packer for a
   revert to stock. `python3 s61_stock_app.py dump.bin -o stock_app_1.0.2.bin`

@@ -95,3 +95,13 @@ it was `sonoff-s60-abcdef`, its network `Sonoff-Setup-CDEF`.
 
 [`prototype/FINDINGS.md`](prototype/FINDINGS.md) records how this route was
 worked out and tested.
+
+## The S61
+
+[`sonoff_s61.yaml`](sonoff_s61.yaml) is the same config for the Sonoff S61
+(a Beken BK7238, on LibreTiny): the same entities, actions and energy totals,
+the S61's wiring, and its Wi-Fi and factory calibration read at boot from the
+stock firmware's own store, which stays on the plug through every conversion -
+so it has no placeholders to fill. The tool installs it as an rt_ota update
+the plug's stock bootloader applies. How it is built and what the emulator
+validated: [docs/s61-tools/esphome/README.md](../docs/s61-tools/esphome/README.md).
