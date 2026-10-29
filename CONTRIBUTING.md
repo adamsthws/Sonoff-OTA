@@ -29,11 +29,11 @@ tools more - the test helpers and the linters - which go in a virtual
 environment in the checkout, never into the system's Python:
 
 ```sh
-tools/setup-dev                       # creates .venv, installs both files below
-python3 tools/leak_scan.py install
+tools/repo/setup-dev                       # creates .venv, installs both files below
+python3 tools/repo/leak_scan.py install
 ```
 
-`tools/setup-dev` is the one-command form of:
+`tools/repo/setup-dev` is the one-command form of:
 
 ```sh
 python3 -m venv .venv
@@ -46,7 +46,7 @@ files: `uv venv` and `uv pip install --require-hashes -r ...`.
 The leak-scan line points Git at the hooks in `.githooks/`: before each commit
 they scan what is staged for secrets and real identifiers, and lint it; before
 each push they scan every commit it sends. A linked worktree reuses this
-checkout's `.venv`, so run `tools/setup-dev` once in the main checkout - and
+checkout's `.venv`, so run `tools/repo/setup-dev` once in the main checkout - and
 in the worktree as well when its branch changes `requirements/`, or it lints
 with the main checkout's versions.
 
@@ -60,7 +60,7 @@ the workflows run them all.
 
 ```sh
 python3 tests/run.py          # the unit tests, about 11 s
-python3 tools/lint.py all     # every linter on every file
+python3 tools/repo/lint.py all     # every linter on every file
 ```
 
 Every fix comes with a test that fails without it. The tests run side by
@@ -83,7 +83,7 @@ eWeLink accounts and plugs' identities.
 - In examples, tests and docs, use the made-up MAC `12:34:56:ab:cd:ef` and
   addresses that are nobody's - never your plug's, network's or account's.
 - If the leak scan stops a commit, take the finding out. A new made-up
-  example belongs in `.leak-scan-allow`; nothing real is ever let through
+  example belongs in `tools/repo/leak-scan-allow`; nothing real is ever let through
   with `--no-verify`.
   [docs/technical-details.md](docs/technical-details.md#keeping-secrets-out-of-git)
 - No third party's proprietary firmware - Sonoff's stock images, a plug's
@@ -115,10 +115,19 @@ eWeLink accounts and plugs' identities.
 
 - The tool uses Python's standard library only, on Python 3.10 or newer.
   Open text files with `encoding=`.
-- `firmware.json`, `artifacts/` and `SHA256SUMS` change only through
-  `tools/update_firmware.py` - most often run by the weekly firmware-update
+- `artifacts/` - its firmware, `firmware.json` and `SHA256SUMS` - changes only through
+  `tools/repo/update_firmware.py` - most often run by the weekly firmware-update
   workflow: [docs/updating-firmware.md](docs/updating-firmware.md).
-- `archive/` is kept as it was, for the record: it is not linted or changed.
+- Where things go: `tools/autoflash/` is the conversion tool (`python3 -m
+  tools.autoflash` runs it) and `tools/repo/` the repository's own plumbing; `tools/espressif/` and `tools/beken/`
+  hold each chip family's tooling, its emulator in `emulator/`; `tools/ewelink/`
+  what talks to eWeLink whatever the chip; `devices/<plug>/` what is one plug's
+  alone (its sheet, its ESPHome configs - at the paths converted plugs give
+  Home Assistant, so a move means a new image - and modules); `tests/` mirrors `tools/`
+  (`tests/autoflash/`, `tests/repo/`, `tests/ewelink/`, `tests/espressif/`,
+  `tests/beken/`; `tests/run.py <directory>` runs one of them); `docs/` prose only;
+  and `archive/` the work that got the project here and is no longer used,
+  kept for the reasoning, linted like the rest.
 - Docs, comments and commit messages match what is here already: plain,
   compact sentences saying what something does and why.
 

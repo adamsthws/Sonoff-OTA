@@ -16,9 +16,9 @@ eWeLink accounts and plugs' identities.
   committed. Git ignores it.
 - **Examples use made-up identifiers**: the MAC `12:34:56:ab:cd:ef`, and
   addresses that are nobody's. Never a real plug's, network's or account's.
-- **The leak scan** (`tools/leak_scan.py`, run by the hooks in `.githooks/`)
+- **The leak scan** (`tools/repo/leak_scan.py`, run by the hooks in `.githooks/`)
   stops a commit or push holding one. Take it out; never pass `--no-verify`
-  to get past a finding. A new made-up example goes in `.leak-scan-allow`.
+  to get past a finding. A new made-up example goes in `tools/repo/leak-scan-allow`.
   [docs/technical-details.md](docs/technical-details.md#keeping-secrets-out-of-git)
 - **A plug's stock Sonoff backup cannot be made again** once the plug is
   converted: never overwrite, move or delete one.
@@ -26,7 +26,7 @@ eWeLink accounts and plugs' identities.
   dump - is ever committed, put on a release or built into a published
   image, whatever the convenience. Where tooling needs one, fetch it at run
   time from where its owner or another project publishes it, as
-  `docs/s61-tools/emulator/bk-emu.sh dump` does.
+  `tools/beken/emulator/bk-emu.sh dump` does.
 
 ## Real plugs and the emulator
 
@@ -35,8 +35,8 @@ eWeLink accounts and plugs' identities.
 - **Stop each emulator** (`docker stop`) as soon as a test batch ends, and
   run no more side by side than the computer has cores: more give false
   failures. [docs/emulator.md](docs/emulator.md)
-- **`tools/emulator/container/`, `fork/` and `emu.Dockerfile` are hashed
-  into the emulator image's tag** (`tools/emulator/image.sh`): any change
+- **`tools/espressif/emulator/container/`, `patches/` and `emu.Dockerfile` are hashed
+  into the emulator image's tag** (`tools/espressif/emulator/image.sh`): any change
   there, a comment included, makes every computer and runner build or pull
   a new image. Change them only for the emulator's sake.
 
@@ -66,7 +66,7 @@ eWeLink accounts and plugs' identities.
   upstream remote, `gh` picks `HG0161/SonoffS60OTA`: always pass
   `-R adamsthws/Sonoff-OTA`.
 - **Its settings** - rulesets, required checks, security features - are
-  written down in `tools/github_settings.py` and set with it, never by hand.
+  written down in `tools/repo/github_settings.py` and set with it, never by hand.
   A job a required check names is renamed with `apply`, push, `apply`.
 - **The workflows pin each action to a commit**, with its version beside
   it; Dependabot moves them, a week after a release.
@@ -94,7 +94,7 @@ eWeLink accounts and plugs' identities.
   around it, over a clever or one-off way - it is what the next reader
   expects.
 - **Before a commit**: `python3 tests/run.py` (about 11 s) and
-  `python3 tools/lint.py` on what changed - the pre-commit hook runs the
+  `python3 tools/repo/lint.py` on what changed - the pre-commit hook runs the
   linters and the leak scan. [docs/testing.md](docs/testing.md)
 - **Every fix has a test that fails without it.**
 - **A failing test or hook is fixed at its cause**: never skipped, loosened
@@ -102,12 +102,18 @@ eWeLink accounts and plugs' identities.
 - **Tests run side by side and in any order**: one leaves nothing behind,
   keeps a port it picked, and touches nothing of the whole computer's.
   [docs/testing.md](docs/testing.md#side-by-side-in-any-order)
-- **`archive/`** is kept as it was: not linted, not changed.
+- **Where things go**: `tools/autoflash/` is the tool, `tools/repo/` the
+  repository's own plumbing, `tools/<family>/` (espressif, beken) a chip
+  family's tooling, `tools/ewelink/` eWeLink whatever the chip,
+  `devices/<plug>/` for what is one plug's alone, `tests/` mirroring `tools/`
+  (`tests/run.py <directory>` runs one of them), `docs/` for prose only,
+  `archive/` for retired work (linted like the rest). A plug's ESPHome config
+  path is its `package_import_url`: moving one means a new image.
 
 ## Firmware and releases
 
-- **`firmware.json`, `artifacts/` and `SHA256SUMS`** change only through
-  `tools/update_firmware.py`, never by hand.
+- **`artifacts/`** - its firmware, `firmware.json` and `SHA256SUMS` - changes only through
+  `tools/repo/update_firmware.py`, never by hand.
   [docs/updating-firmware.md](docs/updating-firmware.md)
 - **A release**: its section in `CHANGELOG.md` first, then the version in
   `tools/autoflash/__init__.py`. The release workflow tags it once the tests

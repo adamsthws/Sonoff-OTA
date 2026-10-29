@@ -1,0 +1,53 @@
+#!/bin/bash
+# Keeps the emulated plug powered: runs QEMU while /run/autoflash-emu/power says "on",
+# and starts it again after it is killed (that is what a power cut looks like).
+# Its serial output goes through the redactor before it reaches the log.
+# (`-serial file:/dev/stdout`, not `-serial stdio`: with stdin at /dev/null the
+# fork's stdio serial stays silent.)
+#
+# -no-reboot: the fork keeps its peripherals running across a guest software
+# reset, so firmware restarting into a different image (stock into the bridge,
+# the bridge into Tasmota) crashes at start-up on stale state. QEMU exits on a
+# guest reset instead and is started again here, so every restart is a clean
+# power-on. Nothing in the conversion depends on the reset type: the bridge
+# picks its next boot itself, and Tasmota's quick power-cycle count clears
+# after 8 s of uptime.
+RUN=/run/autoflash-emu
+LOG=/state/logs/uart.log
+. "$RUN/env"
+
+capture=()
+[ "$PCAP" = 1 ] && capture=(-object "filter-dump,id=d0,netdev=n0,file=/state/logs/wifi-$(date +%Y%m%d-%H%M%S).pcap")
+
+while true; do
+    if [ "$(cat "$RUN/power")" != on ]; then
+        sleep 0.3
+        continue
+    fi
+    echo "===== plug powered on $(date '+%F %T') =====" >> "$LOG"
+    ESP32_WIFI_SOFTAP_FILE="$RUN/softap" ESP32_WIFI_AP_OFF_FILE="$RUN/router-off" \
+    ESP32_WIFI_SOFTAP_STATE_FILE="$RUN/softap.state" \
+    ESP32_WIFI_SOFTAP_STATE_FILE="$RUN/softap.state" \
+        /opt/qemu/bin/qemu-system-riscv32 \
+        -L /opt/qemu/pc-bios -machine esp32c3-picsimlab -display none -no-reboot \
+        -serial file:/dev/stdout -monitor "unix:$RUN/monitor.sock,server,nowait" -pidfile "$RUN/qemu.pid" \
+        -drive file=/state/flash.bin,if=mtd,format=raw \
+        -drive file=/state/efuse.bin,if=none,format=raw,id=efuse \
+        -global driver=nvram.esp32c3.efuse,property=drive,value=efuse \
+        -netdev tap,id=n0,ifname=tap0,script=no,downscript=no \
+        -net nic,model=esp32c3_wifi,netdev=n0 "${capture[@]}" \
+        </dev/null 2>&1 \
+        | python3 -I /work/tools/espressif/emulator/redact.py /secrets/stock-flash.bin >> "$LOG"
+    : > "$RUN/softap"
+    : > "$RUN/softap.station"
+    : > "$RUN/softap.state"
+    : > "$RUN/softap.state"
+    rm -f "$RUN/qemu.pid"
+    if [ -f "$RUN/power-cut" ]; then
+        rm -f "$RUN/power-cut"
+        echo "===== plug powered off $(date '+%F %T') =====" >> "$LOG"
+        sleep 1   # off long enough to count as a power cut
+    else
+        echo "===== plug restarted itself $(date '+%F %T') =====" >> "$LOG"
+    fi
+done

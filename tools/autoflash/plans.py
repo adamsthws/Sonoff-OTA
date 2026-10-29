@@ -3,7 +3,7 @@
 The Tasmota route has a hand-written Berry program per phase. Every other
 change of firmware is a few of the same moves - check the plug is laid out as
 expected, write some bytes and read them back, clear a region, restart - so
-each is a plan, run by one Berry program (repartition/berry/plan.be.tmpl):
+each is a plan, run by one Berry program (tools/espressif/safeboot/repartition/berry/plan.be.tmpl):
 
 - the plug checks its partition table and which slot it runs from first;
 - a streamed write fetches one 4 KiB block at a time from this computer,
@@ -53,8 +53,8 @@ SECONDS_PER_BYTE = 36 / 810_000
 BUSY_LIMIT = 55.0
 
 try:
-    from tools.safeboot_migration import TARGET_TABLE_SHA256 as TASMOTA_TABLE_SHA256
-    from tools.safeboot_migration import (INTERIM_TABLE_SHA256, LOW_REGIONS_OFFSET,
+    from tools.espressif.safeboot.safeboot_migration import TARGET_TABLE_SHA256 as TASMOTA_TABLE_SHA256
+    from tools.espressif.safeboot.safeboot_migration import (INTERIM_TABLE_SHA256, LOW_REGIONS_OFFSET,
                                           LOW_REGIONS_SIZE, MOVED_LOW_OFFSET)
 except ModuleNotFoundError:  # run as a script from tools/
     from safeboot_migration import TARGET_TABLE_SHA256 as TASMOTA_TABLE_SHA256

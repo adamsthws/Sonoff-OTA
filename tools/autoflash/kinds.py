@@ -5,7 +5,7 @@ its stock firmware name it, the model its maker's updater wants a file
 wrapped for, its wiring for Tasmota, what its ESPHome calls itself, and what
 a person calls it.  The firmware published for a kind is pinned where it is
 used, each file named for the kind it is for: its installer
-(autoflash_cli.BRIDGE_OTA, wrapped for its updater), its ESPHome and the
+(tools.autoflash.cli.BRIDGE_OTA, wrapped for its updater), its ESPHome and the
 bootloader built with it (esphome.IMAGE, esphome.BOOTLOADER), and its maker's
 partition table (esphome.SONOFF_TABLE).  The final firmware's network names
 are the same for every kind: tasmota-abcdef and esphome-abcdef.
@@ -94,7 +94,7 @@ SONOFF_S60 = Kind(
     # Relay GPIO4, status LED GPIO5, power meter GPIO7, button GPIO9.  The UK
     # S60TPG and the European S60TPF publish the same pins.
     tasmota_gpio=(1, 1, 1, 1, 224, 544, 1, 3104, 1, 32, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1),
-    # ESPHome/sonoff_s60.yaml. 1.1.0 raised Sonoff-Setup-CDEF; builds before
+    # devices/sonoff-s60/esphome.yaml. 1.1.0 raised Sonoff-Setup-CDEF; builds before
     # that sonoff-s60- and the MAC's last three bytes.
     esphome_name="Sonoff S60",
     esphome_legacy_setup_prefix="Sonoff-Setup-",

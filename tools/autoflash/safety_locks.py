@@ -1,8 +1,9 @@
 """The safety locks - RECOVERY_LOCK and REPARTITION_LOCK - and the runs that
 lift them.
 
-Each is a file whose presence makes its helper refuse to start (the bridge's
-sender, the memory-layout server). A step that needs the helper lifts the lock
+Each is a file in tools/espressif (DIR, under the repository root) whose
+presence makes its helper refuse to start (the bridge's sender, the
+memory-layout server). A step that needs the helper lifts the lock
 - moves it aside - for as long as it works, and puts it back after.
 
 Two runs at once, on two plugs, may both need the same one. So each run that
@@ -24,6 +25,8 @@ from typing import Iterator
 from . import hostsys, oslock
 
 NAMES = ("RECOVERY_LOCK", "REPARTITION_LOCK")
+# Where the lock files live, under the repository root: with the routes they guard.
+DIR = Path("tools", "espressif")
 
 
 def _record(root: Path) -> Path:
@@ -31,7 +34,7 @@ def _record(root: Path) -> Path:
 
 
 def _paths(root: Path, name: str) -> tuple[Path, Path, Path]:
-    return root / name, root / f"{name}.owner-authorized", _record(root) / f"{name}.lifted-by"
+    return root / DIR / name, root / DIR / f"{name}.owner-authorized", _record(root) / f"{name}.lifted-by"
 
 
 @contextmanager

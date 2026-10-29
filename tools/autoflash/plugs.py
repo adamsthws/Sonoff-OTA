@@ -215,7 +215,7 @@ Going back to the Sonoff firmware
   an older Sonoff version; the plug boots the other.
 
 Running it in the emulator
-  tools/emulator/emu.sh offers every backed-up plug by its MAC address and
+  tools/espressif/emulator/emu.sh offers every backed-up plug by its MAC address and
   runs a copy; this backup is never changed (docs/emulator.md).
 """
 

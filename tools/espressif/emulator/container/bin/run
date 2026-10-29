@@ -1,0 +1,4 @@
+#!/bin/bash
+# Short for `python -m tools.autoflash run`, from the repository copy;
+# any options are passed on (run --verbose, run --new, ...).
+cd /work && exec python -m tools.autoflash run "$@"

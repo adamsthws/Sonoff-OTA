@@ -1,0 +1,143 @@
+"""Finding the plug's own setup network, and naming it for a person to find."""
+import contextlib
+import io
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+import tools.autoflash.cli as af
+from tools.autoflash import prompts
+from tools.autoflash.state import RunState
+
+
+class SetupNetworkTestCase(unittest.TestCase):
+    def ctx(self, mac="12:34:56:ab:cd:ef"):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        if mac:
+            state.set_input("plug_mac", mac)
+        return SimpleNamespace(state=state)
+
+
+class NamesTests(SetupNetworkTestCase):
+    def test_this_plugs_names_are_known_from_its_mac(self):
+        # Converted: its name, whatever the plug. Started from its defaults:
+        # Tasmota's own name. And ESP-IDF's default - the hotspot's MAC, one more.
+        self.assertEqual(af.setup_networks(self.ctx()), ("tasmota-abcdef", "tasmota-ABCDEF-", "ESP_ABCDF0"))
+        self.assertEqual(af.setup_network_hint(self.ctx()),
+                         "tasmota-abcdef, tasmota-ABCDEF-NNNN, or ESP_ABCDF0")
+        self.assertEqual(af.final_name(self.ctx(), "tasmota"), "tasmota-abcdef")
+        self.assertEqual(af.final_name(self.ctx(), "esphome"), "esphome-abcdef")
+        # Every firmware of this project's part way through: one name, from
+        # the last two bytes of the plug's own MAC.
+        self.assertEqual(af.our_setup_network(self.ctx()), "autoflash-recovery-CDEF")
+        self.assertEqual(af.mover_network_hint(self.ctx()), "autoflash-recovery-CDEF")
+        # And by the names they had before: the installer before 4.4.4 and
+        # 4.4.3, the mover before 1.1.0.
+        self.assertEqual(af.bridge_networks(self.ctx()),
+                         ("autoflash-recovery-CDEF", "Sonoff-Setup-CDEF", "S60-OTA-Bridge"))
+        self.assertEqual(af.mover_networks(self.ctx()),
+                         ("autoflash-recovery-CDEF", "Sonoff-Setup-CDEF", "sonoff-s60-mover-"))
+        # ESPHome's has its name, as Tasmota's; and the names 1.1.0's and
+        # earlier builds' had.
+        self.assertEqual(af.esphome_network_hint(self.ctx()), "esphome-abcdef")
+        self.assertEqual(af.esphome_networks(self.ctx()),
+                         ("esphome-abcdef", "Sonoff-Setup-CDEF", "sonoff-s60-"))
+
+    def test_one_more_carries_into_the_next_byte(self):
+        self.assertEqual(af.setup_networks(self.ctx("12-34-56-AB-FF-FF"))[2], "ESP_AC0000")
+
+    def test_without_the_mac_any_plugs_will_do(self):
+        self.assertEqual(af.setup_networks(self.ctx(mac=None)), ("tasmota-",))
+        self.assertEqual(af.setup_network_hint(self.ctx(mac=None)), "tasmota-xxxxxx or tasmota-XXXXXX-NNNN")
+        self.assertEqual(af.esphome_network_hint(self.ctx(mac=None)), "esphome-xxxxxx")
+        self.assertEqual(af.bridge_networks(self.ctx(mac=None)),
+                         ("autoflash-recovery-", "Sonoff-Setup-", "S60-OTA-Bridge"))
+        self.assertEqual(af.esphome_networks(self.ctx(mac=None)), ("esphome-", "Sonoff-Setup-", "sonoff-s60-"))
+
+
+class SearchTests(SetupNetworkTestCase):
+    def find(self, visible, ctx, *later):
+        scans = iter([visible, *later])
+        with mock.patch.object(prompts, "scan_wifi_ssids", side_effect=lambda **_: next(scans, visible)), \
+             mock.patch.object(prompts.time, "sleep"):
+            return prompts.find_ssid(af.setup_networks(ctx))
+
+    def test_the_plugs_network_is_found_by_either_name(self):
+        self.assertEqual(self.find(["Home", "tasmota-ABCDEF-1234"], self.ctx()), "tasmota-ABCDEF-1234")
+        self.assertEqual(self.find(["Home", "ESP_ABCDF0"], self.ctx()), "ESP_ABCDF0")
+
+    def test_its_real_name_over_the_one_it_had_for_a_moment(self):
+        # Tasmota turns its setup network on, then names it: for that moment
+        # it is ESP-IDF's ESP_ABCDF0, which a computer lists for a while after,
+        # perhaps first. Asked to join it, a person would find it gone.
+        self.assertEqual(self.find(["ESP_ABCDF0", "Home", "tasmota-ABCDEF-1234"], self.ctx()),
+                         "tasmota-ABCDEF-1234")
+
+    def test_caught_in_that_moment_it_is_looked_at_again(self):
+        self.assertEqual(self.find(["Home", "ESP_ABCDF0"], self.ctx(), ["Home", "tasmota-abcdef"]),
+                         "tasmota-abcdef")
+
+    def test_the_name_asked_for_first_wins_over_scan_order(self):
+        self.assertEqual(self.find(["tasmota-ABCDEF-1234", "tasmota-abcdef"], self.ctx()), "tasmota-abcdef")
+
+    def test_a_neighbours_tasmota_or_esp_is_not(self):
+        self.assertIsNone(self.find(["tasmota-112233-0001", "ESP_112234", "ESP_ABCDEF"], self.ctx()))
+
+    def test_the_installers_network_is_not_taken_for_tasmotas(self):
+        # Seen in the fault suite: sent through the installer's own network,
+        # Tasmota went on, and the installer's network - still listed for a
+        # moment as it restarted - was taken for Tasmota's, never to be joined.
+        # A Tasmota the run named has the Wi-Fi, and raises no network by itself.
+        self.assertIsNone(self.find(["Home", "autoflash-recovery-CDEF"], self.ctx()))
+        # It is the installer's, and found as that.
+        with mock.patch.object(prompts, "scan_wifi_ssids", return_value=["Home", "autoflash-recovery-CDEF"]):
+            self.assertEqual(prompts.find_ssid(af.bridge_networks(self.ctx())), "autoflash-recovery-CDEF")
+
+    def test_only_tasmotas_own_name_is_kept_as_the_plugs(self):
+        ctx = self.ctx()
+        af.note_setup_network(ctx, "ESP_ABCDF0")  # not what its router shows
+        af.note_setup_network(ctx, "autoflash-recovery-CDEF")  # only until it is set up
+        self.assertIsNone(ctx.state.input("device_name"))
+        af.note_setup_network(ctx, "tasmota-ABCDEF-1234")
+        self.assertEqual(ctx.state.input("device_name"), "tasmota-ABCDEF-1234")
+
+
+class LocateTests(SetupNetworkTestCase):
+    def test_a_plug_not_found_can_be_set_up_on_its_own_network_instead(self):
+        ctx = self.ctx()
+        ctx.state.set_input("plug_ip", "192.168.0.50")
+        ctx.finder = SimpleNamespace(poll=lambda: None)
+        ctx.set_plug_ip = lambda ip: ctx.state.set_input("plug_ip", ip)
+        offered = []
+
+        def choose(question, options, help_lines=()):
+            offered.extend(options)
+            return 2
+
+        with contextlib.redirect_stdout(io.StringIO()), \
+                mock.patch.object(af.time, "sleep"), \
+                mock.patch.object(af.time, "monotonic", side_effect=iter(range(0, 10_000, 100))), \
+                mock.patch.object(prompts, "wait_for_host", return_value=False), \
+                mock.patch.object(prompts, "ask_choice", side_effect=choose), \
+                mock.patch.object(af, "configure_plug_wifi", return_value="192.168.0.77") as setup:
+            self.assertEqual(af.locate_plug(ctx, setup=True), "192.168.0.77")
+        setup.assert_called_once_with(ctx, None)
+        self.assertIn("tasmota-ABCDEF-NNNN, or ESP_ABCDF0", offered[2])
+
+    def test_without_it_only_waiting_or_an_address_is_offered(self):
+        offered = []
+        with contextlib.redirect_stdout(io.StringIO()), \
+                mock.patch.object(prompts, "wait_for_host", return_value=False), \
+                mock.patch.object(prompts, "ask_choice",
+                                  side_effect=lambda q, options, help_lines=(): offered.extend(options) or 1), \
+                mock.patch.object(prompts, "ask_ipv4", return_value="192.168.0.9"):
+            self.assertEqual(prompts.wait_or_ask("192.168.0.50"), "192.168.0.9")
+        self.assertEqual(len(offered), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

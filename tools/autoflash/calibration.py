@@ -1,7 +1,7 @@
 """The S60's meter calibration, as Sonoff's firmware applies it, for Tasmota
 and ESPHome to read as Sonoff's did.
 
-Two parts, decoded from stock 1.2.0 (ESPHome/sonoff_s60.yaml applies both):
+Two parts, decoded from stock 1.2.0 (devices/sonoff-s60/esphome.yaml applies both):
 
 - The board's factor: at start-up stock reads GPIO6, GPIO10 and GPIO19 with
   pull-ups, and scales voltage and power by 1.02 unless all three read high.
@@ -11,7 +11,7 @@ Two parts, decoded from stock 1.2.0 (ESPHome/sonoff_s60.yaml applies both):
   two sets of a, b, c for current, voltage and power - the first below 300 W,
   the second from 300 W on - applied as a*x^2/1e7 + b*x/1e6 + c/1e6 in mA, mV
   and mW.  A plug converted through Tasmota has lost it (the new layout
-  clears NVS), but its Sonoff backup keeps it (autoflash_cli.backup_calibration).
+  clears NVS), but its Sonoff backup keeps it (tools.autoflash.cli.backup_calibration).
 
 Tasmota scales each reading by one whole number per quantity (VoltageCal,
 CurrentCal, PowerCal), which it starts from the meter chip's own numbers

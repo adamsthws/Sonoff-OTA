@@ -11,26 +11,19 @@ plugins:
 exclude:
   - AGENTS.md
   - CLAUDE.md
-  - ESPHome/
-  - PSScriptAnalyzerSettings.psd1
-  - RECOVERY_LOCK
-  - REPARTITION_LOCK
-  - SHA256SUMS
   - archive/__init__.py
   - archive/artifacts/
   - archive/bridge/
+  - archive/esphome-prototype/
   - archive/repartition/
   - archive/requirements.txt
+  - archive/s61-research/
   - archive/tasmota-s60/
   - archive/tests/
   - archive/tools/
   - artifacts/
-  - firmware.json
-  - repartition/
   - requirements/
-  - ruff.toml
   - start.cmd
-  - start.ps1
   - start.sh
   - tests/
   - tools/

@@ -1,6 +1,6 @@
 # Published firmware artifacts
 
-Every file here is pinned in [`../SHA256SUMS`](../SHA256SUMS). Per-device
+Every file here is pinned in [`SHA256SUMS`](SHA256SUMS) beside it (`sha256sum -c SHA256SUMS` in this directory), and the versions the tool installs in [`firmware.json`](firmware.json). Per-device
 credentials and flash captures belong under the Git-ignored `captures/`
 directory, never here.
 
@@ -22,7 +22,7 @@ is `f5b34a2`; corresponding source is
 [`arendst/Tasmota@f5b34a26be51be2469737d2c43a62acb237c264f`](https://github.com/arendst/Tasmota/tree/f5b34a26be51be2469737d2c43a62acb237c264f).
 
 The settings template is Tasmota 15.6.0's defaults, captured from a converted
-plug with `tools/capture_tasmota_template.py` and tested on one with
+plug with `tools/espressif/capture_tasmota_template.py` and tested on one with
 `--verify`. Its Wi-Fi names, passwords, last access point, and addresses are
 blank or Tasmota's defaults; it holds nothing about any network. It is only
 used with the Berry Tasmota pinned above (15.6.0.1, same settings layout). If
@@ -32,7 +32,7 @@ official release a converted plug ends on can change without it
 ([`../docs/updating-firmware.md`](../docs/updating-firmware.md)).
 
 The imprintable Safeboot is built from the pinned Tasmota source with
-`repartition/recovery-safeboot/volatile-wifi-defaults.patch` and
+`tools/espressif/safeboot/repartition/recovery-safeboot/volatile-wifi-defaults.patch` and
 `persist-settings.patch`. On its first boot after the repartition it wipes NVS -
 by then only what the Sonoff firmware left and part of an earlier Tasmota
 record - saves its settings, with the Wi-Fi, where Tasmota reads them, and
@@ -51,10 +51,10 @@ was `s60-recovery-NNNN` (four decimal digits) and "S60 recovery", saving no
 name, and the file was `s60-recovery-safeboot-imprintable.bin`; the run still
 reads the older log lines, from a plug a run of an older checkout left on it.
 
-To publish a new one: `tools/configure_imprintable_safeboot.py` writes the
-header with the placeholders, `tools/build_recovery_safeboot.sh` builds it from
-the pinned Tasmota source, `tools/sanitise_safeboot.py` blanks the build
-machine's paths in place, and `tools/validate_imprintable_safeboot.py` must
+To publish a new one: `tools/espressif/safeboot/configure_imprintable_safeboot.py` writes the
+header with the placeholders, `tools/espressif/safeboot/build_recovery_safeboot.sh` builds it from
+the pinned Tasmota source, `tools/espressif/safeboot/sanitise_safeboot.py` blanks the build
+machine's paths in place, and `tools/espressif/safeboot/validate_imprintable_safeboot.py` must
 then say it is publishable. A rebuild holds the same text as the published file
 but its build date and time; one built in a directory whose path is not as
 long as this one's (38 characters) has everything after the first such path a
@@ -66,7 +66,7 @@ bundle-preparation path must imprint and validate a per-device copy first.
 
 From 4.4.1 on, a bridge is named by one version: the one the stock updater is
 given, the one in its app description, and the one its status page reports
-(`bridge 4.4.4`). `tools/build_vendor_ota.py` takes it from the image and
+(`bridge 4.4.4`). `tools/espressif/build_vendor_ota.py` takes it from the image and
 refuses any other. The next bridge is 4.4.5. 4.4.1 has the Wi-Fi behaviour tried on a
 stock plug as "v6" on 8 October 2026; beyond that only its version, its name
 and a larger buffer for the status reply differ. 4.4.2 is 4.4.1 with the
@@ -100,14 +100,14 @@ The earlier bridge v3, wrapped as `1.2.1`, is no longer published here. It
 is in the Git history: `git log --all -- artifacts/s60-ota-bridge-v3-1.2.1.ota`
 finds the last commit that has it.
 
-The ESPHome image is built from [`../ESPHome/sonoff_s60.yaml`](../ESPHome/sonoff_s60.yaml)
+The ESPHome image is built from [`../devices/sonoff-s60/esphome.yaml`](../devices/sonoff-s60/esphome.yaml)
 (its `project` version is the one in the file name) with ESPHome 2026.10.0 and
 ESP-IDF 5.5.6, as `esphome compile sonoff_s60.yaml`, in ESPHome's own Docker
 image for that release (`firmware.json` pins it by digest);
 `firmware.ota.bin` is the file published. The bootloader is
 `bootloader/bootloader.bin` from the build of 1.2.0, with ESPHome 2026.9.1 and
 ESP-IDF 5.5.5. The mover is
-[`../ESPHome/autoflash_mover.yaml`](../ESPHome/autoflash_mover.yaml), built the same way, with ESPHome 2026.9.1: it drives no pins, so it
+[`../devices/sonoff-s60/mover.yaml`](../devices/sonoff-s60/mover.yaml), built the same way, with ESPHome 2026.9.1: it drives no pins, so it
 is the same for any plug with an ESP32-C3 and 4 MB of flash, and from 1.1.0 it
 goes by `autoflash-recovery-XXXX` as the bridge does (1.0.0 was
 `sonoff-s60-mover-xxxxxx` on the home network, and raised `Sonoff-Setup-XXXX`).
@@ -117,7 +117,7 @@ memory (`tools/autoflash/imprint.py`). It has no OTA password, web login or API
 encryption key, as ESPHome's own ready-made images have none: the plug is open
 on the home network until its owner adds them, as official Tasmota is. To
 publish a new one, change the config and build and publish it with
-`tools/update_firmware.py esphome`, which [`../docs/updating-firmware.md`](../docs/updating-firmware.md)
+`tools/repo/update_firmware.py esphome`, which [`../docs/updating-firmware.md`](../docs/updating-firmware.md)
 describes, as for a new ESPHome release; then update the files' rows above.
 
 ESPHome 1.1.0 adds a Wi-Fi signal sensor, which the run reads before it

@@ -1,7 +1,7 @@
 #!/bin/sh
-# Stops every commit the push sends holding a secret or a real identifier: tools/leak_scan.py
+# Stops every commit the push sends holding a secret or a real identifier: tools/repo/leak_scan.py
 # (docs/technical-details.md#keeping-secrets-out-of-git). Installed by
-# python3 tools/leak_scan.py install; --no-verify skips it, for what is meant to be there.
+# python3 tools/repo/leak_scan.py install; --no-verify skips it, for what is meant to be there.
 root=$(git rev-parse --show-toplevel) || exit 1
 # The same Python as pre-commit's: this checkout's .venv, then the main
 # checkout's (a linked worktree has none of its own), then python3.
@@ -13,4 +13,4 @@ for venv in "$root/.venv" "$main/.venv"; do
         [ -x "$candidate" ] && { python=$candidate; break 2; }
     done
 done
-exec "$python" -I "$root/tools/leak_scan.py" push
+exec "$python" -I "$root/tools/repo/leak_scan.py" push

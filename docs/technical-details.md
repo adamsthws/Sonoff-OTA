@@ -11,13 +11,13 @@ For a plain-English account of what happens to the plug, read
 ## The firmware bundle
 
 The first run prepares a bundle: it downloads the official Tasmota release
-files - the release [`firmware.json`](../firmware.json) pins, from its page on
+files - the release [`firmware.json`](../artifacts/firmware.json) pins, from its page on
 GitHub - checks every one against a pinned SHA-256, and writes the bundle into
 `captures/`, which git ignores. It asks nothing: the bundle is built without
 your Wi-Fi details, which are added later in the run. To rebuild it on its own:
 
 ```sh
-python3 tools/prepare_imprinted_bundle.py --without-wifi
+python3 tools/espressif/safeboot/prepare_imprinted_bundle.py --without-wifi
 ```
 
 ### What is in it
@@ -78,7 +78,7 @@ replaces the temporary one.
 Other secrets are not kept either, outside the backup: the plug's eWeLink
 LAN key is never saved, and the update links, the plug's settings memory and staged firmware
 are deleted or reduced to hashes as soon as they have been checked - however
-the run ends. `python3 tools/autoflash_cli.py cleanup` deletes any such file
+the run ends. `python3 -m tools.autoflash cleanup` deletes any such file
 still on disk, such as after the computer lost power mid-run. It leaves the
 backups alone.
 
@@ -129,7 +129,7 @@ the plug on the installer, to carry on from there next time or go back to
 Sonoff with a power cycle. Carrying on marks the stage "Skipped", in green:
 the conversion is not affected. An unattended run carries on without one.
 The test report says how the backup went - completed, failed, or not taken -
-and never where it is or which plug it came from. `python3 tools/autoflash_cli.py list` shows
+and never where it is or which plug it came from. `python3 -m tools.autoflash list` shows
 every backed-up plug.
 
 It is for two things. **Going back to Sonoff:** writing `flash.bin` back
@@ -138,7 +138,7 @@ returns the plug to the Sonoff version, settings and pairing it had - but
 that means opening the plug, which is what the over-the-air route avoids.
 One of the two app slots holds the installer rather than an older Sonoff
 version; the plug boots the other. Restoring it over the air, from Tasmota,
-is not built yet. **The emulator:** `tools/emulator/emu.sh` offers every
+is not built yet. **The emulator:** `tools/espressif/emulator/emu.sh` offers every
 backed-up plug by its MAC and runs a copy of the one you choose
 ([docs/emulator.md](emulator.md)).
 
@@ -173,11 +173,11 @@ the maintainer's checkout nothing in `captures/` needs backing up.
 
 ### Keeping secrets out of Git
 
-`tools/leak_scan.py` stops a commit or a push that would put a secret or a
+`tools/repo/leak_scan.py` stops a commit or a push that would put a secret or a
 real identifier into the repository. Set it up once in a clone:
 
 ```sh
-python3 tools/leak_scan.py install
+python3 tools/repo/leak_scan.py install
 ```
 
 which points Git at the hooks in `.githooks/`: before each commit it looks at
@@ -191,11 +191,11 @@ caught on its way out. It finds two kinds of thing:
   any form, and as raw bytes in any file; the Sonoff settings in each backup
   that say which plug, account or network it is (its eWeLink keys, the Wi-Fi it
   was set up on); the addresses real runs - not the emulator's - found plugs
-  and your computer at; and each line of `.leak-scan.local`, a file Git
+  and your computer at; and each line of `tools/repo/leak-scan.local`, a file Git
   ignores, for anything else of yours (a router's name, a public address).
 - **Anyone's, by shape**: a MAC address that could be a real device's - one
   not locally administered, so not `12:34:56:...` or `aa:bb:...`, and not a
-  made-up example listed in `.leak-scan-allow`; a UUID that could be a device's
+  made-up example listed in `tools/repo/leak-scan-allow`; a UUID that could be a device's
   apikey or id (listed the same way); a private key, or a GitHub, AWS, Google or
   Slack token; disassembly or decompiler output, the shape the S61 research
   tools print, so a pasted dump is caught - commit the tool, not its dump; and
@@ -204,12 +204,12 @@ caught on its way out. It finds two kinds of thing:
 
   A secret with no safe shape - a device's `device_secret`, `app-apikey` or
   `secureCertSha256`, which look like the repository's own hashes - is found by
-  value instead: list it in `.leak-scan.local` (Git-ignored), and the scan keeps
+  value instead: list it in `tools/repo/leak-scan.local` (Git-ignored), and the scan keeps
   that exact value out, as it does anything else of yours.
 
 It says where each finding is and what kind, never the value. Take it out, or
 for something meant to be there - a new made-up example MAC, say, which
-belongs in `.leak-scan-allow` - `git commit --no-verify` lets it through. The
+belongs in `tools/repo/leak-scan-allow` - `git commit --no-verify` lets it through. The
 repository's `leak-scan` workflow runs the shape checks on each push to
 `main` and each pull request, and GitHub's own secret scanning and push protection, on for
 the repository, refuse pushes with known kinds of token. In examples, use
@@ -218,7 +218,7 @@ the repository, refuse pushes with known kinds of token. In examples, use
 ### The repository's settings
 
 What GitHub is set to do for the repository is written down, with why, in
-`tools/github_settings.py`: `main` never deleted or rewritten; a pull request
+`tools/repo/github_settings.py`: `main` never deleted or rewritten; a pull request
 merged only once the unit tests, the emulator, the lint and the leak scan pass
 (an admin may still push to `main`, which the release workflow tests before
 releasing); pull requests squashed; secret
@@ -229,7 +229,7 @@ change once published, and GitHub signs an attestation of them that
 [firmwareliberator.com](https://firmwareliberator.com) (the `CNAME` file at
 the root names the domain; `_config.yml` and `_layouts/` say what the site
 shows and how; Cloudflare Web Analytics counts its visits, without
-cookies). As an admin, `python3 tools/github_settings.py`
+cookies). As an admin, `python3 tools/repo/github_settings.py`
 says what differs from that, and `... apply` sets it.
 
 ### What crosses the network
@@ -308,7 +308,7 @@ once the plug is converted, the account is no longer needed.
 ## Locks on the destructive steps
 
 Besides the PROCEED confirmation, the destructive steps are locked by default:
-the `RECOVERY_LOCK` and `REPARTITION_LOCK` files in this repository have to be
+the `RECOVERY_LOCK` and `REPARTITION_LOCK` files in `tools/espressif/` have to be
 deliberately renamed before the underlying tools will run them on their own.
 
 ## The finished memory layout
@@ -344,7 +344,7 @@ python3 tests/run.py
 ```
 
 To try a change against a plug without converting a real one, the emulator in
-`tools/emulator/` runs the whole conversion against a virtual S60 booting a
+`tools/espressif/emulator/` runs the whole conversion against a virtual S60 booting a
 real stock flash dump, in Docker. It has taken a UK S60TPG on stock 1.2.0
 through every stage to the official layout. On a Linux computer with KVM it
 also runs the tool on Windows beside the plug, in a Windows that starts clean
@@ -355,9 +355,9 @@ works, and what had to be changed in the emulator to get there are in
 For automated testing, `run --unattended` runs a conversion with nobody at
 the keyboard. The eWeLink account comes from `.env`, PROCEED is taken as
 typed, yes/no questions take their cautious default, and any other question
-stops the run, naming it. `tools/unattended_run.py` runs it on a
+stops the run, naming it. `tools/repo/unattended_run.py` runs it on a
 pseudo-terminal, records everything it draws, and rebuilds the final screen,
-colours included, for review. `tools/emulator/unattended-test.sh` does all of
+colours included, for review. `tools/espressif/emulator/unattended-test.sh` does all of
 that against the emulated plug in one command. How each piece works is in
 **[unattended.md](unattended.md)**.
 
@@ -365,10 +365,10 @@ To build the temporary startup firmware yourself instead of using the
 published one, the local-build route is still there:
 
 ```sh
-python3 tools/configure_recovery_safeboot.py        # asks for your Wi-Fi, privately
-tools/build_recovery_safeboot.sh /tmp/tasmota-src   # builds the image
-python3 tools/prepare_recovery_safeboot_migration.py
-python3 tools/safeboot_migration_status.py          # says whether the bundle is good
+python3 tools/espressif/safeboot/configure_recovery_safeboot.py        # asks for your Wi-Fi, privately
+tools/espressif/safeboot/build_recovery_safeboot.sh /tmp/tasmota-src   # builds the image
+python3 tools/espressif/safeboot/prepare_recovery_safeboot_migration.py
+python3 tools/espressif/safeboot/safeboot_migration_status.py          # says whether the bundle is good
 ```
 
 It needs a full flash dump of a plug for `prepare_safeboot_migration.py`. The

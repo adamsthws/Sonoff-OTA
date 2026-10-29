@@ -1,5 +1,5 @@
 # The emulator's image, built once for each version of what it is built from
-# (tools/emulator/image.sh tag) and published as
+# (tools/espressif/emulator/image.sh tag) and published as
 # ghcr.io/<owner>/autoflash-emu:<that hash>: computers and runners pull it
 # rather than build QEMU themselves (emu.sh), and only one labelled with the
 # hash of their own checkout's emulator.
@@ -8,10 +8,10 @@ name: Emulator image
 on:
   push:
     paths:
-      - tools/emulator/emu.Dockerfile
-      - tools/emulator/fork/**
-      - tools/emulator/container/**
-      - tools/emulator/image.sh
+      - tools/espressif/emulator/emu.Dockerfile
+      - tools/espressif/emulator/patches/**
+      - tools/espressif/emulator/container/**
+      - tools/espressif/emulator/image.sh
       - .github/workflows/emulator-image.yml
   workflow_dispatch:
   workflow_call:
@@ -35,13 +35,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag=$(tools/emulator/image.sh tag)
+          tag=$(tools/espressif/emulator/image.sh tag)
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/autoflash-emu:$tag"
           echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           if docker manifest inspect "$image" >/dev/null 2>&1; then
               echo "$image is published already"
               exit 0
           fi
-          time tools/emulator/image.sh build "$image"
+          time tools/espressif/emulator/image.sh build "$image"
           docker push "$image"
           echo "Published $image" >> "$GITHUB_STEP_SUMMARY"

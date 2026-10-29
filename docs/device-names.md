@@ -58,7 +58,7 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 - It is Tasmota's own build (`artifacts/tasmota32c3-bluetooth.bin`), not
   changed. Its name comes from the settings record D1 sends:
   `give_tasmota_the_wifi()` in
-  [`tools/autoflash_cli.py`](../tools/autoflash_cli.py) calls
+  [`tools/autoflash/cli.py`](../tools/autoflash/cli.py) calls
   `tasmota_settings.named(template, our_setup_network(ctx))`
   ([`tools/autoflash/tasmota_settings.py`](../tools/autoflash/tasmota_settings.py):
   `SET_HOSTNAME`, at most `HOSTNAME_MAX` characters, with the record's
@@ -71,19 +71,19 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 - Our build of Tasmota's Safeboot. The pattern is `WIFI_DEFAULT_HOSTNAME`
   (`"autoflash-recovery-%4X"`, Tasmota's `%4X` being the MAC's last four hex
   digits), written into the build's `user_config_override.h` by
-  [`tools/configure_imprintable_safeboot.py`](../tools/configure_imprintable_safeboot.py)
-  and [`tools/configure_recovery_safeboot.py`](../tools/configure_recovery_safeboot.py).
-- [`repartition/recovery-safeboot/persist-settings.patch`](../repartition/recovery-safeboot/persist-settings.patch)
+  [`tools/espressif/safeboot/configure_imprintable_safeboot.py`](../tools/espressif/safeboot/configure_imprintable_safeboot.py)
+  and [`tools/espressif/safeboot/configure_recovery_safeboot.py`](../tools/espressif/safeboot/configure_recovery_safeboot.py).
+- [`tools/espressif/safeboot/repartition/recovery-safeboot/persist-settings.patch`](../tools/espressif/safeboot/repartition/recovery-safeboot/persist-settings.patch)
   saves the name, written out, with the Wi-Fi, for the official Tasmota
   after it. It has to be written out: at every start Tasmota replaces a
   stored hostname that has a `%` in it with its own compiled default
   (`tasmota.ino`).
 - Published as [`artifacts/README.md`](../artifacts/README.md) says: the
   header from `configure_imprintable_safeboot.py`, the build from
-  [`tools/build_recovery_safeboot.sh`](../tools/build_recovery_safeboot.sh),
-  then `tools/sanitise_safeboot.py` and `tools/validate_imprintable_safeboot.py`,
+  [`tools/espressif/safeboot/build_recovery_safeboot.sh`](../tools/espressif/safeboot/build_recovery_safeboot.sh),
+  then `tools/espressif/safeboot/sanitise_safeboot.py` and `tools/espressif/safeboot/validate_imprintable_safeboot.py`,
   into `artifacts/autoflash-recovery-safeboot-imprintable.bin`; a test checks
-  the pattern is in the image (`tests/test_published_artifacts.py`).
+  the pattern is in the image (`tests/repo/test_published_artifacts.py`).
 
 ### Official Tasmota, and F4
 
@@ -109,7 +109,7 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 
 ### The mover
 
-- [`ESPHome/autoflash_mover.yaml`](../ESPHome/autoflash_mover.yaml): ESPHome
+- [`devices/sonoff-s60/mover.yaml`](../devices/sonoff-s60/mover.yaml): ESPHome
   names must be lower case and ESPHome's own suffix is six hex digits, so the
   mover is built as `autoflash-moving` with `name_add_mac_suffix` and its
   `on_boot` writes `autoflash-recovery-%02X%02X` over that name before its
@@ -122,12 +122,12 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 
 ### ESPHome, converted
 
-- [`ESPHome/sonoff_s60.yaml`](../ESPHome/sonoff_s60.yaml): `name: esphome`
+- [`devices/sonoff-s60/esphome.yaml`](../devices/sonoff-s60/esphome.yaml): `name: esphome`
   with `name_add_mac_suffix: true` gives `esphome-abcdef`; `on_boot` sets
   its own network to `App.get_name()`. `friendly_name` says what plug it is.
 - The file name and `package_import_url` stay as they are: they are built
   into plugs converted already, and Home Assistant adopts them by it.
-- Rebuilt as [`ESPHome/README.md`](../ESPHome/README.md) says, a new version
+- Rebuilt as [`devices/sonoff-s60/esphome.md`](../devices/sonoff-s60/esphome.md) says, a new version
   each time: `artifacts/esphome-<kind>-imprintable-<version>.bin` and its
   bootloader, then `IMAGE`, its SHA-256 and size in
   [`tools/autoflash/esphome.py`](../tools/autoflash/esphome.py).
@@ -138,7 +138,7 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 
 ## What the tool looks for
 
-All in [`tools/autoflash_cli.py`](../tools/autoflash_cli.py) unless said:
+All in [`tools/autoflash/cli.py`](../tools/autoflash/cli.py) unless said:
 
 - `SETUP_SSID_PREFIX` (`autoflash-recovery-`), `named()` and
   `our_setup_network()`: the interim name.
@@ -170,7 +170,7 @@ All in [`tools/autoflash_cli.py`](../tools/autoflash_cli.py) unless said:
   `PROVISIONAL_PREFIX` (`ESP_`) last and looked at again.
 - [`tools/autoflash/output.py`](../tools/autoflash/output.py): the patterns
   that keep a plug's name out of the report one shares.
-- [`tools/flash_readout.py`](../tools/flash_readout.py): the names it waits
+- [`tools/espressif/flash_readout.py`](../tools/espressif/flash_readout.py): the names it waits
   for while reading a stock plug.
 
 ## Tasmota's own names
@@ -222,10 +222,10 @@ today's names to these lists rather than replacing them.
    its row in [`artifacts/README.md`](../artifacts/README.md), the path,
    SHA-256 and size where the tool pins it (`BRIDGE_OTA`, `esphome.IMAGE`,
    `CONTROL_FILES` in `flash_readout.py`), and
-   [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
-4. Update the tests that name them: `tests/test_setup_networks.py`,
-   `tests/test_published_artifacts.py`, `tests/test_tasmota_settings.py`,
-   `tests/test_autoflash.py`, `tests/test_flash_readout.py`.
+   [`NOTICES.md`](../NOTICES.md).
+4. Update the tests that name them: `tests/autoflash/test_setup_networks.py`,
+   `tests/repo/test_published_artifacts.py`, `tests/autoflash/test_tasmota_settings.py`,
+   `tests/autoflash/test_autoflash.py`, `tests/espressif/test_flash_readout.py`.
 5. Update the pages that name them: [`troubleshooting.md`](troubleshooting.md)
    ("The plug's own network"), [`what-happens.md`](what-happens.md),
    [`technical-details.md`](technical-details.md), the ESPHome and

@@ -14,6 +14,23 @@ on that commit, and carries the firmware files the tool installs with
 which `gh release verify vX.Y.Z` and `gh release verify-asset vX.Y.Z FILE`
 check.
 
+## 2.3.0
+
+- The repository is laid out by what things are: `tools/espressif/` and
+  `tools/beken/` for each chip family's tooling and emulator, `tools/ewelink/`,
+  `tools/repo/`, `devices/<plug>/` for what is one plug's alone, `tests/`
+  mirroring `tools/`. The published firmware, `firmware.json` and `SHA256SUMS`
+  are together in `artifacts/`, where `SHA256SUMS` names its files bare, so
+  `sha256sum -c` works in the directory a release's files are downloaded to.
+  On Windows, `start.cmd` is the one start file, from a double-click or a
+  terminal.
+- **Breaking for Home Assistant adoption**: the ESPHome configs moved to
+  `devices/sonoff-s60/esphome.yaml` and `devices/sonoff-s61/esphome.yaml`,
+  and the `package_import_url` a plug gives Home Assistant names the new
+  paths. A plug on ESPHome 1.4.0 or earlier names the old path, which no
+  longer exists, so Home Assistant cannot adopt it until it is updated to the
+  image built from the moved config; the plug itself runs as before.
+
 ## 2.2.0
 
 - ESPHome for the S60 is 1.4.0: a change to its config, built with ESPHome

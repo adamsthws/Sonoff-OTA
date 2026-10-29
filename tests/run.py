@@ -4,8 +4,11 @@ runs, in a fraction of the time.
 
     python3 tests/run.py               all of them
     python3 tests/run.py -j 4          on 4 processes (default: 2 per core)
-    python3 tests/run.py test_output test_detect.EsphomeLoginTests
+    python3 tests/run.py autoflash.test_output autoflash.test_detect.EsphomeLoginTests
                                        those modules, classes or tests
+    python3 tests/run.py espressif     one directory's tests: autoflash (the tool),
+                                       repo (the repository's plumbing), ewelink,
+                                       espressif, beken - as tools/ is laid out
     python3 tests/run.py --shuffle     in a random order, to find a test that
                                        passes only after another (--seed N
                                        repeats one)
@@ -14,7 +17,7 @@ runs, in a fraction of the time.
 Most of the tests' time is waiting - on timeouts, sockets, terminals - not
 computing, so each test runs on its own in a pool of more processes than
 there are cores, the longest first - as long as each took the last time, kept
-in .test-times.json (Git ignores it). What a passing test prints is not
+in captures/.test-times.json. What a passing test prints is not
 shown, as with unittest's --buffer; a failing one's is, with its traceback.
 The workflows still run `python -m unittest discover -s tests`, under coverage.
 
@@ -42,7 +45,7 @@ from pathlib import Path
 
 TESTS = Path(__file__).resolve().parent
 ROOT = TESTS.parent
-TIMES = ROOT / ".test-times.json"
+TIMES = ROOT / "captures" / ".test-times.json"   # private and Git-ignored, like all of captures/
 # Classes whose tests share something of the whole computer's, so must not
 # run at the same time as each other: each is run as one, on one process.
 TOGETHER = {
@@ -74,7 +77,15 @@ def flatten(suite: unittest.TestSuite):
 def collect(names: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
     """Each test's id, and each module that would not even load, with why."""
     loader = unittest.TestLoader()
-    suite = (unittest.TestSuite(loader.loadTestsFromName(name) for name in names) if names
+
+    def load(name: str) -> unittest.TestSuite:
+        # A directory under tests/ is discovered; anything else is a module, class
+        # or test, as unittest names them (autoflash.test_plans).
+        if (TESTS / name).is_dir():
+            return loader.discover(str(TESTS / name), top_level_dir=str(TESTS))
+        return loader.loadTestsFromName(name)
+
+    suite = (unittest.TestSuite(load(name) for name in names) if names
              else loader.discover(str(TESTS), top_level_dir=str(TESTS)))
     ids, broken = [], []
     for test in flatten(suite):
@@ -179,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(dumps, ignore_errors=True)
     print()
     try:
+        TIMES.parent.mkdir(exist_ok=True)
         TIMES.write_text(json.dumps(times, indent=0, sort_keys=True), encoding="utf-8")
     except OSError:
         pass  # only an order for next time

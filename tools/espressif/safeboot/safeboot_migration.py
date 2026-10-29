@@ -1,0 +1,786 @@
+"""Shared validation helpers for the guarded Safeboot migration.
+
+This module is intentionally side-effect free.  Device-writing tools import
+the constants and validators here so that every phase agrees on exact byte
+ranges and partition entries.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import struct
+import zlib
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterable
+
+try:
+    from tools.espressif.analyze_vendor_ota import parse_esp_image
+except ModuleNotFoundError:
+    from analyze_vendor_ota import parse_esp_image
+
+
+FLASH_SIZE = 0x400000
+SECTOR_SIZE = 0x1000
+TABLE_OFFSET = 0x8000
+TABLE_SIZE = 0x1000
+TABLE_DATA_SIZE = 0xC00
+PARTITION_ENTRY_SIZE = 32
+PARTITION_MAGIC = 0x50AA
+MD5_MAGIC = 0xEBEB
+
+SOURCE_TABLE_SHA256 = "f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf"
+TARGET_TABLE_SHA256 = "619e5a9b645198b25d04949997221f587776965dfd13cbceddf9862c53e655c1"
+
+SOURCE_PARTITIONS = (
+    ("nvs", 0x01, 0x02, 0x009000, 0x010000, 0x0),
+    ("reserve", 0x01, 0x02, 0x019000, 0x004000, 0x0),
+    ("otadata", 0x01, 0x00, 0x01D000, 0x002000, 0x0),
+    ("phy_init", 0x01, 0x01, 0x01F000, 0x001000, 0x0),
+    ("ota_0", 0x00, 0x10, 0x020000, 0x1F0000, 0x0),
+    ("ota_1", 0x00, 0x11, 0x210000, 0x1F0000, 0x0),
+)
+
+TARGET_PARTITIONS = (
+    ("nvs", 0x01, 0x02, 0x009000, 0x005000, 0x0),
+    ("otadata", 0x01, 0x00, 0x00E000, 0x002000, 0x0),
+    ("safeboot", 0x00, 0x00, 0x010000, 0x0D0000, 0x0),
+    ("app0", 0x00, 0x10, 0x0E0000, 0x2D0000, 0x0),
+    ("spiffs", 0x01, 0x82, 0x3B0000, 0x050000, 0x0),
+)
+
+CANONICAL_NVS_OFFSET = 0x9000
+CANONICAL_NVS_SIZE = 0x5000
+OLD_OTADATA_OFFSET = 0x1D000
+NEW_OTADATA_OFFSET = 0xE000
+OTADATA_SIZE = 0x2000
+OLD_OTA0_OFFSET = 0x20000
+OLD_OTA1_OFFSET = 0x210000
+OLD_OTA_SLOT_SIZE = 0x1F0000
+SAFEBOOT_OFFSET = 0x10000
+SAFEBOOT_SIZE = 0xD0000
+APP0_OFFSET = 0xE0000
+APP0_SIZE = 0x2D0000
+SPIFFS_OFFSET = 0x3B0000
+SPIFFS_SIZE = 0x50000
+SAFEBOOT_STAGE_OFFSET = OLD_OTA0_OFFSET
+
+# The commit copies Safeboot into place over where Sonoff's layout keeps the
+# settings and the boot selection - and Tasmota keeps its settings past the
+# five pages Tasmota's layout keeps, so a power cut part way used to leave a
+# Tasmota with none, waiting on its setup network.  So first those regions are
+# copied whole to the end of ota_0, which the commit never touches, and this
+# interim table - Sonoff's, with them moved - written: a power cut anywhere in
+# the copy then starts the same Tasmota, with its settings and boot selection.
+# The interim layout lives only inside a commit: a later run finding it puts
+# Sonoff's back, from the moved copy, before anything else.
+LOW_REGIONS_OFFSET = 0x9000
+LOW_REGIONS_SIZE = OLD_OTA0_OFFSET - LOW_REGIONS_OFFSET  # nvs, reserve, otadata, phy_init
+MOVED_LOW_OFFSET = OLD_OTA1_OFFSET - LOW_REGIONS_SIZE
+INTERIM_PARTITIONS = (
+    ("nvs", 0x01, 0x02, MOVED_LOW_OFFSET, 0x010000, 0x0),
+    ("reserve", 0x01, 0x02, MOVED_LOW_OFFSET + 0x10000, 0x004000, 0x0),
+    ("otadata", 0x01, 0x00, MOVED_LOW_OFFSET + 0x14000, 0x002000, 0x0),
+    ("phy_init", 0x01, 0x01, MOVED_LOW_OFFSET + 0x16000, 0x001000, 0x0),
+    ("ota_0", 0x00, 0x10, OLD_OTA0_OFFSET, MOVED_LOW_OFFSET - OLD_OTA0_OFFSET - 0x9000, 0x0),
+    ("ota_1", 0x00, 0x11, OLD_OTA1_OFFSET, OLD_OTA_SLOT_SIZE, 0x0),
+)
+INTERIM_TABLE_SHA256 = "cfb1e1c46fa209a6c1eada92123a02847ab8e72f67c0044afbcb1c29ead4c936"
+
+# The official Tasmota release a converted plug ends on, as firmware.json pins
+# it: tools/repo/update_firmware.py writes it, docs/updating-firmware.md says when.
+# The files come from the release's own page on GitHub, which keeps them as
+# they were released (tasmota/install, where they were taken from up to 15.6.0,
+# folds its history away).
+FIRMWARE = json.loads(
+    (Path(__file__).resolve().parents[3] / "artifacts" / "firmware.json").read_text(encoding="utf-8")
+)
+OFFICIAL_TASMOTA_VERSION = FIRMWARE["tasmota"]["version"]
+OFFICIAL_TASMOTA_TAG = FIRMWARE["tasmota"]["tag"]
+OFFICIAL_TASMOTA_COMMIT = FIRMWARE["tasmota"]["commit"]
+
+
+def release_urls(release: dict[str, Any]) -> dict[str, str]:
+    """Where each file of an official release (firmware.json's, now or before) is."""
+    base = f"https://github.com/arendst/Tasmota/releases/download/{release['tag']}"
+    return {name: f"{base}/{file['name']}" for name, file in release["files"].items()}
+
+
+OFFICIAL_URLS = release_urls(FIRMWARE["tasmota"])
+# The Tasmota the interim firmware is made from, which need not follow the
+# official release: the recovery Safeboot is built from this source with this
+# project's patches, and the settings template D1 gives the Berry build below
+# is this release's defaults.  Changing it, or the Bluetooth build?  The
+# template was checked against both: see tools/autoflash/tasmota_settings.py.
+# Until it is re-checked and re-captured, D1 falls back to the setup network
+# and the tests say so.
+INTERIM_TASMOTA_COMMIT = "db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892"  # 15.6.0
+PUBLISHED_BLUETOOTH_FILE = (
+    Path(__file__).resolve().parents[3] / "artifacts" / "tasmota32c3-bluetooth.bin"
+)
+PUBLISHED_BLUETOOTH_SOURCE_COMMIT = "f5b34a26be51be2469737d2c43a62acb237c264f"
+PUBLISHED_BLUETOOTH_UPSTREAM_PATH = (
+    "https://github.com/tasmota/install/blob/firmware/firmware/unofficial/"
+    "tasmota32c3-bluetooth.bin"
+)
+PINNED_ARTIFACTS = {
+    "bluetooth": {
+        "size": 1_807_040,
+        "sha256": "a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708",
+    },
+    **{
+        name: {"size": file["size"], "sha256": file["sha256"]}
+        for name, file in FIRMWARE["tasmota"]["files"].items()
+    },
+}
+
+RECOVERY_MODE = "private-volatile-wifi-safeboot-v1"
+# What validate_recovery_safeboot.py's report says it is.
+RECOVERY_KIND = "volatile-wifi-recovery-safeboot"
+# The published recovery image, with placeholders where credentials go. A user's
+# copy is that file with their own network details written in - no local build.
+IMPRINTED_MODE = "public-imprinted-safeboot-v1"
+PUBLISHED_RECOVERY_FILE = (
+    Path(__file__).resolve().parents[3] / "artifacts" / "autoflash-recovery-safeboot-imprintable.bin"
+)
+PUBLISHED_RECOVERY_SHA256 = "ece36fd964c1443ef9fb74af87a0a257501c9e5ecfb1fb7a1c3aff1744bc29fd"
+RECOVERY_ARTIFACT = "recovery_safeboot"
+RECOVERY_MARKER = b"Autoflash recovery Wi-Fi defaults active"
+RECOVERY_PATCH = (
+    Path(__file__).resolve().parent
+    / "repartition"
+    / "recovery-safeboot"
+    / "volatile-wifi-defaults.patch"
+)
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def sector_aligned_size(size: int) -> int:
+    if size < 0:
+        raise ValueError("size cannot be negative")
+    return (size + SECTOR_SIZE - 1) // SECTOR_SIZE * SECTOR_SIZE
+
+
+def partition_tuple(entry: dict[str, Any]) -> tuple[str, int, int, int, int, int]:
+    return (
+        entry["label"],
+        entry["type"],
+        entry["subtype"],
+        entry["offset"],
+        entry["size"],
+        entry["flags"],
+    )
+
+
+def parse_partition_sector(sector: bytes) -> dict[str, Any]:
+    """Decode and validate a complete 4 KiB ESP-IDF partition-table sector."""
+    if len(sector) != TABLE_SIZE:
+        raise ValueError(f"partition sector must be exactly {TABLE_SIZE} bytes")
+
+    entries: list[dict[str, Any]] = []
+    md5_offset: int | None = None
+    stored_md5: bytes | None = None
+    for offset in range(0, TABLE_DATA_SIZE, PARTITION_ENTRY_SIZE):
+        entry = sector[offset : offset + PARTITION_ENTRY_SIZE]
+        magic = struct.unpack_from("<H", entry)[0]
+        if magic == PARTITION_MAGIC:
+            _, ptype, subtype, part_offset, size, raw_label, flags = struct.unpack(
+                "<HBBII16sI", entry
+            )
+            label = raw_label.split(b"\0", 1)[0].decode("ascii", errors="strict")
+            entries.append(
+                {
+                    "label": label,
+                    "type": ptype,
+                    "subtype": subtype,
+                    "offset": part_offset,
+                    "size": size,
+                    "end": part_offset + size,
+                    "flags": flags,
+                }
+            )
+            continue
+        if magic == MD5_MAGIC:
+            if entry[2:16] != b"\xff" * 14:
+                raise ValueError("partition MD5 entry has invalid reserved bytes")
+            md5_offset = offset
+            stored_md5 = entry[16:32]
+            break
+        raise ValueError(f"unexpected partition-table magic 0x{magic:04x} at 0x{offset:x}")
+
+    if not entries:
+        raise ValueError("partition table contains no entries")
+    if md5_offset is None or stored_md5 is None:
+        raise ValueError("partition table has no MD5 entry")
+    calculated_md5 = hashlib.md5(sector[:md5_offset]).digest()
+    if stored_md5 != calculated_md5:
+        raise ValueError("partition table MD5 does not validate")
+    if any(value != 0xFF for value in sector[md5_offset + 32 :]):
+        raise ValueError("partition table reserved/padding bytes are not erased")
+
+    validate_partition_bounds(entries)
+    return {
+        "entries": entries,
+        "entry_count": len(entries),
+        "md5_offset": md5_offset,
+        "stored_md5": stored_md5.hex(),
+        "calculated_md5": calculated_md5.hex(),
+        "sha256": sha256_bytes(sector),
+    }
+
+
+def validate_partition_bounds(entries: Iterable[dict[str, Any]]) -> None:
+    ordered = sorted(entries, key=lambda entry: entry["offset"])
+    previous_end = TABLE_OFFSET + TABLE_SIZE
+    for entry in ordered:
+        start = entry["offset"]
+        end = entry["end"]
+        if start < previous_end:
+            raise ValueError(f"partition {entry['label']} overlaps a previous region")
+        if end <= start or end > FLASH_SIZE:
+            raise ValueError(f"partition {entry['label']} exceeds 4 MiB flash")
+        if entry["type"] == 0 and start % 0x10000:
+            raise ValueError(f"app partition {entry['label']} is not 64 KiB aligned")
+        if entry["type"] == 1 and start % SECTOR_SIZE:
+            raise ValueError(f"data partition {entry['label']} is not sector aligned")
+        previous_end = end
+
+
+def require_exact_partitions(
+    report: dict[str, Any], expected: Iterable[tuple[str, int, int, int, int, int]]
+) -> None:
+    actual = tuple(partition_tuple(entry) for entry in report["entries"])
+    wanted = tuple(expected)
+    if actual != wanted:
+        raise ValueError(f"partition entries differ\nactual={actual!r}\nexpected={wanted!r}")
+
+
+SOURCE_TABLE_FILE = Path(__file__).resolve().parents[3] / "artifacts" / "sonoff-s60-partition-table.bin"
+
+
+def interim_table(source: bytes | None = None) -> bytes:
+    """Sonoff's partition table with its low regions moved (see INTERIM_PARTITIONS)."""
+    source = SOURCE_TABLE_FILE.read_bytes() if source is None else source
+    if sha256_bytes(source) != SOURCE_TABLE_SHA256:
+        raise ValueError("that is not Sonoff's partition table")
+    report = parse_partition_sector(source)
+    require_exact_partitions(report, SOURCE_PARTITIONS)
+    table = bytearray(source)
+    for index, (label, _, _, offset, size, _) in enumerate(INTERIM_PARTITIONS):
+        if report["entries"][index]["label"] != label:
+            raise ValueError("Sonoff's partitions are not in the expected order")
+        struct.pack_into("<II", table, index * PARTITION_ENTRY_SIZE + 4, offset, size)
+    md5 = report["md5_offset"]
+    table[md5 + 16:md5 + 32] = hashlib.md5(table[:md5]).digest()
+    require_exact_partitions(parse_partition_sector(bytes(table)), INTERIM_PARTITIONS)
+    if sha256_bytes(bytes(table)) != INTERIM_TABLE_SHA256:
+        raise ValueError("the interim table differs from the reviewed one")
+    return bytes(table)
+
+
+def official_release(release: dict[str, Any] | None = None) -> dict[str, str]:
+    """The official release a bundle is made for, as its manifest names it:
+    the one pinned now, or `release`, one pinned before."""
+    release = release or FIRMWARE["tasmota"]
+    return {"tag": release["tag"], "tasmota_commit": release["commit"]}
+
+
+def earlier_release(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    """The official release the tool installed before this one whose files a
+    bundle holds (firmware.json keeps each, by its files' hashes): a run that
+    installed it finishes with that bundle, its app and Safeboot a pair."""
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return None
+    for earlier in FIRMWARE["tasmota"].get("earlier", []):
+        if all(isinstance(artifacts.get(name), dict)
+               and (artifacts[name].get("size"), artifacts[name].get("sha256")) == (file["size"], file["sha256"])
+               for name, file in earlier["files"].items()):
+            return earlier
+    return None
+
+
+def require_pinned_artifacts(manifest: dict[str, Any], current_only: bool = False) -> None:
+    """Refuse substitution of the frozen Bluetooth/official firmware set: the
+    official release pinned now, or (unless `current_only`) one pinned before."""
+    release = manifest.get("official_release")
+    pinned = PINNED_ARTIFACTS
+    if release != official_release():
+        earlier = None if current_only else earlier_release(manifest)
+        if earlier is None:
+            raise ValueError(
+                "manifest official-release identity differs from the reviewed frozen set"
+            )
+        pinned = {"bluetooth": PINNED_ARTIFACTS["bluetooth"],
+                  **{name: {"size": file["size"], "sha256": file["sha256"]}
+                     for name, file in earlier["files"].items()}}
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise ValueError("manifest has no artifact map")
+    for name, expected in pinned.items():
+        record = artifacts.get(name)
+        if not isinstance(record, dict):
+            raise ValueError(f"manifest has no pinned {name} artifact")
+        for field in ("size", "sha256"):
+            if record.get(field) != expected[field]:
+                raise ValueError(f"{name} {field} differs from the reviewed frozen set")
+
+
+def is_recovery_manifest(manifest: dict[str, Any]) -> bool:
+    """True for either route to a credential-carrying startup firmware.
+
+    Both put the same kind of image in the same slot; they differ only in how it
+    was obtained - built locally, or the published one with credentials written
+    in. Each is validated by its own rules below.
+    """
+    mode = manifest.get("migration_mode")
+    if mode is None:
+        return False
+    if mode not in (RECOVERY_MODE, IMPRINTED_MODE):
+        raise ValueError(f"unsupported migration mode {mode!r}")
+    return True
+
+
+def is_imprinted_manifest(manifest: dict[str, Any]) -> bool:
+    return manifest.get("migration_mode") == IMPRINTED_MODE
+
+
+def require_imprinted_manifest(manifest_path: Path, manifest: dict[str, Any]) -> None:
+    """Validate a bundle whose startup firmware came from the published image.
+
+    The credentials are not known here and must not be, so provenance is proved
+    structurally: the artifact has to be the published file with values written
+    into the reserved fields and nothing else changed.
+    """
+    try:
+        from tools.autoflash.imprint import derived_from, require_imprinted
+    except ModuleNotFoundError:
+        from autoflash.imprint import derived_from, require_imprinted
+
+    provenance = manifest.get("imprinted_safeboot")
+    if not isinstance(provenance, dict):
+        raise ValueError("imprinted manifest has no imprinted_safeboot provenance")
+    if provenance.get("artifact") != RECOVERY_ARTIFACT:
+        raise ValueError("imprinted manifest selects an unexpected artifact")
+    if provenance.get("published_sha256") != PUBLISHED_RECOVERY_SHA256:
+        raise ValueError(
+            "the manifest was built from a different published recovery image "
+            "than this checkout ships"
+        )
+
+    try:
+        published = PUBLISHED_RECOVERY_FILE.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"cannot read the published recovery image: {exc}") from exc
+    if sha256_bytes(published) != PUBLISHED_RECOVERY_SHA256:
+        raise ValueError("the published recovery image in this checkout has been altered")
+
+    image = artifact_bytes(manifest_path, manifest, RECOVERY_ARTIFACT)
+    validate_native_image(image, SAFEBOOT_SIZE, "recovery Safeboot")
+    if RECOVERY_MARKER not in image:
+        raise ValueError("recovery Safeboot marker is absent")
+    if sha256_bytes(image) == PINNED_ARTIFACTS["safeboot"]["sha256"]:
+        raise ValueError("recovery Safeboot unexpectedly equals the official image")
+    require_imprinted(image)
+    if not derived_from(image, published):
+        raise ValueError(
+            "the bundle's startup firmware is not the published image with "
+            "credentials written in - something else differs"
+        )
+
+
+def safeboot_artifact_name(manifest: dict[str, Any]) -> str:
+    return RECOVERY_ARTIFACT if is_recovery_manifest(manifest) else "safeboot"
+
+
+def require_recovery_manifest(manifest_path: Path, manifest: dict[str, Any]) -> None:
+    """Validate the separately built private recovery payload and provenance."""
+    if not is_recovery_manifest(manifest):
+        return
+    if is_imprinted_manifest(manifest):
+        require_imprinted_manifest(manifest_path, manifest)
+        return
+    recovery = manifest.get("recovery_safeboot")
+    if not isinstance(recovery, dict):
+        raise ValueError("recovery manifest has no recovery_safeboot provenance")
+    if recovery.get("artifact") != RECOVERY_ARTIFACT:
+        raise ValueError("recovery manifest selects an unexpected artifact")
+    if recovery.get("tasmota_commit") != INTERIM_TASMOTA_COMMIT:
+        raise ValueError("recovery Safeboot uses an unexpected Tasmota commit")
+    try:
+        patch_hash = sha256_bytes(RECOVERY_PATCH.read_bytes())
+    except OSError as exc:
+        raise ValueError(f"cannot read reviewed recovery patch: {exc}") from exc
+    if recovery.get("patch_sha256") != patch_hash:
+        raise ValueError("recovery Safeboot patch hash differs")
+
+    artifacts = manifest.get("artifacts", {})
+    record = artifacts.get(RECOVERY_ARTIFACT)
+    if not isinstance(record, dict):
+        raise ValueError("recovery Safeboot artifact record is missing")
+    image = artifact_bytes(manifest_path, manifest, RECOVERY_ARTIFACT)
+    validate_native_image(image, SAFEBOOT_SIZE, "recovery Safeboot")
+    if RECOVERY_MARKER not in image:
+        raise ValueError("recovery Safeboot marker is absent")
+    if sha256_bytes(image) == PINNED_ARTIFACTS["safeboot"]["sha256"]:
+        raise ValueError("recovery Safeboot unexpectedly equals the official image")
+
+    validation_name = recovery.get("validation_file")
+    if not isinstance(validation_name, str) or Path(validation_name).name != validation_name:
+        raise ValueError("recovery validation filename is invalid")
+    try:
+        validation_bytes = (manifest_path.parent / validation_name).read_bytes()
+        validation = json.loads(validation_bytes)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot load recovery validation report: {exc}") from exc
+    if sha256_bytes(validation_bytes) != recovery.get("validation_sha256"):
+        raise ValueError("recovery validation report hash differs")
+    expected = {
+        "schema": 1,
+        "kind": RECOVERY_KIND,
+        "tasmota_commit": INTERIM_TASMOTA_COMMIT,
+        "size": len(image),
+        "sha256": sha256_bytes(image),
+        "max_size": SAFEBOOT_SIZE,
+        "headroom": SAFEBOOT_SIZE - len(image),
+        "password_present": True,
+    }
+    for field, value in expected.items():
+        if validation.get(field) != value:
+            raise ValueError(f"recovery validation {field} differs")
+    if validation.get("credential_header_sha256") != recovery.get("credential_header_sha256"):
+        raise ValueError("recovery credential-header identity differs")
+
+
+def validate_native_image(data: bytes, maximum_size: int, label: str) -> dict[str, Any]:
+    if len(data) > maximum_size:
+        raise ValueError(f"{label} is too large: {len(data)} > {maximum_size}")
+    report = parse_esp_image(data)
+    if not report["chip_is_esp32_c3"]:
+        raise ValueError(f"{label} does not target ESP32-C3")
+    if not report["checksum_valid"]:
+        raise ValueError(f"{label} has an invalid ESP checksum")
+    if report["sha256_valid"] is False:
+        raise ValueError(f"{label} has an invalid appended SHA-256")
+    if report["trailing_bytes"]:
+        raise ValueError(f"{label} has {report['trailing_bytes']} trailing bytes")
+    return report
+
+
+NVS_PAGE_STATES = {
+    0xFFFFFFFF: "empty",
+    0xFFFFFFFE: "active",
+    0xFFFFFFFC: "full",
+    0xFFFFFFF8: "freeing",
+    0xFFFFFFF0: "corrupt",
+}
+NVS_KNOWN_TYPES = {
+    0x01, 0x02, 0x04, 0x08, 0x11, 0x12, 0x14, 0x18,
+    0x21, 0x41, 0x42, 0x48,
+}
+NVS_VARIABLE_TYPES = {0x21, 0x41, 0x42}
+NVS_BLOB_DATA = 0x42
+NVS_BLOB_INDEX = 0x48
+
+
+def analyze_canonical_nvs(data: bytes) -> dict[str, Any]:
+    """Check whether the retained official-size NVS window is self-contained enough.
+
+    This is a conservative structural gate, not a replacement for boot testing.
+    It validates page headers and records top-level NVS keys without exposing
+    their values.
+    """
+    if len(data) != CANONICAL_NVS_SIZE:
+        raise ValueError(f"canonical NVS capture must be {CANONICAL_NVS_SIZE} bytes")
+
+    pages: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
+    keys: set[str] = set()
+    for page_index in range(CANONICAL_NVS_SIZE // SECTOR_SIZE):
+        page = data[page_index * SECTOR_SIZE : (page_index + 1) * SECTOR_SIZE]
+        state, sequence = struct.unpack_from("<II", page, 0)
+        state_name = NVS_PAGE_STATES.get(state, f"unknown-0x{state:08x}")
+        stored_crc = struct.unpack_from("<I", page, 28)[0]
+        calculated_crc = zlib.crc32(page[4:28], 0xFFFFFFFF) & 0xFFFFFFFF
+        header_crc_valid = state == 0xFFFFFFFF or stored_crc == calculated_crc
+        page_keys: list[str] = []
+        invalid_entries: list[int] = []
+
+        if state != 0xFFFFFFFF:
+            bitmap = page[32:64]
+            index = 0
+            while index < 126:
+                entry_state = (bitmap[index // 4] >> ((index % 4) * 2)) & 0x03
+                entry = page[64 + index * 32 : 96 + index * 32]
+                namespace, entry_type, span, chunk_index = struct.unpack_from(
+                    "<BBBB", entry, 0
+                )
+                raw_key = entry[8:24].split(b"\0", 1)[0]
+                if entry_state == 2 and entry_type in NVS_KNOWN_TYPES and span >= 1:
+                    span_fits = index + span <= 126
+                    span_written = span_fits and all(
+                        ((bitmap[part // 4] >> ((part % 4) * 2)) & 0x03) == 2
+                        for part in range(index, index + span)
+                    )
+                    stored_entry_crc = struct.unpack_from("<I", entry, 4)[0]
+                    calculated_entry_crc = (
+                        zlib.crc32(entry[:4] + entry[8:32], 0xFFFFFFFF) & 0xFFFFFFFF
+                    )
+                    entry_crc_valid = stored_entry_crc == calculated_entry_crc
+                    try:
+                        key = raw_key.decode("ascii", errors="strict")
+                    except UnicodeDecodeError:
+                        key = ""
+                    if key and all(0x20 <= ord(char) <= 0x7E for char in key):
+                        page_keys.append(key)
+                        keys.add(key)
+                    record: dict[str, Any] = {
+                        "page": page_index,
+                        "entry": index,
+                        "namespace": namespace,
+                        "type": entry_type,
+                        "span": span,
+                        "chunk_index": chunk_index,
+                        "key": key,
+                        "span_fits": span_fits,
+                        "span_written": span_written,
+                        "entry_crc_valid": entry_crc_valid,
+                    }
+                    if entry_type in NVS_VARIABLE_TYPES and span_fits:
+                        data_length = struct.unpack_from("<H", entry, 24)[0]
+                        payload = page[
+                            64 + (index + 1) * 32 : 64 + (index + span) * 32
+                        ][:data_length]
+                        stored_data_crc = struct.unpack_from("<I", entry, 28)[0]
+                        calculated_data_crc = (
+                            zlib.crc32(payload, 0xFFFFFFFF) & 0xFFFFFFFF
+                        )
+                        record.update(
+                            {
+                                "data_length": data_length,
+                                "span_length_valid": span == 1 + (data_length + 31) // 32,
+                                "data_crc_valid": stored_data_crc == calculated_data_crc,
+                            }
+                        )
+                    elif entry_type == NVS_BLOB_INDEX:
+                        total_size, chunk_count, chunk_start = struct.unpack_from(
+                            "<IBB", entry, 24
+                        )
+                        record.update(
+                            {
+                                "total_size": total_size,
+                                "chunk_count": chunk_count,
+                                "chunk_start": chunk_start,
+                            }
+                        )
+                    records.append(record)
+                    record_valid = span_fits and span_written and entry_crc_valid
+                    if entry_type in NVS_VARIABLE_TYPES:
+                        record_valid = (
+                            record_valid
+                            and record.get("span_length_valid", False)
+                            and record.get("data_crc_valid", False)
+                        )
+                    if not record_valid:
+                        invalid_entries.append(index)
+                    index += span
+                else:
+                    if entry_state == 2:
+                        invalid_entries.append(index)
+                    index += 1
+
+        pages.append(
+            {
+                "index": page_index,
+                "offset": CANONICAL_NVS_OFFSET + page_index * SECTOR_SIZE,
+                "state": state_name,
+                "sequence": sequence,
+                "header_crc_valid": header_crc_valid,
+                "keys": sorted(set(page_keys)),
+                "invalid_entries": invalid_entries,
+            }
+        )
+
+    active_pages = [page for page in pages if page["state"] == "active"]
+    empty_pages = [page for page in pages if page["state"] == "empty"]
+    invalid_headers = [page for page in pages if not page["header_crc_valid"]]
+    invalid_entry_pages = [page for page in pages if page["invalid_entries"]]
+    required_keys = {"Settings", "sta.apinfo"}
+    missing_keys = sorted(required_keys - keys)
+
+    required_records: dict[str, dict[str, Any]] = {}
+    incomplete_keys: list[str] = []
+    for required_key in sorted(required_keys):
+        indexes = [
+            record
+            for record in records
+            if record["key"] == required_key
+            and record["type"] == NVS_BLOB_INDEX
+            and record["entry_crc_valid"]
+        ]
+        complete = False
+        detail: dict[str, Any] = {"index_records": len(indexes), "complete": False}
+        if len(indexes) == 1:
+            blob_index = indexes[0]
+            start = blob_index["chunk_start"]
+            count = blob_index["chunk_count"]
+            expected_chunks = [((start + number) & 0xFF) for number in range(count)]
+            chunks = [
+                record
+                for record in records
+                if record["key"] == required_key
+                and record["namespace"] == blob_index["namespace"]
+                and record["type"] == NVS_BLOB_DATA
+                and record["chunk_index"] in expected_chunks
+            ]
+            chunks_by_index = {record["chunk_index"]: record for record in chunks}
+            ordered_chunks = [chunks_by_index.get(chunk) for chunk in expected_chunks]
+            chunk_metadata_valid = all(
+                chunk is not None
+                and chunk["span_fits"]
+                and chunk["span_written"]
+                and chunk["entry_crc_valid"]
+                and chunk.get("span_length_valid", False)
+                and chunk.get("data_crc_valid", False)
+                for chunk in ordered_chunks
+            )
+            observed_size = sum(
+                chunk.get("data_length", 0) for chunk in ordered_chunks if chunk is not None
+            )
+            complete = (
+                count > 0
+                and len(chunks) == count
+                and len(chunks_by_index) == count
+                and chunk_metadata_valid
+                and observed_size == blob_index["total_size"]
+            )
+            detail.update(
+                {
+                    "namespace": blob_index["namespace"],
+                    "total_size": blob_index["total_size"],
+                    "chunk_count": count,
+                    "chunk_start": start,
+                    "found_chunks": sorted(chunks_by_index),
+                    "observed_size": observed_size,
+                    "complete": complete,
+                }
+            )
+        required_records[required_key] = detail
+        if not complete:
+            incomplete_keys.append(required_key)
+
+    ready = (
+        len(active_pages) == 1
+        and bool(empty_pages)
+        and not invalid_headers
+        and not invalid_entry_pages
+        and not missing_keys
+        and not incomplete_keys
+    )
+    return {
+        "size": len(data),
+        "sha256": sha256_bytes(data),
+        "pages": pages,
+        "keys": sorted(keys),
+        "required_keys": sorted(required_keys),
+        "missing_keys": missing_keys,
+        "incomplete_keys": incomplete_keys,
+        "required_records": required_records,
+        "invalid_entry_pages": [page["index"] for page in invalid_entry_pages],
+        "ready": ready,
+    }
+
+
+def load_manifest(path: Path) -> dict[str, Any]:
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"could not load manifest {path}: {exc}") from exc
+    if manifest.get("schema") != 1:
+        raise ValueError("unsupported migration manifest schema")
+    return manifest
+
+
+# Artifacts handed over in memory instead of read from a file.  The recovery
+# image carries Wi-Fi credentials, so it is marked memory_only in the manifest
+# and never written to disk; it is checked against the same pinned size and
+# SHA-256 as any file would be.
+_MEMORY_ARTIFACTS: dict[str, bytes] = {}
+
+
+def provide_in_memory(name: str, data: bytes) -> None:
+    _MEMORY_ARTIFACTS[name] = data
+
+
+def _artifact_data(manifest_path: Path, name: str, artifact: dict[str, Any]) -> bytes:
+    if name in _MEMORY_ARTIFACTS:
+        return _MEMORY_ARTIFACTS[name]
+    if artifact.get("memory_only"):
+        raise ValueError(f"{name} is kept only in memory and was not provided")
+    try:
+        return (manifest_path.parent / artifact["file"]).read_bytes()
+    except OSError as exc:
+        raise ValueError(f"could not read {name} artifact: {exc}") from exc
+
+
+def verify_manifest_files(
+    manifest_path: Path, manifest: dict[str, Any], allow_unprovided: bool = False
+) -> None:
+    """Every artifact is present and unchanged.
+
+    With `allow_unprovided`, a memory-only artifact that has not been handed
+    over yet is skipped - for checking a bundle before its secrets are known.
+    """
+    for name, artifact in manifest["artifacts"].items():
+        if allow_unprovided and artifact.get("memory_only") and name not in _MEMORY_ARTIFACTS:
+            continue
+        data = _artifact_data(manifest_path, name, artifact)
+        if len(data) != artifact["size"]:
+            raise ValueError(f"{name} size changed")
+        if sha256_bytes(data) != artifact["sha256"]:
+            raise ValueError(f"{name} SHA-256 changed")
+
+
+def artifact_bytes(
+    manifest_path: Path, manifest: dict[str, Any], name: str
+) -> bytes:
+    """Read one already-verified manifest artifact."""
+    try:
+        artifact = manifest["artifacts"][name]
+    except KeyError as exc:
+        raise ValueError(f"manifest has no {name} artifact") from exc
+    data = _artifact_data(manifest_path, name, artifact)
+    if len(data) != artifact["size"]:
+        raise ValueError(f"{name} size changed")
+    if sha256_bytes(data) != artifact["sha256"]:
+        raise ValueError(f"{name} SHA-256 changed")
+    return data
+
+
+def load_evidence(path: Path, expected_phase: str, max_age_seconds: int) -> dict[str, Any]:
+    """Load a host-validated live-phase record and reject stale evidence."""
+    try:
+        evidence = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"could not load {expected_phase} evidence {path}: {exc}") from exc
+    if evidence.get("schema") != 1 or evidence.get("phase") != expected_phase:
+        raise ValueError(f"{path} is not {expected_phase} evidence")
+    if evidence.get("status") != "PASS":
+        raise ValueError(f"{expected_phase} evidence did not pass")
+    try:
+        created = datetime.fromisoformat(evidence["created_utc"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"{expected_phase} evidence has an invalid timestamp") from exc
+    if created.tzinfo is None:
+        raise ValueError(f"{expected_phase} evidence timestamp has no timezone")
+    age = (datetime.now(timezone.utc) - created.astimezone(timezone.utc)).total_seconds()
+    if age < -60 or age > max_age_seconds:
+        raise ValueError(
+            f"{expected_phase} evidence is not fresh (age {age:.0f}s; "
+            f"limit {max_age_seconds}s)"
+        )
+    return evidence

@@ -1,4 +1,4 @@
-# The leak scan (tools/leak_scan.py) on main and pull requests: what
+# The leak scan (tools/repo/leak_scan.py) on main and pull requests: what
 # the hooks stop on a maintainer's computer, by its shape alone here - a MAC
 # address that could be a real device's, a private key, a token - since the
 # values only a maintainer's computer knows are not here. For a pull request
@@ -37,7 +37,7 @@ jobs:
           fi
           if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ] \
                   && git cat-file -e "$BEFORE" 2>/dev/null; then
-              python3 tools/leak_scan.py range "$BEFORE..$AFTER"
+              python3 tools/repo/leak_scan.py range "$BEFORE..$AFTER"
           fi
       - name: The repository as it stands
-        run: python3 tools/leak_scan.py tree
+        run: python3 tools/repo/leak_scan.py tree
