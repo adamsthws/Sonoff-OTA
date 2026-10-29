@@ -28,6 +28,12 @@ the plug uses:
 
     python3 stub_server.py --bind 192.168.60.1 --cert server.crt --key server.key \\
         --device-json stub-device.json
+
+With `--plain` it serves plaintext HTTP/WS instead of TLS and needs no cert. The
+emulated S61's dispatch is plaintext (its factory dispatch URL is
+`http://...:80`); its IoT WebSocket is still `wss://` and verifies the server
+cert, so a run serves dispatch plaintext and the IoT channel over TLS and swaps
+the firmware's trust anchor. See docs/s61-tools/s61_cloud_online.py.
 """
 
 from __future__ import annotations
@@ -204,7 +210,10 @@ class Stub:
     def dispatch_response(self) -> dict:
         # The plug connects to this host by numeric IP without DNS (it
         # inet_aton()s the field), so hand back an address, not a hostname.
-        return {"error": 0, "reason": "", "IP": self.iot_host, "port": self.iot_port}
+        # The S60 reads `IP`; the S61 reads `domain` (same numeric address) -
+        # include both so either firmware finds the field it parses.
+        return {"error": 0, "reason": "", "IP": self.iot_host, "domain": self.iot_host,
+                "port": self.iot_port}
 
     def app_dispatch_response(self) -> dict:
         # The tool's app-side dispatch (serve_tasmota_ota). It connects by TLS
@@ -287,7 +296,8 @@ class Handler(socketserver.BaseRequestHandler):
         # while accepting: one client that stalls in it must not stop the rest.
         sock.settimeout(REQUEST_TIMEOUT)
         try:
-            sock.do_handshake()
+            if isinstance(sock, ssl.SSLSocket):
+                sock.do_handshake()
             header = self._read_headers(sock)
         except (ConnectionError, ssl.SSLError, OSError) as exc:
             log(peer, "connection ended before a request:", exc)
@@ -474,12 +484,21 @@ class TLSServer(socketserver.ThreadingTCPServer):
             raise
 
 
+class PlainServer(socketserver.ThreadingTCPServer):
+    """Plaintext variant for the emulated S61, which dials http://...:80."""
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--bind", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=443)
-    parser.add_argument("--cert", required=True)
-    parser.add_argument("--key", required=True)
+    parser.add_argument("--cert")
+    parser.add_argument("--key")
+    parser.add_argument("--plain", action="store_true",
+                        help="serve plaintext HTTP/WS, no TLS (the emulated S61 dials "
+                             "http://...:80 with the factory dispatch URL)")
     parser.add_argument("--iot-host", default="192.168.60.1",
                         help="IoT server handed back by dispatch: a numeric IP (the plug "
                              "does no DNS for it) that the cert's IP SAN covers")
@@ -490,13 +509,20 @@ def main(argv: list[str] | None = None) -> int:
                              "devicekey, model, ...) for the tool-facing API")
     args = parser.parse_args(argv)
 
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(args.cert, args.key)
-
     device = json.loads(args.device_json.read_text()) if args.device_json else None
     Handler.stub = Stub(args.iot_host, args.iot_port, args.hb_interval, device)
-    server = TLSServer((args.bind, args.port), Handler, context)
-    log(f"stub listening on {args.bind}:{args.port}; dispatch -> {args.iot_host}:{args.iot_port}")
+    if args.plain:
+        server = PlainServer((args.bind, args.port), Handler)
+        scheme = "plaintext"
+    else:
+        if not args.cert or not args.key:
+            parser.error("--cert and --key are required unless --plain is given")
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(args.cert, args.key)
+        server = TLSServer((args.bind, args.port), Handler, context)
+        scheme = "TLS"
+    log(f"stub listening on {args.bind}:{args.port} ({scheme}); "
+        f"dispatch -> {args.iot_host}:{args.iot_port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
