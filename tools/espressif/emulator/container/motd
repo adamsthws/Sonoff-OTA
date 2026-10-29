@@ -6,7 +6,7 @@
   │ paired with your account.                                               │
   │                                                                         │
   │ Run the conversion exactly as on a real plug:                           │
-  │     run            (short for: python tools/autoflash_cli.py run)       │
+  │     run            (short for: python -m tools.autoflash run)       │
   │                                                                         │
   │ When it asks you to do something to the plug or your Wi-Fi:             │
   │     plug restart | plug off | plug on | plug cycle 7    (power)         │

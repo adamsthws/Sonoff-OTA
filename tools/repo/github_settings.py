@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The repository's settings on GitHub, written down here with why.
 
-    python3 tools/github_settings.py          what differs from them
-    python3 tools/github_settings.py apply    set them
+    python3 tools/repo/github_settings.py          what differs from them
+    python3 tools/repo/github_settings.py apply    set them
 
 Through gh, logged in as an admin of the repository. `apply` changes only
 what differs, and of the checks before main (the second ruleset) requires
@@ -163,12 +163,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         found = differences()
         if not found:
-            print(f"{REPOSITORY}: every setting is as tools/github_settings.py says.")
+            print(f"{REPOSITORY}: every setting is as tools/repo/github_settings.py says.")
             return 0
         for what, how, _ in found:
             print(f"  {what}: {how}")
         if not args:
-            print("python3 tools/github_settings.py apply sets them.")
+            print("python3 tools/repo/github_settings.py apply sets them.")
             return 1
         for what, _, (method, path, body) in found:
             if what == "ruleset 'Checks before main'":

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Keep secrets and real identifiers out of Git: commits, their messages, pushes.
 
-    python3 tools/leak_scan.py staged         what is staged (the pre-commit hook)
-    python3 tools/leak_scan.py message FILE   a commit message (the commit-msg hook)
-    python3 tools/leak_scan.py push           what a push sends (the pre-push hook, from its stdin)
-    python3 tools/leak_scan.py range A..B     every commit in a range: its patch and its message
-    python3 tools/leak_scan.py tree           every tracked file as it stands
-    python3 tools/leak_scan.py install        this clone's hooks from .githooks/
+    python3 tools/repo/leak_scan.py staged         what is staged (the pre-commit hook)
+    python3 tools/repo/leak_scan.py message FILE   a commit message (the commit-msg hook)
+    python3 tools/repo/leak_scan.py push           what a push sends (the pre-push hook, from its stdin)
+    python3 tools/repo/leak_scan.py range A..B     every commit in a range: its patch and its message
+    python3 tools/repo/leak_scan.py tree           every tracked file as it stands
+    python3 tools/repo/leak_scan.py install        this clone's hooks from .githooks/
 
 Two kinds of finding:
 
@@ -44,7 +44,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 ALLOW_FILE = ROOT / ".leak-scan-allow"
@@ -156,7 +156,7 @@ def own_values() -> dict[str, str]:
                     if not any(address in network for network in EMULATOR_NETWORKS):
                         add(value, "an address a real run found")
     try:
-        from tools.sonoff_secrets import sonoff_values
+        from tools.autoflash.sonoff_secrets import sonoff_values
         for flash in dumps.values():
             for value, where in sonoff_values(flash).items():
                 if value.isascii() and value.decode("ascii", "ignore").isprintable():
@@ -341,7 +341,7 @@ def command_install() -> int:
     for hook in (ROOT / ".githooks").iterdir():
         hook.chmod(0o755)
     print("This clone's hooks are .githooks/ now: each commit, its message and each push are scanned,\n"
-          "and each commit linted (tools/lint.py) by the linters in .venv:\n"
+          "and each commit linted (tools/repo/lint.py) by the linters in .venv:\n"
           "    .venv/bin/python -m pip install --require-hashes -r requirements/lint.txt")
     return 0
 

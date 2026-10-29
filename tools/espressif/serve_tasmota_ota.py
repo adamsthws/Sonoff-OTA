@@ -216,7 +216,7 @@ def until_online(device: dict, look_again, *, sleep=time.sleep) -> dict:
 
 # Said when a send failed before the upgrade command went out: the plug was
 # never asked to fetch the installer, so it never came - which the run must
-# not blame on this computer's firewall (autoflash_cli.bridge_failure_advice).
+# not blame on this computer's firewall (tools.autoflash.cli.bridge_failure_advice).
 NOT_SENT = "The upgrade command was not sent: nothing reached the plug."
 
 

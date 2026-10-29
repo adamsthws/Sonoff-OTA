@@ -1,4 +1,4 @@
-# ruff (tools/lint.py): what is likely a bug, not style - no formatting,
+# ruff (tools/repo/lint.py): what is likely a bug, not style - no formatting,
 # no import order.
 target-version = "py310"   # the oldest Python the tool runs on
 extend-exclude = []

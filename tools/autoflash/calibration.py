@@ -11,7 +11,7 @@ Two parts, decoded from stock 1.2.0 (ESPHome/sonoff_s60.yaml applies both):
   two sets of a, b, c for current, voltage and power - the first below 300 W,
   the second from 300 W on - applied as a*x^2/1e7 + b*x/1e6 + c/1e6 in mA, mV
   and mW.  A plug converted through Tasmota has lost it (the new layout
-  clears NVS), but its Sonoff backup keeps it (autoflash_cli.backup_calibration).
+  clears NVS), but its Sonoff backup keeps it (tools.autoflash.cli.backup_calibration).
 
 Tasmota scales each reading by one whole number per quantity (VoltageCal,
 CurrentCal, PowerCal), which it starts from the meter chip's own numbers

@@ -117,7 +117,7 @@ memory (`tools/autoflash/imprint.py`). It has no OTA password, web login or API
 encryption key, as ESPHome's own ready-made images have none: the plug is open
 on the home network until its owner adds them, as official Tasmota is. To
 publish a new one, change the config and build and publish it with
-`tools/update_firmware.py esphome`, which [`../docs/updating-firmware.md`](../docs/updating-firmware.md)
+`tools/repo/update_firmware.py esphome`, which [`../docs/updating-firmware.md`](../docs/updating-firmware.md)
 describes, as for a new ESPHome release; then update the files' rows above.
 
 ESPHome 1.1.0 adds a Wi-Fi signal sensor, which the run reads before it

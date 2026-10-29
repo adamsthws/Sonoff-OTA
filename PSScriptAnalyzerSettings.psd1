@@ -1,4 +1,4 @@
-# PSScriptAnalyzer (tools/lint.py): what is likely to break, not style.
+# PSScriptAnalyzer (tools/repo/lint.py): what is likely to break, not style.
 @{
     Severity     = @('Error', 'Warning')
     ExcludeRules = @(

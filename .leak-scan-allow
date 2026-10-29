@@ -1,4 +1,4 @@
-# Values tools/leak_scan.py lets through: the made-up examples the repository
+# Values tools/repo/leak_scan.py lets through: the made-up examples the repository
 # uses that look like something real. Never a real one - a real value goes
 # nowhere near this repository. One per line.
 #

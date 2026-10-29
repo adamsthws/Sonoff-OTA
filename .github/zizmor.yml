@@ -1,4 +1,4 @@
-# zizmor (tools/lint.py).
+# zizmor (tools/repo/lint.py).
 rules:
   # GitHub's new self-repository syntax (uses: $/...) is not yet known to
   # actionlint, which refuses it. The workflows call each other only as whole

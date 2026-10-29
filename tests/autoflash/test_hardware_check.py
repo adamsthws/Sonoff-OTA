@@ -3,7 +3,7 @@
 import unittest
 from unittest import mock
 
-import tools.autoflash_cli as af
+import tools.autoflash.cli as af
 
 
 class DescribeHardwareTests(unittest.TestCase):

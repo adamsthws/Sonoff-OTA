@@ -58,7 +58,7 @@ class PlugLockTests(unittest.TestCase):
 
     def test_the_run_refused_is_told_plainly(self):
         from types import SimpleNamespace
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         with mock.patch.object(plugs, "hold", side_effect=plugs.PlugBusy("run plugs/x, process 7")):
             with self.assertRaisesRegex(autoflash.Abort, "another run is converting this plug"):
                 autoflash.hold_plug(SimpleNamespace(), MAC)
@@ -85,7 +85,7 @@ class PlugLockTests(unittest.TestCase):
         # Its log, report, firewall rule and safety locks are the other run's
         # too: the run's main stops before any of them (seen in the fault
         # suite: a refused run took the other's firewall rule away).
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         other = self.other_run("time.sleep(30)")
         try:
             with mock.patch.object(autoflash, "tell") as told:
@@ -97,7 +97,7 @@ class PlugLockTests(unittest.TestCase):
         self.assertFalse(autoflash.refused_for_another_run("run", self.ctx()))  # then it is this run's
 
     def test_cleanup_waits_for_every_run_to_finish(self):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         other = self.other_run("time.sleep(30)")
         try:
             with mock.patch.object(autoflash, "tell") as told:
@@ -109,7 +109,7 @@ class PlugLockTests(unittest.TestCase):
         self.assertFalse(autoflash.refused_for_another_run("cleanup", self.ctx(mac=None)))
 
     def test_looking_is_never_refused(self):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         other = self.other_run("time.sleep(30)")
         try:
             for command in ("status", "list"):

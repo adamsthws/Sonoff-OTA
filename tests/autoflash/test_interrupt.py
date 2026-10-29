@@ -80,7 +80,7 @@ class StageEndTests(unittest.TestCase):
     countdown that carries on by itself."""
 
     def ask(self, pending, answer):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         interrupt.clear()
         if pending:
             interrupt._state["first"] = 1.0

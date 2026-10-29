@@ -58,7 +58,7 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 - It is Tasmota's own build (`artifacts/tasmota32c3-bluetooth.bin`), not
   changed. Its name comes from the settings record D1 sends:
   `give_tasmota_the_wifi()` in
-  [`tools/autoflash_cli.py`](../tools/autoflash_cli.py) calls
+  [`tools/autoflash/cli.py`](../tools/autoflash/cli.py) calls
   `tasmota_settings.named(template, our_setup_network(ctx))`
   ([`tools/autoflash/tasmota_settings.py`](../tools/autoflash/tasmota_settings.py):
   `SET_HOSTNAME`, at most `HOSTNAME_MAX` characters, with the record's
@@ -138,7 +138,7 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 
 ## What the tool looks for
 
-All in [`tools/autoflash_cli.py`](../tools/autoflash_cli.py) unless said:
+All in [`tools/autoflash/cli.py`](../tools/autoflash/cli.py) unless said:
 
 - `SETUP_SSID_PREFIX` (`autoflash-recovery-`), `named()` and
   `our_setup_network()`: the interim name.

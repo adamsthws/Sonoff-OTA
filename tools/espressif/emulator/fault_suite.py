@@ -92,7 +92,7 @@ APP0_OFFSET = 0xE0000  # Tasmota's own firmware, on its layout (tools/espressif/
 PLUG_CMD = "/opt/autoflash-emu/bin/plug"
 ESPHOME_OTA_PORT = 3232
 MAX_RUNS = 4
-TOOL = "tools/autoflash_cli.py"
+TOOL = "tools/autoflash/cli.py"
 HELPERS = ("serve_safeboot_migration.py", "serve_tasmota_ota.py")
 
 # Each direction: the saved plug it starts from, its target, and the steps that
@@ -330,7 +330,7 @@ LEGACY_STARTS = {
 }
 LEGACY = EMU / "legacy"
 LEGACY_TOOL = "tools/s60_autoflash.py"  # its name until 2.0.0
-# What a run says when an error it did not expect stops it (autoflash_cli._main).
+# What a run says when an error it did not expect stops it (tools.autoflash.cli._main).
 UNEXPECTED = "something unexpected went wrong"
 LEGACY_NAMED = {"G1", "H1"}  # killed past its F4: the plug keeps the name that release gave it
 _legacy_lock = threading.Lock()
@@ -861,10 +861,10 @@ class Scenario:
             # The computer asleep: everything of the run stopped, and nothing
             # of it on the network, then all back at once.
             self.offline(True)
-            for pattern in (TOOL, *HELPERS, "tools/unattended_run.py"):
+            for pattern in (TOOL, *HELPERS, "tools/repo/unattended_run.py"):
                 self.ex("pkill", "-STOP", "-f", pattern)
             time.sleep(arg)
-            for pattern in ("tools/unattended_run.py", *HELPERS, TOOL):
+            for pattern in ("tools/repo/unattended_run.py", *HELPERS, TOOL):
                 self.ex("pkill", "-CONT", "-f", pattern)
             self.offline(False)
         elif fault == "fallback":

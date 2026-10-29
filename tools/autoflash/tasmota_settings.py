@@ -55,7 +55,7 @@ HOSTNAME_MAX = 32                # TasmotaGlobal.hostname[33]
 # gives Tasmota its Wi-Fi by hand, and tests/autoflash/test_tasmota_settings.py fails
 # saying so.  See archive/docs/reference/automatic-wifi.md.  The official
 # release needs only CFG_HOLDER (above) to be its own, for it to take the
-# record the recovery Safeboot saves: tools/update_firmware.py checks it.
+# record the recovery Safeboot saves: tools/repo/update_firmware.py checks it.
 TEMPLATE_SOURCE_COMMIT = "db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892"
 TEMPLATE_VERSION = 0x0F060000
 BERRY_FIRMWARE_SHA256 = "a92cfadaff5a3c824f790471ba31464acd2076a24ff1fcad2de28574c5641708"

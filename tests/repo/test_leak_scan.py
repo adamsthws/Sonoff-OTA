@@ -1,4 +1,4 @@
-"""Secrets and real identifiers are kept out of Git (tools/leak_scan.py)."""
+"""Secrets and real identifiers are kept out of Git (tools/repo/leak_scan.py)."""
 
 import json
 import tempfile
@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools import leak_scan as ls
+from tools.repo import leak_scan as ls
 
 
 def scanner(own=None, allow=()):

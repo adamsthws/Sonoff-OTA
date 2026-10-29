@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """Move the firmware the tool installs to a new Tasmota or ESPHome release.
 
-    python3 tools/update_firmware.py check
+    python3 tools/repo/update_firmware.py check
         what firmware.json pins, against each project's latest stable release;
         exits 1 when either is behind
 
-    python3 tools/update_firmware.py due [--today YYYY-MM-DD]
+    python3 tools/repo/update_firmware.py due [--today YYYY-MM-DD]
         the release of each project now due by the settled-release rule
         (SETTLE_DAYS below), as JSON: what the firmware-update workflow takes
 
-    python3 tools/update_firmware.py tasmota [VERSION]
+    python3 tools/repo/update_firmware.py tasmota [VERSION]
         pin that official Tasmota release (default: the latest) - its ESP32-C3
         app, Safeboot and factory image, from the release's page on GitHub -
         once each is shown to fit the layout the conversion builds
 
-    python3 tools/update_firmware.py esphome [VERSION] [--image-version X.Y.Z]
+    python3 tools/repo/update_firmware.py esphome [VERSION] [--image-version X.Y.Z]
                                      [--mover] [--new-bootloader]
         build ESPHome/sonoff_s60.yaml with that ESPHome release (default: the
         latest) in ESPHome's own Docker image, check it, and publish it in
@@ -40,7 +40,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import esphome, imprint, tasmota_settings  # noqa: E402

@@ -1,4 +1,4 @@
-"""A linked worktree lints with the main checkout's .venv (tools/lint.py, .githooks/)."""
+"""A linked worktree lints with the main checkout's .venv (tools/repo/lint.py, .githooks/)."""
 
 import os
 import shutil
@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools import lint
+from tools.repo import lint
 
 HOOKS = Path(__file__).resolve().parents[2] / ".githooks"
 # Git as it would be on a computer of its own: none of this one's settings

@@ -16,7 +16,7 @@ with nobody at the keyboard, the plug chosen last time is used.
 
 With none here - captures/ is only ever a working copy - the maintainer's
 sealed backup is fetched from its private package and filed here first
-(tools/private_backup.py restore, docs/private-backup.md), given its key and
+(tools/repo/private_backup.py restore, docs/private-backup.md), given its key and
 a login that can read the package; and a test copy asked for by --plug that
 is not here yet is made from it (copy_plug.py). AUTOFLASH_NO_RESTORE=1 says
 not to.
@@ -93,7 +93,7 @@ def choose(found: list[Choice], wanted: str | None, last: str | None, interactiv
 
 def restored(wanted: str | None) -> list[Choice]:
     """The plugs here once the sealed backup is - and the test copy asked for."""
-    from tools import private_backup
+    from tools.repo import private_backup
     from tools.espressif.emulator import copy_plug
     try:
         mac = private_backup.restore()
@@ -102,7 +102,7 @@ def restored(wanted: str | None) -> list[Choice]:
               "(it needs AUTOFLASH_BACKUP_KEY and a GitHub login that can read the package:\n"
               "docs/private-backup.md)", file=sys.stderr)
         return choices()
-    print(f"Restored the sealed Sonoff backup of {mac} (tools/private_backup.py).")
+    print(f"Restored the sealed Sonoff backup of {mac} (tools/repo/private_backup.py).")
     if wanted and plugs.folder_name(wanted) != plugs.folder_name(mac) and \
             not (plugs.PLUGS / plugs.folder_name(wanted)).exists():
         copy_plug.copy(mac, wanted)

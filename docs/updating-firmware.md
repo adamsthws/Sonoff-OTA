@@ -41,7 +41,7 @@ the apps of later 5.x releases. Replacing it is a decision of its own:
 ## By itself
 
 Every Monday `.github/workflows/firmware-update.yml` asks which release of each
-project has **settled** (`python3 tools/update_firmware.py due`). A release has
+project has **settled** (`python3 tools/repo/update_firmware.py due`). A release has
 settled when it is
 
 1. a stable release - never a beta, a pre-release or a development build;
@@ -80,7 +80,7 @@ schedules off after 60 days with no activity, this one with them.
 
 By hand, from the Actions tab: `tasmota` or `esphome` takes a given release
 whether settled or not, and `dry_run` makes and tests the update and opens
-nothing. `python3 tools/update_firmware.py check` says what is pinned and what
+nothing. `python3 tools/repo/update_firmware.py check` says what is pinned and what
 is latest.
 
 ## By hand
@@ -90,8 +90,8 @@ Work on a branch from `main`. Each step below is one commit.
 ### 1. Tasmota
 
 ```sh
-python3 tools/update_firmware.py tasmota            # the latest release
-python3 tools/update_firmware.py tasmota 16.0.0     # or that one
+python3 tools/repo/update_firmware.py tasmota            # the latest release
+python3 tools/repo/update_firmware.py tasmota 16.0.0     # or that one
 ```
 
 It reads the release from GitHub (refusing a draft or pre-release) and its
@@ -124,8 +124,8 @@ Where it stops:
 ### 2. ESPHome
 
 ```sh
-python3 tools/update_firmware.py esphome            # the latest release
-python3 tools/update_firmware.py esphome 2026.10.0 --image-version 1.3.0
+python3 tools/repo/update_firmware.py esphome            # the latest release
+python3 tools/repo/update_firmware.py esphome 2026.10.0 --image-version 1.3.0
 ```
 
 A change to `ESPHome/sonoff_s60.yaml` is published the same way, naming the

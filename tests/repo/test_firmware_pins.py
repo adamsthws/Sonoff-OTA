@@ -1,6 +1,6 @@
 """firmware.json, the files it pins, and everything that names them, agreeing.
 
-tools/update_firmware.py writes firmware.json and the files; the rest is by
+tools/repo/update_firmware.py writes firmware.json and the files; the rest is by
 hand (docs/updating-firmware.md), and these say what was missed.
 """
 
@@ -9,7 +9,7 @@ import json
 import unittest
 from pathlib import Path
 
-from tools import update_firmware as uf
+from tools.repo import update_firmware as uf
 from tools.autoflash import tasmota_settings
 from tools.espressif.safeboot.safeboot_migration import OFFICIAL_URLS, PINNED_ARTIFACTS, sha256_bytes
 

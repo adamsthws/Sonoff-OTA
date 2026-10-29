@@ -74,7 +74,7 @@ own cloud, served locally, so nothing is shared and runs go fully parallel.
 
 ## What the cloud is actually used for
 
-Tracing the conversion ([`tools/autoflash_cli.py`](../tools/autoflash_cli.py)
+Tracing the conversion ([`tools/autoflash/cli.py`](../tools/autoflash/cli.py)
 `step_discover` / `step_bridge`) shows the cloud's role is smaller than it looks.
 It is needed for two things:
 
@@ -669,7 +669,7 @@ which drives the app side: login, app dispatch, a `userAgent:"app"` WebSocket,
 and an `upgrade` the cloud passes to the device. So the stub gained
 `/dispatch/app`, the `WS_DISPATCH` override (`probe_ota_command.py`), and the
 **app↔device relay**: until then it answered each socket on its own, and the
-command never reached the plug. Run: `emu.sh --stub-cloud`, then `autoflash_cli.py step
+command never reached the plug. Run: `emu.sh --stub-cloud`, then `autoflash/cli.py step
 {A0,A5,A1,A2,C2}` pointed at the stub. A5 built the Tasmota bundle by downloading
 the official files (stub mode lets your computer reach the firmware CDN while
 eWeLink stays blocked). **Result:** A1 discover, A2 device key from the stub,

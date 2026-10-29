@@ -72,9 +72,9 @@ class DeliverTests(unittest.TestCase):
             self.assertIn("went offline", (root / "sender.log").read_text())
 
     def test_the_readout_file_is_the_conversion_bridge_version(self):
-        from tools import autoflash_cli
+        from tools.autoflash import cli
         self.assertEqual(flash_readout.READOUT_OTA.name.rsplit("-", 1)[1],
-                         autoflash_cli.BRIDGE_OTA.name.rsplit("-", 1)[1])
+                         cli.BRIDGE_OTA.name.rsplit("-", 1)[1])
 
 
 class CloudChatterTests(unittest.TestCase):
@@ -139,8 +139,8 @@ class ControlTests(unittest.TestCase):
             self.assertIn(f"{digest}  {Path(path).as_posix()}", sums)
 
     def test_the_default_control_is_what_the_conversion_sends(self):
-        from tools import autoflash_cli
-        self.assertEqual(flash_readout.CONTROL_FILES["4.4.4"][0], autoflash_cli.BRIDGE_OTA)
+        from tools.autoflash import cli
+        self.assertEqual(flash_readout.CONTROL_FILES["4.4.4"][0], cli.BRIDGE_OTA)
 
     def test_a_changed_file_is_refused(self):
         with tempfile.NamedTemporaryFile() as handle:

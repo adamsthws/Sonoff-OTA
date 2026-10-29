@@ -8,24 +8,24 @@ key only its owner has) and keeps the sealed file in a private package on
 GitHub's container registry, beside the public repository but never in it:
 not in its history, not in a clone, not in a release (docs/private-backup.md).
 
-    python3 tools/private_backup.py key
+    python3 tools/repo/private_backup.py key
         a new key, written into .env as AUTOFLASH_BACKUP_KEY - never shown
-    python3 tools/private_backup.py seal BACKUP_DIR SEALED
+    python3 tools/repo/private_backup.py seal BACKUP_DIR SEALED
         the backup (flash.bin, efuse.bin, report.json, README.txt), sealed
-    python3 tools/private_backup.py verify SEALED BACKUP_DIR
+    python3 tools/repo/private_backup.py verify SEALED BACKUP_DIR
         whether SEALED opens to exactly BACKUP_DIR, writing nothing
-    python3 tools/private_backup.py unseal SEALED OUT_DIR
+    python3 tools/repo/private_backup.py unseal SEALED OUT_DIR
         the backup again, into a new directory, every file checked
-    python3 tools/private_backup.py restore
+    python3 tools/repo/private_backup.py restore
         fetched and unsealed into captures/plugs/<MAC>/, where the emulator
         looks - unless it is there already, as it was sealed
-    python3 tools/private_backup.py upload SEALED
+    python3 tools/repo/private_backup.py upload SEALED
         into the private package, then shown to be private
-    python3 tools/private_backup.py fetch SEALED
+    python3 tools/repo/private_backup.py fetch SEALED
         out of it
-    python3 tools/private_backup.py check-private
+    python3 tools/repo/private_backup.py check-private
         shown that nobody but its owner can get the package
-    python3 tools/private_backup.py secret
+    python3 tools/repo/private_backup.py secret
         the key, from .env, as the repository's Actions secret
 
 The key comes from AUTOFLASH_BACKUP_KEY, in the environment (a GitHub
@@ -53,7 +53,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import credentials, plugs  # noqa: E402
@@ -115,7 +115,7 @@ def command_key(_args: argparse.Namespace) -> int:
     existing = credentials.ENV_FILE.read_text(encoding="utf-8") if credentials.ENV_FILE.exists() else ""
     with open(credentials.ENV_FILE, "a", encoding="utf-8") as env:
         env.write(("" if not existing or existing.endswith("\n") else "\n")
-                  + "\n# Opens the maintainer's sealed Sonoff backup (tools/private_backup.py).\n"
+                  + "\n# Opens the maintainer's sealed Sonoff backup (tools/repo/private_backup.py).\n"
                   + f"# Keep a copy somewhere else too: nothing else opens it.\n{KEY_NAME}={text}\n")
     os.chmod(credentials.ENV_FILE, 0o600)
     print(f"A new key is in {credentials.ENV_FILE} as {KEY_NAME} (not shown). Copy it into your password "

@@ -149,7 +149,7 @@ The terminal becomes a tmux session. Window **conversion** is "your computer
 on the home Wi-Fi": run the tool there exactly as on a real plug,
 
 ```sh
-python tools/autoflash_cli.py run    # or just: run  (options pass through: run --verbose)
+python -m tools.autoflash run    # or just: run  (options pass through: run --verbose)
 ```
 
 and window **plug** follows the plug's serial output, with the dump's secrets
@@ -195,7 +195,7 @@ so **the real plug must already be unplugged**: it is not asked. `--pcap`,
 `--rebuild` and `--no-firewall` are `emu.sh`'s.
 
 Once the plug answers on the emulated Wi-Fi, it runs
-`tools/unattended_run.py` in the container's copy of the repository, as your
+`tools/repo/unattended_run.py` in the container's copy of the repository, as your
 user. `.env` is handed to that run alone (`--env-file`, from the container's
 `/tmp`, removed afterwards): the copy of the repository never holds it, so a
 run you start yourself with `emu.sh` asks for the eWeLink account and
@@ -378,7 +378,7 @@ tools/espressif/emulator/windows-ssh.sh                 # PowerShell, in C:\User
 tools/espressif/emulator/windows-ssh.sh 'Get-ChildItem C:\Autoflash\repo\captures'  # any PowerShell command
 tools/espressif/emulator/windows-ssh.sh log -f          # follow the conversion's latest run.log
 tools/espressif/emulator/windows-ssh.sh get C:/Autoflash/repo/captures ./win-captures
-tools/espressif/emulator/windows-ssh.sh put tools/autoflash_cli.py C:/Autoflash/repo/tools/
+tools/espressif/emulator/windows-ssh.sh put tools/autoflash/cli.py C:/Autoflash/repo/tools/
 ```
 
 The key is let in at logon (`start.ps1`), so about a minute after a run
@@ -467,7 +467,7 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
 `emu.sh --detach`, keep a WSL window open.
 
 ```
- Windows: autoflash_cli.py ── "Autoflash emulator" TAP 192.168.60.10
+ Windows: autoflash/cli.py ── "Autoflash emulator" TAP 192.168.60.10
                                    │  windows_link.py ⇄ 127.0.0.1:7860 (length-prefixed frames)
  container autoflash-emu ──────────┼───────────────────────────────────────
    windows-link ⇄ tap1 ─┐          │
@@ -481,7 +481,7 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
                                  │  container autoflash-emu ("your computer")
  ┌───────────────────────────────┼──────────────────────────────────────────┐
  │  browser-forward ─────────────┘                                          │
- │  autoflash_cli.py, nmcli stand-in, wifi / plug commands                  │
+ │  autoflash/cli.py, nmcli stand-in, wifi / plug commands                  │
  │        │                                                                 │
  │  tap0 192.168.60.1/24 ── dnsmasq (DHCP + DNS; plug fixed at .50)         │
  │        │                    └─ internet: only with --cloud (iptables)    │

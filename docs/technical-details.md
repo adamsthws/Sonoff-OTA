@@ -78,7 +78,7 @@ replaces the temporary one.
 Other secrets are not kept either, outside the backup: the plug's eWeLink
 LAN key is never saved, and the update links, the plug's settings memory and staged firmware
 are deleted or reduced to hashes as soon as they have been checked - however
-the run ends. `python3 tools/autoflash_cli.py cleanup` deletes any such file
+the run ends. `python3 -m tools.autoflash cleanup` deletes any such file
 still on disk, such as after the computer lost power mid-run. It leaves the
 backups alone.
 
@@ -129,7 +129,7 @@ the plug on the installer, to carry on from there next time or go back to
 Sonoff with a power cycle. Carrying on marks the stage "Skipped", in green:
 the conversion is not affected. An unattended run carries on without one.
 The test report says how the backup went - completed, failed, or not taken -
-and never where it is or which plug it came from. `python3 tools/autoflash_cli.py list` shows
+and never where it is or which plug it came from. `python3 -m tools.autoflash list` shows
 every backed-up plug.
 
 It is for two things. **Going back to Sonoff:** writing `flash.bin` back
@@ -173,11 +173,11 @@ the maintainer's checkout nothing in `captures/` needs backing up.
 
 ### Keeping secrets out of Git
 
-`tools/leak_scan.py` stops a commit or a push that would put a secret or a
+`tools/repo/leak_scan.py` stops a commit or a push that would put a secret or a
 real identifier into the repository. Set it up once in a clone:
 
 ```sh
-python3 tools/leak_scan.py install
+python3 tools/repo/leak_scan.py install
 ```
 
 which points Git at the hooks in `.githooks/`: before each commit it looks at
@@ -218,14 +218,14 @@ the repository, refuse pushes with known kinds of token. In examples, use
 ### The repository's settings
 
 What GitHub is set to do for the repository is written down, with why, in
-`tools/github_settings.py`: `main` never deleted or rewritten; a pull request
+`tools/repo/github_settings.py`: `main` never deleted or rewritten; a pull request
 merged only once the unit tests, the emulator, the lint and the leak scan pass
 (an admin may still push to `main`, which the release workflow tests before
 releasing); pull requests squashed; secret
 scanning, Dependabot's security updates, CodeQL and private vulnerability
 reporting on; and immutable releases, so a release's tag and files never
 change once published, and GitHub signs an attestation of them that
-`gh release verify` checks. As an admin, `python3 tools/github_settings.py`
+`gh release verify` checks. As an admin, `python3 tools/repo/github_settings.py`
 says what differs from that, and `... apply` sets it.
 
 ### What crosses the network
@@ -351,7 +351,7 @@ works, and what had to be changed in the emulator to get there are in
 For automated testing, `run --unattended` runs a conversion with nobody at
 the keyboard. The eWeLink account comes from `.env`, PROCEED is taken as
 typed, yes/no questions take their cautious default, and any other question
-stops the run, naming it. `tools/unattended_run.py` runs it on a
+stops the run, naming it. `tools/repo/unattended_run.py` runs it on a
 pseudo-terminal, records everything it draws, and rebuilds the final screen,
 colours included, for review. `tools/espressif/emulator/unattended-test.sh` does all of
 that against the emulated plug in one command. How each piece works is in

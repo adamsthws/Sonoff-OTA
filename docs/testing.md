@@ -136,12 +136,12 @@ plans it builds, which the emulator runs whole.
 ## Linters
 
 ```sh
-tools/setup-dev               # once: creates .venv, installs the linters (and test helpers)
-python3 tools/lint.py all
+tools/repo/setup-dev               # once: creates .venv, installs the linters (and test helpers)
+python3 tools/repo/lint.py all
 ```
 
 Before the tests, what is likely wrong in the code as written. The
-pre-commit hook (`python3 tools/leak_scan.py install` sets it up) runs them on
+pre-commit hook (`python3 tools/repo/leak_scan.py install` sets it up) runs them on
 the files a commit changes, and the `lint` workflow on every file:
 
 | Linter | On | Looks for |

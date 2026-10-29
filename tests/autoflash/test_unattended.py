@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from tools import unattended_run
+from tools.repo import unattended_run
 from tools.autoflash import credentials, output, prompts
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -122,7 +122,7 @@ class UnattendedPromptTests(unittest.TestCase):
         self.assertIn("eWeLink account email", self.screen.getvalue())
 
     def test_proceed_is_taken_as_typed(self):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         with mock.patch("builtins.input", side_effect=AssertionError("read the keyboard")):
             self.assertTrue(autoflash.require_word("proceed"))
         self.assertIn("PROCEED   (unattended)", self.screen.getvalue())
@@ -130,7 +130,7 @@ class UnattendedPromptTests(unittest.TestCase):
 
 class GivenPasswordTests(unittest.TestCase):
     def context(self, given, email="me@example.com", given_email=None):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         ctx = SimpleNamespace(_ewelink_password=None, _given_ewelink_password=given,
                               _given_email=given_email, email=lambda: email)
         quiet = mock.patch.object(autoflash, "say")
@@ -155,7 +155,7 @@ class GivenPasswordTests(unittest.TestCase):
 
 class SudoPasswordTests(unittest.TestCase):
     def setUp(self):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         self.autoflash = autoflash
         patcher = mock.patch.dict(os.environ)
         patcher.start()

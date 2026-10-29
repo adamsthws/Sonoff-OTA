@@ -6,7 +6,7 @@
   │ 192.168.60.50.                                                          │
   │                                                                         │
   │ Run the conversion on Windows, exactly as on a real plug:               │
-  │     python tools\autoflash_cli.py run                                   │
+  │     python tools\autoflash.cli.py run                                   │
   │                                                                         │
   │ When it asks you to do something to the plug, do it here:               │
   │     plug restart | plug off | plug on | plug cycle 7    (power)         │

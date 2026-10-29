@@ -26,7 +26,7 @@ catch {
 $arguments = @(if ($args.Count) { $args } else { "run" })
 $code = 1
 try {
-    & $python (Join-Path $PSScriptRoot "tools\autoflash_cli.py") @arguments
+    & $python (Join-Path $PSScriptRoot "tools\autoflash\cli.py") @arguments
     $code = $LASTEXITCODE
 } finally {
     Request-PythonRemoval

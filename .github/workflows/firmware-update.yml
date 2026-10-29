@@ -61,7 +61,7 @@ jobs:
           INPUT_TASMOTA: ${{ inputs.tasmota }}
           INPUT_ESPHOME: ${{ inputs.esphome }}
         run: |
-          python3 tools/update_firmware.py due > due.json
+          python3 tools/repo/update_firmware.py due > due.json
           tasmota=$(python3 -c 'import json; print(json.load(open("due.json"))["tasmota"]["due"] or "")')
           esphome=$(python3 -c 'import json; print(json.load(open("due.json"))["esphome"]["due"] or "")')
           [ -z "$INPUT_TASMOTA" ] || tasmota=$INPUT_TASMOTA
@@ -148,10 +148,10 @@ jobs:
           set -o pipefail
           : > update.txt
           if [ -n "$TASMOTA" ]; then
-              .venv/bin/python tools/update_firmware.py tasmota "$TASMOTA" 2>&1 | tee -a update.txt
+              .venv/bin/python tools/repo/update_firmware.py tasmota "$TASMOTA" 2>&1 | tee -a update.txt
           fi
           if [ -n "$ESPHOME" ]; then
-              .venv/bin/python tools/update_firmware.py esphome "$ESPHOME" 2>&1 | tee -a update.txt
+              .venv/bin/python tools/repo/update_firmware.py esphome "$ESPHOME" 2>&1 | tee -a update.txt
           fi
           git add -A -- . ':!update.txt'
           # Asked by hand for what it installs already: nothing to make, test or open.
@@ -163,10 +163,10 @@ jobs:
           echo "changed=yes" >> "$GITHUB_OUTPUT"
           title="Install${TASMOTA:+ Tasmota $TASMOTA}${TASMOTA:+${ESPHOME:+ and}}${ESPHOME:+ ESPHome built with $ESPHOME}"
           echo "TITLE=$title" >> "$GITHUB_ENV"
-          git commit -q -m "$title" -m "Made by the firmware-update workflow: tools/update_firmware.py, then the unit tests and the final-firmware emulator test (the pull request says what they found)."
+          git commit -q -m "$title" -m "Made by the firmware-update workflow: tools/repo/update_firmware.py, then the unit tests and the final-firmware emulator test (the pull request says what they found)."
       - name: Nothing in it that should not be there
         if: steps.branch.outputs.made != 'yes' && steps.update.outputs.changed == 'yes'
-        run: python3 tools/leak_scan.py range origin/main..HEAD
+        run: python3 tools/repo/leak_scan.py range origin/main..HEAD
       - name: The unit tests
         if: steps.branch.outputs.made != 'yes' && steps.update.outputs.changed == 'yes'
         id: unit

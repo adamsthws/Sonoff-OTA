@@ -89,7 +89,7 @@ INTERIM_PARTITIONS = (
 INTERIM_TABLE_SHA256 = "cfb1e1c46fa209a6c1eada92123a02847ab8e72f67c0044afbcb1c29ead4c936"
 
 # The official Tasmota release a converted plug ends on, as firmware.json pins
-# it: tools/update_firmware.py writes it, docs/updating-firmware.md says when.
+# it: tools/repo/update_firmware.py writes it, docs/updating-firmware.md says when.
 # The files come from the release's own page on GitHub, which keeps them as
 # they were released (tasmota/install, where they were taken from up to 15.6.0,
 # folds its history away).

@@ -5,7 +5,7 @@ its stock firmware name it, the model its maker's updater wants a file
 wrapped for, its wiring for Tasmota, what its ESPHome calls itself, and what
 a person calls it.  The firmware published for a kind is pinned where it is
 used, each file named for the kind it is for: its installer
-(autoflash_cli.BRIDGE_OTA, wrapped for its updater), its ESPHome and the
+(tools.autoflash.cli.BRIDGE_OTA, wrapped for its updater), its ESPHome and the
 bootloader built with it (esphome.IMAGE, esphome.BOOTLOADER), and its maker's
 partition table (esphome.SONOFF_TABLE).  The final firmware's network names
 are the same for every kind: tasmota-abcdef and esphome-abcdef.

@@ -1,4 +1,4 @@
-# The linters (tools/lint.py) on every tracked file, as the pre-commit hook
+# The linters (tools/repo/lint.py) on every tracked file, as the pre-commit hook
 # runs them on what a commit changes: for a pull request from a fork, a
 # commit made with --no-verify, or one from a computer without them.
 name: Lint
@@ -36,4 +36,4 @@ jobs:
         env:
           RUFF_OUTPUT_FORMAT: github   # findings marked on the pull request's lines
           GH_TOKEN: ${{ github.token }}   # zizmor's checks against GitHub
-        run: .venv/bin/python tools/lint.py all
+        run: .venv/bin/python tools/repo/lint.py all

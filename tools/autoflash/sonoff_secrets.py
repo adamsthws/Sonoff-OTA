@@ -2,7 +2,7 @@
 network it is: what must never leave the computer the backup is on.
 
 Used by tools/espressif/emulator/sanitise_plug.py, to show a public plug holds none of
-them, and tools/leak_scan.py, to keep them out of Git. Only the standard
+them, and tools/repo/leak_scan.py, to keep them out of Git. Only the standard
 library and tools/espressif/inspect_stock_nvs.py: a Git hook imports it.
 """
 
@@ -16,7 +16,7 @@ try:
 except ModuleNotFoundError:  # run from inside tools/
     from inspect_stock_nvs import parse as parse_nvs
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 # Fields of Sonoff's JSON settings that say what the product is, not which

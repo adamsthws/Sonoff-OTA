@@ -1,4 +1,4 @@
-# PSScriptAnalyzer on the files given, for tools/lint.py, with the settings
+# PSScriptAnalyzer on the files given, for tools/repo/lint.py, with the settings
 # in PSScriptAnalyzerSettings.psd1: each finding, and exit 1 if there is one.
 param([Parameter(ValueFromRemainingArguments)] [string[]] $Files)
 $ErrorActionPreference = 'Stop'

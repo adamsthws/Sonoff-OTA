@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The tool's version, and its release notes from CHANGELOG.md.
 
-    python3 tools/release_notes.py --version   the version, as set in tools/autoflash
-    python3 tools/release_notes.py [VERSION]   that version's notes (default: the current one)
+    python3 tools/repo/release_notes.py --version   the version, as set in tools/autoflash
+    python3 tools/repo/release_notes.py [VERSION]   that version's notes (default: the current one)
 
 Used by .github/workflows/release.yml, so the tag and the release are made from
 the version in the code and the notes written for it - nothing typed twice.
@@ -13,7 +13,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import __version__  # noqa: E402

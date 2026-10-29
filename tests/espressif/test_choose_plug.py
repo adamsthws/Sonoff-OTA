@@ -62,7 +62,7 @@ class RestoreTests(unittest.TestCase):
     def test_with_no_backup_here_the_sealed_one_is_restored_and_a_test_copy_made(self):
         from unittest import mock
         from tools.espressif.emulator import choose_plug as cp
-        with mock.patch("tools.private_backup.restore", return_value="94:a9:90:00:00:01") as restore, \
+        with mock.patch("tools.repo.private_backup.restore", return_value="94:a9:90:00:00:01") as restore, \
              mock.patch("tools.espressif.emulator.copy_plug.copy") as copy, \
              mock.patch.object(cp, "choices", return_value=[]), \
              mock.patch.object(cp.plugs, "PLUGS", cp.Path("/nonexistent")), mock.patch("builtins.print"):
@@ -72,9 +72,9 @@ class RestoreTests(unittest.TestCase):
 
     def test_a_restore_that_cannot_be_done_leaves_the_usual_message(self):
         from unittest import mock
-        from tools import private_backup
+        from tools.repo import private_backup
         from tools.espressif.emulator import choose_plug as cp
-        with mock.patch("tools.private_backup.restore", side_effect=private_backup.SealError("no key")), \
+        with mock.patch("tools.repo.private_backup.restore", side_effect=private_backup.SealError("no key")), \
              mock.patch.object(cp, "choices", return_value=[]), mock.patch("sys.stderr"):
             self.assertEqual(cp.restored(None), [])
 

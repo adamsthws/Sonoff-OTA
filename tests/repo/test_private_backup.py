@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools import private_backup as pb
+from tools.repo import private_backup as pb
 from tools.autoflash import credentials
 
 

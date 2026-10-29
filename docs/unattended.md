@@ -39,8 +39,8 @@ run you sit through there is asked everything, as a real one is, while
 ## Run it
 
 ```sh
-python3 tools/unattended_run.py                       # recorded, as below
-python3 tools/unattended_run.py -- --plug-ip 192.168.1.50 --new
+python3 tools/repo/unattended_run.py                       # recorded, as below
+python3 tools/repo/unattended_run.py -- --plug-ip 192.168.1.50 --new
 sh start.sh run --unattended                          # the same, unrecorded
 ```
 

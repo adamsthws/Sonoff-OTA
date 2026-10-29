@@ -1,4 +1,4 @@
 #!/bin/bash
-# Short for `python tools/autoflash_cli.py run`, from the repository copy;
+# Short for `python -m tools.autoflash run`, from the repository copy;
 # any options are passed on (run --verbose, run --new, ...).
-cd /work && exec python tools/autoflash_cli.py run "$@"
+cd /work && exec python -m tools.autoflash run "$@"

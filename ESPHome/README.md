@@ -36,7 +36,7 @@ they carry on from where they were.
 ## Changing it
 
 Edit `sonoff_s60.yaml`, then build and publish it with
-`python3 tools/update_firmware.py esphome`, as for a new ESPHome release
+`python3 tools/repo/update_firmware.py esphome`, as for a new ESPHome release
 ([docs/updating-firmware.md](../docs/updating-firmware.md)): it raises the
 config's `project` `version`, builds it in ESPHome's own Docker image, checks
 the image can still be imprinted, and publishes it in `artifacts/`, with its

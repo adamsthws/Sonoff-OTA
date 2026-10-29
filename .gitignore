@@ -50,5 +50,5 @@ REPARTITION_LOCK.owner-authorized*
 0
 *.bak
 
-# tools/leak_scan.py: your own values to keep out of Git.
+# tools/repo/leak_scan.py: your own values to keep out of Git.
 .leak-scan.local

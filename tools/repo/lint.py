@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """The linters, on what a commit holds or on every tracked file.
 
-    python3 tools/lint.py staged     the files a commit changes (the pre-commit hook)
-    python3 tools/lint.py all        every tracked file (the lint workflow)
-    python3 tools/lint.py FILE...    those files
+    python3 tools/repo/lint.py staged     the files a commit changes (the pre-commit hook)
+    python3 tools/repo/lint.py all        every tracked file (the lint workflow)
+    python3 tools/repo/lint.py FILE...    those files
 
 Each linter is handed the files of its kind:
 
@@ -18,9 +18,9 @@ Each linter is handed the files of its kind:
                       image it pins (Docker): what ESPHome itself would refuse
 
 The first four come from requirements/lint.txt, in the repository's .venv, which
-tools/setup-dev creates and fills:
+tools/repo/setup-dev creates and fills:
 
-    tools/setup-dev
+    tools/repo/setup-dev
     # or by hand:
     .venv/bin/python -m pip install --require-hashes -r requirements/lint.txt
 
@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 # Where the hook's Python is, and the repository's .venv: the linters it installs.
 TOOL_DIRS = [Path(sys.executable).parent, ROOT / ".venv" / "bin", ROOT / ".venv" / "Scripts"]
 
@@ -73,7 +73,7 @@ class Linter:
     wants: Callable[[Path], bool]       # whether it lints this file
     command: Callable[[list[str]], list[str]]
     needs: str                          # the program it runs
-    install: str = ("run tools/setup-dev, or in .venv: "
+    install: str = ("run tools/repo/setup-dev, or in .venv: "
                     "pip install --require-hashes -r requirements/lint.txt")
     ready: Callable[[str], bool] | None = None   # given PATH: more than `needs` there
 
@@ -138,7 +138,7 @@ LINTERS = [
            lambda files: ["zizmor", "--quiet", *([] if os.environ.get("GH_TOKEN") else ["--offline"]), *files],
            "zizmor"),
     Linter("PSScriptAnalyzer", powershell,
-           lambda files: ["pwsh", "-NoProfile", "-NonInteractive", "-File", "tools/lint_powershell.ps1", *files],
+           lambda files: ["pwsh", "-NoProfile", "-NonInteractive", "-File", "tools/repo/lint_powershell.ps1", *files],
            "pwsh", "install pwsh 7.4.6+, then: Install-Module PSScriptAnalyzer -Scope CurrentUser",
            has_psscriptanalyzer),
     Linter("esphome config", esphome_config, esphome_command, "docker",
@@ -181,7 +181,7 @@ def run(paths: list[str], strict: bool) -> int:
             print(result.stdout, end="", flush=True)
             failed.append(linter.name)
     if failed:
-        print(f"lint: stopped by {', '.join(failed)} (python3 tools/lint.py FILE... runs them "
+        print(f"lint: stopped by {', '.join(failed)} (python3 tools/repo/lint.py FILE... runs them "
               "again; git commit --no-verify skips them)", file=sys.stderr)
     return 1 if failed else 0
 

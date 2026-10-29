@@ -1,8 +1,8 @@
 #!/bin/sh
-# Stops the commit message holding a secret or a real identifier: tools/leak_scan.py
+# Stops the commit message holding a secret or a real identifier: tools/repo/leak_scan.py
 # (docs/technical-details.md#keeping-secrets-out-of-git). Installed by
-# python3 tools/leak_scan.py install; --no-verify skips it, for what is meant to be there.
+# python3 tools/repo/leak_scan.py install; --no-verify skips it, for what is meant to be there.
 root=$(git rev-parse --show-toplevel) || exit 1
 python=$root/.venv/bin/python
 [ -x "$python" ] || python=python3
-exec "$python" -I "$root/tools/leak_scan.py" message "$1"
+exec "$python" -I "$root/tools/repo/leak_scan.py" message "$1"

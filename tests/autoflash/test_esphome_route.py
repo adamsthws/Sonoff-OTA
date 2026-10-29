@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import tools.autoflash_cli as af
+import tools.autoflash.cli as af
 from tools.autoflash import prompts
 from tools.autoflash.state import DONE, RunState
 

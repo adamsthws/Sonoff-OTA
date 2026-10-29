@@ -1,6 +1,6 @@
 #!/bin/bash
 # A whole conversion of the emulated plug with nobody at the keyboard, and the
-# screen it drew shown at the end (tools/unattended_run.py, docs/unattended.md).
+# screen it drew shown at the end (tools/repo/unattended_run.py, docs/unattended.md).
 #
 #   tools/espressif/emulator/unattended-test.sh            from where the last run left the plug
 #   tools/espressif/emulator/unattended-test.sh --fresh    the plug back to stock first, and no earlier run
@@ -206,7 +206,7 @@ stub_env=()
     -e AUTOFLASH_TASMOTA_PASSWORD="${AUTOFLASH_TASMOTA_PASSWORD:-}" -e AUTOFLASH_ESPHOME_OTA_PASSWORD="${AUTOFLASH_ESPHOME_OTA_PASSWORD:-}" \
     -e AUTOFLASH_ESPHOME_WEB_USER="${AUTOFLASH_ESPHOME_WEB_USER:-}" -e AUTOFLASH_ESPHOME_WEB_PASSWORD="${AUTOFLASH_ESPHOME_WEB_PASSWORD:-}" \
     -e AUTOFLASH_ESPHOME_API_KEY="${AUTOFLASH_ESPHOME_API_KEY:-}" \
-    -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/unattended_run.py --size 100x40 \
+    -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/repo/unattended_run.py --size 100x40 \
     --save "captures/unattended/$stamp" -- --env-file "$answers" "${run_args[@]}" || status=$?
 
 echo "On this computer: ${STATE#"$ROOT/"}/work/captures/unattended/$stamp/"

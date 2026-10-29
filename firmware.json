@@ -1,5 +1,5 @@
 {
-  "about": "The firmware the tool installs that follows Tasmota's and ESPHome's releases, pinned. Written by tools/update_firmware.py - see docs/updating-firmware.md - never by hand.",
+  "about": "The firmware the tool installs that follows Tasmota's and ESPHome's releases, pinned. Written by tools/repo/update_firmware.py - see docs/updating-firmware.md - never by hand.",
   "tasmota": {
     "version": "16.0.0",
     "tag": "v16.0.0",

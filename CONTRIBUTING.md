@@ -29,11 +29,11 @@ tools more - the test helpers and the linters - which go in a virtual
 environment in the checkout, never into the system's Python:
 
 ```sh
-tools/setup-dev                       # creates .venv, installs both files below
-python3 tools/leak_scan.py install
+tools/repo/setup-dev                       # creates .venv, installs both files below
+python3 tools/repo/leak_scan.py install
 ```
 
-`tools/setup-dev` is the one-command form of:
+`tools/repo/setup-dev` is the one-command form of:
 
 ```sh
 python3 -m venv .venv
@@ -46,7 +46,7 @@ files: `uv venv` and `uv pip install --require-hashes -r ...`.
 The leak-scan line points Git at the hooks in `.githooks/`: before each commit
 they scan what is staged for secrets and real identifiers, and lint it; before
 each push they scan every commit it sends. A linked worktree reuses this
-checkout's `.venv`, so run `tools/setup-dev` once in the main checkout - and
+checkout's `.venv`, so run `tools/repo/setup-dev` once in the main checkout - and
 in the worktree as well when its branch changes `requirements/`, or it lints
 with the main checkout's versions.
 
@@ -60,7 +60,7 @@ the workflows run them all.
 
 ```sh
 python3 tests/run.py          # the unit tests, about 11 s
-python3 tools/lint.py all     # every linter on every file
+python3 tools/repo/lint.py all     # every linter on every file
 ```
 
 Every fix comes with a test that fails without it. The tests run side by
@@ -116,10 +116,10 @@ eWeLink accounts and plugs' identities.
 - The tool uses Python's standard library only, on Python 3.10 or newer.
   Open text files with `encoding=`.
 - `firmware.json`, `artifacts/` and `SHA256SUMS` change only through
-  `tools/update_firmware.py` - most often run by the weekly firmware-update
+  `tools/repo/update_firmware.py` - most often run by the weekly firmware-update
   workflow: [docs/updating-firmware.md](docs/updating-firmware.md).
-- Where things go: `tools/autoflash/` is the conversion tool and the rest of
-  `tools/` the repository's own plumbing; `tools/espressif/` and `tools/beken/`
+- Where things go: `tools/autoflash/` is the conversion tool (`python3 -m
+  tools.autoflash` runs it) and `tools/repo/` the repository's own plumbing; `tools/espressif/` and `tools/beken/`
   hold each chip family's tooling, its emulator in `emulator/`; `tools/ewelink/`
   what talks to eWeLink whatever the chip; `devices/<plug>/` what is one plug's
   alone (its sheet, configs, modules); `ESPHome/` the ESPHome configs, at the

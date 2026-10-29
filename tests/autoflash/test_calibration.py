@@ -142,7 +142,7 @@ class BackupCalibrationTests(unittest.TestCase):
     """The factory calibration, as a plug's Sonoff backup holds it."""
 
     def read(self, content):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         from tools.espressif.inspect_stock_nvs import Value
         value = Value(namespace=5, key="content", kind=0x42, chunks={0: content})
         with mock.patch.object(autoflash.inspect_stock_nvs, "parse",
@@ -167,7 +167,7 @@ class StepTests(unittest.TestCase):
                                state=SimpleNamespace(input=inputs.get))
 
     def test_tasmota_is_calibrated_at_f4_with_the_backups_numbers(self):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         tasmota = FakeTasmota()
         with mock.patch.object(autoflash, "backup_calibration", return_value=calibration.parse(FACTORY)), \
              mock.patch.object(autoflash, "say") as said, mock.patch.object(calibration.time, "sleep"):
@@ -177,7 +177,7 @@ class StepTests(unittest.TestCase):
         self.assertIn("factory calibration from its backup", said.call_args.args[0])
 
     def test_a_plug_that_does_not_answer_is_left_as_tasmota_calibrates_it(self):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
 
         def command(text, timeout=None):
             raise autoflash.DeviceError("no answer")
@@ -188,7 +188,7 @@ class StepTests(unittest.TestCase):
         self.assertIn("left as it is", told.call_args.args[0])
 
     def test_a_rerun_on_tasmota_checks_its_meter(self):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         with mock.patch.object(autoflash, "unlock_tasmota") as unlocked, \
              mock.patch.object(autoflash, "calibrate_tasmota_meter") as calibrated, \
              mock.patch.object(autoflash, "say"):
@@ -197,7 +197,7 @@ class StepTests(unittest.TestCase):
         calibrated.assert_called_once()
 
     def test_a_rerun_needing_a_password_not_given_stops_untouched(self):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         with mock.patch.object(autoflash, "unlock_tasmota", side_effect=autoflash.Abort("no password")), \
              mock.patch.object(autoflash, "calibrate_tasmota_meter") as calibrated, \
              mock.patch.object(autoflash, "tell"):
@@ -205,7 +205,7 @@ class StepTests(unittest.TestCase):
         calibrated.assert_not_called()
 
     def test_esphome_is_given_the_backups_numbers(self):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         numbers = calibration.parse(FACTORY)
         with mock.patch.object(autoflash, "backup_calibration", return_value=numbers), \
              mock.patch.object(autoflash.esphome, "api_give_calibration", return_value=True) as give, \
@@ -217,7 +217,7 @@ class StepTests(unittest.TestCase):
         self.assertIn("from its Sonoff backup", said.call_args.args[0])
 
     def test_without_a_backup_esphome_is_not_asked(self):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         with mock.patch.object(autoflash, "backup_calibration", return_value=None), \
              mock.patch.object(autoflash.esphome, "api_give_calibration") as give:
             outcome = autoflash.calibrate_esphome_meter(self.ctx())
@@ -225,7 +225,7 @@ class StepTests(unittest.TestCase):
         self.assertIn("skipped", outcome)
 
     def test_an_esphome_without_the_action_is_told_of_not_failed(self):
-        import tools.autoflash_cli as autoflash
+        import tools.autoflash.cli as autoflash
         with mock.patch.object(autoflash, "backup_calibration", return_value=calibration.parse(FACTORY)), \
              mock.patch.object(autoflash.esphome, "api_give_calibration", return_value=False), \
              mock.patch.object(autoflash, "tell"):

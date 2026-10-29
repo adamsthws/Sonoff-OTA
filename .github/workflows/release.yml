@@ -1,6 +1,6 @@
 # Tag and release the tool's version, once, when a new one reaches main.
 # The version comes from tools/autoflash/__init__.py and the notes from
-# CHANGELOG.md (tools/release_notes.py), so a release is: add the notes,
+# CHANGELOG.md (tools/repo/release_notes.py), so a release is: add the notes,
 # change the number, merge.
 #
 # Only once the unit tests, the final firmware on the emulator, the lint and
@@ -40,7 +40,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="v$(python3 tools/release_notes.py --version)"
+          tag="v$(python3 tools/repo/release_notes.py --version)"
           if gh release view "$tag" >/dev/null 2>&1; then
               echo "$tag is already released"
           else
@@ -139,7 +139,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
         run: |
-          python3 tools/release_notes.py "${TAG#v}" > notes.md
+          python3 tools/repo/release_notes.py "${TAG#v}" > notes.md
           # The files SHA256SUMS pins that the tool sends (archive/ is history).
           mapfile -t files < <(awk '$2 ~ /^artifacts\// { print $2 }' SHA256SUMS)
           sha256sum --check --strict SHA256SUMS

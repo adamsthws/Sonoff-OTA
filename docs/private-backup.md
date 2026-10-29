@@ -6,7 +6,7 @@ and nothing here is part of a conversion.
 The emulator ([emulator.md](emulator.md)) boots a real plug's Sonoff backup:
 Sonoff's firmware, with that plug's eWeLink keys and the Wi-Fi it was set up on.
 The project has exactly one, and can never make another - every plug it had is
-converted. `tools/private_backup.py` keeps a copy of it off the maintainer's
+converted. `tools/repo/private_backup.py` keeps a copy of it off the maintainer's
 computer without it ever being public: sealed on the maintainer's side, then
 kept in a **private** package on GitHub's container registry. It is not in the
 repository - not its history, a clone, a fork or a release - so
@@ -35,14 +35,14 @@ they are, pinned byte for byte.
 
 ## The key
 
-A random 256-bit key, made once by `tools/private_backup.py key`, which writes
+A random 256-bit key, made once by `tools/repo/private_backup.py key`, which writes
 it into `.env` as `AUTOFLASH_BACKUP_KEY` and never shows it. Without it the
 sealed backup cannot be opened, by anyone - so keep a copy **off your
 computer**, in a password manager: a `.env` lost with the computer takes the
 original backup and the only key with it. A new key is never written over an
 old one, which would leave the sealed copy unopenable.
 
-`tools/private_backup.py secret` sets it as the repository's Actions secret of
+`tools/repo/private_backup.py secret` sets it as the repository's Actions secret of
 the same name, for a workflow that one day opens the backup on GitHub's side
 (see below). GitHub never shows a secret back, so that copy is not one to
 recover it from.
@@ -84,13 +84,13 @@ computer that makes `captures/` a working copy, safe to delete
 
 ```sh
 B=captures/plugs/<MAC>/sonoff-backup
-python3 tools/private_backup.py seal "$B" sonoff-backup.sealed     # the sealed copy
-python3 tools/private_backup.py verify sonoff-backup.sealed "$B"   # opens to exactly it? writes nothing
-python3 tools/private_backup.py upload sonoff-backup.sealed        # into the package, then checks it is private
-python3 tools/private_backup.py check-private                      # at any time
-python3 tools/private_backup.py fetch sonoff-backup.sealed         # back out of it
-python3 tools/private_backup.py restore                            # filed where the emulator looks
-python3 tools/private_backup.py unseal sonoff-backup.sealed OUT    # the backup, into a new directory OUT
+python3 tools/repo/private_backup.py seal "$B" sonoff-backup.sealed     # the sealed copy
+python3 tools/repo/private_backup.py verify sonoff-backup.sealed "$B"   # opens to exactly it? writes nothing
+python3 tools/repo/private_backup.py upload sonoff-backup.sealed        # into the package, then checks it is private
+python3 tools/repo/private_backup.py check-private                      # at any time
+python3 tools/repo/private_backup.py fetch sonoff-backup.sealed         # back out of it
+python3 tools/repo/private_backup.py restore                            # filed where the emulator looks
+python3 tools/repo/private_backup.py unseal sonoff-backup.sealed OUT    # the backup, into a new directory OUT
 ```
 
 Nothing writes over a file or directory that is there already, and `unseal`
@@ -130,7 +130,7 @@ does - on runners of the maintainer's own, say - needs:
 - the package to give the repository access (its settings, "Manage Actions
   access": read), and the workflow `permissions: packages: read`, so that
   `fetch` reaches it with the workflow's `GITHUB_TOKEN`;
-- the `AUTOFLASH_BACKUP_KEY` secret (`tools/private_backup.py secret`);
+- the `AUTOFLASH_BACKUP_KEY` secret (`tools/repo/private_backup.py secret`);
 - to run only on a schedule or by hand (`workflow_dispatch`), from `main`:
   never on `pull_request_target`, which would run a contributor's code with
   the repository's secrets and could open the backup. A pull request from a

@@ -4,11 +4,11 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
-from tools import github_settings as gs
+from tools.repo import github_settings as gs
 
 
 class FakeGitHub:
-    """GitHub's API for one repository, as tools/github_settings.py sees it."""
+    """GitHub's API for one repository, as tools/repo/github_settings.py sees it."""
 
     def __init__(self, checks_on_main=(), protect_rules=None):
         self.repository = {key: not want for key, want in gs.REPOSITORY_SETTINGS.items()}
@@ -120,7 +120,7 @@ class GitHubSettingsTests(unittest.TestCase):
         fake.sent.clear()
         code, out = run(fake, "apply")
         self.assertEqual((code, fake.sent), (0, []))
-        self.assertIn("every setting is as tools/github_settings.py says", out)
+        self.assertIn("every setting is as tools/repo/github_settings.py says", out)
 
     def test_every_required_check_is_a_job_in_a_workflow(self):
         from pathlib import Path
