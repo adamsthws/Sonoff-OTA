@@ -32,8 +32,10 @@ None of these rights cover giving the copy to anyone else, and that is where
 the line is drawn below.
 
 Right-to-repair laws mostly require manufacturers to provide parts, tools and
-information. They support what this project does, but they do not grant
-copyright permissions, so the project relies on the copyright exceptions above.
+information. They are **background support** for what this project does, not the
+grant: they do not give copyright permissions, so the project rests on the
+interoperability and study exceptions above. This footing is the same for every
+device the project works with, now or later.
 
 ## What the project does
 
@@ -96,6 +98,28 @@ protection measures.
 - The optional router rules ([router-rules.md](router-rules.md)) keep a stock
   plug as it is by stopping it from installing updates. They do not defeat
   anything.
+
+
+### Studying and emulating the firmware
+
+Some of the project's work is research: reading a plug's own firmware to learn how
+it stores Wi-Fi credentials and how it pairs, so a bridge firmware can keep the
+owner's Wi-Fi through a conversion. This is the observing, testing and
+decompiling-for-interoperability the exceptions above allow, and it is written to
+hold for any device the project adds, not one in particular.
+
+- The dumps studied are **the owner's own plugs**, read from hardware the owner
+  bought. No vendor firmware, no decompiled listing, and no data or key taken from
+  one is published: the research notes describe the firmware in prose, tables,
+  addresses and offsets only - facts and ideas, not the vendor's code.
+- Where a device is studied under emulation, because the ordinary update route does
+  not yet cover it, the firmware runs in an emulator from a copy of the owner's own
+  dump. A change the emulator needs to boot that copy - for example standing in for
+  a hardware check the emulator cannot reproduce - is made **only inside the
+  emulator, on the owner's own dump, and is never written to or run on a real
+  plug**. It removes no protection from a device, and distributes nothing.
+- Any exchange with the vendor's cloud is made with the owner's own account and the
+  owner's own plug. The published tooling points at a local stub by default.
 
 
 ### Signing in to eWeLink
