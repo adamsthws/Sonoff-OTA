@@ -195,8 +195,17 @@ caught on its way out. It finds two kinds of thing:
   ignores, for anything else of yours (a router's name, a public address).
 - **Anyone's, by shape**: a MAC address that could be a real device's - one
   not locally administered, so not `12:34:56:...` or `aa:bb:...`, and not a
-  made-up example listed in `.leak-scan-allow` - a private key, or a GitHub,
-  AWS, Google or Slack token.
+  made-up example listed in `.leak-scan-allow`; a UUID that could be a device's
+  apikey or id (listed the same way); a private key, or a GitHub, AWS, Google or
+  Slack token; disassembly or decompiler output, the shape the S61 research
+  tools print, so a pasted dump is caught - commit the tool, not its dump; and
+  a packet capture (`.pcap`/`.pcapng`), whose frames carry a network's Wi-Fi
+  credentials, refused by its name.
+
+  A secret with no safe shape - a device's `device_secret`, `app-apikey` or
+  `secureCertSha256`, which look like the repository's own hashes - is found by
+  value instead: list it in `.leak-scan.local` (Git-ignored), and the scan keeps
+  that exact value out, as it does anything else of yours.
 
 It says where each finding is and what kind, never the value. Take it out, or
 for something meant to be there - a new made-up example MAC, say, which
