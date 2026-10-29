@@ -51,6 +51,13 @@ CODE_SCANNING = {"state": "configured", "languages": ["actions", "python"], "que
 # attestation of them (`gh release verify`).
 TOGGLES = ["private-vulnerability-reporting", "immutable-releases"]
 
+# GitHub Pages: the README on main as a web page at firmwareliberator.com,
+# built by GitHub's own Jekyll, which rewrites its links to the docs to their
+# rendered pages. The CNAME file at the root of the repository names the
+# domain too, so a build keeps it. HTTPS is enforced once GitHub has issued
+# the certificate, which it does after the domain's DNS points at Pages.
+PAGES = {"source": {"branch": "main", "path": "/"}, "cname": "firmwareliberator.com", "https_enforced": True}
+
 MAIN = {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}
 # The checks main requires: jobs of the unit tests and emulator, leak-scan
 # and lint workflows.
@@ -145,6 +152,14 @@ def differences() -> list[tuple[str, str, Any]]:
     for toggle in TOGGLES:
         if not (api(f"/{toggle}", ok_missing=True) or {}).get("enabled"):
             found.append((toggle, "is off, should be on", ("PUT", f"/{toggle}", None)))
+    pages = api("/pages", ok_missing=True)
+    if pages is None:
+        found.append(("Pages", "is off, should serve main", ("POST", "/pages", {"source": PAGES["source"]})))
+        pages = {}
+    have = {"source": {key: (pages.get("source") or {}).get(key) for key in PAGES["source"]},
+            **{key: pages.get(key) for key in ("cname", "https_enforced")}}
+    if have != PAGES:
+        found.append(("Pages domain", f"is {have}, should be {PAGES}", ("PUT", "/pages", PAGES)))
     existing = {ruleset["name"]: ruleset["id"] for ruleset in api("/rulesets")}
     for name, want in RULESETS.items():
         body = {"name": name, **want}
@@ -183,6 +198,13 @@ def main(argv: list[str] | None = None) -> int:
                     api(path, method, body)
                     print(f"  {what}: set, but for {', '.join(not_run)}, not yet run on main: "
                           "apply again once they have")
+                    continue
+            if what == "Pages domain":
+                certificate = (api("/pages").get("https_certificate") or {}).get("state")
+                if certificate != "approved":
+                    api(path, method, {key: value for key, value in body.items() if key != "https_enforced"})
+                    print(f"  {what}: set, but HTTPS not enforced until GitHub has issued the certificate "
+                          f"(now {certificate}): apply again once it has")
                     continue
             api(path, method, body)
             print(f"  {what}: set")

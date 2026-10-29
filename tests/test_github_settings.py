@@ -16,6 +16,7 @@ class FakeGitHub:
         self.scanning = {"state": "not-configured", "languages": ["actions", "c-cpp", "python"],
                          "query_suite": "default"}
         self.toggles = {toggle: False for toggle in gs.TOGGLES}
+        self.pages = None
         self.rulesets = {7: {"id": 7, "name": "Protect Main Branch", "target": "branch",
                              "enforcement": "active", "conditions": gs.MAIN, "bypass_actors": [],
                              "rules": protect_rules or [{"type": "deletion"}],
@@ -26,6 +27,13 @@ class FakeGitHub:
     def __call__(self, path, method="GET", body=None, ok_missing=False):
         if method != "GET":
             self.sent.append((method, path, body))
+            if path == "/pages":
+                if method == "POST":
+                    self.pages = {"cname": None, "https_enforced": False, "https_certificate": {"state": "new"},
+                                  "build_type": "legacy", "url": "x"}
+                elif body.get("https_enforced") and self.pages["https_certificate"]["state"] != "approved":
+                    raise gs.SettingsError("HTTP 422: certificate not yet issued")
+                self.pages.update(copy.deepcopy(body))
             if path.startswith("/rulesets"):
                 ruleset = {"id": 8 if method == "POST" else int(path.rsplit("/", 1)[1]), **copy.deepcopy(body)}
                 self.rulesets[ruleset["id"]] = ruleset
@@ -36,6 +44,9 @@ class FakeGitHub:
             return self.scanning
         if path.lstrip("/") in self.toggles:
             return {"enabled": self.toggles[path.lstrip("/")]}
+        if path == "/pages":
+            assert ok_missing or self.pages is not None
+            return self.pages
         if path == "/rulesets":
             return [{"id": r["id"], "name": r["name"]} for r in self.rulesets.values()]
         if path.startswith("/rulesets/"):
@@ -117,10 +128,34 @@ class GitHubSettingsTests(unittest.TestCase):
         fake.repository["security_and_analysis"] = {key: {"status": want} for key, want in gs.SECURITY.items()}
         fake.scanning = dict(gs.CODE_SCANNING)
         fake.toggles = {toggle: True for toggle in gs.TOGGLES}
+        fake.pages = {**copy.deepcopy(gs.PAGES), "https_certificate": {"state": "approved"}}
         fake.sent.clear()
         code, out = run(fake, "apply")
         self.assertEqual((code, fake.sent), (0, []))
         self.assertIn("every setting is as tools/github_settings.py says", out)
+
+    def test_pages_serve_main_at_the_domain_with_https_once_its_certificate_is_issued(self):
+        fake = FakeGitHub()
+        code, out = run(fake)
+        self.assertIn("Pages: is off, should serve main", out)
+        code, out = run(fake, "apply")
+        self.assertEqual(code, 0)
+        self.assertIn("Pages: set", out)
+        self.assertIn("Pages domain: set, but HTTPS not enforced until GitHub has issued the certificate (now new)", out)
+        self.assertEqual((fake.pages["source"], fake.pages["cname"], fake.pages["https_enforced"]),
+                         (gs.PAGES["source"], gs.PAGES["cname"], False))
+        # Until it is issued, each run says so and sends nothing that would fail.
+        code, out = run(fake, "apply")
+        self.assertIn("not enforced until", out)
+        fake.pages["https_certificate"]["state"] = "approved"
+        code, out = run(fake, "apply")
+        self.assertIn("Pages domain: set\n", out)
+        self.assertTrue(fake.pages["https_enforced"])
+
+    def test_the_cname_file_names_the_pages_domain(self):
+        from pathlib import Path
+        cname = (Path(__file__).resolve().parents[1] / "CNAME").read_text(encoding="utf-8")
+        self.assertEqual(cname, gs.PAGES["cname"] + "\n")
 
     def test_every_required_check_is_a_job_in_a_workflow(self):
         from pathlib import Path
