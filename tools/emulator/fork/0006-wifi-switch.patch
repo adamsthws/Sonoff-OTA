@@ -1,6 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 20:10:56 +0000
+Subject: [PATCH 6/7] esp32c3 wifi: the access points can be switched off, so
+ the router can be restarted
+
+The fork's access points live inside QEMU, so blocking traffic outside it
+only cuts the plug off from the computer; its Wi-Fi stays up. While the file
+$ESP32_WIFI_AP_OFF_FILE exists (`plug router off`), they send no beacons and
+answer nothing, and deauthenticate the plug - a few times, and again whenever
+it sends data, as a real access point does to a station that is not joined.
+The plug sees its Wi-Fi go within a second or two, retries as a real one does
+("Connect failed with AP timeout"), and rejoins within seconds of `plug router
+on`. The fork's frame builder leaves a frame's destination and signal strength
+unset, so both are set here, or the plug drops the frame. Specific to this
+project's container, so not offered upstream.
+---
+ hw/misc/esp32_wifi_ap.c | 64 ++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 63 insertions(+), 1 deletion(-)
+
+diff --git a/hw/misc/esp32_wifi_ap.c b/hw/misc/esp32_wifi_ap.c
+index 9938938..7cfd89a 100644
 --- a/hw/misc/esp32_wifi_ap.c
 +++ b/hw/misc/esp32_wifi_ap.c
-@@ -103,10 +103,64 @@
+@@ -103,10 +103,64 @@ static void esp32_wifi_report_softap(const char *ssid)
      }
  }
  
@@ -65,7 +87,7 @@
      // only send a beacon if we are an access point
      if((ENABLE_BEACON)&&(s->mode == Esp32_Mode_Station)){
        if(s->ap_state!=Esp32_WLAN__STATE_STA_ASSOCIATED) {
-@@ -732,7 +786,7 @@
+@@ -732,7 +786,7 @@ void Esp32_WLAN_handle_frame(Esp32WifiState *s, struct mac80211_frame *frame)
                  }
                  break;
          }
@@ -74,7 +96,7 @@
              memcpy(s->ap_macaddr,ap_info->mac_address,6);
              switch(frame->frame_control.sub_type) {
                  case IEEE80211_TYPE_MGT_SUBTYPE_PROBE_REQ:
-@@ -765,6 +819,14 @@
+@@ -765,6 +819,14 @@ void Esp32_WLAN_handle_frame(Esp32WifiState *s, struct mac80211_frame *frame)
              }
          }
      }

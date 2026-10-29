@@ -1,5 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 20:10:57 +0000
+Subject: [PATCH 7/7] esp32c3 wifi: the host can join the guest's own network
+ while the guest stays a station
+
+The fork treated a guest broadcasting its own network as a guest that was now
+only an access point: its virtual station probed it once (never answered),
+then ran a DHCP exchange of its own (never answered either), and the guest
+could not also be a station. Now the computer's station on the plug's network
+is a link of its own, with its own MAC (02:53:36:30:00:02), apart from the
+guest's station link with the fork's access points. It authenticates and
+associates once a second until the plug answers, passes the computer's traffic
+through untouched, and is dropped when the plug stops beaconing. The guest can
+run both at once (AP+STA), as Tasmota and ESPHome do while trying Wi-Fi
+details their setup page was given: an access point addressed by its MAC
+answers on whatever channel the radio is on, as the plug's own network keeps
+it on its channel. How far the station has got is written to
+$ESP32_WIFI_SOFTAP_STATE_FILE, which `wifi join` waits on. Offered upstream as
+lcgamboa/qemu #15.
+---
+ hw/misc/esp32_wifi_ap.c | 207 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 207 insertions(+)
+
 diff --git a/hw/misc/esp32_wifi_ap.c b/hw/misc/esp32_wifi_ap.c
-index dd73ca7..8a8c0c2 100644
+index 7cfd89a..5a9e3fd 100644
 --- a/hw/misc/esp32_wifi_ap.c
 +++ b/hw/misc/esp32_wifi_ap.c
 @@ -131,10 +131,197 @@ static void esp32_wifi_send_deauth(Esp32WifiState *s)

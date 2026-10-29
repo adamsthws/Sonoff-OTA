@@ -1,5 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 20:10:56 +0000
+Subject: [PATCH 2/7] esp32c3 wifi: write the guest's own network and the
+ station's MAC to a file
+
+The fork keeps to itself the name of the network the guest broadcasts and the
+MAC its virtual station joins it with; the container's nmcli stand-in and
+`wifi join` need both. They are written to a file for them. Specific to this
+project's container, so not offered upstream.
+---
+ hw/misc/esp32_wifi_ap.c | 20 +++++++++++++++++++-
+ 1 file changed, 19 insertions(+), 1 deletion(-)
+
 diff --git a/hw/misc/esp32_wifi_ap.c b/hw/misc/esp32_wifi_ap.c
-index 6686115..0c17272 100644
+index 6686115..5939328 100644
 --- a/hw/misc/esp32_wifi_ap.c
 +++ b/hw/misc/esp32_wifi_ap.c
 @@ -70,6 +70,21 @@ access_point_info access_points[]={
