@@ -231,4 +231,4 @@ open-the-case method came first.
 
 Worked out with the Tasmota community's discussion of this device.
 
-See [`LICENSE`](LICENSE) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+See [`LICENSE`](LICENSE) and [`NOTICES.md`](NOTICES.md).

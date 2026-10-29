@@ -167,7 +167,7 @@ while any of it is missing:
 
 - `artifacts/README.md`: the image's row (its name and SHA-256), the ESPHome
   release that builds it, and a paragraph on the new build;
-- `THIRD_PARTY_NOTICES.md`: the image's name, ESPHome release and ESP-IDF
+- `NOTICES.md`: the image's name, ESPHome release and ESP-IDF
   version;
 - `ESPHome/README.md`: the ESPHome release that built the current image;
 - `CHANGELOG.md`: a line for each firmware, with a link to its release notes,

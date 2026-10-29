@@ -531,12 +531,12 @@ def command_esphome(args: argparse.Namespace) -> int:
     by_hand = []
     if args.no_docs:
         by_hand += ["artifacts/README.md: each changed file's row (name, SHA-256) and a paragraph on what changed",
-                    "THIRD_PARTY_NOTICES.md: the files' names, the ESPHome release and ESP-IDF version",
+                    "NOTICES.md: the files' names, the ESPHome release and ESP-IDF version",
                     "ESPHome/README.md: the ESPHome release that built the current image",
                     f"CHANGELOG.md: ESPHome is built with {release}"]
     else:
         write_texts(texts)
-        print(f"artifacts/README.md, THIRD_PARTY_NOTICES.md, ESPHome/README.md and CHANGELOG.md "
+        print(f"artifacts/README.md, NOTICES.md, ESPHome/README.md and CHANGELOG.md "
               f"({release_version}) say so.")
         if args.mover or replaced:
             by_hand.append("the mover's or bootloader's own rows and paragraphs, which only the image's are written for")
@@ -557,7 +557,7 @@ def command_esphome(args: argparse.Namespace) -> int:
 CHANGELOG = ROOT / "CHANGELOG.md"
 VERSION_FILE = ROOT / "tools/autoflash/__init__.py"
 ARTIFACTS_README = ROOT / "artifacts/README.md"
-NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
+NOTICES = ROOT / "NOTICES.md"
 ESPHOME_README = ROOT / "ESPHome/README.md"
 
 
@@ -613,7 +613,7 @@ def tasmota_doc_texts(old: str, new: str) -> tuple[dict[Path, str], str]:
 
 def esphome_doc_texts(old: dict[str, Any], new: dict[str, Any], bootloader_same: bool,
                       replaced: bool = False) -> tuple[dict[Path, str], str]:
-    """artifacts/README.md, THIRD_PARTY_NOTICES.md, ESPHome/README.md and the
+    """artifacts/README.md, NOTICES.md, ESPHome/README.md and the
     changelog for a new image: the same config with a new ESPHome release, or,
     with the same release, a change to the config, which a person describes -
     worked out before anything is written, so a passage not found changes
@@ -642,10 +642,10 @@ def esphome_doc_texts(old: dict[str, Any], new: dict[str, Any], bootloader_same:
     notices = NOTICES.read_text(encoding="utf-8")
     notices = substituted(notices, r"`artifacts/esphome-sonoff-s60-imprintable-[\d.]+\.bin` is built with ESPHome(\s+)\S+ and ESP-IDF [\d.]+",
                           lambda m: f"`{new['file']}` is built with ESPHome{m.group(1)}{new['esphome']} and ESP-IDF {new['esp_idf']}",
-                          "the image's paragraph in THIRD_PARTY_NOTICES.md")
+                          "the image's paragraph in NOTICES.md")
     texts[NOTICES] = substituted(notices, r"\[ESPHome \S+ release\]\(https://github.com/esphome/esphome/tree/\S+\)",
                                  f"[ESPHome {new['esphome']} release](https://github.com/esphome/esphome/tree/{new['esphome']})",
-                                 "the image's source release in THIRD_PARTY_NOTICES.md")
+                                 "the image's source release in NOTICES.md")
     texts[ESPHOME_README] = substituted(ESPHOME_README.read_text(encoding="utf-8"), r"ESPHome \S+ built the current",
                                         f"ESPHome {new['esphome']} built the current", "ESPHome/README.md's release")
     release = f"[{new['esphome']}](https://github.com/{ESPHOME_REPO}/releases/tag/{new['esphome']})"

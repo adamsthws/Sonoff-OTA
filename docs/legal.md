@@ -59,7 +59,7 @@ device the project works with, now or later.
 - No Sonoff firmware image, and none of Sonoff's code, is in the repository
   or its history. The firmware files committed are this project's own builds,
   builds of Tasmota and ESPHome, and two data files
-  ([THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) lists their sources and
+  ([NOTICES.md](../NOTICES.md) lists their sources and
   licences).
 - One of those data files, `artifacts/sonoff-s60-partition-table.bin`, was read
   from a stock plug. It is the standard ESP-IDF partition table every S60
@@ -135,7 +135,7 @@ hold for any device the project adds, not one in particular.
 Sonoff and eWeLink are trademarks of their owners. The project names them only
 to say which devices and services it works with, and states that it is
 independent and not an official installer
-([THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)).
+([NOTICES.md](../NOTICES.md)).
 
 ## What we ask of you
 

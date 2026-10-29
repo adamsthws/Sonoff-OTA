@@ -81,7 +81,7 @@ class DocumentedTests(unittest.TestCase):
             self.assertIn(f"`{pin['sha256']}`", row, pin["file"])
 
     def test_third_party_notices_name_each_file_and_its_build(self):
-        notices = (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+        notices = (ROOT / "NOTICES.md").read_text(encoding="utf-8")
         for pin in PINS["esphome"].values():
             self.assertIn(f"`{pin['file']}`", notices)
             self.assertIn(f"ESPHome {pin['esphome']}", notices)

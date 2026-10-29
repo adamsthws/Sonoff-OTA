@@ -222,7 +222,7 @@ today's names to these lists rather than replacing them.
    its row in [`artifacts/README.md`](../artifacts/README.md), the path,
    SHA-256 and size where the tool pins it (`BRIDGE_OTA`, `esphome.IMAGE`,
    `CONTROL_FILES` in `flash_readout.py`), and
-   [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
+   [`NOTICES.md`](../NOTICES.md).
 4. Update the tests that name them: `tests/autoflash/test_setup_networks.py`,
    `tests/repo/test_published_artifacts.py`, `tests/autoflash/test_tasmota_settings.py`,
    `tests/autoflash/test_autoflash.py`, `tests/espressif/test_flash_readout.py`.
