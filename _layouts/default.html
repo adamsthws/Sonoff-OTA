@@ -8,6 +8,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% if page.title and page.title != site.title %}{{ page.title }} · {{ site.title }}{% else %}{{ site.title }}{% endif %}</title>
 <meta name="description" content="{{ site.description }}">
+{% assign title = page.title | default: site.title %}
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ title }}">
+<meta property="og:description" content="{{ site.description }}">
+<meta property="og:url" content="{{ page.url | absolute_url }}">
+<meta property="og:image" content="{{ '/assets/apple-touch-icon.png' | absolute_url }}">
+<meta name="twitter:card" content="summary">
 <!-- Safari takes the PNG, as it ignores SVG icons; the others prefer the
      SVG, listed last and for any size, whose colour follows their theme. -->
 <link rel="icon" href="{{ '/assets/favicon.png' | relative_url }}" type="image/png" sizes="128x128">
@@ -21,8 +28,11 @@
   body { margin: 0; background: var(--bg); }
   .markdown-body { box-sizing: border-box; max-width: 980px; margin: 0 auto; padding: 45px; }
   @media (max-width: 767px) { .markdown-body { padding: 15px; } }
-  #theme { position: fixed; top: 12px; right: 12px; width: 36px; height: 36px; border: 1px solid var(--line);
-           border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 18px; line-height: 1; cursor: pointer; }
+  #theme, #github { position: fixed; top: 12px; height: 36px; box-sizing: border-box; border: 1px solid var(--line);
+                    border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 18px; line-height: 1; }
+  #theme { right: 12px; width: 36px; cursor: pointer; }
+  #github { right: 56px; padding: 0 10px; display: flex; align-items: center; font-size: 14px; text-decoration: none; }
+  @media print { #theme, #github { display: none; } }
 </style>
 <script>
   function setTheme(theme) {
@@ -36,6 +46,7 @@
 </script>
 </head>
 <body>
+<a id="github" href="https://github.com/{{ site.repository }}">GitHub</a>
 <button id="theme" type="button" aria-label="Switch between dark and light">&#x263E;&#xFE0E;</button>
 <article class="markdown-body">
 {{ content }}
