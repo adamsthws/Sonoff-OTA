@@ -46,7 +46,7 @@ And every route between them.
 
 ### Fully automated 'Over The Air' firmware conversion
 
-Turn your stock Sonoff S60/S61 smart plug into one running **Tasmota**, **OpenBeken** or **ESPHome** using OTA method - no soldering, no taking the plug apart. Move the plug between the two, or back to Sonoff's own firmware.
+Turn your stock Sonoff S60 or S61S smart plug into one running **Tasmota**, **OpenBeken** or **ESPHome** using OTA method - no soldering, no taking the plug apart. Move the plug between the two, or back to Sonoff's own firmware.
 
 > Conversion with this tool is fully automated end to end, with checks at every stage. It is resumable and can be restarted at any point.
 
@@ -76,7 +76,8 @@ Converted plugs end up identical to a plug flashed over USB
 **The plug** 
 > A Wi-Fi Sonoff S60, e.g:  
 UK: **S60TPG** | European: **S60TPF**  
-(Not the Zigbee S60)
+(Not the Zigbee S60)  
+The S61S (iPlug Gen2, model **S61STPF**) is being worked on: see [devices/sonoff-s61/](devices/sonoff-s61/).
 
 **An eWeLink account**
 > Free. A throwaway one is fine. The plug has to be added to it first.

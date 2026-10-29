@@ -102,7 +102,12 @@ eWeLink accounts and plugs' identities.
 - **Tests run side by side and in any order**: one leaves nothing behind,
   keeps a port it picked, and touches nothing of the whole computer's.
   [docs/testing.md](docs/testing.md#side-by-side-in-any-order)
-- **`archive/`** is kept as it was: not linted, not changed.
+- **Where things go**: `tools/<family>/` (espressif, beken) for a chip
+  family's tooling, `tools/ewelink/` for eWeLink whatever the chip,
+  `devices/<plug>/` for what is one plug's alone, `tests/` mirroring `tools/`
+  (`tests/run.py <directory>` runs one of them), `docs/` for prose only,
+  `archive/` for retired work (linted like the rest). The ESPHome configs stay
+  at their paths in `ESPHome/`: converted plugs name them.
 
 ## Firmware and releases
 

@@ -32,19 +32,16 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
 
 try:
-    from tools.ewelink.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device
+    from tools.ewelink.get_device_key import APP_ID, EwelinkError, api_json, get_devices, login_session
     from tools.ewelink.probe_ota_command import WS_DISPATCH, nonce
-    from tools.ewelink.query_ota import ota_identity, query_ota
     from archive.tools.download_ota import ota_files
     from archive.tools.probe_vendor_header import private_bytes
     from tools.ewelink.websocket_minimal import WebSocket, WebSocketError
 except ModuleNotFoundError:
-    from tools.ewelink.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device
+    from tools.ewelink.get_device_key import APP_ID, EwelinkError, api_json, get_devices, login_session
     from tools.ewelink.probe_ota_command import WS_DISPATCH, nonce
-    from tools.ewelink.query_ota import ota_identity, query_ota
     from download_ota import ota_files
     from probe_vendor_header import private_bytes
     from tools.ewelink.websocket_minimal import WebSocket, WebSocketError
@@ -63,7 +60,6 @@ class FullRelayHandler(http.server.BaseHTTPRequestHandler):
         pass  # quiet by default; we print our own lines
 
     def _send_error_plain(self, code):
-        body = b""
         self.send_response(code)
         self.send_header("Content-Length", "0")
         self.send_header("Connection", "close")
@@ -108,7 +104,6 @@ class FullRelayHandler(http.server.BaseHTTPRequestHandler):
             try:
                 lo_str, hi_str = range_hdr[6:].split("-")
                 lo = int(lo_str)
-                hi = int(hi_str) if hi_str else lo + len(body) - 1
             except ValueError:
                 lo = 0
         else:
@@ -266,7 +261,7 @@ def main() -> int:
     thread.start()
     print(f"\nRelay listening on {args.listen_ip}:{args.listen_port}")
     print(f"Upstream: {UPSTREAM_HOST}:{UPSTREAM_PORT}")
-    print(f"Device will flash vendor 1.2.0 - this is intentional.\n")
+    print("Device will flash vendor 1.2.0 - this is intentional.\n")
 
     # eWeLink login
     try:

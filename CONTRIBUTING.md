@@ -118,7 +118,16 @@ eWeLink accounts and plugs' identities.
 - `firmware.json`, `artifacts/` and `SHA256SUMS` change only through
   `tools/update_firmware.py` - most often run by the weekly firmware-update
   workflow: [docs/updating-firmware.md](docs/updating-firmware.md).
-- `archive/` is kept as it was, for the record: it is not linted or changed.
+- Where things go: `tools/autoflash/` is the conversion tool and the rest of
+  `tools/` the repository's own plumbing; `tools/espressif/` and `tools/beken/`
+  hold each chip family's tooling, its emulator in `emulator/`; `tools/ewelink/`
+  what talks to eWeLink whatever the chip; `devices/<plug>/` what is one plug's
+  alone (its sheet, configs, modules); `ESPHome/` the ESPHome configs, at the
+  paths converted plugs name for Home Assistant; `tests/` mirrors `tools/`
+  (`tests/autoflash/`, `tests/repo/`, `tests/ewelink/`, `tests/espressif/`,
+  `tests/beken/`; `tests/run.py <directory>` runs one of them); `docs/` prose only;
+  and `archive/` the work that got the project here and is no longer used,
+  kept for the reasoning, linted like the rest.
 - Docs, comments and commit messages match what is here already: plain,
   compact sentences saying what something does and why.
 

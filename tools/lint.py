@@ -86,7 +86,7 @@ CONTAINER = Path("tools/espressif/emulator/container")
 
 
 def python(path: Path) -> bool:
-    return path.suffix == ".py" and path.parts[0] != "archive"   # archive/ is kept as it was
+    return path.suffix == ".py"
 
 
 def workflow(path: Path) -> bool:
@@ -94,8 +94,6 @@ def workflow(path: Path) -> bool:
 
 
 def shell(path: Path) -> bool:
-    if path.parts[0] == "archive":
-        return False
     if path.suffix == ".sh":
         return True
     with open(ROOT / path, "rb") as file:
@@ -103,7 +101,7 @@ def shell(path: Path) -> bool:
 
 
 def powershell(path: Path) -> bool:
-    return path.suffix == ".ps1" and path.parts[0] != "archive"
+    return path.suffix == ".ps1"
 
 
 def has_psscriptanalyzer(path: str) -> bool:

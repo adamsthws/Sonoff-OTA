@@ -75,7 +75,7 @@ def main() -> int:
         print(f"Refusing: recovery lock is active at {recovery_lock}", file=sys.stderr)
         return 2
 
-    if not getattr(args, "i_confirm_the_router_block_was_tested"):
+    if not args.i_confirm_the_router_block_was_tested:
         print(f"Refusing to run without {SAFETY_FLAG}", file=sys.stderr)
         return 2
     if (args.blocked_host, args.blocked_port) != (EXPECTED_HOST, EXPECTED_PORT):
@@ -195,7 +195,7 @@ def main() -> int:
             args.output,
             {
                 "upgrade_command_sent": sent,
-                "router_block_attested": bool(getattr(args, "i_confirm_the_router_block_was_tested")),
+                "router_block_attested": bool(args.i_confirm_the_router_block_was_tested),
                 "blocked_target": f"{args.blocked_host}:{args.blocked_port}",
                 "version": result_version,
                 "header_saved": saved,

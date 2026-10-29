@@ -222,7 +222,7 @@ def main() -> int:
         print(f"Refusing: recovery lock is active at {recovery_lock}", file=sys.stderr)
         return 2
 
-    if not getattr(args, "i_confirm_dnat_is_limited_to_the_s60"):
+    if not args.i_confirm_dnat_is_limited_to_the_s60:
         print(f"Refusing to run without {SAFETY_FLAG}", file=sys.stderr)
         return 2
     listen_address = ipaddress.ip_address(args.listen_ip)
@@ -311,7 +311,7 @@ def main() -> int:
             thread.join(timeout=3.0)
         private_json(args.output, {
             "upgrade_command_sent": sent,
-            "dnat_attested": bool(getattr(args, "i_confirm_dnat_is_limited_to_the_s60")),
+            "dnat_attested": bool(args.i_confirm_dnat_is_limited_to_the_s60),
             "target": f"{EXPECTED_HOST}:{EXPECTED_PORT}",
             "version": version,
             "header_saved": bool(server and server.captured.is_set()),
