@@ -35,6 +35,26 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual(self.found("sha256 5c4181c756fb0a98c107a4d53389536f878b69fedbbce47168b07458122f53e8"), [])
         self.assertEqual(self.found("2026-10-23T12:34:56Z"), [])
 
+    def test_a_uuid_that_could_be_a_device_apikey_or_id_is_found(self):
+        uuid = "deadbeef-0000-1111-2222-" + "333344445555"   # split so the tree scan ignores this file
+        self.assertTrue(self.found("apikey " + uuid))
+        self.assertEqual(self.found("apikey " + uuid, allow={uuid}), [])   # a listed example
+
+    def test_a_uuid_run_on_into_more_hex_is_not(self):
+        uuid = "deadbeef-0000-1111-2222-" + "333344445555"
+        self.assertEqual(self.found("x" + uuid + "0"), [])
+
+    def test_disassembly_and_decompiler_output_are_found(self):
+        what = "disassembly or decompiler output (commit the tool that makes it, not its dump)"
+        disasm = "0x04203c:  " + "4ff00008  mov.w\tr0, #8"   # the capstone line shape
+        banner = "### FUNCTION 0x" + "04203c ###"            # the angr-decompiler banner
+        self.assertIn(what, self.found(disasm))
+        self.assertIn(what, self.found(banner))
+
+    def test_an_inline_address_in_prose_is_not_disassembly(self):
+        self.assertEqual(self.found("the start-cloud handler 0x2c204 has three callers"), [])
+        self.assertEqual(self.found("0x2c204  if (*0x403e31 != 0)   // a note, not a dump"), [])
+
     def test_tokens_and_keys_are_found(self):
         key = "PRIVATE " + "KEY-----"   # not written whole: the scan would find this file
         for text, what in (("-----BEGIN " + key, "a private key"),
@@ -83,6 +103,16 @@ class OwnValueTests(unittest.TestCase):
         s.raw("b.bin", b"x" + bytes.fromhex("778899" "79cf58") + b"y")
         s.raw("c.bin", b"nothing here")
         self.assertEqual(sorted(f.where for f in s.findings), ["a.bin", "b.bin"])
+
+
+class FileNameTests(unittest.TestCase):
+    def test_a_packet_capture_is_refused_by_its_name(self):
+        s = scanner()
+        s.filename("airkiss.pcap", "airkiss.pcap")
+        s.filename("docs/s61-tools/grab.PCAPNG", "docs/s61-tools/grab.PCAPNG")
+        s.filename("s61_airkiss_replay.py", "s61_airkiss_replay.py")   # a tool, not a capture
+        self.assertEqual(sorted(f.where for f in s.findings),
+                         ["airkiss.pcap", "docs/s61-tools/grab.PCAPNG"])
 
 
 class PatchTests(unittest.TestCase):

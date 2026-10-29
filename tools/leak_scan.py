@@ -18,7 +18,15 @@ Two kinds of finding:
   .leak-scan.local, which Git ignores: more of your own (a router, a name).
 - **Anyone's**, by their shape: a MAC address that could be a real device's -
   not locally administered, and not one of the made-up ones .leak-scan-allow
-  lists; a private key; a GitHub, AWS, Google or Slack token.
+  lists; a UUID that could be a device's apikey or id (same allow-list); a
+  private key; a GitHub, AWS, Google or Slack token; disassembly or decompiler
+  output (the S61 research tools make it - commit the tool, not its dump); and
+  a packet capture (.pcap/.pcapng), whose frames carry a network's credentials.
+
+An arbitrary secret with no safe shape - a device_secret, an app-apikey, a
+secureCertSha256 - cannot be found by shape without flagging the repository's
+own hashes, so list its value in .leak-scan.local (Git-ignored) to have it
+found by value, as with anything else of yours.
 
 Nothing found is printed: only where, and what kind. A finding stops the
 commit or push; `--no-verify` lets one through that is meant to be there
@@ -53,6 +61,19 @@ TOKENS = {
     "an AWS access key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
     "a Google API key": re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"),
     "a Slack token": re.compile(r"\bxox[abprs]-[0-9A-Za-z-]{10,}"),
+}
+# A UUID that could be a device's apikey or id; and the two shapes the S61
+# research tools print, so a pasted dump of either is caught. s61_dis.py lines
+# are "0xADDR:  BYTES  mnemonic"; s61_decomp.py banners are "### FUNCTION 0x.. ###".
+UUID_TEXT = re.compile(r"(?<![0-9A-Za-z-])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+                       r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Za-z-])")
+DISASM_LINE = re.compile(r"\b0x[0-9a-f]{4,8}:\s+[0-9a-f]{4,8}\s+[a-z]")
+DECOMP_BANNER = re.compile(r"###\s+FUNCTION\s+0x[0-9a-f]{4,8}\s+###")
+# File names never committed: a packet capture holds a network's frames, whose
+# lengths carry the Wi-Fi credentials of whatever network it was taken on.
+FORBIDDEN_SUFFIX = {
+    ".pcap": "a packet capture (its frames carry a network's Wi-Fi credentials)",
+    ".pcapng": "a packet capture (its frames carry a network's Wi-Fi credentials)",
 }
 
 
@@ -191,6 +212,20 @@ class Scanner:
         for what, pattern in TOKENS.items():
             if pattern.search(text):
                 self.findings.append(Finding(where, what))
+        for match in UUID_TEXT.finditer(text):
+            if match.group(0).lower() in self.allow:
+                continue  # a known example: a fixed public constant, or one listed
+            self.findings.append(Finding(where, "a UUID that could be a device's apikey or id "
+                                                "(list a made-up example in .leak-scan-allow)"))
+        if DISASM_LINE.search(text) or DECOMP_BANNER.search(text):
+            self.findings.append(Finding(where, "disassembly or decompiler output "
+                                                "(commit the tool that makes it, not its dump)"))
+
+    def filename(self, where: str, path: str) -> None:
+        """A file whose kind must never be committed, by its name."""
+        what = FORBIDDEN_SUFFIX.get(Path(path).suffix.lower())
+        if what:
+            self.findings.append(Finding(where, what))
 
     def data(self, where: str, data: bytes) -> None:
         """A binary file: this computer's own values, as bytes."""
@@ -255,6 +290,7 @@ def scan_commit(scanner: Scanner, commit: str) -> None:
             blob = git("show", f"{commit}:{path}")
         except subprocess.CalledProcessError:
             continue  # deleted
+        scanner.filename(f"{short} {path}", path)
         (scanner.data if path in binary_paths(numstat) else scanner.raw)(f"{short} {path}", blob)
 
 
@@ -267,6 +303,7 @@ def command_staged(scanner: Scanner) -> None:
             blob = git("show", f":{path}")
         except subprocess.CalledProcessError:
             continue  # deleted
+        scanner.filename(path, path)
         (scanner.data if path in binary else scanner.raw)(path, blob)
 
 
@@ -286,6 +323,7 @@ def command_tree(scanner: Scanner) -> None:
     for path in git("ls-files", "-z").decode().split("\0"):
         if not path or path == ALLOW_FILE.name:
             continue
+        scanner.filename(path, path)
         try:
             data = (ROOT / path).read_bytes()
         except OSError:

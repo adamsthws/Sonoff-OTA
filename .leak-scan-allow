@@ -19,3 +19,9 @@
 Emulator test copy
 # The emulator's sudo password, which is public: it is in the emulator's image.
 autoflash
+# UUIDs the repository uses that are not a device's: fixed public constants
+# (the RFC 6455 WebSocket GUID; a Windows network-class GUID) and the made-up
+# key the tests use. A real device apikey/id never goes near this repository.
+258eafa5-e914-47da-95ca-c5ab0dc85b11
+4d36e972-e325-11ce-bfc1-08002be10318
+00000000-1111-2222-3333-444444444444
