@@ -16,7 +16,7 @@ from tools.espressif.safeboot.configure_recovery_safeboot import render_header
 from tools.autoflash.imprint import imprint, repair_image
 from tools.espressif.safeboot.safeboot_migration import RECOVERY_MARKER
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PUBLISHED = (ROOT / "artifacts/autoflash-recovery-safeboot-imprintable.bin").read_bytes()
 
 

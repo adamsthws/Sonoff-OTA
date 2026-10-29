@@ -63,7 +63,7 @@ class AwakeTests(unittest.TestCase):
     def test_a_run_killed_outright_leaves_no_hold_behind(self):
         code = textwrap.dedent(f"""
             import sys, time
-            sys.path.insert(0, {str(__import__("pathlib").Path(__file__).resolve().parents[1])!r})
+            sys.path.insert(0, {str(__import__("pathlib").Path(__file__).resolve().parents[2])!r})
             from tools.autoflash import awake
             print(awake.keep_awake(), flush=True)
             time.sleep(60)

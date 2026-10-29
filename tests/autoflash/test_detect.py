@@ -4,7 +4,7 @@ import threading
 import unittest
 from unittest import mock
 
-from tests.test_device_requests import LockedTasmota
+from tests.autoflash.test_device_requests import LockedTasmota
 from tools.autoflash import detect
 
 TASMOTA_TABLE = "1" * 64

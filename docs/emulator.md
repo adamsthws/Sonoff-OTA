@@ -392,7 +392,7 @@ Server Core has no desktop, which is what makes it quick to install and run,
 and leaves three things a person's Windows has untested here: the User
 Account Control prompt (Server Core has neither the prompt nor the service
 behind it, and an administrator's programs are always elevated there, so the
-firewall rule is added without asking; tests/test_windows_uac.py answers it
+firewall rule is added without asking; tests/autoflash/test_windows_uac.py answers it
 every way instead, and a Windows 11 computer shows the real one), Windows
 Security's notifications, and
 Windows Terminal's window itself. Terminal cannot start on Server Core, which

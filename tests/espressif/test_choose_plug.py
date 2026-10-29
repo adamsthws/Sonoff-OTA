@@ -37,7 +37,7 @@ class ChoosePlugTests(unittest.TestCase):
 
     def test_backups_and_an_old_style_dump_are_both_found(self):
         from tools.autoflash import plugs
-        from tests.test_autoflash import efuse_with_mac
+        from tests.autoflash.test_autoflash import efuse_with_mac
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             legacy = root / "emulation"

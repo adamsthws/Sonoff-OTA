@@ -125,7 +125,7 @@ class GitHubSettingsTests(unittest.TestCase):
     def test_every_required_check_is_a_job_in_a_workflow(self):
         from pathlib import Path
         import re
-        root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+        root = Path(__file__).resolve().parents[2] / ".github" / "workflows"
         jobs = set()
         for workflow in root.glob("*.yml"):
             text = workflow.read_text(encoding="utf-8")

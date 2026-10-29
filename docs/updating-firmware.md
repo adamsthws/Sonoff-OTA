@@ -162,7 +162,7 @@ that made the published one, it comes out the same.
 
 ### 3. The docs
 
-Each update writes what it changed, and `tests/test_firmware_pins.py` fails
+Each update writes what it changed, and `tests/repo/test_firmware_pins.py` fails
 while any of it is missing:
 
 - `artifacts/README.md`: the image's row (its name and SHA-256), the ESPHome

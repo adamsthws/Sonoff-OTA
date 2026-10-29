@@ -4,8 +4,11 @@ runs, in a fraction of the time.
 
     python3 tests/run.py               all of them
     python3 tests/run.py -j 4          on 4 processes (default: 2 per core)
-    python3 tests/run.py test_output test_detect.EsphomeLoginTests
+    python3 tests/run.py autoflash.test_output autoflash.test_detect.EsphomeLoginTests
                                        those modules, classes or tests
+    python3 tests/run.py espressif     one directory's tests: autoflash (the tool),
+                                       repo (the repository's plumbing), ewelink,
+                                       espressif, beken - as tools/ is laid out
     python3 tests/run.py --shuffle     in a random order, to find a test that
                                        passes only after another (--seed N
                                        repeats one)
@@ -74,7 +77,15 @@ def flatten(suite: unittest.TestSuite):
 def collect(names: list[str]) -> tuple[list[str], list[tuple[str, str]]]:
     """Each test's id, and each module that would not even load, with why."""
     loader = unittest.TestLoader()
-    suite = (unittest.TestSuite(loader.loadTestsFromName(name) for name in names) if names
+
+    def load(name: str) -> unittest.TestSuite:
+        # A directory under tests/ is discovered; anything else is a module, class
+        # or test, as unittest names them (autoflash.test_plans).
+        if (TESTS / name).is_dir():
+            return loader.discover(str(TESTS / name), top_level_dir=str(TESTS))
+        return loader.loadTestsFromName(name)
+
+    suite = (unittest.TestSuite(load(name) for name in names) if names
              else loader.discover(str(TESTS), top_level_dir=str(TESTS)))
     ids, broken = [], []
     for test in flatten(suite):

@@ -540,7 +540,7 @@ def command_esphome(args: argparse.Namespace) -> int:
             by_hand.append("the mover's or bootloader's own rows and paragraphs, which only the image's are written for")
         if old_image["esphome"] == release:
             by_hand.append("what the change to the config does, in CHANGELOG.md and artifacts/README.md")
-    left_to_do(by_hand + ["python3 -m unittest discover -s tests (tests/test_firmware_pins.py checks the docs)",
+    left_to_do(by_hand + ["python3 -m unittest discover -s tests (tests/repo/test_firmware_pins.py checks the docs)",
                           "the emulator runs in docs/updating-firmware.md, then a real plug"])
     return 0
 
@@ -548,7 +548,7 @@ def command_esphome(args: argparse.Namespace) -> int:
 # -- what is written about it ----------------------------------------------------
 #
 # Each update writes what it changes into the docs the tests hold to it
-# (tests/test_firmware_pins.py), and its line in CHANGELOG.md: under the
+# (tests/repo/test_firmware_pins.py), and its line in CHANGELOG.md: under the
 # section not yet released, or a new one, a minor version on (raising
 # tools/autoflash/__init__.py), so that merging it is the release. --no-docs
 # leaves them for a person to write.

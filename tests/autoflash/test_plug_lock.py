@@ -28,7 +28,7 @@ class PlugLockTests(unittest.TestCase):
         """A second process holding the plug, as another run would."""
         code = textwrap.dedent(f"""
             import sys, time
-            sys.path.insert(0, {str(Path(__file__).resolve().parents[1])!r})
+            sys.path.insert(0, {str(Path(__file__).resolve().parents[2])!r})
             from tools.autoflash import plugs
             from pathlib import Path
             plugs.PLUGS = Path({str(self.root)!r})

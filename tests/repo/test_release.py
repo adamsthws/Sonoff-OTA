@@ -7,7 +7,7 @@ from pathlib import Path
 from tools import release_notes
 from tools.autoflash import __version__
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class VersionTests(unittest.TestCase):

@@ -10,7 +10,7 @@ from unittest import mock
 
 from tools import lint
 
-HOOKS = Path(__file__).resolve().parents[1] / ".githooks"
+HOOKS = Path(__file__).resolve().parents[2] / ".githooks"
 # Git as it would be on a computer of its own: none of this one's settings
 # (signing, hooks) and none of a hook's GIT_DIR, if the tests run inside one.
 GIT_ENV = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")} | {

@@ -26,7 +26,7 @@ class SafetyLockTests(unittest.TestCase):
         """Another run, in a process of its own, with the lock lifted."""
         code = textwrap.dedent(f"""
             import sys, time
-            sys.path.insert(0, {str(Path(__file__).resolve().parents[1])!r})
+            sys.path.insert(0, {str(Path(__file__).resolve().parents[2])!r})
             from pathlib import Path
             from tools.autoflash import safety_locks
             with safety_locks.lifted(Path({str(self.root)!r}), {NAME!r}):

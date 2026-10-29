@@ -113,7 +113,7 @@ cat > "$work/pyproject.toml" <<EOF
 [tool.mutmut]
 source_paths = ["tools"]
 only_mutate = ["tools/autoflash/plans.py"]
-pytest_add_cli_args_test_selection = ["tests/test_plans.py", "tests/test_autoflash.py"]
+pytest_add_cli_args_test_selection = ["tests/autoflash/test_plans.py", "tests/autoflash/test_autoflash.py"]
 also_copy = [$(git ls-files | cut -d/ -f1 | sort -u | grep -vx -e tools -e tests | sed 's/.*/"&"/' | paste -sd, -)]
 EOF
 cd "$work" && .venv/bin/mutmut run && .venv/bin/mutmut results

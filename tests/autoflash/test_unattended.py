@@ -13,7 +13,7 @@ from unittest import mock
 from tools import unattended_run
 from tools.autoflash import credentials, output, prompts
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class CredentialsFileTests(unittest.TestCase):

@@ -9,7 +9,7 @@
 58:cf:79:0a:0b:0c
 94:a9:90:00:00:01
 00:11:22:33:44:55
-# The made-up plug and router tests/test_leak_scan.py finds (its own scanner
+# The made-up plug and router tests/repo/test_leak_scan.py finds (its own scanner
 # ignores this list).
 58:cf:79:12:34:56
 58:cf:79:99:88:77

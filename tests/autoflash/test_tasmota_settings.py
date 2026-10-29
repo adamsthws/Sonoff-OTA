@@ -8,7 +8,7 @@ from pathlib import Path
 
 from tools.autoflash import tasmota_settings as ts
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 C_SOURCE = ROOT / "archive/bridge/main/tasmota_settings.c"
 
 # Tasmota's defaults start the pool like this (SET_OTAURL, three MQTT prefixes,

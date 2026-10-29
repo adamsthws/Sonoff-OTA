@@ -251,7 +251,7 @@ class RecoverySafebootHeaderTests(unittest.TestCase):
         self.assertIn("AUTOFLASH_RECOVERY_PERSIST_SETTINGS", self.header(True))
 
     def test_the_patch_guards_against_being_used_alone(self):
-        patch = (Path(__file__).resolve().parents[1]
+        patch = (Path(__file__).resolve().parents[2]
                  / "tools/espressif/safeboot/repartition/recovery-safeboot/persist-settings.patch").read_text()
         # It must refuse to build without the Wi-Fi defaults it saves, and must
         # never overwrite settings a configured device already has.

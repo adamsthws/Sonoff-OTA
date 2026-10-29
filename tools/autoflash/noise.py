@@ -10,7 +10,7 @@ is sealed with keys made for that connection.
 All it takes is X25519 (RFC 7748), ChaCha20-Poly1305 (RFC 8439) and SHA-256,
 so the tool needs no package for it: the first two are here, written from
 their RFCs and checked against their test vectors, and the handshake against
-ESPHome's own client (tests/test_noise.py).  Plain Python is slower than a
+ESPHome's own client (tests/autoflash/test_noise.py).  Plain Python is slower than a
 compiled library - about two seconds a megabyte - and not constant-time;
 its keys are ephemeral, made for one connection on the home network, and the
 shared key is only ever hashed.

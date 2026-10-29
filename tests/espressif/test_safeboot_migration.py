@@ -969,7 +969,7 @@ class ChunkBodyTests(unittest.TestCase):
 
     def test_every_phase_that_fetches_chunks_checks_them_and_asks_again(self):
         for phase in ("stage", "restore", "plan"):
-            source = (Path(__file__).resolve().parents[1] / f"tools/espressif/safeboot/repartition/berry/{phase}.be.tmpl").read_text()
+            source = (Path(__file__).resolve().parents[2] / f"tools/espressif/safeboot/repartition/berry/{phase}.be.tmpl").read_text()
             fetch = source[source.index("def fetch_chunk"):]
             fetch = fetch[:fetch.index("\nend\n")]
             with self.subTest(phase=phase):

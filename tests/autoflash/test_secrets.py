@@ -14,7 +14,7 @@ from tools.espressif.safeboot import prepare_imprinted_bundle as bundle
 from tools.espressif.safeboot import safeboot_migration
 from tools.espressif.safeboot.safeboot_migration import RECOVERY_ARTIFACT
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 LOCAL = ROOT / "captures" / "safeboot-recovery-migration"
 OFFICIAL = {name: LOCAL / name for name in
             ("tasmota32c3.factory.bin", "tasmota32c3-safeboot.bin", "tasmota32c3.bin")}

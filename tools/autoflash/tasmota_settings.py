@@ -52,7 +52,7 @@ HOSTNAME_MAX = 32                # TasmotaGlobal.hostname[33]
 # commits the record layout, text pool order and size, cfg_holder, CRC and the
 # load path are identical, and no SettingsDelta step lies between 15.6.0 and
 # 15.6.0.1.  Change either pin and these must be checked again: until then D1
-# gives Tasmota its Wi-Fi by hand, and tests/test_tasmota_settings.py fails
+# gives Tasmota its Wi-Fi by hand, and tests/autoflash/test_tasmota_settings.py fails
 # saying so.  See archive/docs/reference/automatic-wifi.md.  The official
 # release needs only CFG_HOLDER (above) to be its own, for it to take the
 # record the recovery Safeboot saves: tools/update_firmware.py checks it.

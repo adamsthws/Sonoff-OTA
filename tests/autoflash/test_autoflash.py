@@ -525,7 +525,7 @@ class AdvertSignalTests(unittest.TestCase):
     written, from the plug's own eWeLink advert, opened with its LAN key."""
 
     def report(self, source="192.168.0.50"):
-        from tests.test_ewelink_lan import ADVERT
+        from tests.autoflash.test_ewelink_lan import ADVERT
         return {"packets": [{"source": source, "records": [
             {"type": "TXT", "value": [f"{k}={v}" for k, v in ADVERT.items()]}]}]}
 
@@ -535,14 +535,14 @@ class AdvertSignalTests(unittest.TestCase):
 
     def test_the_plugs_own_advert_gives_its_signal(self):
         import tools.autoflash_cli as af
-        from tests.test_ewelink_lan import ADVERT, KEY
+        from tests.autoflash.test_ewelink_lan import ADVERT, KEY
         ctx = self.ctx([{"deviceid": "1000ffffff", "devicekey": "other"},
                         {"deviceid": ADVERT["id"], "devicekey": KEY}])
         self.assertEqual(af.advert_signal(ctx, self.report(), "192.168.0.50"), -61)
 
     def test_another_devices_advert_or_no_key_gives_nothing(self):
         import tools.autoflash_cli as af
-        from tests.test_ewelink_lan import ADVERT, KEY
+        from tests.autoflash.test_ewelink_lan import ADVERT, KEY
         key = [{"deviceid": ADVERT["id"], "devicekey": KEY}]
         self.assertIsNone(af.advert_signal(self.ctx(key), self.report("192.168.0.7"), "192.168.0.50"))
         self.assertIsNone(af.advert_signal(self.ctx([]), self.report(), "192.168.0.50"))
@@ -626,7 +626,7 @@ class SecretPromptTests(unittest.TestCase):
         )
         process = subprocess.Popen(
             [sys.executable, "-c", code], stdin=slave, stdout=slave, stderr=slave,
-            cwd=Path(__file__).resolve().parents[1],
+            cwd=Path(__file__).resolve().parents[2],
         )
         os.close(slave)
         output = b""
@@ -3165,7 +3165,7 @@ class TasmotaWifiPresetTests(unittest.TestCase):
     def test_the_tasmota_is_named_as_every_firmware_part_way_through(self):
         # Until F4's reset gives it Tasmota's own name; and its setup network,
         # should it raise one, by the same.
-        template = self.ts.template_path(Path(__file__).resolve().parents[1]).read_bytes()
+        template = self.ts.template_path(Path(__file__).resolve().parents[2]).read_bytes()
         self.inputs["plug_mac"] = "12:34:56:ab:cd:ef"
         given, sent = self.run_preset(template)
         self.assertTrue(given)
@@ -3178,7 +3178,7 @@ class TasmotaWifiPresetTests(unittest.TestCase):
         # not tasmota-ABCDEF-1234 (seen in the fault suite, C3 with the home
         # Wi-Fi gone).
         from tools.autoflash import setup_network
-        template = self.ts.template_path(Path(__file__).resolve().parents[1]).read_bytes()
+        template = self.ts.template_path(Path(__file__).resolve().parents[2]).read_bytes()
         self.inputs["plug_mac"] = "12:34:56:ab:cd:ef"
         given, sent = self.run_preset(template, address=setup_network.SETUP_HOST, answer=self.ALONE)
         self.assertFalse(given)
@@ -3190,7 +3190,7 @@ class TasmotaWifiPresetTests(unittest.TestCase):
     def test_an_installer_before_4_4_4_leaves_tasmota_its_own_name_quietly(self):
         from tools.autoflash import setup_network
         self.inputs["plug_mac"] = "12:34:56:ab:cd:ef"
-        template = self.ts.template_path(Path(__file__).resolve().parents[1]).read_bytes()
+        template = self.ts.template_path(Path(__file__).resolve().parents[2]).read_bytes()
         given, _ = self.run_preset(template, send_error="The bridge has not joined a network",
                                    address=setup_network.SETUP_HOST)
         self.assertFalse(given)
@@ -3705,7 +3705,7 @@ class WifiFromPlugTests(unittest.TestCase):
 
     def setUp(self):
         from tools.autoflash import tasmota_settings as ts
-        from tests.test_tasmota_settings import default_record
+        from tests.autoflash.test_tasmota_settings import default_record
         self.ts = ts
         self.record = ts.fill(ts.make_template(default_record()), "Home-2G", "a good password")
 

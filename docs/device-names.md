@@ -83,7 +83,7 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
   [`tools/espressif/safeboot/build_recovery_safeboot.sh`](../tools/espressif/safeboot/build_recovery_safeboot.sh),
   then `tools/espressif/safeboot/sanitise_safeboot.py` and `tools/espressif/safeboot/validate_imprintable_safeboot.py`,
   into `artifacts/autoflash-recovery-safeboot-imprintable.bin`; a test checks
-  the pattern is in the image (`tests/test_published_artifacts.py`).
+  the pattern is in the image (`tests/repo/test_published_artifacts.py`).
 
 ### Official Tasmota, and F4
 
@@ -223,9 +223,9 @@ today's names to these lists rather than replacing them.
    SHA-256 and size where the tool pins it (`BRIDGE_OTA`, `esphome.IMAGE`,
    `CONTROL_FILES` in `flash_readout.py`), and
    [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
-4. Update the tests that name them: `tests/test_setup_networks.py`,
-   `tests/test_published_artifacts.py`, `tests/test_tasmota_settings.py`,
-   `tests/test_autoflash.py`, `tests/test_flash_readout.py`.
+4. Update the tests that name them: `tests/autoflash/test_setup_networks.py`,
+   `tests/repo/test_published_artifacts.py`, `tests/autoflash/test_tasmota_settings.py`,
+   `tests/autoflash/test_autoflash.py`, `tests/espressif/test_flash_readout.py`.
 5. Update the pages that name them: [`troubleshooting.md`](troubleshooting.md)
    ("The plug's own network"), [`what-happens.md`](what-happens.md),
    [`technical-details.md`](technical-details.md), the ESPHome and
