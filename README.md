@@ -178,7 +178,7 @@ report back on how it went here:
   at each stage, where each is set, and how to change them.
 - **[docs/upstream-contributions.md](docs/upstream-contributions.md)** - bugs
   found and fixed while building this project.
-- **[archive/docs/reference/](archive/docs/reference/)** - the original
+- **[archive/docs/reference/](archive/docs/reference/README.md)** - the original
   research, the manual procedure and how the firmware format was decoded.
 - **[docs/legal.md](docs/legal.md)** - how the project keeps backing up
   Sonoff's firmware lawful, and what it asks of you.

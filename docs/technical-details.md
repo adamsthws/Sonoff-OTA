@@ -324,7 +324,7 @@ tools, the bridge firmware source and the custom Tasmota build that got the
 early plugs converted. None of it is needed now, and none of it has been
 deleted. The research behind all of it - how the update mechanism was worked
 out, the partition analysis, the reviewed migration plan and the manual
-procedure - is in **[archive/docs/reference/](../archive/docs/reference/)**.
+procedure - is in **[archive/docs/reference/](../archive/docs/reference/README.md)**.
 
 The tests check the tool against itself; nothing touches the plug:
 
