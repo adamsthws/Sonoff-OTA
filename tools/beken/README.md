@@ -181,14 +181,14 @@ signed-char `Tiny_CRC8`, the `0x1e1000` config offset).
   partition of an OpenBeken image. Version-fragile (depends on the exact config
   format); prefer the import module below.
   `python3 wifi_migrate.py --stock stock.bin --obk OpenBK7238_QIO.bin --out converted.bin`
-- **`openbeken/drv_sonoff_s61_import.c`** — **the dependable mechanism to ship.**
+- **`devices/sonoff-s61/openbeken/drv_sonoff_s61_import.c`** — **the dependable mechanism to ship.**
   An OpenBeken module that, on first boot, reads the stock EF40 creds with
   `beken_hal_flash_read` and sets them via OpenBeken's own
   `CFG_SetWiFiSSID()`/`CFG_SetWiFiPass()` — so it survives OpenBeken config-format
   changes across releases — then carries the factory meter calibration over and
   applies the S61's wiring. Reads the stock store only (reversible). Build recipe
-  and the `S61RevertToStock` command in [`openbeken/README.md`](../../docs/s61-tools/openbeken/README.md).
-- **`esphome/README.md`** — the **ESPHome route**: how
+  and the `S61RevertToStock` command in [`devices/sonoff-s61/openbeken/README.md`](../../devices/sonoff-s61/openbeken/README.md).
+- **`devices/sonoff-s61/esphome.md`** — the **ESPHome route**: how
   [`ESPHome/sonoff_s61.yaml`](../../ESPHome/sonoff_s61.yaml) (LibreTiny) reads
   the stock Wi-Fi and meter calibration from the EF40 store at boot, its 4 MB
   flash layout, the build, the reversion through ESPHome's own OTA, and what

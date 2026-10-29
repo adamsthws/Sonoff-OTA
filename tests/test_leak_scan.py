@@ -109,10 +109,10 @@ class FileNameTests(unittest.TestCase):
     def test_a_packet_capture_is_refused_by_its_name(self):
         s = scanner()
         s.filename("airkiss.pcap", "airkiss.pcap")
-        s.filename("docs/s61-tools/grab.PCAPNG", "docs/s61-tools/grab.PCAPNG")
+        s.filename("tools/beken/grab.PCAPNG", "tools/beken/grab.PCAPNG")
         s.filename("airkiss_replay.py", "airkiss_replay.py")   # a tool, not a capture
         self.assertEqual(sorted(f.where for f in s.findings),
-                         ["airkiss.pcap", "docs/s61-tools/grab.PCAPNG"])
+                         ["airkiss.pcap", "tools/beken/grab.PCAPNG"])
 
 
 class PatchTests(unittest.TestCase):

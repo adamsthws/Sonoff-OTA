@@ -1,8 +1,8 @@
 # ESPHome (LibreTiny) for the Sonoff S61
 
-[`ESPHome/sonoff_s61.yaml`](../../../ESPHome/sonoff_s61.yaml) is the ESPHome the
+[`ESPHome/sonoff_s61.yaml`](../../ESPHome/sonoff_s61.yaml) is the ESPHome the
 conversion installs on an S61, built on [LibreTiny](https://docs.libretiny.eu/)
-for its BK7238. It is the S60's config ([`ESPHome/sonoff_s60.yaml`](../../../ESPHome/sonoff_s60.yaml))
+for its BK7238. It is the S60's config ([`ESPHome/sonoff_s60.yaml`](../../ESPHome/sonoff_s60.yaml))
 with the S61's wiring and storage: the same entities, actions, calibration
 handling and energy totals, so the two plugs look alike in Home Assistant.
 
@@ -22,7 +22,7 @@ handling and energy totals, so the two plugs look alike in Home Assistant.
   and applied the way the stock firmware applies it: the BL0937's pulse rate
   reckoned with a 1.1 V reference where the datasheet (and ESPHome) say
   1.218 V, then `a*x^2/1e7 + b*x/1e6 + c/1e6` on the reading in A, V or W
-  ([the derivation](../../beken-s61-emulation.md#energy-meter-calibration-the-stock-formula-and-the-openbeken-mapping)).
+  ([the derivation](../../docs/beken-s61-emulation.md#energy-meter-calibration-the-stock-formula-and-the-openbeken-mapping)).
   One set of nine numbers, where the S60 has two sets for below and above
   300 W. The `Calibration` sensor says `stock store`, `from backup` (given
   through `autoflash_calibration`, nine numbers) or `missing`.
@@ -59,7 +59,7 @@ docker run --rm -u "$(id -u):$(id -g)" -e HOME=/config -v "$PWD":/config \
 The outputs, in `.esphome/build/esphome/.pioenvs/esphome/`:
 
 - `image_bk7238_app.ota.rbl` - the **rt_ota update** (about 500 KB) for the
-  conversion: wrapped with [`../fota_wrap.py`](../fota_wrap.py) it is
+  conversion: wrapped with [`../fota_wrap.py`](../../tools/beken/fota_wrap.py) it is
   what the stock plug downloads; staged in OpenBeken's `ota_http` it converts
   an OpenBeken plug. The stock bootloader applies it from the download slot.
 - `firmware.uf2` - LibreTiny's flasher/OTA image, which ESPHome's own OTA
@@ -72,7 +72,7 @@ The outputs, in `.esphome/build/esphome/.pioenvs/esphome/`:
 A plug on ESPHome takes updates through ESPHome's OTA as UF2 files, and
 LibreTiny writes a UF2's `download` part to the download slot. So a UF2 that
 carries the stock app RBL (rebuilt from a dump with
-[`../stock_app.py`](../stock_app.py) and the SDK packer, as the
+[`../stock_app.py`](../../tools/beken/stock_app.py) and the SDK packer, as the
 OpenBeken README says) as its download part, sent through the ordinary
 ESPHome OTA, is a reversion: the stock bootloader applies it on the reboot
 that follows. ltchiptool (LibreTiny's tool) builds it:

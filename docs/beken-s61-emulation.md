@@ -6,7 +6,7 @@ what is known about the firmware: how it boots, how it stores its
 configuration, how pairing and provisioning work, how its OTA update works, and
 how all of that is used to convert the plug to OpenBeken and back. Each claim was
 tested in the emulator unless the text says otherwise; the drivers that produced
-the results are in [s61-tools/](s61-tools/README.md). Per-device identifiers are
+the results are in [tools/beken/](../tools/beken/README.md). Per-device identifiers are
 kept out of this repository; examples use the made-up MAC `12:34:56:ab:cd:ef`.
 
 The dumps and plugs are the owner's own devices. Observing, testing and
@@ -52,7 +52,7 @@ the project adds. See [legal.md](legal.md).
   (`bk-emu.Dockerfile`), or pulls the one the `beken-emulator-image` workflow
   published for that version (`ghcr.io/adamsthws/autoflash-beken-emu:<hash>`),
   and runs the tools in it with this checkout at `/work` (see
-  [the fork](#the-fork-s61-toolsemulator)). Upstream publishes no licence;
+  [the fork](#the-fork-toolsbekenemulator)). Upstream publishes no licence;
   its source is kept here so the emulator depends on nothing outside this
   repository. Neither the archive nor the image holds any of upstream's
   `firmwares/`: the public S61s dump is Sonoff's firmware, which this
@@ -921,7 +921,7 @@ The build is a `FLASH_SIZE=4M` switch, in two patches kept in
 [`tools/beken/openbeken/`](../../tools/beken/openbeken/) and
 offered upstream — OpenBK7231T_App#2290 and beken_freertos_sdk#13, see
 [upstream-contributions.md](upstream-contributions.md#openbeken-on-a-4-mb-bk7238)
-(the recipe is in [its README](../s61-tools/openbeken/README.md#building-bk7238-4-mb-table)).
+(the recipe is in [its README](../devices/sonoff-s61/openbeken/README.md#building-bk7238-4-mb-table)).
 Packing a whole 4 MB image needed a 4 MB bootloader, and that turned up a tidy
 fact: **the S61's factory bootloader is the SDK's shipped
 `bootloader_bk7238_uart1_v1.0.15.bin` with the 4 MB FAL table in its tail**,
@@ -968,7 +968,7 @@ emulator. With the generic stock app and this region, a plug can always be put
 back to stock.
 
 **The robust, update-proof mechanism (ship this): an OpenBeken import module**
-([`docs/s61-tools/openbeken/drv_sonoff_s61_import.c`](../s61-tools/openbeken/drv_sonoff_s61_import.c)).
+([`devices/sonoff-s61/openbeken/drv_sonoff_s61_import.c`](../devices/sonoff-s61/openbeken/drv_sonoff_s61_import.c)).
 On first boot (only when no SSID is set) it reads the stock EF40 store with
 `beken_hal_flash_read`, finds the newest CRC-valid `wifi-ssid`/`wifi-pass`, and
 calls OpenBeken's own `CFG_SetWiFiSSID()`/`CFG_SetWiFiPass()`. Because it uses the
@@ -987,7 +987,7 @@ The second open firmware for the S61 is ESPHome on **LibreTiny**, whose 1.13.0
 [`ESPHome/sonoff_s61.yaml`](../ESPHome/sonoff_s61.yaml), is the S60's with the
 S61's wiring and storage, and needs no change to LibreTiny or ESPHome; the
 build, the reversion and the validation are in
-[docs/s61-tools/esphome/README.md](s61-tools/esphome/README.md). What the
+[devices/sonoff-s61/esphome.md](../devices/sonoff-s61/esphome.md). What the
 route rests on:
 
 - **The image is the same `rt_ota` format** OpenBeken's is: LibreTiny's build
@@ -1562,7 +1562,7 @@ patches no longer apply.
   `xref.py` (BL/BLX callers + data-word refs for an address), `strxref.py`
   (find code by the log/format string it uses), and `decomp.py` (angr
   pseudo-C decompiler — no Java/Ghidra needed).
-- **s61-tools** (`docs/s61-tools/`): the static-analysis tools above, plus the
+- **tools/beken** (`tools/beken/`): the static-analysis tools above, plus the
   provisioning drivers — `seed_join.py` (seed creds → Wi-Fi join),
   `ble_provision.py` (drive the eWeLink BLE messages through the dispatcher →
   Wi-Fi join), and `cloud_dial.py` (seed + synthesise the pairing trigger →

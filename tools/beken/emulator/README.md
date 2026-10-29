@@ -3,7 +3,7 @@
 [BekenEmulator](https://github.com/openshwprojects/BekenEmulator) at the commit
 `UPSTREAM` pins, with this project's patches and the Python it imports, as a
 container image - the way the S60's emulator is kept (`tools/espressif/emulator`). The
-tools in `docs/s61-tools` run in it:
+tools in `tools/beken` run in it:
 
 ```sh
 tools/beken/emulator/bk-emu.sh python tools/beken/seed_join.py
@@ -24,7 +24,7 @@ once into `captures/emulation/cache/` and checked against the SHA-256
 `UPSTREAM` pins. So the emulator needs nothing outside this repository. Upstream
 publishes no licence. `bk-emu.sh` with no argument lists the rest; what each
 patch does and why, how to change them, and how the pin moves, is in
-[docs/beken-s61-emulation.md](../../beken-s61-emulation.md#the-fork-s61-toolsemulator).
+[docs/beken-s61-emulation.md](../../../docs/beken-s61-emulation.md#the-fork-toolsbekenemulator).
 
 **No firmware is in the image or the archive.** The public S61s dump is Sonoff's
 firmware, which this repository never holds, so `bk-emu.sh dump` fetches it

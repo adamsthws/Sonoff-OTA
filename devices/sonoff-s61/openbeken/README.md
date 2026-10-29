@@ -9,7 +9,7 @@ It goes through `CFG_SetWiFiSSID()` / `CFG_SetWiFiPass()` rather than writing th
 config blob itself, so it keeps working across OpenBeken releases that change the
 `mainConfig_t` layout or checksum. It reads the stock store only (never writes
 it), so it does not stand in the way of reverting to stock. See the full findings
-in [beken-s61-emulation.md](../../beken-s61-emulation.md#carrying-wi-fi-across-the-conversion-the-openbeken-config).
+in [beken-s61-emulation.md](../../../docs/beken-s61-emulation.md#carrying-wi-fi-across-the-conversion-the-openbeken-config).
 
 ## Integrating into OpenBeken
 
@@ -65,12 +65,12 @@ stock bootloader applies from — so both OpenBeken updates and reversion to sto
 work through the ordinary `ota_http` — its config moves to the dedicated empty
 `0x3e1000`, and it reads the plug's real radio calibration at `0x3e0000`.
 
-Two patches, kept in [`upstream/`](upstream/) and offered upstream as
+Two patches, kept in [`tools/beken/openbeken/`](../../../tools/beken/openbeken/) and offered upstream as
 [OpenBK7231T_App#2290](https://github.com/openshwprojects/OpenBK7231T_App/pull/2290)
 and [beken_freertos_sdk#13](https://github.com/NonPIayerCharacter/beken_freertos_sdk/pull/13),
 add a `FLASH_SIZE=4M` build switch:
 
-- [`openbk7231t_app-bk7238-4m-flash.patch`](upstream/openbk7231t_app-bk7238-4m-flash.patch)
+- [`openbk7231t_app-bk7238-4m-flash.patch`](../../../tools/beken/openbeken/openbk7231t_app-bk7238-4m-flash.patch)
   (against `openshwprojects/OpenBK7231T_App`): `make FLASH_SIZE=4M` builds with
   the 4 MB table; `hal_ota.h` takes the OTA slot from the partition table the
   firmware was built with instead of a hard-coded `0x132000` (the REST and web-UI
@@ -81,7 +81,7 @@ add a `FLASH_SIZE=4M` build switch:
   table (on a 4 MB build LittleFS would otherwise have sat inside the app
   partition); and a change of flash size between builds rebuilds the app's
   objects, which the SDK build would otherwise reuse from the previous size.
-- [`beken_freertos_sdk-4m-pack-profile.patch`](upstream/beken_freertos_sdk-4m-pack-profile.patch)
+- [`beken_freertos_sdk-4m-pack-profile.patch`](../../../tools/beken/openbeken/beken_freertos_sdk-4m-pack-profile.patch)
   (against the SDK it clones, `NonPIayerCharacter/beken_freertos_sdk`): the pack
   step names its outputs by flash size instead of always `_2M`; the 4 MB QIO
   profile's app size matches the table (2516 K — the 2890 K it had ran into the
@@ -114,7 +114,7 @@ docker run --rm -v "$(pwd)":/app ubuntu:24.04 bash -c '
 
 `output/s61/OpenBK7238_4M_s61.rbl` is the `rt_ota` image for the **OTA
 conversion**: wrap it in the CoolKit FOTA container with
-[`../fota_wrap.py`](../fota_wrap.py) to push it to a stock plug.
+[`../fota_wrap.py`](../../../tools/beken/fota_wrap.py) to push it to a stock plug.
 `OpenBK7238_4M_QIO_s61.bin` beside it is a whole 4 MB flash — bootloader included
 — for the emulator or a UART flash.
 
@@ -203,7 +203,7 @@ bootloader never looks). The stock EasyFlash store is never touched, so the plug
 comes back with its own Wi-Fi, calibration and identity.
 
 The stock app RBL is rebuilt from a dump — the app partition holds only the
-decompressed image — with [`../stock_app.py`](../stock_app.py)
+decompressed image — with [`../stock_app.py`](../../../tools/beken/stock_app.py)
 (extracts and verifies it against the stored FNV-1a hash) and the SDK's own
 packer, exactly as OpenBeken's build packages its app:
 
@@ -225,7 +225,7 @@ still there afterwards.
 
 ## Backing up the plug
 
-[`../backup.py`](../backup.py) copies the per-device region
+[`../backup.py`](../../../tools/beken/backup.py) copies the per-device region
 `0x3e0000–0x400000` (factory TLV with MAC and radio calibration, EasyFlash app
 store with Wi-Fi creds and `elecCalibCoef`, system ENV) out of a converted plug
 over OpenBeken's `GET /api/flash/<addr>-<len>`, and files it the way the S60

@@ -93,7 +93,7 @@ every ESPHome the conversion installs is, whatever the plug, and its own
 network has that name too; the friendly name says what plug it is. Up to 1.1.0
 it was `sonoff-s60-abcdef`, its network `Sonoff-Setup-CDEF`.
 
-[`prototype/FINDINGS.md`](prototype/FINDINGS.md) records how this route was
+[`archive/esphome-prototype/FINDINGS.md`](../archive/esphome-prototype/FINDINGS.md) records how this route was
 worked out and tested.
 
 ## The S61
@@ -104,4 +104,4 @@ the S61's wiring, and its Wi-Fi and factory calibration read at boot from the
 stock firmware's own store, which stays on the plug through every conversion -
 so it has no placeholders to fill. The tool installs it as an rt_ota update
 the plug's stock bootloader applies. How it is built and what the emulator
-validated: [docs/s61-tools/esphome/README.md](../docs/s61-tools/esphome/README.md).
+validated: [devices/sonoff-s61/esphome.md](../devices/sonoff-s61/esphome.md).

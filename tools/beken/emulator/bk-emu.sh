@@ -2,7 +2,7 @@
 # The S61's emulator, BekenEmulator with this project's patches, as a container
 # image - built from the source archive this repository's release
 # emulator-source-beken-<commit> holds, or pulled where it is published - and
-# the tools in docs/s61-tools run in it.
+# the tools in tools/beken run in it.
 #
 #   tools/beken/emulator/bk-emu.sh python ARGS...
 #                             run python in the emulator's container, with this checkout
