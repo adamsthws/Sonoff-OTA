@@ -22,6 +22,11 @@ eWeLink accounts and plugs' identities.
   [docs/technical-details.md](docs/technical-details.md#keeping-secrets-out-of-git)
 - **A plug's stock Sonoff backup cannot be made again** once the plug is
   converted: never overwrite, move or delete one.
+- **No third party's proprietary firmware** - Sonoff's stock images, a plug's
+  dump - is ever committed, put on a release or built into a published
+  image, whatever the convenience. Where tooling needs one, fetch it at run
+  time from where its owner or another project publishes it, as
+  `docs/s61-tools/emulator/bk-emu.sh dump` does.
 
 ## Real plugs and the emulator
 

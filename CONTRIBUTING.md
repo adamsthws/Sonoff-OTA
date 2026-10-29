@@ -86,6 +86,13 @@ eWeLink accounts and plugs' identities.
   example belongs in `.leak-scan-allow`; nothing real is ever let through
   with `--no-verify`.
   [docs/technical-details.md](docs/technical-details.md#keeping-secrets-out-of-git)
+- No third party's proprietary firmware - Sonoff's stock images, a plug's
+  dump, anything else we have no right to publish - is ever committed, put on
+  a release or built into a published image. Git ignores `*.bin` for this
+  reason; the exceptions listed in `.gitignore` are open-source firmware this
+  project ships. Where the tooling needs such an image, as the emulators'
+  tests do, it is fetched at run time from wherever its owner or another
+  project publishes it, never copied here.
 
 ## Commits and pull requests
 
@@ -117,8 +124,13 @@ eWeLink accounts and plugs' identities.
 
 ## Elsewhere
 
-A bug found in another project - Tasmota, ESPHome, ESP-IDF, the emulator's
-QEMU - is reported there, and recorded in
-[docs/upstream-contributions.md](docs/upstream-contributions.md).
+A bug found in another project - Tasmota, ESPHome, ESP-IDF, OpenBeken, the
+emulator's QEMU - is reported there, and every pull request or issue opened
+because of work here gets an entry in
+[docs/upstream-contributions.md](docs/upstream-contributions.md) in the same
+change, in that document's style: a row in the table of the topic it belongs
+to (or a new topic, with a short introduction), giving the project, a link
+and one line on what it fixes, and a note on how the fix was proven. Open the
+pull request, then write the entry, so the link is real.
 
 AI assistants working here: [AGENTS.md](AGENTS.md).
