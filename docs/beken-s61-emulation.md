@@ -876,8 +876,9 @@ P24 for SEL (and `0x26` = `8<<2 | 6` looks like CF/CF1 packed). The template's
 fixed upstream in 1.18.235 (PR #1930); our 1.18.319 base has the fix. The import
 module applies this template on first boot, plus `SetStartValue 1 -1` so the
 relay restores its last state after a power cut (what the tool sets on the S60).
-No ESPHome/LibreTiny config for the S61 exists yet; the pins above translate
-directly (`hlw8012: model: BL0937, sel_pin: P24, cf_pin: P8, cf1_pin: P6`).
+The ESPHome config ([`ESPHome/sonoff_s61.yaml`](../ESPHome/sonoff_s61.yaml),
+on LibreTiny) uses the same pins (`hlw8012: model: BL0937, sel_pin: P24,
+cf_pin: P8, cf1_pin: P6`); see [the ESPHome route](#the-esphome-route-libretiny).
 
 #### Partition map: the SDK's 4 MB table *is* Sonoff's layout
 
@@ -962,6 +963,62 @@ as a fallback / emulator aid. The module's EF40 scan + CRC + extract logic is
 validated against the dump; building it into an OpenBeken image and flashing it is
 the remaining on-device step. It also only reads the stock store, so it is fully
 reversible.
+
+### The ESPHome route (LibreTiny)
+
+The second open firmware for the S61 is ESPHome on **LibreTiny**, whose 1.13.0
+(the version ESPHome 2026.10.0 pins) has the BK7238. The config,
+[`ESPHome/sonoff_s61.yaml`](../ESPHome/sonoff_s61.yaml), is the S60's with the
+S61's wiring and storage, and needs no change to LibreTiny or ESPHome; the
+build, the reversion and the validation are in
+[docs/s61-tools/esphome/README.md](s61-tools/esphome/README.md). What the
+route rests on:
+
+- **The image is the same `rt_ota` format** OpenBeken's is: LibreTiny's build
+  produces `image_bk7238_app.ota.rbl` (name `app`, gzip, AES with RT-Thread's
+  public key), which the stock bootloader applies from the download slot like
+  any other. Staged at `0x286000` through the cloud-pushed `upgrade` (the
+  FOTA container, verbatim), the bootloader logs
+  `upgrade(1.0.2->26.10.29-bk7238)`, `_STREAM_END` with the raw size the
+  build reported, erases and writes `app`, and jumps.
+- **LibreTiny's partition table is the board's `flash` section**, which it
+  wraps over the SDK's (`BkDriverFlash.c`), and PlatformIO's `board_flash.*`
+  overrides reach both the firmware and ltchiptool (the build writes the
+  merged board to `board.json`). So the config carries the S61's layout in
+  `platformio_options`: app `0x11000+0x275000` with `bkrbl_size_app
+  0x250000`, download `0x286000` (ESPHome's own OTA then lands where the stock
+  bootloader looks), calibration `0x3e0000`, FlashDB preferences at
+  `0x3ee000` (the empty 32 KB OpenBeken's 4 MB table calls `USR_CONFIG`),
+  LittleFS at the empty `0x3e1000`. Nothing of the stock stores is touched.
+- **Wi-Fi and calibration come from the stock EF40 store at boot**, read with
+  `lt_flash_read` in a boot lambda (the import module's scan, in C++): there
+  is no image imprinting on this route, as the packaged image cannot be
+  patched, and none is needed. The calibration is applied with the stock
+  formula above; ESPHome's `hlw8012` reckons the pulse rate with the BL0937
+  datasheet's 1.218 V where the stock driver uses 1.1 V, so the readings are
+  scaled by that ratio (squared for power) before the trim.
+- **Reversion** is ESPHome's own OTA: LibreTiny writes a UF2's `download`
+  part to the download slot, so a UF2 carrying the stock app RBL (ltchiptool
+  builds one) brings the stock bootloader's apply on the next reboot - and
+  one carrying OpenBeken's 4 MB-table `.rbl` moves the plug to OpenBeken,
+  whose `ota_http` of the ESPHome `.rbl` moves it back. Both proven in the
+  emulator: each first boot takes Wi-Fi, calibration and wiring from the
+  stock store, and the two firmwares' own settings live in different sectors
+  (`0x3ee000` ESPHome, `0x3e1000` OpenBeken), so neither disturbs the other.
+- **The emulator needed one change** (in the fork): LibreTiny keeps its
+  FreeRTOS tick on hardware **Timer 0** (the 26 MHz group, for a fine
+  `micros()`; `cores/beken-72xx/base/fixups/clock_rtos.c`), where OpenBeken
+  and the stock firmware use Timer 3. The emulator raised only Timer 3's
+  status, so LibreTiny's timer ISR acknowledged a channel with no handler
+  while `xTaskIncrementTick` never ran: every log line said `0.000`, the
+  first `delay()` never returned, and the Wi-Fi start stalled at `Waiting for
+  init_thread`. It now models the 26 MHz group too (Timer 3 as before):
+  each enabled channel fires at its programmed period, at the slow tick's
+  resolution. The period is not optional: OpenBeken's BK7238 build feeds its
+  interrupt watchdog from a 10 s channel of that group (two key writes with
+  a busy delay between), and a first version that raised every enabled
+  channel on every tick ran that feed back to back and starved OpenBeken
+  right after `Main_Init_Before_Delay`.
 
 ### Tools (reproducibility)
 
@@ -1234,6 +1291,16 @@ real hardware, likely stands up an AP IP/dhcpd); it is **not** a self-contained
 credential-provisioning AP. This is why seeding `wifi-ssid`/`wifi-pass` directly
 is the right way to get the emulated plug onto a network — it lands in the same
 end state without the BLE handoff the emulator has no radio for.
+
+> **If we ever implement our own LAN client** (to drive a plug on port 8081 once
+> it is online, rather than over the cloud WebSocket), look to **iHost**, which
+> drives eWeLink devices locally. Its "eWeLink Smart Home" add-on would contain a
+> working implementation of the encrypted LAN-control protocol and the device-key
+> handling — a useful reference for the mDNS `_ewelink._tcp` discovery, the port-8081
+> request format, and the AES scheme keyed on the device secret. Note this is a
+> control channel only: the stock LAN endpoint carries no firmware-push route (no
+> `/zeroconf/ota_*`), so OTA still goes through the cloud-dial redirect — the LAN
+> client would be for exercising an online plug, not for conversion.
 
 **AirKiss decode is not implemented in this build — `0x403b20` is a stub
 callback.** `0x403b20` is the monitor-mode frame **callback pointer**: the RX
