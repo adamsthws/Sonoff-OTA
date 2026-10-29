@@ -1,24 +1,51 @@
-# Sonoff S60 → Tasmota or ESPHome, OTA
-***Flash it, don't smash it.***
-
-[![Runs on Linux, macOS and Windows](https://img.shields.io/badge/Runs%20on-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#what-it-has-been-run-on)
-
-[![Installs Tasmota](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.tasmota.version&label=Installs%20Tasmota&color=blue)](docs/updating-firmware.md) [![Installs ESPHome](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.esphome.image.esphome&label=Installs%20ESPHome&color=blue)](docs/updating-firmware.md)
-
-[![Release](https://img.shields.io/github/v/release/adamsthws/Sonoff-OTA?label=Release)](https://github.com/adamsthws/Sonoff-OTA/releases/latest) [![Downloads](https://img.shields.io/github/downloads/adamsthws/Sonoff-OTA/total?label=Downloads)](https://github.com/adamsthws/Sonoff-OTA/releases) [![Tests](https://img.shields.io/github/actions/workflow/status/adamsthws/Sonoff-OTA/emulator-check.yml?branch=main&label=Tests)](https://github.com/adamsthws/Sonoff-OTA/actions/workflows/emulator-check.yml) [![Lint](https://img.shields.io/github/actions/workflow/status/adamsthws/Sonoff-OTA/lint.yml?branch=main&label=Lint)](https://github.com/adamsthws/Sonoff-OTA/actions/workflows/lint.yml) [![License: GPL-3.0](https://img.shields.io/github/license/adamsthws/Sonoff-OTA?label=License)](LICENSE) [![Discussions](https://img.shields.io/github/discussions/adamsthws/Sonoff-OTA?label=Discussions)](https://github.com/adamsthws/Sonoff-OTA/discussions) [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/adamsthws)
+# Sonoff → Tasmota, OpenBeken, ESPHome
+> **Firmware Flasher**  
+(Fully OTA - 'Over The Air' - I.e Flash over Wi-Fi)
 
 <br>
+
+[![Runs on Linux, macOS and Windows](https://img.shields.io/badge/Runs%20on-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#what-it-supports)
+
+[![Installs ESPHome](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.esphome.image.esphome&label=Installs%20ESPHome&color=blue)](docs/updating-firmware.md) [![Installs Tasmota](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Ffirmware.json&query=%24.tasmota.version&label=Installs%20Tasmota&color=blue)](docs/updating-firmware.md) [![Installs OpenBeken](https://img.shields.io/badge/Installs%20OpenBeken-Coming%20Soon-blue)](docs/updating-firmware.md)
+
+[![Release](https://img.shields.io/github/v/release/adamsthws/Sonoff-OTA?label=Release)](https://github.com/adamsthws/Sonoff-OTA/releases/latest) [![Tests](https://img.shields.io/github/actions/workflow/status/adamsthws/Sonoff-OTA/emulator-check.yml?branch=main&label=Tests)](https://github.com/adamsthws/Sonoff-OTA/actions/workflows/emulator-check.yml) [![License: GPL-3.0](https://img.shields.io/github/license/adamsthws/Sonoff-OTA?label=License)](LICENSE)
+
+[![Discussions](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fimg.shields.io%2Fgithub%2Fdiscussions%2Fadamsthws%2FSonoff-OTA.json&search=(%5Cd%2B)%20total&replace=%241&label=Discussions&color=blue)](https://github.com/adamsthws/Sonoff-OTA/discussions) [![Issues](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fimg.shields.io%2Fgithub%2Fissues%2Fadamsthws%2FSonoff-OTA.json&search=(%5Cd%2B)%20open&replace=%241&label=Issues&color=blue)](https://github.com/adamsthws/Sonoff-OTA/issues) [![Pull Requests](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fimg.shields.io%2Fgithub%2Fissues-pr%2Fadamsthws%2FSonoff-OTA.json&search=(%5Cd%2B)%20open&replace=%241&label=Pull%20Requests&color=blue)](https://github.com/adamsthws/Sonoff-OTA/pulls) [![Downloads](https://img.shields.io/github/downloads/adamsthws/Sonoff-OTA/total?label=Downloads&color=blue)](https://github.com/adamsthws/Sonoff-OTA/releases)
+
 <br>
 
-![Sonoff (eWeLink), Tasmota and ESPHome: any one converts to any other](docs/FirmwareRoutes.svg)
+## Keep this tool alive and growing  
+Your donation goes toward expansion, supporting many more devices - Thankyou!  
+
+
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-Support-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/adamsthws) [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/adamsthws) [![PayPal](https://img.shields.io/badge/PayPal-Support-00457C?logo=paypal&logoColor=white)](https://www.paypal.me/adamsthws)  
+
+> Sponsor through GitHub and a sponsor badge appears beside your name in this repository's issues and discussions, and the Sponsor achievement on your profile.
 
 <br>
+
+### Liberation From The Cloud
+
+Your device answers to you alone, on your own network.
+> Removes dependence on external cloud servers. After flashing you'll no longer require a cloud account or third party app, and even after a cloud service is switched off your device keeps working and remains fully under your control.
+
 <br>
 
-## Fully automated 'Over The Air' firmware conversion
+### Any Direction
 
-Turn your stock Sonoff S60 smart plug into one running **Tasmota** or
-**ESPHome** using OTA method - no soldering, no taking the plug apart. Move the plug between the two, or back to Sonoff's own firmware.
+And every route between them.
+> Stock Sonoff to Tasmota, OpenBeken or ESPHome, either to the other, and back to Sonoff's own firmware if you change your mind.
+
+<br>
+
+
+![Sonoff (eWeLink), Tasmota or OpenBeken, and ESPHome: any one converts to any other](docs/FirmwareRoutes.svg)
+
+<br>
+
+### Fully automated 'Over The Air' firmware conversion
+
+Turn your stock Sonoff S60/S61 smart plug into one running **Tasmota**, **OpenBeken** or **ESPHome** using OTA method - no soldering, no taking the plug apart. Move the plug between the two, or back to Sonoff's own firmware.
 
 > Conversion with this tool is fully automated end to end, with checks at every stage. It is resumable and can be restarted at any point.
 
@@ -61,12 +88,13 @@ UK: **S60TPG** | European: **S60TPF**
 
 <br>
 
-## What it has been run on
+## What it supports
+> Support for more devices coming soon.
 
 **Model**
 
-- ✅ **S60TPG** - UK / Type G
-- ✅ **S60TPF** - EU / Type E/F
+- ✅ **Sonoff S60TPG** - UK / Type G
+- ✅ **Sonoff S60TPF** - EU / Type E/F
 
 **Stock firmware**
 
