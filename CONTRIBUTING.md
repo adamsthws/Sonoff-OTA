@@ -86,6 +86,13 @@ eWeLink accounts and plugs' identities.
   example belongs in `.leak-scan-allow`; nothing real is ever let through
   with `--no-verify`.
   [docs/technical-details.md](docs/technical-details.md#keeping-secrets-out-of-git)
+- No third party's proprietary firmware - Sonoff's stock images, a plug's
+  dump, anything else we have no right to publish - is ever committed, put on
+  a release or built into a published image. Git ignores `*.bin` for this
+  reason; the exceptions listed in `.gitignore` are open-source firmware this
+  project ships. Where the tooling needs such an image, as the emulators'
+  tests do, it is fetched at run time from wherever its owner or another
+  project publishes it, never copied here.
 
 ## Commits and pull requests
 
