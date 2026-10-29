@@ -20,8 +20,8 @@ the eWeLink cloud dispatch needs the eWeLink identity too — see the main doc).
 This is the integrity-gate bypass (0x29c3c) plus the credential injection; no
 other intervention. Requires the BekenEmulator fork.
 
-  $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_seed_join.py
-  SSID=MyNet PASS=mypassword CH=6 SECS=40 python3 s61_seed_join.py
+  $(tools/beken/emulator/bk-emu.sh python) tools/beken/seed_join.py
+  SSID=MyNet PASS=mypassword CH=6 SECS=40 python3 seed_join.py
 """
 import os
 import sys

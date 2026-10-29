@@ -2,13 +2,13 @@
 
 Builds a small CFG around each target (Thumb) and runs angr's decompiler. angr is
 heavy and best-effort on a raw blob — treat the output as a reading aid alongside
-s61_dis.py, not ground truth. (No Java is needed; this is the Ghidra-free path.)
+disasm.py, not ground truth. (No Java is needed; this is the Ghidra-free path.)
 
-Addresses are offsets into the logical image (see s61_unstripe.py), which equal
+Addresses are offsets into the logical image (see unstripe.py), which equal
 CPU addresses.
 
 Usage:
-  s61_decomp.py IMAGE ADDR [ADDR...]
+  decomp.py IMAGE ADDR [ADDR...]
 """
 import sys
 import logging

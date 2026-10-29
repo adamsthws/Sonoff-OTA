@@ -2,7 +2,7 @@
 follow -- soft-AP beacons or station-mode association, or the AirKiss sniffer.
 
 Background (full story in ../beken-s61-emulation.md): with the integrity gate
-bypassed (s61_integrity_gate.py) the AIS app framework boots and its state
+bypassed (integrity_gate.py) the AIS app framework boots and its state
 machine (ais_appfw_task) cycles, but nothing sets a pairing method and posts the
 start event, so the firmware sits idle. This tool sets a method and calls the
 firmware's own pairing-method dispatcher `0x21eb4` from inside the appfw task's
@@ -30,16 +30,16 @@ What you see when it works (verified 2026-10-27):
     device is already in monitor mode from the RF init. The smartconfig decoder
     subscription (0x403b20) is set once the coexist path runs to completion; to
     feed and decode captured AirKiss frames, pair this with monitor_rx_deliver
-    and s61_airkiss_replay.py.
+    and airkiss_replay.py.
 
-Two emulator-side interventions are shared with s61_long_press.py: the
+Two emulator-side interventions are shared with long_press.py: the
 integrity-gate bypass (force the compare at 0x29c3c to "equal") and raising
 Timer 5's interrupt status each slow tick (the key/app periodics run on
 bk_timer = Timer 5, which the emulator does not raise on its own).
 
-  $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_pair_drive.py 0        # soft-AP (coexist)
-  $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_pair_drive.py 1        # station
-  $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_pair_drive.py airkiss  # sniffer-start
+  $(tools/beken/emulator/bk-emu.sh python) archive/s61-research/pair_drive.py 0        # soft-AP (coexist)
+  $(tools/beken/emulator/bk-emu.sh python) archive/s61-research/pair_drive.py 1        # station
+  $(tools/beken/emulator/bk-emu.sh python) archive/s61-research/pair_drive.py airkiss  # sniffer-start
 
 Env: SECS (run seconds, 18), FIRE_AT (when to drive, 8), SSID/PASS (peer AP to
 join for method 1 / credentials written into the config buffer).

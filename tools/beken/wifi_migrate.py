@@ -9,19 +9,19 @@ A template (OpenBeken's own default config blob) keeps every non-credential
 field valid; without one a zeroed config still loads and joins but carries no
 pin/relay mapping.
 
-  python s61_wifi_migrate.py --stock stock.bin --obk OpenBK7238_QIO.bin \
+  python wifi_migrate.py --stock stock.bin --obk OpenBK7238_QIO.bin \
          --out converted.bin [--cfg-offset 0x1e1000] [--template default_cfg.bin]
 """
 import argparse
 import sys
 
-import s61_ef40
+import ef40
 from obk_config import build_config, CFG_SIZE
 
 
 def read_stock_creds(stock_path):
     data = open(stock_path, "rb").read()
-    kv = s61_ef40.parse_store(data)
+    kv = ef40.parse_store(data)
     ssid = kv.get("wifi-ssid")
     pw = kv.get("wifi-pass")
     if ssid is None or pw is None:

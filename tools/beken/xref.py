@@ -5,12 +5,12 @@ For each target address it reports:
   - 32-bit data-word references (literal pools / tables), for both addr and addr|1
     (Thumb pointers carry the low bit set).
 
-Addresses are offsets into the logical image (see s61_unstripe.py), which equal
+Addresses are offsets into the logical image (see unstripe.py), which equal
 CPU addresses. The code region defaults to 0x10000..0x130000 (the app); override
 with S61_CODE_LO / S61_CODE_HI if needed.
 
 Usage:
-  s61_xref.py IMAGE ADDR [ADDR...]
+  xref.py IMAGE ADDR [ADDR...]
 """
 import os
 import sys

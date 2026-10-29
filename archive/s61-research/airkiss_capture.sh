@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Capture a phone's eWeLink AirKiss/smartconfig broadcast to a pcap, for replay
-# into the emulator (see s61_airkiss_replay.py). Needs root. Takes the Wi-Fi
+# into the emulator (see airkiss_replay.py). Needs root. Takes the Wi-Fi
 # adapter into monitor mode, so the laptop drops off Wi-Fi while capturing.
 # Intel AX200 (iwlwifi) does monitor CAPTURE fine.
 #
@@ -9,7 +9,7 @@
 # 802.11). This script tells NetworkManager to release the interface first and
 # restores it afterwards.
 #
-# Usage:  sudo ./s61_airkiss_capture.sh <channel> [iface] [out.pcap]
+# Usage:  sudo ./airkiss_capture.sh <channel> [iface] [out.pcap]
 set -euo pipefail
 CH="${1:?need channel, e.g. 6}"; IFACE="${2:-wlp1s0}"; OUT="${3:-airkiss-$(date +%Y%m%d-%H%M%S).pcap}"
 echo "[cap] iface=$IFACE channel=$CH out=$OUT"

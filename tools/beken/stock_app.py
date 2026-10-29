@@ -15,7 +15,7 @@ accepts:
 
 (the key is RT-Thread's public default; see docs/beken-s61-emulation.md).
 
-  python3 s61_stock_app.py dump.bin [-o stock_app_1.0.2.bin]
+  python3 stock_app.py dump.bin [-o stock_app_1.0.2.bin]
 """
 from __future__ import annotations
 

@@ -10,7 +10,7 @@ Two things have to be synthesised, because the emulator has no BLE radio:
 1. Wi-Fi credentials. The firmware reads `wifi-ssid`/`wifi-pass` from EasyFlash
    (`ef_get_env_blob`, 0x12f438); hooking that call feeds our SSID/pass, so the
    plug associates (WPA2) and gets a DHCP lease. (Same technique as
-   `s61_seed_join.py`.)
+   `seed_join.py`.)
 
 2. The pairing-success trigger. The cloud dial is gated on a chain that normally
    fires only when an eWeLink BLE pairing COMPLETES over a real GATT link:
@@ -22,7 +22,7 @@ Two things have to be synthesised, because the emulator has no BLE radio:
                   -> reads the AIS context *0x4044ac and dials ctx+0x5f (dispatchUrl)
 
    Driving the BLE provisioning MESSAGES through the dispatcher (see
-   `s61_ble_provision.py`) runs the handlers and connects Wi-Fi, but never fires
+   `ble_provision.py`) runs the handlers and connects Wi-Fi, but never fires
    the pairing-FINISH event, so the device stays unpaired and dials nothing. We
    synthesise that event directly by force-calling the start-cloud handler
    (0x2c204) once Wi-Fi is up.
@@ -41,8 +41,8 @@ Verified 2026-10-27: the default dials our AP gateway `192.168.1.1:80`; `DISPATC
 leaves the factory `8.8.8.8:80`. Either way the netstack logs
 `TCP connect .. -> ..:80` + `HTTP GET /dispatch/device`, retried with backoff.
 
-  $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_dial.py              # local stub (default)
-  DISPATCH= $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_dial.py    # factory placeholder
+  $(tools/beken/emulator/bk-emu.sh python) tools/beken/cloud_dial.py              # local stub (default)
+  DISPATCH= $(tools/beken/emulator/bk-emu.sh python) tools/beken/cloud_dial.py    # factory placeholder
 """
 import os
 import sys

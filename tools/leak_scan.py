@@ -63,8 +63,8 @@ TOKENS = {
     "a Slack token": re.compile(r"\bxox[abprs]-[0-9A-Za-z-]{10,}"),
 }
 # A UUID that could be a device's apikey or id; and the two shapes the S61
-# research tools print, so a pasted dump of either is caught. s61_dis.py lines
-# are "0xADDR:  BYTES  mnemonic"; s61_decomp.py banners are "### FUNCTION 0x.. ###".
+# research tools print, so a pasted dump of either is caught. disasm.py lines
+# are "0xADDR:  BYTES  mnemonic"; decomp.py banners are "### FUNCTION 0x.. ###".
 UUID_TEXT = re.compile(r"(?<![0-9A-Za-z-])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
                        r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Za-z-])")
 DISASM_LINE = re.compile(r"\b0x[0-9a-f]{4,8}:\s+[0-9a-f]{4,8}\s+[a-z]")

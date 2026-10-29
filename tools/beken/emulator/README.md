@@ -6,7 +6,7 @@ container image - the way the S60's emulator is kept (`tools/espressif/emulator`
 tools in `docs/s61-tools` run in it:
 
 ```sh
-tools/beken/emulator/bk-emu.sh python docs/s61-tools/s61_seed_join.py
+tools/beken/emulator/bk-emu.sh python tools/beken/seed_join.py
 tools/beken/emulator/bk-emu.sh run captures/your-dump.bin --wifi-peer auto
 tools/beken/emulator/bk-emu.sh test -k "Sonoff 4MB"    # upstream's self-tests, under the patches
 ```

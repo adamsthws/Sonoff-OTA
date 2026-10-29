@@ -17,7 +17,7 @@ With these a plug can be put back to stock later whatever happens: stage the
 stock RBL (S61RevertToStock), and if the config region were ever lost, rewrite
 it from the copy. The backup is never overwritten once made.
 
-  python3 s61_backup.py --plug http://192.168.1.100 [--stock-rbl stock_app_1.0.2.rbl]
+  python3 backup.py --plug http://192.168.1.100 [--stock-rbl stock_app_1.0.2.rbl]
 """
 from __future__ import annotations
 

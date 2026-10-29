@@ -22,7 +22,7 @@ The device verifies only integrity: the magic, the trailer/descriptor CRC-32s, a
 version-greater-than check, and the `upgrade` command's digest (SHA-256 of the file).
 
 Usage:
-    s61_fota_wrap.py IN.rbl [-o OUT.fota] [--name NAME] [--version VER]
+    fota_wrap.py IN.rbl [-o OUT.fota] [--name NAME] [--version VER]
                      [--serve [HOST:PORT]]
 
 With --serve it hosts the container over HTTP (206 ranged, keep-alive) exactly as

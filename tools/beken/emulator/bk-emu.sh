@@ -8,7 +8,7 @@
 #                             run python in the emulator's container, with this checkout
 #                             at /work (the working directory) and the fetched firmware
 #                             mounted in; the image is ensured first:
-#                             tools/beken/emulator/bk-emu.sh python docs/s61-tools/s61_seed_join.py
+#                             tools/beken/emulator/bk-emu.sh python tools/beken/seed_join.py
 #   tools/beken/emulator/bk-emu.sh run DUMP [ARGS...]
 #                             run a BK7238 dump as the S61 work does: main.py DUMP
 #                             --with-boot -chip BK7238 --only-uart ARGS

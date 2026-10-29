@@ -32,8 +32,8 @@ path. The eWeLink-provisioned/bound state that gates the cloud task (`ais_link_t
 not locatable by static xref (the firmware loads it `adr`-relative). See the main
 doc's "eWeLink BLE provisioning protocol" section.
 
-  $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_ble_provision.py
-  SEQ=devinfo,auth,wifi,server SSID=MyNet PASS=mypass python3 s61_ble_provision.py
+  $(tools/beken/emulator/bk-emu.sh python) archive/s61-research/ble_provision.py
+  SEQ=devinfo,auth,wifi,server SSID=MyNet PASS=mypass python3 ble_provision.py
 """
 import os
 import sys

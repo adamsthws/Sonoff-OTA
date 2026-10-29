@@ -10,7 +10,7 @@ Uses the emulator fork's CRC routine (so it always matches the model); set
 BK_EMU_ROOT if the fork is not where tools/beken/emulator/bk-emu.sh puts it.
 
 Usage:
-  s61_unstripe.py [RAW_DUMP] [OUT_LOGICAL]
+  unstripe.py [RAW_DUMP] [OUT_LOGICAL]
     RAW_DUMP      raw flash dump (default: $S61_DUMP, else the fork's S61 image)
     OUT_LOGICAL   output path (default: ./logical.bin)
 """

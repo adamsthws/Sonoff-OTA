@@ -6,7 +6,7 @@ decode, an optional AP-role peer (known SSID/pass) lets the device associate.
 Stdlib-only pcap/radiotap parsing. DLT 127 (radiotap) and 105 (raw 802.11).
 
 Usage:
-  s61_airkiss_replay.py <capture.pcap> [--ssid S --pass P] [--loops N] [--selftest]
+  airkiss_replay.py <capture.pcap> [--ssid S --pass P] [--loops N] [--selftest]
 With --selftest it generates a synthetic capture and replays it to prove the
 pipeline (no real decode, just delivery/throughput).
 """

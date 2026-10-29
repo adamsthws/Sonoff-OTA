@@ -1,6 +1,6 @@
 """Complete the eWeLink cloud cycle: the emulated S61 comes ONLINE against a stub.
 
-Builds on s61_cloud_dial.py (which gets the plug to dial GET /dispatch/device) by
+Builds on cloud_dial.py (which gets the plug to dial GET /dispatch/device) by
 standing up the local CoolKit stub (tools/espressif/emulator/stub_cloud/stub_server.py) on
 loopback and bridging the emulator's netstack to it, then driving the whole
 handshake:
@@ -30,11 +30,11 @@ it routes through the gateway), which we redirect to the loopback stub -
 plaintext dispatch on one port, TLS IoT on another. Everything stays on this
 host; nothing reaches the real cloud.
 
-Two synthesised pieces, as in s61_cloud_dial.py: Wi-Fi creds seeded at
+Two synthesised pieces, as in cloud_dial.py: Wi-Fi creds seeded at
 ef_get_env_blob, and the pairing-success trigger (force-call the start-cloud
 handler 0x2c204) once Wi-Fi is up.
 
-  $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_online.py
+  $(tools/beken/emulator/bk-emu.sh python) tools/beken/cloud_online.py
 """
 import os
 import sys

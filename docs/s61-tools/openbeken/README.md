@@ -99,7 +99,7 @@ image is too old and fails with `GLIBC_2.34 not found`). The SDK's pack step cal
 ```sh
 git clone https://github.com/openshwprojects/OpenBK7231T_App
 cd OpenBK7231T_App
-cp <this repo>/docs/s61-tools/openbeken/upstream/*.patch .
+cp <this repo>/tools/beken/openbeken/*.patch .
 git apply openbk7231t_app-bk7238-4m-flash.patch
 # ...the three module edits from the section above...
 docker run --rm -v "$(pwd)":/app ubuntu:24.04 bash -c '
@@ -114,7 +114,7 @@ docker run --rm -v "$(pwd)":/app ubuntu:24.04 bash -c '
 
 `output/s61/OpenBK7238_4M_s61.rbl` is the `rt_ota` image for the **OTA
 conversion**: wrap it in the CoolKit FOTA container with
-[`../s61_fota_wrap.py`](../s61_fota_wrap.py) to push it to a stock plug.
+[`../fota_wrap.py`](../fota_wrap.py) to push it to a stock plug.
 `OpenBK7238_4M_QIO_s61.bin` beside it is a whole 4 MB flash — bootloader included
 — for the emulator or a UART flash.
 
@@ -203,12 +203,12 @@ bootloader never looks). The stock EasyFlash store is never touched, so the plug
 comes back with its own Wi-Fi, calibration and identity.
 
 The stock app RBL is rebuilt from a dump — the app partition holds only the
-decompressed image — with [`../s61_stock_app.py`](../s61_stock_app.py)
+decompressed image — with [`../stock_app.py`](../stock_app.py)
 (extracts and verifies it against the stored FNV-1a hash) and the SDK's own
 packer, exactly as OpenBeken's build packages its app:
 
 ```sh
-python3 ../s61_stock_app.py dump.bin -o stock_app_1.0.2.bin
+python3 ../stock_app.py dump.bin -o stock_app_1.0.2.bin
 sdk/beken_freertos_sdk/tools/rtt_ota/rt_ota_packaging_tool_cli \
     -f stock_app_1.0.2.bin -o stock_app_1.0.2.rbl -p app -c gzip -s aes \
     -k 0123456789ABCDEF0123456789ABCDEF -i 0123456789ABCDEF -v 1.0.2
@@ -225,7 +225,7 @@ still there afterwards.
 
 ## Backing up the plug
 
-[`../s61_backup.py`](../s61_backup.py) copies the per-device region
+[`../backup.py`](../backup.py) copies the per-device region
 `0x3e0000–0x400000` (factory TLV with MAC and radio calibration, EasyFlash app
 store with Wi-Fi creds and `elecCalibCoef`, system ENV) out of a converted plug
 over OpenBeken's `GET /api/flash/<addr>-<len>`, and files it the way the S60
@@ -239,7 +239,7 @@ captures/plugs/<mac-with-dashes>/sonoff-backup/
 ```
 
 ```sh
-python3 ../s61_backup.py --plug http://<plug> --stock-rbl stock_app_1.0.2.rbl
+python3 ../backup.py --plug http://<plug> --stock-rbl stock_app_1.0.2.rbl
 ```
 
 Byte-exact against the dump in the emulator.

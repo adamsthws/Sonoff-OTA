@@ -5,10 +5,10 @@ that point at the string, and disassembles (Thumb) the `ldr rX, [pc, #imm]` that
 loads each pool word plus its surrounding context. Good for turning a UART line
 like "softap:ssid=%s" or "pairingMode by %d" into the function that prints it.
 
-Addresses are offsets into the logical image (see s61_unstripe.py).
+Addresses are offsets into the logical image (see unstripe.py).
 
 Usage:
-  s61_strxref.py IMAGE STRING [STRING...]
+  strxref.py IMAGE STRING [STRING...]
 """
 import struct
 import sys

@@ -110,7 +110,7 @@ class FileNameTests(unittest.TestCase):
         s = scanner()
         s.filename("airkiss.pcap", "airkiss.pcap")
         s.filename("docs/s61-tools/grab.PCAPNG", "docs/s61-tools/grab.PCAPNG")
-        s.filename("s61_airkiss_replay.py", "s61_airkiss_replay.py")   # a tool, not a capture
+        s.filename("airkiss_replay.py", "airkiss_replay.py")   # a tool, not a capture
         self.assertEqual(sorted(f.where for f in s.findings),
                          ["airkiss.pcap", "docs/s61-tools/grab.PCAPNG"])
 

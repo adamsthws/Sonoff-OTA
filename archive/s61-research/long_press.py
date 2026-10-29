@@ -21,7 +21,7 @@ ISR -> handler -> periodic scan -> long-press action 0x42250. (That action is
 the relay/LED path via bk_gpio_output; the eWeLink pairing long-press is a
 further app-layer step -- see the doc.)
 
-  $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_long_press.py
+  $(tools/beken/emulator/bk-emu.sh python) archive/s61-research/long_press.py
 """
 import sys
 import os

@@ -59,7 +59,7 @@ docker run --rm -u "$(id -u):$(id -g)" -e HOME=/config -v "$PWD":/config \
 The outputs, in `.esphome/build/esphome/.pioenvs/esphome/`:
 
 - `image_bk7238_app.ota.rbl` - the **rt_ota update** (about 500 KB) for the
-  conversion: wrapped with [`../s61_fota_wrap.py`](../s61_fota_wrap.py) it is
+  conversion: wrapped with [`../fota_wrap.py`](../fota_wrap.py) it is
   what the stock plug downloads; staged in OpenBeken's `ota_http` it converts
   an OpenBeken plug. The stock bootloader applies it from the download slot.
 - `firmware.uf2` - LibreTiny's flasher/OTA image, which ESPHome's own OTA
@@ -72,7 +72,7 @@ The outputs, in `.esphome/build/esphome/.pioenvs/esphome/`:
 A plug on ESPHome takes updates through ESPHome's OTA as UF2 files, and
 LibreTiny writes a UF2's `download` part to the download slot. So a UF2 that
 carries the stock app RBL (rebuilt from a dump with
-[`../s61_stock_app.py`](../s61_stock_app.py) and the SDK packer, as the
+[`../stock_app.py`](../stock_app.py) and the SDK packer, as the
 OpenBeken README says) as its download part, sent through the ordinary
 ESPHome OTA, is a reversion: the stock bootloader applies it on the reboot
 that follows. ltchiptool (LibreTiny's tool) builds it:

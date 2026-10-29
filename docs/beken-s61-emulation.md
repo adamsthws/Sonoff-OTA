@@ -171,7 +171,7 @@ per-device secrets redacted:
 Boot/reboot counters (`chip-counters.*`), `chip-factory.uniqueId`, and Matter
 globals (`g/*`). No `f/1/n` fabric/NOC on this dump.
 
-**EF40 enumeration tool:** `docs/s61-tools/ef40_dump.py <flash.bin>` lists every
+**EF40 enumeration tool:** `tools/beken/ef40_dump.py <flash.bin>` lists every
 KV40 node with CRC validation.
 
 ### Update (RBL) format
@@ -303,7 +303,7 @@ by synthesising the pairing-completion trigger, and the connect machinery it sta
 
 Seeding the stored Wi-Fi credentials puts the emulated plug on a network for
 real — the same end state a real provisioning reaches, without the BLE handoff the
-radio-less emulator cannot do. `s61_seed_join.py` hooks the firmware's own
+radio-less emulator cannot do. `seed_join.py` hooks the firmware's own
 `ef_get_env_blob` (`0x12f438`) to return a chosen SSID/passphrase for
 `wifi-ssid`/`wifi-pass`, and attaches the fork peer as a WPA2-PSK AP with the same
 creds. The plug then runs the genuine sequence: station mode → authenticate →
@@ -356,7 +356,7 @@ feeding it to `0x492ae` with a fabricated session would be a sizeable sub-projec
 But that is not needed to reach the cloud: the only thing the full pairing produces
 that the dial depends on is the **completion trigger**, and that is one firmware
 call. Synthesising it (plus seeding Wi-Fi) reaches the eWeLink cloud dial directly
-(`s61_cloud_dial.py`), with no protocol reconstruction and no bound dump. A
+(`cloud_dial.py`), with no protocol reconstruction and no bound dump. A
 genuinely eWeLink-bound dump is still useful — for a *faithful* dispatch server
 (the factory URL is a placeholder) and a real device-secret — but is no longer
 required to reproduce the dial. **Stage 1 (on the network) is done and faithful
@@ -402,7 +402,7 @@ with the password decoder bypassed, **the plug associates (WPA2) and gets DHCP
 (`docs/s61-tools/` scratchpad `recv_drive.py`).
 
 **What this reaches, and what it does not.** Driving these messages through the
-dispatcher runs the handlers and connects Wi-Fi (`s61_ble_provision.py`), but does
+dispatcher runs the handlers and connects Wi-Fi (`ble_provision.py`), but does
 not fire the **pairing-completion event**: the handlers share a session state
 machine (session flag `0x40cfe3`, step byte `0x40cf14`) and a field accumulator,
 and the completion is normally posted by the BLE-connection lifecycle, which the
@@ -415,7 +415,7 @@ reaches the cloud, next.
 ### The cloud dial: synthesise the pairing-success trigger
 
 The emulated plug now performs the real eWeLink (CoolKit) cloud handshake. Driven
-end to end by `docs/s61-tools/s61_cloud_dial.py`: seed Wi-Fi creds (join + DHCP),
+end to end by `tools/beken/cloud_dial.py`: seed Wi-Fi creds (join + DHCP),
 then force-call the firmware's own **start-cloud handler** once Wi-Fi is up. The
 plug opens a TCP connection to its dispatch server and sends the CoolKit
 **`GET /dispatch/device`** request, retried with backoff — the genuine first step
@@ -464,7 +464,7 @@ and real device-secret — but the dial mechanism itself is fully reproduced her
 Overwriting `ctx+0x5f` points the dial at any server; a local stub then completes
 the exchange (dispatch → `/api/ws`, with the S60 trust-swap for TLS).
 
-**Verified** (`python3 s61_cloud_dial.py`, the default local stub at `192.168.1.1:80`):
+**Verified** (`python3 cloud_dial.py`, the default local stub at `192.168.1.1:80`):
 
 ```
 device IP = 192.168.1.100
@@ -476,13 +476,13 @@ TCP 192.168.1.100:62636 <-> 192.168.1.1:80 sends: HTTP GET /dispatch/device HTTP
 This is the full provisioning outcome on the radio-less emulator: **the plug joins
 our AP and dials the eWeLink cloud.** The only piece not reproduced is the BLE GATT
 link that, on hardware, carries the pairing that *naturally* fires this trigger;
-`s61_cloud_dial.py` synthesises that single completion event instead.
+`cloud_dial.py` synthesises that single completion event instead.
 
 ### The cloud handshake: trust-swap to ONLINE
 
 With the dial reproduced, the rest of the eWeLink handshake completes against a
 local stub and the plug reaches **ONLINE** — driven end to end by
-`docs/s61-tools/s61_cloud_online.py` and the CoolKit stub
+`tools/beken/cloud_online.py` and the CoolKit stub
 (`tools/espressif/emulator/stub_cloud/stub_server.py`, extended with a `--plain` dispatch
 mode). Nothing leaves the host: the netstack relay (`attach_wifi_peer(net_out=True)`)
 is redirected so the factory dispatch IP resolves to loopback — plaintext dispatch
@@ -519,7 +519,7 @@ changes, and the stub serves a leaf signed by that CA.
 against the name the firmware verifies (it sends SNI `8.8.8.8`) — and a
 **serverAuth EKU**. With those the verification passes.
 
-**Verified** (`tools/beken/emulator/bk-emu.sh python docs/s61-tools/s61_cloud_online.py`):
+**Verified** (`tools/beken/emulator/bk-emu.sh python tools/beken/cloud_online.py`):
 
 ```
 dispatch -> {"error":0,...,"domain":"8.8.8.8","port":"443"}   (accepted)
@@ -732,7 +732,7 @@ End to end, then: push `upgrade` with a `downloadUrl` we control → the plug do
 our FOTA-wrapped OpenBeken `.rbl` and **stages it verbatim** to the download partition
 (confirmed byte-for-byte for the full 507 KB image) → on reboot the stock bootloader
 decompresses and applies it. Nothing in the chain decrypts, signs, or needs a secret.
-`s61_fota_wrap.py` builds the container for any `.rbl`. The remaining step — flashing a
+`fota_wrap.py` builds the container for any `.rbl`. The remaining step — flashing a
 real plug — is irreversible and is not done here.
 
 ### Booting the converted firmware in the emulator
@@ -809,7 +809,7 @@ byte-exact against a real OpenBK7238 1.18.319 config:**
 **Proven in the emulator:** read `wifi-ssid`/`wifi-pass` from the stock EF40 →
 build a `mainConfig_t` with those creds → write it at `0x1e1000` of a 2 MB-padded
 OpenBK7238 image → boot: `Correct config has been loaded`, `Using SSID [...]`,
-four-way handshake, DHCP lease. End-to-end `s61_wifi_migrate.py` does the whole
+four-way handshake, DHCP lease. End-to-end `wifi_migrate.py` does the whole
 read→build→seed chain.
 
 Emulator gotchas worth remembering: pad the QIO image to the real flash size or
@@ -918,7 +918,7 @@ table. Verified in the emulator: the 4 MB build writes its config at `0x3e1000`
 and `0x1e1000` stays blank.
 
 The build is a `FLASH_SIZE=4M` switch, in two patches kept in
-[`docs/s61-tools/openbeken/upstream/`](../s61-tools/openbeken/upstream/) and
+[`tools/beken/openbeken/`](../../tools/beken/openbeken/) and
 offered upstream — OpenBK7231T_App#2290 and beken_freertos_sdk#13, see
 [upstream-contributions.md](upstream-contributions.md#openbeken-on-a-4-mb-bk7238)
 (the recipe is in [its README](../s61-tools/openbeken/README.md#building-bk7238-4-mb-table)).
@@ -958,7 +958,7 @@ OTA path uses), refusing on a 2 MB-table build where the download would land at
 the emulator against a host HTTP server: `init OTA, startaddr 0x286000` → reboot →
 `upgrade(s61v6->1.0.2)` → stock firmware up, EF40 untouched.
 
-[`docs/s61-tools/s61_backup.py`](../s61-tools/s61_backup.py) copies the
+[`tools/beken/backup.py`](../../tools/beken/backup.py) copies the
 per-device region `0x3e0000–0x400000` (factory TLV, EF40 app store, system ENV)
 out of a converted plug over `GET /api/flash/<addr>-<len>` (the REST reader's
 `DEFAULT_FLASH_LEN` is raised to 4 MB in the S61 build) into
@@ -1045,7 +1045,7 @@ redirect), `s61_ota_flash.py` (build the FOTA container, serve the ranged downlo
 log flash writes; an `OBK_RBL=` env serves a real OpenBeken `.rbl`), `s61_stage_boot.py`
 (stage an RBL and boot the gate chain, with the crypt-flag / custom-verify opt-ins),
 `app_apply_test.py` (boot the stock bootloader over a directly-staged RBL, no bypasses),
-`obk_apply_test.py` (the same with a real OpenBeken `.rbl`), and `s61_fota_wrap.py`
+`obk_apply_test.py` (the same with a real OpenBeken `.rbl`), and `fota_wrap.py`
 (wrap an `.rbl` in the FOTA container and optionally serve it), plus a Thumb/ARM
 disassembler over the de-striped image and `boot_qio.py` (boot an OpenBeken flash /
 the spliced conversion image). The BK7238 UART transmit register is `0x0080210c` (for
@@ -1166,7 +1166,7 @@ naturally, none force-called.
 
 ### What the simulation achieves (reproducible)
 
-`docs/s61-tools/s61_button_sim.py` drives the firmware's genuine key stack using
+`archive/s61-research/button_sim.py` drives the firmware's genuine key stack using
 the Thumb-bit force-call harness (see [Tools and methods](#tools-and-methods)):
 
 1. force-run the block init `0x1bc18`;
@@ -1208,7 +1208,7 @@ ICU bit 8) — that is the RTOS tick on the OpenBK/Tuya firmwares — so Timer 5
 interrupt was never raised, the giver never ran, and the thread was signalled 0
 times (`wait`=1, `nodeproc`=0 forever). Raise Timer 5's status bit and the giver
 fires, the thread wakes, the scan runs, and the hold is timed — proven with
-`docs/s61-tools/s61_long_press.py` (`scan` runs hundreds of times, long-press
+`archive/s61-research/long_press.py` (`scan` runs hundreds of times, long-press
 action `0x42250` fires). The script raises `timer3_5_ctl` bit 9 itself because a
 blanket per-enabled-channel raise in `_pacing` (what the BK7252 path does)
 **regresses 3 other BK7238 self-tests** that drive Timers 4/5 at their own rate;
@@ -1247,7 +1247,7 @@ different runner / the RAM-resident `0x21eb4` caller `0x3f60c`.
 Called in the appfw task's own context (hook loop `0x319c4` + the force-call
 harness, so the RTOS/RW-task messaging runs in a real task), the dispatcher drives
 the emulated radio into the right mode — verified with
-`docs/s61-tools/s61_pair_drive.py`:
+`archive/s61-research/pair_drive.py`:
 
 - **Method 0 (coexist → soft-AP).** `0x21a80` builds the soft-AP struct, the MAC
   leaves monitor mode (`RX filter … back to normal reception`) and **transmits
@@ -1358,14 +1358,14 @@ Open items (no route ruled out):
 - **Faithful BK7238 timer model.** Model each enabled Timer 3-5 channel's own
   period so Timer 5 (`bk_timer`) is raised at its real rate without the slow-tick
   over-fire that regresses the Zengge/other BK7238 self-tests; then the key-driver
-  thread wakes natively and `s61_long_press.py` / `s61_pair_drive.py` need no
+  thread wakes natively and `long_press.py` / `pair_drive.py` need no
   manual Timer-5 raise.
 - **Integrity gate, legitimately.** With the real plug's flash UID the gate passes
   for real (`spi_flash.py` already takes `uid=`; its "nothing needs the real value"
   comment is wrong for the S61), removing the need for the `0x29c3c` bypass.
 
 > Note: the registered button is on **GPIO pins 0 and 2**, not pin 3 —
-> `docs/s61-tools/s61_button_sim.py` defaults to pin 3 and predates both the
+> `archive/s61-research/button_sim.py` defaults to pin 3 and predates both the
 > integrity-gate finding and natural registration.
 
 ## Pairing and provisioning routes
@@ -1400,8 +1400,8 @@ for the full trace). The two sub-results are worth keeping separate:
   favour of soft-AP + BLE. There is no decoder behind the callback to reach.
 
 The delivery pipeline tooling still stands for any future firmware that *does*
-decode: `docs/s61-tools/s61_airkiss_capture.sh` (AX200 monitor capture to pcap)
-and `s61_airkiss_replay.py` (replay a pcap into the MAC; `--selftest` checks the
+decode: `archive/s61-research/airkiss_capture.sh` (AX200 monitor capture to pcap)
+and `airkiss_replay.py` (replay a pcap into the MAC; `--selftest` checks the
 pipeline, `S61_RX_OBJ_PTR` gates injection on the handler object). Real captures
 stay in the scratchpad — credentials are carried in the frame lengths.
 
@@ -1556,17 +1556,17 @@ patches no longer apply.
   This reaches firmware code correctly, but cannot satisfy RTOS/RW-task context
   that only exists inside the owning task/thread (force-calls into the RW-task
   message path or the key-driver timer thread park or fault for this reason).
-- **Static analysis on the logical image.** `s61_unstripe.py` removes the CRC
+- **Static analysis on the logical image.** `unstripe.py` removes the CRC
   stripes to produce `logical.bin`, where CPU address == file offset, so static
-  addresses match runtime. Then: `s61_dis.py` (capstone disassembly),
-  `s61_xref.py` (BL/BLX callers + data-word refs for an address), `s61_strxref.py`
-  (find code by the log/format string it uses), and `s61_decomp.py` (angr
+  addresses match runtime. Then: `disasm.py` (capstone disassembly),
+  `xref.py` (BL/BLX callers + data-word refs for an address), `strxref.py`
+  (find code by the log/format string it uses), and `decomp.py` (angr
   pseudo-C decompiler — no Java/Ghidra needed).
 - **s61-tools** (`docs/s61-tools/`): the static-analysis tools above, plus the
-  provisioning drivers — `s61_seed_join.py` (seed creds → Wi-Fi join),
-  `s61_ble_provision.py` (drive the eWeLink BLE messages through the dispatcher →
-  Wi-Fi join), and `s61_cloud_dial.py` (seed + synthesise the pairing trigger →
-  **eWeLink cloud dial**) — plus `s61_button_sim.py` (button press),
-  `s61_long_press.py`, `s61_pair_drive.py`, and `s61_airkiss_capture.sh` +
-  `s61_airkiss_replay.py` (AirKiss relay). Emulator tools take paths via env
+  provisioning drivers — `seed_join.py` (seed creds → Wi-Fi join),
+  `ble_provision.py` (drive the eWeLink BLE messages through the dispatcher →
+  Wi-Fi join), and `cloud_dial.py` (seed + synthesise the pairing trigger →
+  **eWeLink cloud dial**) — plus `button_sim.py` (button press),
+  `long_press.py`, `pair_drive.py`, and `airkiss_capture.sh` +
+  `airkiss_replay.py` (AirKiss relay). Emulator tools take paths via env
   `BK_EMU_ROOT` / `S61_DUMP`; see the folder's README.

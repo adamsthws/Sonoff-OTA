@@ -1,11 +1,11 @@
 """Disassemble a window of the logical S61 image (capstone).
 
-Addresses are offsets into the logical image (see s61_unstripe.py), which equal
+Addresses are offsets into the logical image (see unstripe.py), which equal
 CPU addresses. Thumb by default; pass 'arm' for ARM. A Thumb function address
 with its low bit set (addr|1) is accepted.
 
 Usage:
-  s61_dis.py IMAGE ADDR [N] [thumb|arm]
+  disasm.py IMAGE ADDR [N] [thumb|arm]
     IMAGE   logical image (destriped)
     ADDR    start address (hex ok, e.g. 0x4203c)
     N       number of instructions (default 24)
