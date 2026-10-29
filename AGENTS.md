@@ -26,7 +26,7 @@ eWeLink accounts and plugs' identities.
   dump - is ever committed, put on a release or built into a published
   image, whatever the convenience. Where tooling needs one, fetch it at run
   time from where its owner or another project publishes it, as
-  `docs/s61-tools/emulator/bk-emu.sh dump` does.
+  `tools/beken/emulator/bk-emu.sh dump` does.
 
 ## Real plugs and the emulator
 
@@ -35,8 +35,8 @@ eWeLink accounts and plugs' identities.
 - **Stop each emulator** (`docker stop`) as soon as a test batch ends, and
   run no more side by side than the computer has cores: more give false
   failures. [docs/emulator.md](docs/emulator.md)
-- **`tools/emulator/container/`, `fork/` and `emu.Dockerfile` are hashed
-  into the emulator image's tag** (`tools/emulator/image.sh`): any change
+- **`tools/espressif/emulator/container/`, `patches/` and `emu.Dockerfile` are hashed
+  into the emulator image's tag** (`tools/espressif/emulator/image.sh`): any change
   there, a comment included, makes every computer and runner build or pull
   a new image. Change them only for the emulator's sake.
 

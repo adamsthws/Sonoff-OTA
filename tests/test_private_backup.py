@@ -164,7 +164,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual((other / "flash.bin").read_bytes(), b"another")
 
     def test_the_emulator_never_hands_the_key_to_a_run(self):
-        script = (pb.ROOT / "tools/emulator/unattended-test.sh").read_text()
+        script = (pb.ROOT / "tools/espressif/emulator/unattended-test.sh").read_text()
         self.assertIn("BACKUP_KEY\\)' \"$ROOT/.env\"", script)
 
 

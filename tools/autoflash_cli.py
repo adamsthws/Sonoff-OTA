@@ -973,7 +973,7 @@ def firewall_ports(ctx: Context) -> list[int]:
 
 
 def emulator_password_hint() -> list[str]:
-    """Inside the emulator (tools/emulator) only: the password sudo asks for
+    """Inside the emulator (tools/espressif/emulator) only: the password sudo asks for
     there, so nobody has to look it up.  A real computer's is never known."""
     known = os.environ.get("AUTOFLASH_EMULATOR_SUDO_PASSWORD")
     if not known or hostsys.IS_WINDOWS:
@@ -6145,7 +6145,7 @@ def run_steps(ctx: Context) -> int:
 def plug_page_url(plug_ip: str | None) -> str | None:
     """The address to open the converted plug's Tasmota page at.
 
-    Inside the emulator (tools/emulator) the plug's address only exists in its
+    Inside the emulator (tools/espressif/emulator) the plug's address only exists in its
     container; the emulator says where your browser reaches it instead.
     """
     emulated = os.environ.get("AUTOFLASH_EMULATOR_URL")
@@ -6569,7 +6569,7 @@ def admin_password() -> str:
     to ask, so it says what to give instead (OSError, as for a refused one)."""
     given = credentials.get("AUTOFLASH_SUDO_PASSWORD")
     if given is None and prompts.UNATTENDED:
-        # Inside the emulator (tools/emulator) its password is known.
+        # Inside the emulator (tools/espressif/emulator) its password is known.
         given = os.environ.get("AUTOFLASH_EMULATOR_SUDO_PASSWORD")
     if given is not None:
         if hostsys.check_sudo_password(given) is None:

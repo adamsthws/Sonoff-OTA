@@ -1,7 +1,7 @@
 """The values in a Sonoff backup's settings that say which plug, account or
 network it is: what must never leave the computer the backup is on.
 
-Used by tools/emulator/sanitise_plug.py, to show a public plug holds none of
+Used by tools/espressif/emulator/sanitise_plug.py, to show a public plug holds none of
 them, and tools/leak_scan.py, to keep them out of Git. Only the standard
 library and tools/inspect_stock_nvs.py: a Git hook imports it.
 """

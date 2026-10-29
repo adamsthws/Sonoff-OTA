@@ -1,6 +1,6 @@
 # The emulator: converting a virtual S60
 
-`tools/emulator/` runs the whole conversion against an emulated Sonoff S60, so
+`tools/espressif/emulator/` runs the whole conversion against an emulated Sonoff S60, so
 changes can be tried end to end without converting, or risking, a real plug.
 
 The emulated plug boots a real flash dump of a stock S60, so it runs Sonoff's
@@ -110,18 +110,18 @@ real plug before using `--cloud`.
 On Linux or macOS (on Windows, see "On Windows" below):
 
 ```sh
-tools/emulator/emu.sh            # plug offline: nothing reaches the internet
-tools/emulator/emu.sh --cloud    # plug and tool online - asks you to confirm the real plug is unplugged
-tools/emulator/emu.sh --cloud --yes  # ... without asking: you have unplugged it (for unattended tests)
-tools/emulator/emu.sh --stub-cloud  # a local eWeLink stub serves this instance alone (its own cloud; see docs/cloud-stub.md)
-tools/emulator/emu.sh --plug 58:cf:79:01:02:03  # run that backed-up plug, without asking which
-tools/emulator/emu.sh --fresh    # put the plug back to its Sonoff backup, and forget the previous run and the eWeLink account
-tools/emulator/emu.sh --pcap     # also record the plug's Wi-Fi traffic
-tools/emulator/emu.sh --rebuild  # rebuild the image first
-tools/emulator/emu.sh --detach   # start in the background; join: docker exec -it -u ubuntu autoflash-emu tmux attach -t autoflash
-tools/emulator/emu.sh --no-firewall  # without the "computer's" firewall, which is on by default
-tools/emulator/emu.sh --windows  # Windows is the computer (see "On Windows"; started by emu.ps1 and windows-test.sh)
-tools/emulator/emu.sh --instance 2  # a second emulator beside the first (see "Several at once")
+tools/espressif/emulator/emu.sh            # plug offline: nothing reaches the internet
+tools/espressif/emulator/emu.sh --cloud    # plug and tool online - asks you to confirm the real plug is unplugged
+tools/espressif/emulator/emu.sh --cloud --yes  # ... without asking: you have unplugged it (for unattended tests)
+tools/espressif/emulator/emu.sh --stub-cloud  # a local eWeLink stub serves this instance alone (its own cloud; see docs/cloud-stub.md)
+tools/espressif/emulator/emu.sh --plug 58:cf:79:01:02:03  # run that backed-up plug, without asking which
+tools/espressif/emulator/emu.sh --fresh    # put the plug back to its Sonoff backup, and forget the previous run and the eWeLink account
+tools/espressif/emulator/emu.sh --pcap     # also record the plug's Wi-Fi traffic
+tools/espressif/emulator/emu.sh --rebuild  # rebuild the image first
+tools/espressif/emulator/emu.sh --detach   # start in the background; join: docker exec -it -u ubuntu autoflash-emu tmux attach -t autoflash
+tools/espressif/emulator/emu.sh --no-firewall  # without the "computer's" firewall, which is on by default
+tools/espressif/emulator/emu.sh --windows  # Windows is the computer (see "On Windows"; started by emu.ps1 and windows-test.sh)
+tools/espressif/emulator/emu.sh --instance 2  # a second emulator beside the first (see "Several at once")
 ```
 
 A conversion needs the cloud: the upgrade to the bridge firmware is sent
@@ -183,10 +183,10 @@ keyboard, prints the screen the run left, and stops the emulator again
 every fault in its way):
 
 ```sh
-tools/emulator/unattended-test.sh --fresh    # from stock, as a new user would
-tools/emulator/unattended-test.sh            # from where the last run left the plug
-tools/emulator/unattended-test.sh --keep     # leave the emulator running afterwards
-tools/emulator/unattended-test.sh -- --new   # anything after -- goes to the run itself
+tools/espressif/emulator/unattended-test.sh --fresh    # from stock, as a new user would
+tools/espressif/emulator/unattended-test.sh            # from where the last run left the plug
+tools/espressif/emulator/unattended-test.sh --keep     # leave the emulator running afterwards
+tools/espressif/emulator/unattended-test.sh -- --new   # anything after -- goes to the run itself
 ```
 
 It needs a `.env` with the eWeLink account the dump's plug is in (see
@@ -224,7 +224,7 @@ Tasmota have taken its app slots, and D5 its bootloader - so from there on
 nothing of Sonoff's is needed: that is what tests the firmware a conversion
 ends on ([updating-firmware.md](updating-firmware.md)).
 
-`tools/emulator/sanitise_plug.py` makes one from a plug kept past D5, on a test
+`tools/espressif/emulator/sanitise_plug.py` makes one from a plug kept past D5, on a test
 copy's made-up MAC (`copy_plug.py`). It rebuilds the flash from blank and
 copies in only what it shows to be public: the bootloader, partition table and
 app images byte for byte the published files in `artifacts/`, the startup
@@ -242,15 +242,15 @@ it, the real MAC in any form, and the eWeLink account and devices on your
 computer, and writes nothing if it finds one (`--explain` says which setting
 a value came from, never the value).
 
-`tools/emulator/public_plugs.py` makes the two the final-firmware test starts
+`tools/espressif/emulator/public_plugs.py` makes the two the final-firmware test starts
 from - after E3 on the way to Tasmota, after D5 on the way to ESPHome - from
 the fault suite's plugs saved after D1, and runs that test:
 
 ```sh
-tools/emulator/fault_suite.py --plug=12:34:56:ab:cd:ef --stub-cloud prep   # once, with your backup
-python -I tools/emulator/public_plugs.py make --plug 12:34:56:ab:cd:ef \
+tools/espressif/emulator/fault_suite.py --plug=12:34:56:ab:cd:ef --stub-cloud prep   # once, with your backup
+python -I tools/espressif/emulator/public_plugs.py make --plug 12:34:56:ab:cd:ef \
     --stock captures/plugs/<your plug's MAC>/sonoff-backup
-python -I tools/emulator/public_plugs.py test                              # no backup, no cloud
+python -I tools/espressif/emulator/public_plugs.py test                              # no backup, no cloud
 ```
 
 They are made again only when what runs before the final firmware changes: an
@@ -277,7 +277,7 @@ sees the plug's MAC, its mDNS answers and its connections exactly as on a
 real network. There are two ways to have it:
 
 - **Windows from Linux** - nothing to install by hand, and a clean Windows
-  every run: `tools/emulator/windows-test.sh`.
+  every run: `tools/espressif/emulator/windows-test.sh`.
 - **On a Windows computer**, the emulator in WSL beside it:
   `tools\emulator\emu.ps1`.
 
@@ -289,11 +289,11 @@ emulated either way.
 ### Windows from Linux
 
 ```sh
-tools/emulator/windows-test.sh --cloud
+tools/espressif/emulator/windows-test.sh --cloud
 ```
 
 The emulated plug runs in Docker as usual, and beside it **Windows Server 2025,
-Server Core** in a container of its own (`tools/emulator/windows/`): QEMU with
+Server Core** in a container of its own (`tools/espressif/emulator/windows/`): QEMU with
 KVM, so one layer of virtualisation, nothing nested. It needs Linux with
 `/dev/kvm` and Docker; on a Mac, use a Windows computer or VM instead (below).
 If `/dev/kvm` is missing on a PC, its processor's virtualisation is usually
@@ -306,11 +306,11 @@ its container at most 1 GB more, for QEMU itself, without swap. The emulator
 gets 256 MB and 2 CPUs (`AUTOFLASH_EMU_MEMORY=512m`, `AUTOFLASH_EMU_CPUS`).
 
 ```sh
-tools/emulator/windows-test.sh --cloud                    # a conversion, in OpenConsole, as on Windows 11
-tools/emulator/windows-test.sh --cloud --classic-console  # ... in the classic console, as on Windows 10
-tools/emulator/windows-test.sh --cloud --first-run        # ... on a Windows that has never seen the tool
-tools/emulator/windows-test.sh --cloud --fresh            # ... with the plug back to stock and no earlier run
-tools/emulator/windows-test.sh --rebuild-layer=rig        # set Windows' rig layer (and tool) up again first
+tools/espressif/emulator/windows-test.sh --cloud                    # a conversion, in OpenConsole, as on Windows 11
+tools/espressif/emulator/windows-test.sh --cloud --classic-console  # ... in the classic console, as on Windows 10
+tools/espressif/emulator/windows-test.sh --cloud --first-run        # ... on a Windows that has never seen the tool
+tools/espressif/emulator/windows-test.sh --cloud --fresh            # ... with the plug back to stock and no earlier run
+tools/espressif/emulator/windows-test.sh --rebuild-layer=rig        # set Windows' rig layer (and tool) up again first
 ```
 
 `--fresh`, `--pcap`, `--no-firewall`, `--rebuild` and `--plug=<MAC>` are `emu.sh`'s;
@@ -370,15 +370,15 @@ can be resumed.
 Windows runs OpenSSH's server (set up in the `rig` layer) with PowerShell as
 its shell, on `127.0.0.1:2222` (`AUTOFLASH_WINDOWS_SSH_PORT` to change), logged on
 to as `autoflash` with a key `windows-test.sh` makes once in
-`~/.cache/autoflash-emu/windows/ssh`. `tools/emulator/windows-ssh.sh` wraps it:
+`~/.cache/autoflash-emu/windows/ssh`. `tools/espressif/emulator/windows-ssh.sh` wraps it:
 
 ```sh
-tools/emulator/windows-ssh.sh --wait          # until Windows has logged on and lets the key in
-tools/emulator/windows-ssh.sh                 # PowerShell, in C:\Users\autoflash
-tools/emulator/windows-ssh.sh 'Get-ChildItem C:\Autoflash\repo\captures'  # any PowerShell command
-tools/emulator/windows-ssh.sh log -f          # follow the conversion's latest run.log
-tools/emulator/windows-ssh.sh get C:/Autoflash/repo/captures ./win-captures
-tools/emulator/windows-ssh.sh put tools/autoflash_cli.py C:/Autoflash/repo/tools/
+tools/espressif/emulator/windows-ssh.sh --wait          # until Windows has logged on and lets the key in
+tools/espressif/emulator/windows-ssh.sh                 # PowerShell, in C:\Users\autoflash
+tools/espressif/emulator/windows-ssh.sh 'Get-ChildItem C:\Autoflash\repo\captures'  # any PowerShell command
+tools/espressif/emulator/windows-ssh.sh log -f          # follow the conversion's latest run.log
+tools/espressif/emulator/windows-ssh.sh get C:/Autoflash/repo/captures ./win-captures
+tools/espressif/emulator/windows-ssh.sh put tools/autoflash_cli.py C:/Autoflash/repo/tools/
 ```
 
 The key is let in at logon (`start.ps1`), so about a minute after a run
@@ -507,9 +507,9 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
   `emulator-source-beken-<commit>`; the earlier `emulator-source` release
   was deleted on 2026-10-29, and its name cannot be used again). QEMU is
   GPL-2.0: the archive is its unmodified source, and this project's changes
-  to it are the patches in `tools/emulator/fork/`, so a change to the
+  to it are the patches in `tools/espressif/emulator/patches/`, so a change to the
   emulator is a new patch, not a new release. The image is labelled with
-  a hash of what it is built from (`tools/emulator/image.sh tag`), and the
+  a hash of what it is built from (`tools/espressif/emulator/image.sh tag`), and the
   repository's `emulator-image` workflow publishes each one as
   `ghcr.io/adamsthws/autoflash-emu:<that hash>`: `emu.sh` pulls that, and
   builds only where it is not published (`AUTOFLASH_EMU_NO_PULL=1`, or
@@ -561,7 +561,7 @@ Copies only; the original dump is never written.
   order, which is what `efuse.bin` holds; it is only padded to 1024 bytes. The
   plug's MAC comes from it.
 
-### The QEMU fork (`tools/emulator/fork/*.patch`)
+### The QEMU fork (`tools/espressif/emulator/patches/*.patch`)
 
 Each patch is `git format-patch` output - one change, its reasoning in its
 header - applied in name order, each on top of those before it, when the
@@ -664,13 +664,13 @@ gives each request its own connection.
 ## Debugging
 
 - **The serial log** is `captures/emulation/state/logs/uart.log`, redacted by
-  `tools/emulator/redact.py`, which masks the dump's secrets and drops panic
+  `tools/espressif/emulator/redact.py`, which masks the dump's secrets and drops panic
   memory dumps (they show RAM as words the masking cannot see into). Put any
   other log through it before reading it.
 - **A QEMU of your own build**: `AUTOFLASH_EMU_QEMU=path/to/qemu-system-riscv32
-  tools/emulator/emu.sh ...` runs it in place of the image's, without
+  tools/espressif/emulator/emu.sh ...` runs it in place of the image's, without
   rebuilding the image (`qemu-build.Dockerfile` builds one from a fork
-  checkout with the patches applied). Patches in `tools/emulator/fork/` apply
+  checkout with the patches applied). Patches in `tools/espressif/emulator/patches/` apply
   in name order, each on top of those before it.
 - **The QEMU monitor** is at `/run/autoflash-emu/monitor.sock` in the container.
   It does not answer while the guest is in a tight crash loop.
@@ -682,5 +682,5 @@ gives each request its own connection.
 - **Without a NIC** (`-nic none`) the fork does not map its Wi-Fi device, and
   firmware hangs in Wi-Fi initialisation. That is a test set-up problem, not
   a firmware one.
-- **The image's build environment** alone is `tools/emulator/qemu-build.Dockerfile`,
+- **The image's build environment** alone is `tools/espressif/emulator/qemu-build.Dockerfile`,
   handy for building the fork incrementally while working on a patch.

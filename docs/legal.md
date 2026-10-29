@@ -70,13 +70,13 @@ device the project works with, now or later.
 - The docs describe the firmware format in prose and tables. They do not list
   Sonoff's code or data.
 - The emulator ([emulator.md](emulator.md)) boots **your own** backup, and its
-  image does not contain one. `tools/emulator/patch_stock.py` changes a copy
+  image does not contain one. `tools/espressif/emulator/patch_stock.py` changes a copy
   of your backup so it runs under QEMU. It checks the bytes it replaces are as
   expected, but carries none of Sonoff's code beyond those few instructions,
   and never changes the backup itself.
 - The emulator's **public plugs**, which test the firmware a conversion ends
   on, hold nothing of Sonoff's: they are made from plugs past the point where
-  Sonoff's firmware has been replaced, and `tools/emulator/sanitise_plug.py`
+  Sonoff's firmware has been replaced, and `tools/espressif/emulator/sanitise_plug.py`
   shows each holds no part of the backup it came from
   ([emulator.md](emulator.md#public-plugs)).
 - The maintainer keeps their own backup off their computer, as any owner may

@@ -166,7 +166,7 @@ it, and the workflow runs it - and `git commit --no-verify` skips them all.
 A conversion with nobody at the keyboard ([unattended.md](unattended.md)):
 
 ```sh
-tools/emulator/unattended-test.sh --fresh --plug=MAC -- --firmware esphome
+tools/espressif/emulator/unattended-test.sh --fresh --plug=MAC -- --firmware esphome
 ```
 
 Several run side by side with `--instance=N` (1-30), each its own container,
@@ -178,8 +178,8 @@ A plug can be kept as a run left it, with what your computer recorded about
 it (its backup, its runs), and started from again:
 
 ```sh
-tools/emulator/unattended-test.sh --fresh --plug=MAC --save=on-tasmota -- --firmware tasmota
-tools/emulator/unattended-test.sh --from=on-tasmota --plug=MAC -- --firmware esphome
+tools/espressif/emulator/unattended-test.sh --fresh --plug=MAC --save=on-tasmota -- --firmware tasmota
+tools/espressif/emulator/unattended-test.sh --from=on-tasmota --plug=MAC -- --firmware esphome
 ```
 
 That is how every direction is tested: from a plug the tool converted, as a
@@ -187,7 +187,7 @@ person converting it again would have.
 
 ## The fault suite
 
-`tools/emulator/fault_suite.py` puts every fault in the way of every step, in
+`tools/espressif/emulator/fault_suite.py` puts every fault in the way of every step, in
 every direction - 1,380 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
@@ -233,7 +233,7 @@ every direction - 1,380 scenarios:
     power cut as the plug restarts to save the template it sent (`nohook-cut`,
     step `F4tp`), which can leave it without one.
 - **Runs left by an earlier release** (`legacy-v1.2.0`): release 1.2.0 itself
-  - its tagged files, with only `tools/emulator/legacy/v1.2.0.patch` on top,
+  - its tagged files, with only `tools/espressif/emulator/legacy/v1.2.0.patch` on top,
   which points it at the cloud stub - converting a plug fresh from Sonoff,
   killed at 40% of each of its steps; then your checkout's tool over the same
   captures, as a person who updated their checkout would run it. And a plug
@@ -326,16 +326,16 @@ give that to `--plug`; its saved starting plugs are its own (the MAC's last
 four digits after the name):
 
 ```sh
-python -I tools/emulator/copy_plug.py --from MAC --to 12:34:56:ab:cd:ef
-python -I tools/emulator/copy_plug.py --remove 12:34:56:ab:cd:ef
+python -I tools/espressif/emulator/copy_plug.py --from MAC --to 12:34:56:ab:cd:ef
+python -I tools/espressif/emulator/copy_plug.py --remove 12:34:56:ab:cd:ef
 ```
 
 ```sh
-tools/emulator/fault_suite.py --plug=MAC prep           # the starting plugs (eWeLink)
-tools/emulator/fault_suite.py list > all.txt            # every scenario, cloud or not
+tools/espressif/emulator/fault_suite.py --plug=MAC prep           # the starting plugs (eWeLink)
+tools/espressif/emulator/fault_suite.py list > all.txt            # every scenario, cloud or not
 AUTOFLASH_CLOUD_WORKERS=3 AUTOFLASH_ANY_WORKERS=3 \
-    tools/emulator/fault_suite.py --plug=MAC batch all.txt   # what has not passed yet
-tools/emulator/fault_suite.py report
+    tools/espressif/emulator/fault_suite.py --plug=MAC batch all.txt   # what has not passed yet
+tools/espressif/emulator/fault_suite.py report
 ```
 
 Add `--stub-cloud` to `prep` and `batch` to give each emulator its own local
@@ -347,8 +347,8 @@ other kind, and a stub run's passes are not the real cloud's. See
 [cloud-stub.md](cloud-stub.md).
 
 ```sh
-AUTOFLASH_STUB_WORKERS=3 tools/emulator/fault_suite.py --plug=MAC --stub-cloud prep
-AUTOFLASH_STUB_WORKERS=3 tools/emulator/fault_suite.py --plug=MAC --stub-cloud batch all.txt
+AUTOFLASH_STUB_WORKERS=3 tools/espressif/emulator/fault_suite.py --plug=MAC --stub-cloud prep
+AUTOFLASH_STUB_WORKERS=3 tools/espressif/emulator/fault_suite.py --plug=MAC --stub-cloud batch all.txt
 ```
 
 Results, a log per scenario and what each failure leaves (its run records and

@@ -3,8 +3,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools.emulator import choose_plug
-from tools.emulator.choose_plug import Choice, choose
+from tools.espressif.emulator import choose_plug
+from tools.espressif.emulator.choose_plug import Choice, choose
 
 A = Choice("58:cf:79:01:02:03", Path("a"), "58:cf:79:01:02:03  (Sonoff 1.2.0)")
 B = Choice("58:cf:79:0a:0b:0c", Path("b"), "58:cf:79:0a:0b:0c  (Sonoff 1.3.0)")
@@ -61,9 +61,9 @@ if __name__ == "__main__":
 class RestoreTests(unittest.TestCase):
     def test_with_no_backup_here_the_sealed_one_is_restored_and_a_test_copy_made(self):
         from unittest import mock
-        from tools.emulator import choose_plug as cp
+        from tools.espressif.emulator import choose_plug as cp
         with mock.patch("tools.private_backup.restore", return_value="94:a9:90:00:00:01") as restore, \
-             mock.patch("tools.emulator.copy_plug.copy") as copy, \
+             mock.patch("tools.espressif.emulator.copy_plug.copy") as copy, \
              mock.patch.object(cp, "choices", return_value=[]), \
              mock.patch.object(cp.plugs, "PLUGS", cp.Path("/nonexistent")), mock.patch("builtins.print"):
             cp.restored("12:34:56:ab:cd:ef")
@@ -73,7 +73,7 @@ class RestoreTests(unittest.TestCase):
     def test_a_restore_that_cannot_be_done_leaves_the_usual_message(self):
         from unittest import mock
         from tools import private_backup
-        from tools.emulator import choose_plug as cp
+        from tools.espressif.emulator import choose_plug as cp
         with mock.patch("tools.private_backup.restore", side_effect=private_backup.SealError("no key")), \
              mock.patch.object(cp, "choices", return_value=[]), mock.patch("sys.stderr"):
             self.assertEqual(cp.restored(None), [])
@@ -82,7 +82,7 @@ class RestoreTests(unittest.TestCase):
         import os
         import tempfile
         from unittest import mock
-        from tools.emulator import choose_plug as cp
+        from tools.espressif.emulator import choose_plug as cp
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"AUTOFLASH_NO_RESTORE": "1"}), \
              mock.patch.object(cp, "choices", return_value=[]), mock.patch.object(cp, "restored") as restored, \
              mock.patch("sys.stderr"):

@@ -34,7 +34,7 @@ The file is also read on an ordinary run, where it saves typing the account
 details. If eWeLink refuses the password, it is asked for instead. The
 emulator is the exception: its copy of the repository leaves `.env` out, so a
 run you sit through there is asked everything, as a real one is, while
-`tools/emulator/unattended-test.sh` hands `.env` to its run alone.
+`tools/espressif/emulator/unattended-test.sh` hands `.env` to its run alone.
 
 ## Run it
 
@@ -84,7 +84,7 @@ full log is in the run's `run.log`, under `captures/plugs/<MAC>/runs/`, as usual
 
 ## In the emulator
 
-`tools/emulator/unattended-test.sh --fresh` starts the emulator, converts the
+`tools/espressif/emulator/unattended-test.sh --fresh` starts the emulator, converts the
 emulated plug this way, prints its final screen and stops the emulator again.
 See "Unattended, for testing" in [emulator.md](emulator.md#unattended-for-testing).
 

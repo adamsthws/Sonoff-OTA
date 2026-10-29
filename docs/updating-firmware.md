@@ -203,7 +203,7 @@ first is done. The plugs hold nothing of Sonoff's, so no cloud is needed, real o
 stub, nor an account:
 
 ```sh
-python -I tools/emulator/public_plugs.py test
+python -I tools/espressif/emulator/public_plugs.py test
 ```
 
 All four must convert. The repository's `emulator-check` workflow runs the

@@ -82,7 +82,7 @@ SHEBANG = re.compile(rb"#!\s*(?:/usr/bin/env\s+|/usr/bin/|/bin/)(?:ba|da)?sh\b")
 # The container's scripts are hashed into the emulator image's tag (image.sh), so
 # what shellcheck cannot see of them is said here rather than in them: the env
 # file entrypoint.sh writes (SC1091), the variables udhcpc sets (SC2154).
-CONTAINER = Path("tools/emulator/container")
+CONTAINER = Path("tools/espressif/emulator/container")
 
 
 def python(path: Path) -> bool:

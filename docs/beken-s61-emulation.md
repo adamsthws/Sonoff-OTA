@@ -42,13 +42,13 @@ the project adds. See [legal.md](legal.md).
   commands complete, but there is **no BLE radio**: nothing is transmitted and no
   peer can connect.
 - It comes with this repository as a container image, as the S60's QEMU does:
-  its source at the commit `s61-tools/emulator/UPSTREAM` pins, unmodified, is
+  its source at the commit `../tools/beken/emulator/UPSTREAM` pins, unmodified, is
   an archive of the
   [`emulator-source-beken-d9a3772`](https://github.com/adamsthws/Sonoff-OTA/releases/tag/emulator-source-beken-d9a3772)
   release - named after the commit, holding that one archive, never changed;
   a new pin is a new release - and this project's changes to it are the patches in
-  [`s61-tools/emulator/patches/`](s61-tools/emulator/patches/).
-  `s61-tools/emulator/bk-emu.sh` builds the image from them
+  [`../tools/beken/emulator/patches/`](../tools/beken/emulator/patches/).
+  `../tools/beken/emulator/bk-emu.sh` builds the image from them
   (`bk-emu.Dockerfile`), or pulls the one the `beken-emulator-image` workflow
   published for that version (`ghcr.io/adamsthws/autoflash-beken-emu:<hash>`),
   and runs the tools in it with this checkout at `/work` (see
@@ -64,7 +64,7 @@ the project adds. See [legal.md](legal.md).
 Run the S61 dump:
 
 ```sh
-docs/s61-tools/emulator/bk-emu.sh run captures/<S61 dump>.bin --wifi-peer auto
+tools/beken/emulator/bk-emu.sh run captures/<S61 dump>.bin --wifi-peer auto
 # which is, in the container:
 python /opt/beken-emulator/src/main.py <S61 dump>.bin --with-boot -chip BK7238 --only-uart --wifi-peer auto
 ```
@@ -483,7 +483,7 @@ link that, on hardware, carries the pairing that *naturally* fires this trigger;
 With the dial reproduced, the rest of the eWeLink handshake completes against a
 local stub and the plug reaches **ONLINE** — driven end to end by
 `docs/s61-tools/s61_cloud_online.py` and the CoolKit stub
-(`tools/emulator/stub_cloud/stub_server.py`, extended with a `--plain` dispatch
+(`tools/espressif/emulator/stub_cloud/stub_server.py`, extended with a `--plain` dispatch
 mode). Nothing leaves the host: the netstack relay (`attach_wifi_peer(net_out=True)`)
 is redirected so the factory dispatch IP resolves to loopback — plaintext dispatch
 on one port, TLS IoT on another.
@@ -519,7 +519,7 @@ changes, and the stub serves a leaf signed by that CA.
 against the name the firmware verifies (it sends SNI `8.8.8.8`) — and a
 **serverAuth EKU**. With those the verification passes.
 
-**Verified** (`docs/s61-tools/emulator/bk-emu.sh python docs/s61-tools/s61_cloud_online.py`):
+**Verified** (`tools/beken/emulator/bk-emu.sh python docs/s61-tools/s61_cloud_online.py`):
 
 ```
 dispatch -> {"error":0,...,"domain":"8.8.8.8","port":"443"}   (accepted)
@@ -1500,7 +1500,7 @@ from another context does not complete the round-trip. `IsWiFiStationProvisioned
 is `0x7388e` (reads `wifi-ssid` via `0x5ad84` → `0x12f438`), reached from CHIP
 `DriveStationState` `0x73b28`.
 
-## The fork (`s61-tools/emulator/`)
+## The fork (`../tools/beken/emulator/`)
 
 The emulator is upstream BekenEmulator at the commit `UPSTREAM` pins - the
 archive on the release `emulator-source-beken-<commit>`, whose hash `UPSTREAM` also pins -

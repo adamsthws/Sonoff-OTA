@@ -14,7 +14,7 @@ version or builds it, fetches the public S61s dump from upstream's repository
 container, with this checkout at `/work`:
 
 ```sh
-docs/s61-tools/emulator/bk-emu.sh python docs/s61-tools/s61_integrity_gate.py
+tools/beken/emulator/bk-emu.sh python docs/s61-tools/s61_integrity_gate.py
 ```
 
 In the container the emulator is at `/opt/beken-emulator`, the tools' default
@@ -115,7 +115,7 @@ the other tools at it.
   `python3 s61_cloud_dial.py`
 
 - **`s61_cloud_online.py`** — complete the eWeLink cloud cycle: the plug reaches
-  **ONLINE**. Stands up the CoolKit stub (`tools/emulator/stub_cloud/stub_server.py`,
+  **ONLINE**. Stands up the CoolKit stub (`tools/espressif/emulator/stub_cloud/stub_server.py`,
   `--plain` dispatch mode) on loopback and bridges the netstack relay to it
   (plaintext dispatch + TLS IoT, fully contained — nothing leaves the host), seeds
   Wi-Fi creds and fires the pairing trigger as `s61_cloud_dial.py` does, then drives

@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from tools.autoflash import esphome, plugs, tasmota_settings as ts
-from tools.emulator import public_plugs, sanitise_plug as sp
+from tools.espressif.emulator import public_plugs, sanitise_plug as sp
 
 HAS_NVS_GEN = importlib.util.find_spec("esp_idf_nvs_partition_gen") is not None
 TEST_MAC, REAL_MAC = "12:34:56:ab:cd:ef", "12:34:56:00:00:01"

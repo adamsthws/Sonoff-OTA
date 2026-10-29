@@ -1,5 +1,5 @@
 # The tool's unit tests, then the firmware a conversion ends on, run on the
-# emulator from the published public plugs (tools/emulator/public_plugs.py):
+# emulator from the published public plugs (tools/espressif/emulator/public_plugs.py):
 # each final firmware installed, then each plug taken to the other. Nothing of
 # Sonoff's, no cloud and no secret: it runs on any runner, and a pull request
 # from a fork runs it as it is.
@@ -133,7 +133,7 @@ jobs:
           # none is published. The one waited for is the one emu.sh pulls.
           published="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/autoflash-emu"
           echo "AUTOFLASH_EMU_PUBLISHED=$published" >> "$GITHUB_ENV"
-          image="$published:$(tools/emulator/image.sh tag)"
+          image="$published:$(tools/espressif/emulator/image.sh tag)"
           echo "Emulator image: $image"
           for _ in $(seq 60); do
               if docker manifest inspect "$image" >/dev/null 2>&1; then
@@ -149,11 +149,11 @@ jobs:
           done
           echo "Still not published after 20 minutes: emu.sh builds it here."
       - name: The public plugs
-        run: .venv/bin/python -I tools/emulator/public_plugs.py fetch
+        run: .venv/bin/python -I tools/espressif/emulator/public_plugs.py fetch
       - name: The final firmware, from them
         run: |
           set -o pipefail
-          .venv/bin/python -I tools/emulator/public_plugs.py test | tee test.txt
+          .venv/bin/python -I tools/espressif/emulator/public_plugs.py test | tee test.txt
           {
             echo "### The final firmware on the emulator"
             echo

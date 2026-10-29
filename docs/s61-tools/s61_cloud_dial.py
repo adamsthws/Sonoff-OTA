@@ -41,8 +41,8 @@ Verified 2026-10-27: the default dials our AP gateway `192.168.1.1:80`; `DISPATC
 leaves the factory `8.8.8.8:80`. Either way the netstack logs
 `TCP connect .. -> ..:80` + `HTTP GET /dispatch/device`, retried with backoff.
 
-  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_dial.py              # local stub (default)
-  DISPATCH= $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_dial.py    # factory placeholder
+  $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_dial.py              # local stub (default)
+  DISPATCH= $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_dial.py    # factory placeholder
 """
 import os
 import sys

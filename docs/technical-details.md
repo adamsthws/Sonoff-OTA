@@ -138,7 +138,7 @@ returns the plug to the Sonoff version, settings and pairing it had - but
 that means opening the plug, which is what the over-the-air route avoids.
 One of the two app slots holds the installer rather than an older Sonoff
 version; the plug boots the other. Restoring it over the air, from Tasmota,
-is not built yet. **The emulator:** `tools/emulator/emu.sh` offers every
+is not built yet. **The emulator:** `tools/espressif/emulator/emu.sh` offers every
 backed-up plug by its MAC and runs a copy of the one you choose
 ([docs/emulator.md](emulator.md)).
 
@@ -340,7 +340,7 @@ python3 tests/run.py
 ```
 
 To try a change against a plug without converting a real one, the emulator in
-`tools/emulator/` runs the whole conversion against a virtual S60 booting a
+`tools/espressif/emulator/` runs the whole conversion against a virtual S60 booting a
 real stock flash dump, in Docker. It has taken a UK S60TPG on stock 1.2.0
 through every stage to the official layout. On a Linux computer with KVM it
 also runs the tool on Windows beside the plug, in a Windows that starts clean
@@ -353,7 +353,7 @@ the keyboard. The eWeLink account comes from `.env`, PROCEED is taken as
 typed, yes/no questions take their cautious default, and any other question
 stops the run, naming it. `tools/unattended_run.py` runs it on a
 pseudo-terminal, records everything it draws, and rebuilds the final screen,
-colours included, for review. `tools/emulator/unattended-test.sh` does all of
+colours included, for review. `tools/espressif/emulator/unattended-test.sh` does all of
 that against the emulated plug in one command. How each piece works is in
 **[unattended.md](unattended.md)**.
 

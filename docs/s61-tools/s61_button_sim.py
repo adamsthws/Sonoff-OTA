@@ -16,7 +16,7 @@ The long-press *action* (enter pairing mode) is consumed in the app layer, which
 stays parked, so this reaches "long-press timer armed", not pairing mode. It is a
 research/validation tool, not a converter. Drives the fork, not this repo's code.
 
-  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_button_sim.py [pin]   # default pin 3
+  $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_button_sim.py [pin]   # default pin 3
 """
 import sys
 import os

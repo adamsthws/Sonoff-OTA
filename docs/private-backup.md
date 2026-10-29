@@ -49,7 +49,7 @@ recover it from.
 
 `.env` holding the key still loads for a conversion (`tools/autoflash/credentials.py`
 knows the name, and keeps the value out of the log), and the emulator never
-hands it to a run (`tools/emulator/unattended-test.sh`).
+hands it to a run (`tools/espressif/emulator/unattended-test.sh`).
 
 ## Where it is kept
 
@@ -70,7 +70,7 @@ gh auth refresh -h github.com -s write:packages,read:packages
 ## The emulator restores it by itself
 
 When the emulator finds no Sonoff backup in `captures/plugs/`
-(`tools/emulator/choose_plug.py`), it runs `restore`: the sealed backup is
+(`tools/espressif/emulator/choose_plug.py`), it runs `restore`: the sealed backup is
 fetched, opened and filed in `captures/plugs/<MAC>/sonoff-backup/`, its plug's
 record beside it, as a conversion files one. A copy there already is used as
 it is, and one that differs from the sealed backup is never written over: the

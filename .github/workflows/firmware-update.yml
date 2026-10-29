@@ -179,8 +179,8 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          .venv/bin/python -I tools/emulator/public_plugs.py fetch
-          .venv/bin/python -I tools/emulator/public_plugs.py test | tee emulator.txt
+          .venv/bin/python -I tools/espressif/emulator/public_plugs.py fetch
+          .venv/bin/python -I tools/espressif/emulator/public_plugs.py test | tee emulator.txt
       - name: The pull request
         if: steps.branch.outputs.made != 'yes' && steps.update.outputs.changed == 'yes'
         env:

@@ -1,7 +1,7 @@
 """Complete the eWeLink cloud cycle: the emulated S61 comes ONLINE against a stub.
 
 Builds on s61_cloud_dial.py (which gets the plug to dial GET /dispatch/device) by
-standing up the local CoolKit stub (tools/emulator/stub_cloud/stub_server.py) on
+standing up the local CoolKit stub (tools/espressif/emulator/stub_cloud/stub_server.py) on
 loopback and bridging the emulator's netstack to it, then driving the whole
 handshake:
 
@@ -14,7 +14,7 @@ Dispatch is plaintext (the S61's factory dispatch URL is http://...:80), but the
 IoT WebSocket is wss:// and the firmware verifies the server certificate against
 a baked-in CoolKit root CA (authmode REQUIRED), so a self-signed stub cert is
 rejected (bad_certificate). We clear that the same honest way the S60 does
-(tools/emulator/patch_stock.py --trust-ca): a *trust-anchor swap*. The S60 swaps
+(tools/espressif/emulator/patch_stock.py --trust-ca): a *trust-anchor swap*. The S60 swaps
 the CA PEM in its flash image; the S61 does not keep its CA as a static flash
 blob (it is assembled into RAM at TLS-setup time), so the swap is applied at the
 one point the firmware installs it - mbedtls_x509_crt_parse (0x125e4c): when the
@@ -34,7 +34,7 @@ Two synthesised pieces, as in s61_cloud_dial.py: Wi-Fi creds seeded at
 ef_get_env_blob, and the pairing-success trigger (force-call the start-cloud
 handler 0x2c204) once Wi-Fi is up.
 
-  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_online.py
+  $(tools/beken/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_online.py
 """
 import os
 import sys
@@ -48,7 +48,7 @@ import tempfile
 import subprocess
 from pathlib import Path
 ROOT = Path(os.environ.get("BK_EMU_ROOT", "/opt/beken-emulator")); sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "emulator" / "stub_cloud"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "espressif" / "emulator" / "stub_cloud"))
 from src.main import build_emulator  # noqa: E402
 from unicorn import UC_HOOK_CODE  # noqa: E402
 from unicorn.arm_const import (  # noqa: E402

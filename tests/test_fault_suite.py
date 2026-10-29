@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/emulator"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/espressif/emulator"))
 import fault_suite as fs  # noqa: E402
 
 MAC = "12:34:56:ab:cd:ef"

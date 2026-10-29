@@ -330,7 +330,7 @@ are under [the stub server](#every-exchange-with-examples).
 
 ### Emulator boot patches (context)
 
-[`patch_stock.py`](../tools/emulator/patch_stock.py) already edits `ota_0` only to
+[`patch_stock.py`](../tools/espressif/emulator/patch_stock.py) already edits `ota_0` only to
 make it boot under QEMU (which emulates no Bluetooth): two routines
 (`0x4200A66A`, `0x4201BB60`) are patched to `return 0` so BT init is skipped.
 These do not touch dispatch or TLS, so dispatch/trust behaviour in the emulator
@@ -359,7 +359,7 @@ itself is never modified.
 
 ### Self-signed CA + server cert
 
-[`tools/emulator/stub_cloud/make_ca.py`](../tools/emulator/stub_cloud/make_ca.py)
+[`tools/espressif/emulator/stub_cloud/make_ca.py`](../tools/espressif/emulator/stub_cloud/make_ca.py)
 generates, into `captures/emulation/stub-cloud/` (git-ignored, private):
 
 - a **root CA**: EC P-256 (for the slot-size reason above), self-signed,
@@ -376,7 +376,7 @@ regenerates the CA. The CA private key never enters the firmware.
 
 ### Firmware change A — trust our CA (trust-store swap in `ota_0`)
 
-[`patch_stock.py --trust-ca <ca.crt>`](../tools/emulator/patch_stock.py) checks
+[`patch_stock.py --trust-ca <ca.crt>`](../tools/espressif/emulator/patch_stock.py) checks
 both slots currently hold the coolkit CA (`O=coolkit, CN=coolkit.cn`), overwrites
 each with our CA PEM null-padded to the original 1040-byte slot, then calls
 `appimage.reseal` so the image checksum and SHA-256 are valid and the bootloader
@@ -385,7 +385,7 @@ plain-boot path (no `--trust-ca`) is unchanged.
 
 ### Firmware change B — point the plug at our domain (NVS `dis_server`)
 
-[`rewrite_nvs.py --dis-server disp.autoflash-stub.test --dis-port 443`](../tools/emulator/rewrite_nvs.py)
+[`rewrite_nvs.py --dis-server disp.autoflash-stub.test --dis-port 443`](../tools/espressif/emulator/rewrite_nvs.py)
 sets those `frame_params` fields the same way it already rewrites
 `ssid`/`passwd`: the partition is decoded and regenerated with
 `nvs_partition_gen`, so the value length is not constrained. A pure NVS edit; no
@@ -393,10 +393,10 @@ firmware string-patch is needed (test 1).
 
 ## The stub server
 
-[`tools/emulator/stub_cloud/stub_server.py`](../tools/emulator/stub_cloud/stub_server.py)
+[`tools/espressif/emulator/stub_cloud/stub_server.py`](../tools/espressif/emulator/stub_cloud/stub_server.py)
 is one stdlib-only HTTPS listener on `192.168.60.1:443` (the leaf cert), routed by
 request. Device identity for the account API is read from the booted flash dump by
-[`device_identity.py`](../tools/emulator/stub_cloud/device_identity.py), so the
+[`device_identity.py`](../tools/espressif/emulator/stub_cloud/device_identity.py), so the
 LAN key never leaves the instance network. Every device/app message is logged with
 secret values (`apikey`, `deviceid`, `devicekey`, `encrypt_key`, …) redacted.
 
@@ -877,9 +877,9 @@ X1 too, from its configuration dump: X1 -23, D4 -19, E1 -22, reported -23.
 
 ## Files
 
-Added under `tools/emulator/stub_cloud/`: `__init__.py`, `make_ca.py`,
+Added under `tools/espressif/emulator/stub_cloud/`: `__init__.py`, `make_ca.py`,
 `device_identity.py`, `stub_server.py`. Changed:
-`tools/emulator/patch_stock.py` (CA-swap patch), `rewrite_nvs.py`
+`tools/espressif/emulator/patch_stock.py` (CA-swap patch), `rewrite_nvs.py`
 (`--dis-server`/`--dis-port`), `emu.sh` and `unattended-test.sh` (`--stub-cloud`,
 `AUTOFLASH_EMU_IMAGE`), `container/entrypoint.sh` (stub DNS/firewall/launch),
 `fault_suite.py` (drop the cloud lock under `--stub-cloud`), and
