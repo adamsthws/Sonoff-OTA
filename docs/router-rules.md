@@ -168,7 +168,7 @@ not. That test still exists and is still covered by the test suite:
 
 - `tools/autoflash/redirect_test.py` - the test itself, with the
   address-borrowing helpers in `tools/autoflash/hostsys.py`;
-- `tools/test_ota_firewall.sh` - the research's command-line version.
+- `tools/espressif/test_ota_firewall.sh` - the research's command-line version.
 
 The step that asked for the rule and ran the test was step **B2**,
 `step_intercept`, in `tools/autoflash_cli.py`; git history has it. Putting it

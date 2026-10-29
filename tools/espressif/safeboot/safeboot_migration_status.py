@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from tools.safeboot_migration import (
+    from tools.espressif.safeboot.safeboot_migration import (
         TARGET_PARTITIONS,
         TARGET_TABLE_SHA256,
         load_manifest,
@@ -21,7 +21,7 @@ try:
         require_exact_partitions,
         verify_manifest_files,
     )
-    from tools.serve_safeboot_migration import LOCK_PATH
+    from tools.espressif.safeboot.serve_safeboot_migration import LOCK_PATH
 except ModuleNotFoundError:
     from safeboot_migration import (
         TARGET_PARTITIONS,
@@ -178,7 +178,7 @@ def main() -> int:
         print(f"  SHA-256 {app['sha256']}")
         print("After canonical app0 is stable and Berry is available, run:")
         print(
-            "  python3 tools/serve_safeboot_migration.py restore "
+            "  python3 tools/espressif/safeboot/serve_safeboot_migration.py restore "
             f"--manifest {manifest_path} --listen-ip <WORKSTATION_LAN_IP> "
             f"--device-ip {args.device_ip} --i-confirm-normal-app-is-stable"
         )
@@ -197,7 +197,7 @@ def main() -> int:
     print(note)
     print("Run (replace the workstation address):")
     print(
-        f"  python3 tools/serve_safeboot_migration.py {next_phase} "
+        f"  python3 tools/espressif/safeboot/serve_safeboot_migration.py {next_phase} "
         f"--manifest {manifest_path} --listen-ip <WORKSTATION_LAN_IP> "
         f"--device-ip {args.device_ip}"
     )

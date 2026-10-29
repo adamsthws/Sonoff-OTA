@@ -11,10 +11,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools import validate_imprintable_safeboot, validate_recovery_safeboot
-from tools.configure_recovery_safeboot import render_header
+from tools.espressif.safeboot import validate_imprintable_safeboot, validate_recovery_safeboot
+from tools.espressif.safeboot.configure_recovery_safeboot import render_header
 from tools.autoflash.imprint import imprint, repair_image
-from tools.safeboot_migration import RECOVERY_MARKER
+from tools.espressif.safeboot.safeboot_migration import RECOVERY_MARKER
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLISHED = (ROOT / "artifacts/autoflash-recovery-safeboot-imprintable.bin").read_bytes()
@@ -124,7 +124,7 @@ class RecoverySafebootTests(unittest.TestCase):
                 validate_recovery_safeboot.validate(image, given)
 
     def test_the_official_safeboot_is_refused(self):
-        from tools.safeboot_migration import sha256_bytes
+        from tools.espressif.safeboot.safeboot_migration import sha256_bytes
         pinned = {"safeboot": {"sha256": sha256_bytes(self.BUILT)}}
         with mock.patch.object(validate_recovery_safeboot, "PINNED_ARTIFACTS", pinned), \
              self.assertRaisesRegex(ValueError, "equals official Safeboot"):

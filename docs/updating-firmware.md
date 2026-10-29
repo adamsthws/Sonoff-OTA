@@ -24,7 +24,7 @@ ESPHome builds are: the run writes the plug's Wi-Fi into a copy of each.
 conversion - stays as it is. Each has been through every fault the suite puts
 in its way, a change to one means all of that again, and none of it is left
 on a plug. The Tasmota they are made from is `INTERIM_TASMOTA_COMMIT` in
-`tools/safeboot_migration.py`, which need not be the official release's: the
+`tools/espressif/safeboot/safeboot_migration.py`, which need not be the official release's: the
 recovery Safeboot saves the Wi-Fi in its release's settings record, and the
 official release takes that record and moves it on to its own layout, as
 Tasmota does on any upgrade - as long as `CFG_HOLDER` is the same in both,
@@ -112,7 +112,7 @@ Then it writes the release, its commit and each file's size and SHA-256 into
 Where it stops:
 
 - **Another partition table**: Tasmota has changed its layout. The repartition
-  (`TARGET_PARTITIONS`, the Berry phases in `repartition/berry/`) was reviewed
+  (`TARGET_PARTITIONS`, the Berry phases in `tools/espressif/safeboot/repartition/berry/`) was reviewed
   for this one; a new layout is a new design, not an update.
 - **Another `CFG_HOLDER`**: the release would start without the Wi-Fi the
   recovery Safeboot saved, and every conversion would end on its setup

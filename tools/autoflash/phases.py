@@ -1,6 +1,6 @@
 """Drive the reviewed migration phase servers without console pasting.
 
-This starts tools/serve_safeboot_migration.py exactly as the runbook does,
+This starts tools/espressif/safeboot/serve_safeboot_migration.py exactly as the runbook does,
 reads the URL and arm token it prints, and delivers the loader to the plug over
 Tasmota's ordinary command endpoint.  It changes the transport only: the Berry
 that executes on the device is byte-for-byte the reviewed template the server

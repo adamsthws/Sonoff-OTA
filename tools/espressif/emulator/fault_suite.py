@@ -88,7 +88,7 @@ MAC = None  # --plug: the backed-up plug the emulators run copies of
 PLUG_URL = "http://192.168.60.50"
 # An MQTT host for a plug set up by its owner (notemplate): nobody's (RFC 5737).
 NOTEMPLATE_MQTT_HOST = "192.0.2.10"
-APP0_OFFSET = 0xE0000  # Tasmota's own firmware, on its layout (tools/safeboot_migration.py)
+APP0_OFFSET = 0xE0000  # Tasmota's own firmware, on its layout (tools/espressif/safeboot/safeboot_migration.py)
 PLUG_CMD = "/opt/autoflash-emu/bin/plug"
 ESPHOME_OTA_PORT = 3232
 MAX_RUNS = 4
@@ -954,7 +954,7 @@ class Scenario:
             self.ex("prlimit", f"--pid={pid}", "--fsize=unlimited")
         elif fault == "token":
             out = self.ex("sh", "-c", "cd /work && set -a && . /tmp/autoflash-unattended.env && "
-                          "/opt/venv/bin/python -c 'import os; from tools.get_device_key import login; "
+                          "/opt/venv/bin/python -c 'import os; from tools.ewelink.get_device_key import login; "
                           "login(os.environ[\"EWELINK_EMAIL\"], os.environ[\"EWELINK_PASSWORD\"], \"+44\", \"eu\"); "
                           "print(\"logged in again\")'", timeout=60)
             self.notes["token"] = (out.stdout + out.stderr).strip()[-200:]

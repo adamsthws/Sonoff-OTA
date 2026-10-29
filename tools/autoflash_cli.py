@@ -61,11 +61,11 @@ from tools.autoflash.prompts import (  # noqa: E402
     wait_or_ask,
 )
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED, PENDING, RunState  # noqa: E402
-from tools.discover_ewelink import answered_ids, discover  # noqa: E402
-from tools.dump_stock_flash import is_good, read_dump, summary  # noqa: E402
-from tools.get_device_key import EwelinkError, get_devices, login  # noqa: E402
-from tools import inspect_stock_nvs  # noqa: E402
-from tools.prepare_imprinted_bundle import (  # noqa: E402
+from tools.ewelink.discover_ewelink import answered_ids, discover  # noqa: E402
+from tools.espressif.dump_stock_flash import is_good, read_dump, summary  # noqa: E402
+from tools.ewelink.get_device_key import EwelinkError, get_devices, login  # noqa: E402
+from tools.espressif import inspect_stock_nvs  # noqa: E402
+from tools.espressif.safeboot.prepare_imprinted_bundle import (  # noqa: E402
     BundleError,
     ask_credentials,
     ask_password,
@@ -77,8 +77,8 @@ from tools.prepare_imprinted_bundle import (  # noqa: E402
     startup_image,
     validate_bundle,
 )
-from tools.query_ota import ota_endpoints  # noqa: E402
-from tools.safeboot_migration import (  # noqa: E402
+from tools.ewelink.query_ota import ota_endpoints  # noqa: E402
+from tools.espressif.safeboot.safeboot_migration import (  # noqa: E402
     APP0_OFFSET,
     OFFICIAL_TASMOTA_VERSION,
     PINNED_ARTIFACTS,
@@ -915,7 +915,7 @@ def save_settings(settings: dict[str, Any]) -> None:
 
 # A phase server's line that says why it stopped, rather than how it is getting on.
 # The commit's own checks, made before its first write, that the plug is still
-# as E1 and E2 left it (repartition/berry/commit.be.tmpl).
+# as E1 and E2 left it (tools/espressif/safeboot/repartition/berry/commit.be.tmpl).
 COMMIT_REFUSED_AS_CHANGED_RE = re.compile(r"NVS changed since preflight|staged Safeboot")
 # The commit's checks of what it wrote: after any of these it put back what was
 # there before (a bit read wrong once, say), so it can be tried again.
@@ -2258,7 +2258,7 @@ def step_discover(ctx: Context) -> dict[str, Any]:
     mdns.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     email = ctx.email()
     env = ctx.ewelink_env()
-    if run_tool(hostsys.python_script("tools/query_ota.py", "--mdns-capture", str(mdns),
+    if run_tool(hostsys.python_script("tools/ewelink/query_ota.py", "--mdns-capture", str(mdns),
                                       "--email", email, "--output", str(meta)),
                 interactive=True, env=env) != 0:
         reasons = output.tool_problems(1)
@@ -2352,7 +2352,7 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
     with safety_locks.lifted(ROOT, "RECOVERY_LOCK"):
         code = run_tool(
             hostsys.python_script(
-                "tools/serve_tasmota_ota.py",
+                "tools/espressif/serve_tasmota_ota.py",
                 "--listen-ip", listen_ip, "--listen-port", str(port),
                 "--device-ip", plug_ip,
                 "--firmware", str(ctx.bridge),
@@ -6113,7 +6113,7 @@ def run_steps(ctx: Context) -> int:
             section("Research bridge installed - stopping here", [
                 f"{ctx.bridge.name} is on the plug. Join the bridge's network",
                 f"({our_setup_network(ctx)}, open) and run its research tool, e.g.:",
-                "  python tools/inspect_stock_nvs.py",
+                "  python tools/espressif/inspect_stock_nvs.py",
                 "Then switch the plug off and on: it goes back to its Sonoff",
                 "firmware. Or run this tool again to carry on the conversion.",
             ])

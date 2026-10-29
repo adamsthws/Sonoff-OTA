@@ -1,7 +1,7 @@
 import re
 import unittest
 
-from tools.safeboot_migration import (
+from tools.espressif.safeboot.safeboot_migration import (
     PINNED_ARTIFACTS,
     PUBLISHED_BLUETOOTH_FILE,
     PUBLISHED_BLUETOOTH_SOURCE_COMMIT,
@@ -33,8 +33,8 @@ class PublishedArtifactTests(unittest.TestCase):
 
     def test_the_bridge_carries_one_version_everywhere(self):
         import re
-        from tools.analyze_vendor_ota import analyze
-        from tools.build_vendor_ota import app_version
+        from tools.espressif.analyze_vendor_ota import analyze
+        from tools.espressif.build_vendor_ota import app_version
         from tools.autoflash_cli import BRIDGE_OTA, ROOT
         source = (ROOT / "archive/bridge/main/main.c").read_text()
         project = (ROOT / "archive/bridge/CMakeLists.txt").read_text()
@@ -56,7 +56,7 @@ class PublishedArtifactTests(unittest.TestCase):
         self.assertIn(b"/update\0", wrapped)
 
     def test_the_published_startup_firmware_saves_the_wifi(self):
-        from tools.safeboot_migration import PUBLISHED_RECOVERY_FILE, PUBLISHED_RECOVERY_SHA256
+        from tools.espressif.safeboot.safeboot_migration import PUBLISHED_RECOVERY_FILE, PUBLISHED_RECOVERY_SHA256
         image = PUBLISHED_RECOVERY_FILE.read_bytes()
         self.assertEqual(sha256_bytes(image), PUBLISHED_RECOVERY_SHA256)
         self.assertIn(b"Autoflash recovery Wi-Fi defaults active", image)

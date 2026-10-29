@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from tools.safeboot_migration import (
+    from tools.espressif.safeboot.safeboot_migration import (
         CANONICAL_NVS_SIZE,
         OTADATA_SIZE,
         RECOVERY_ARTIFACT,
@@ -94,8 +94,8 @@ except ModuleNotFoundError:
     from autoflash.plans import Plan, PlanError
 
 
-ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE_DIR = ROOT / "repartition" / "berry"
+ROOT = Path(__file__).resolve().parents[3]
+TEMPLATE_DIR = Path(__file__).resolve().parent / "repartition" / "berry"
 LOCK_PATH = ROOT / "REPARTITION_LOCK"
 COMMIT_FLAG = "--i-accept-power-loss-may-require-opening-the-plug"
 PHASES = ("preflight", "stage", "commit", "restore", "plan")

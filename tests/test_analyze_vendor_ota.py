@@ -2,8 +2,8 @@ import hashlib
 import struct
 import unittest
 
-from tools.analyze_vendor_ota import analyze, validation_checks
-from tools.build_vendor_ota import build_wrapper
+from tools.espressif.analyze_vendor_ota import analyze, validation_checks
+from tools.espressif.build_vendor_ota import build_wrapper
 
 
 def make_esp_image() -> bytes:
@@ -69,7 +69,7 @@ class WrapperVersionTests(unittest.TestCase):
         return bytes(32) + struct.pack("<I", 0xABCD5432) + bytes(12) + version.ljust(32, b"\0")
 
     def test_the_image_version_is_used_and_must_match(self):
-        from tools.build_vendor_ota import wrapper_version
+        from tools.espressif.build_vendor_ota import wrapper_version
         image = self.image_with_version(b"4.4.1")
         self.assertEqual(wrapper_version(image, None), "4.4.1")
         self.assertEqual(wrapper_version(image, "4.4.1"), "4.4.1")
@@ -77,7 +77,7 @@ class WrapperVersionTests(unittest.TestCase):
             wrapper_version(image, "9.9.9")
 
     def test_images_without_a_dotted_version_need_one_given(self):
-        from tools.build_vendor_ota import wrapper_version
+        from tools.espressif.build_vendor_ota import wrapper_version
         image = self.image_with_version(b"1")
         self.assertEqual(wrapper_version(image, "1.2.1"), "1.2.1")
         with self.assertRaises(ValueError):

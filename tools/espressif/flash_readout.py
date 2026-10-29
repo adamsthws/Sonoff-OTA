@@ -10,7 +10,7 @@ What it costs: the spare slot is overwritten, so whatever was there - often
 the Sonoff version the plug had before its last update - is gone. The Sonoff
 firmware it is running, its settings and its pairing are kept.
 
-    python3 tools/flash_readout.py
+    python3 tools/espressif/flash_readout.py
 """
 
 from __future__ import annotations
@@ -27,10 +27,10 @@ import time
 from pathlib import Path
 from typing import Callable
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from tools.analyze_vendor_ota import analyze  # noqa: E402
+from tools.espressif.analyze_vendor_ota import analyze  # noqa: E402
 from tools.autoflash import hostsys, kinds, output  # noqa: E402
 from tools.autoflash.output import PROBLEM_RE  # noqa: E402
 from tools.autoflash.prompts import (  # noqa: E402
@@ -42,8 +42,8 @@ from tools.autoflash.prompts import (  # noqa: E402
     section,
     warning_box,
 )
-from tools.discover_ewelink import discover  # noqa: E402
-from tools.dump_stock_flash import fetch, is_readout_bridge, save_dump  # noqa: E402
+from tools.ewelink.discover_ewelink import discover  # noqa: E402
+from tools.espressif.dump_stock_flash import fetch, is_readout_bridge, save_dump  # noqa: E402
 from tools.autoflash_cli import (  # noqa: E402
     DELIVERY_PORTS,
     LEGACY_BRIDGE_PASSWORD,
@@ -157,7 +157,7 @@ def query_plug(plug_ip: str, email: str, env: dict[str, str], work: Path) -> tup
     meta = work / "ota-metadata.json"
     try:
         completed = subprocess.run(
-            hostsys.python_script("tools/query_ota.py", "--mdns-capture", str(mdns),
+            hostsys.python_script("tools/ewelink/query_ota.py", "--mdns-capture", str(mdns),
                                   "--email", email, "--output", str(meta)),
             cwd=ROOT, env=env, capture_output=True, text=True,
         )
@@ -212,7 +212,7 @@ def deliver(plug_ip: str, listen_ip: str, port: int, email: str, version: str,
     try:
         process = subprocess.Popen(
             hostsys.python_script(
-                "tools/serve_tasmota_ota.py",
+                "tools/espressif/serve_tasmota_ota.py",
                 "--listen-ip", listen_ip, "--listen-port", str(port),
                 "--device-ip", plug_ip, "--firmware", str(firmware),
                 "--email", email, "--expected-current-version", version,
@@ -417,7 +417,7 @@ def run(args: argparse.Namespace) -> int:
             print("accepted it and it runs.")
         elif save_dump(host, args.label or f"stock-{version}", version) != 0:
             raise Stop("the dump was not complete or not well formed. The readout firmware is "
-                       f"still running: retry with python3 tools/dump_stock_flash.py --host {host}")
+                       f"still running: retry with python3 tools/espressif/dump_stock_flash.py --host {host}")
     finally:
         if rule is not None and not hostsys.close_firewall(rule):
             print("Remove the temporary firewall rule yourself:")

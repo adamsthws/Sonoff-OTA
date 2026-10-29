@@ -11,7 +11,7 @@ from pathlib import Path
 
 from tools import update_firmware as uf
 from tools.autoflash import tasmota_settings
-from tools.safeboot_migration import OFFICIAL_URLS, PINNED_ARTIFACTS, sha256_bytes
+from tools.espressif.safeboot.safeboot_migration import OFFICIAL_URLS, PINNED_ARTIFACTS, sha256_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 PINS = json.loads((ROOT / "firmware.json").read_text(encoding="utf-8"))

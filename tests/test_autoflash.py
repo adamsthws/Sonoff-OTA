@@ -764,7 +764,7 @@ class ModelGuardTests(unittest.TestCase):
                               ewelink_env=lambda: {})
 
         def fake_tool(args, **_):
-            if "tools/query_ota.py" in args:
+            if "tools/ewelink/query_ota.py" in args:
                 (root / "ota-metadata.json").write_text(json.dumps({
                     "query": {"version": "1.2.0", "model": model},
                     "response": {"data": {"otaInfoList": []}},
@@ -2316,7 +2316,7 @@ class StartChoiceTests(unittest.TestCase):
         import tempfile
         from unittest import mock
         import tools.autoflash_cli as autoflash
-        from tools.safeboot_migration import FIRMWARE
+        from tools.espressif.safeboot.safeboot_migration import FIRMWARE
         earlier = FIRMWARE["tasmota"]["earlier"][0]
         with tempfile.TemporaryDirectory() as directory:
             manifest = Path(directory) / "manifest.json"
@@ -2597,7 +2597,7 @@ class BackOnSonoffTests(unittest.TestCase):
         # Seen against the real cloud: eWeLink's servers dropping connections
         # (SSL EOF), and the run said the firewall had kept the plug out - of
         # a download it was never asked to make.
-        import tools.serve_tasmota_ota as sender
+        import tools.espressif.serve_tasmota_ota as sender
         error = "ERROR: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol"
         advice = self.advice([error, sender.NOT_SENT], reported=[error, sender.NOT_SENT])
         self.assertNotIn("FIREWALL", advice)
@@ -2605,7 +2605,7 @@ class BackOnSonoffTests(unittest.TestCase):
         self.assertIn("run this again", advice)
 
     def test_a_send_refused_before_the_command_says_only_that_nothing_was_sent(self):
-        import tools.serve_tasmota_ota as sender
+        import tools.espressif.serve_tasmota_ota as sender
         refused = "ERROR: Device reports 1.3.0, expected 1.2.0; refusing"
         advice = self.advice([refused, sender.NOT_SENT], reported=[refused, sender.NOT_SENT])
         self.assertEqual(advice, "Nothing was sent to the plug, so it keeps its Sonoff firmware.")
@@ -3920,7 +3920,7 @@ class SonoffBackupWifiTests(unittest.TestCase):
     def read(self, content):
         from unittest import mock
         import tools.autoflash_cli as autoflash
-        from tools.inspect_stock_nvs import Value
+        from tools.espressif.inspect_stock_nvs import Value
         value = Value(namespace=3, key="content", kind=0x21, chunks={0: content})
         with mock.patch.object(autoflash.inspect_stock_nvs, "parse",
                                return_value=({3: "frame_params"}, {(3, "content"): value})):

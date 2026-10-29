@@ -1,7 +1,7 @@
 import unittest
 
-from tools.get_device_key import EwelinkError
-from tools.query_ota import ota_endpoints, ota_identity
+from tools.ewelink.get_device_key import EwelinkError
+from tools.ewelink.query_ota import ota_endpoints, ota_identity
 
 
 class QueryOtaTests(unittest.TestCase):

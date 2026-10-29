@@ -3,13 +3,13 @@ set -eu
 
 usage() {
     cat >&2 <<'EOF'
-Usage: sudo ./tools/test_ota_firewall.sh INTERFACE PLUG_IP WORKSTATION_IP VENDOR_OTA_IP [PORT]
+Usage: sudo ./tools/espressif/test_ota_firewall.sh INTERFACE PLUG_IP WORKSTATION_IP VENDOR_OTA_IP [PORT]
 
 Run only after creating the source-specific DNAT and MASQUERADE rules.
 The plug must be switched off and the local OTA server must not be running.
 
 Example:
-  sudo ./tools/test_ota_firewall.sh wlo1 192.168.1.50 192.168.1.20 203.0.113.10 8088
+  sudo ./tools/espressif/test_ota_firewall.sh wlo1 192.168.1.50 192.168.1.20 203.0.113.10 8088
 EOF
 }
 

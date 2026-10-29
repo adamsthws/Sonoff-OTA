@@ -24,12 +24,12 @@ from typing import Any
 try:
     from tools.autoflash import kinds
     from tools.autoflash.prompts import ask_secret
-    from tools.analyze_vendor_ota import analyze
-    from tools.build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE
-    from tools.get_device_key import APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
-    from tools.probe_ota_command import WS_DISPATCH, nonce
-    from tools.query_ota import ota_identity
-    from tools.websocket_minimal import WebSocket, WebSocketError
+    from tools.espressif.analyze_vendor_ota import analyze
+    from tools.espressif.build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE
+    from tools.ewelink.get_device_key import APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
+    from tools.ewelink.probe_ota_command import WS_DISPATCH, nonce
+    from tools.ewelink.query_ota import ota_identity
+    from tools.ewelink.websocket_minimal import WebSocket, WebSocketError
 except ModuleNotFoundError:
     from autoflash import kinds
     from autoflash.prompts import ask_secret
@@ -241,7 +241,7 @@ def main():
     parser.add_argument(SAFETY_FLAG, action="store_true")
     args = parser.parse_args()
 
-    recovery_lock = Path(__file__).resolve().parents[1] / "RECOVERY_LOCK"
+    recovery_lock = Path(__file__).resolve().parents[2] / "RECOVERY_LOCK"
     if recovery_lock.exists():
         print(f"Refusing: recovery lock is active at {recovery_lock}", file=sys.stderr)
         return 2

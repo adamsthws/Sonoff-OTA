@@ -21,9 +21,9 @@ from typing import Any
 
 try:
     from tools.autoflash.prompts import ask_secret
-    from tools.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
-    from tools.query_ota import ota_identity
-    from tools.websocket_minimal import WebSocket, WebSocketError
+    from tools.ewelink.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
+    from tools.ewelink.query_ota import ota_identity
+    from tools.ewelink.websocket_minimal import WebSocket, WebSocketError
 except ModuleNotFoundError:
     from autoflash.prompts import ask_secret
     from get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
@@ -130,7 +130,7 @@ def main() -> int:
     parser.add_argument(SAFETY_FLAG, action="store_true")
     args = parser.parse_args()
 
-    recovery_lock = Path(__file__).resolve().parents[1] / "RECOVERY_LOCK"
+    recovery_lock = Path(__file__).resolve().parents[2] / "RECOVERY_LOCK"
     if recovery_lock.exists():
         print(f"Refusing: recovery lock is active at {recovery_lock}", file=sys.stderr)
         return 2

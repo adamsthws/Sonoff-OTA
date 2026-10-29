@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import esphome, imprint, tasmota_settings  # noqa: E402
-from tools.safeboot_migration import (  # noqa: E402
+from tools.espressif.safeboot.safeboot_migration import (  # noqa: E402
     APP0_OFFSET,
     APP0_SIZE,
     SAFEBOOT_OFFSET,

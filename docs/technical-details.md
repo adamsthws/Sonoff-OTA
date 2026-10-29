@@ -17,7 +17,7 @@ GitHub - checks every one against a pinned SHA-256, and writes the bundle into
 your Wi-Fi details, which are added later in the run. To rebuild it on its own:
 
 ```sh
-python3 tools/prepare_imprinted_bundle.py --without-wifi
+python3 tools/espressif/safeboot/prepare_imprinted_bundle.py --without-wifi
 ```
 
 ### What is in it
@@ -361,10 +361,10 @@ To build the temporary startup firmware yourself instead of using the
 published one, the local-build route is still there:
 
 ```sh
-python3 tools/configure_recovery_safeboot.py        # asks for your Wi-Fi, privately
-tools/build_recovery_safeboot.sh /tmp/tasmota-src   # builds the image
-python3 tools/prepare_recovery_safeboot_migration.py
-python3 tools/safeboot_migration_status.py          # says whether the bundle is good
+python3 tools/espressif/safeboot/configure_recovery_safeboot.py        # asks for your Wi-Fi, privately
+tools/espressif/safeboot/build_recovery_safeboot.sh /tmp/tasmota-src   # builds the image
+python3 tools/espressif/safeboot/prepare_recovery_safeboot_migration.py
+python3 tools/espressif/safeboot/safeboot_migration_status.py          # says whether the bundle is good
 ```
 
 It needs a full flash dump of a plug for `prepare_safeboot_migration.py`. The

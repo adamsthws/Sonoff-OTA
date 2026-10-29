@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 try:
-    from tools.analyze_vendor_ota import parse_esp_image
+    from tools.espressif.analyze_vendor_ota import parse_esp_image
     from tools.autoflash.imprint import (
         PASSWORD_FIELD_BYTES,
         PASSWORD_MARKER,

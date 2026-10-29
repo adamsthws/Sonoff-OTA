@@ -2,7 +2,7 @@ import struct
 import unittest
 import zlib
 
-from tools import inspect_stock_nvs
+from tools.espressif import inspect_stock_nvs
 
 
 def entry(ns: int, kind: int, key: str, span: int = 1, chunk: int = 0xFF, data: bytes = b"") -> bytes:

@@ -21,7 +21,7 @@ import hashlib
 import re
 
 try:
-    from tools.analyze_vendor_ota import parse_esp_image
+    from tools.espressif.analyze_vendor_ota import parse_esp_image
 except ModuleNotFoundError:  # running from inside tools/
     from analyze_vendor_ota import parse_esp_image
 

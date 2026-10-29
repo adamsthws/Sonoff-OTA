@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 try:
-    from tools.analyze_vendor_ota import parse_esp_image
+    from tools.espressif.analyze_vendor_ota import parse_esp_image
 except ModuleNotFoundError:
     from analyze_vendor_ota import parse_esp_image
 
@@ -94,7 +94,7 @@ INTERIM_TABLE_SHA256 = "cfb1e1c46fa209a6c1eada92123a02847ab8e72f67c0044afbcb1c29
 # they were released (tasmota/install, where they were taken from up to 15.6.0,
 # folds its history away).
 FIRMWARE = json.loads(
-    (Path(__file__).resolve().parents[1] / "firmware.json").read_text(encoding="utf-8")
+    (Path(__file__).resolve().parents[3] / "firmware.json").read_text(encoding="utf-8")
 )
 OFFICIAL_TASMOTA_VERSION = FIRMWARE["tasmota"]["version"]
 OFFICIAL_TASMOTA_TAG = FIRMWARE["tasmota"]["tag"]
@@ -117,7 +117,7 @@ OFFICIAL_URLS = release_urls(FIRMWARE["tasmota"])
 # and the tests say so.
 INTERIM_TASMOTA_COMMIT = "db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892"  # 15.6.0
 PUBLISHED_BLUETOOTH_FILE = (
-    Path(__file__).resolve().parents[1] / "artifacts" / "tasmota32c3-bluetooth.bin"
+    Path(__file__).resolve().parents[3] / "artifacts" / "tasmota32c3-bluetooth.bin"
 )
 PUBLISHED_BLUETOOTH_SOURCE_COMMIT = "f5b34a26be51be2469737d2c43a62acb237c264f"
 PUBLISHED_BLUETOOTH_UPSTREAM_PATH = (
@@ -142,13 +142,13 @@ RECOVERY_KIND = "volatile-wifi-recovery-safeboot"
 # copy is that file with their own network details written in - no local build.
 IMPRINTED_MODE = "public-imprinted-safeboot-v1"
 PUBLISHED_RECOVERY_FILE = (
-    Path(__file__).resolve().parents[1] / "artifacts" / "autoflash-recovery-safeboot-imprintable.bin"
+    Path(__file__).resolve().parents[3] / "artifacts" / "autoflash-recovery-safeboot-imprintable.bin"
 )
 PUBLISHED_RECOVERY_SHA256 = "ece36fd964c1443ef9fb74af87a0a257501c9e5ecfb1fb7a1c3aff1744bc29fd"
 RECOVERY_ARTIFACT = "recovery_safeboot"
 RECOVERY_MARKER = b"Autoflash recovery Wi-Fi defaults active"
 RECOVERY_PATCH = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parent
     / "repartition"
     / "recovery-safeboot"
     / "volatile-wifi-defaults.patch"
@@ -259,7 +259,7 @@ def require_exact_partitions(
         raise ValueError(f"partition entries differ\nactual={actual!r}\nexpected={wanted!r}")
 
 
-SOURCE_TABLE_FILE = Path(__file__).resolve().parents[1] / "artifacts" / "sonoff-s60-partition-table.bin"
+SOURCE_TABLE_FILE = Path(__file__).resolve().parents[3] / "artifacts" / "sonoff-s60-partition-table.bin"
 
 
 def interim_table(source: bytes | None = None) -> bytes:

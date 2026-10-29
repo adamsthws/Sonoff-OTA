@@ -16,18 +16,18 @@ from typing import Any
 
 try:
     from archive.tools.download_ota import DownloadError, ota_files
-    from tools.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
-    from tools.probe_ota_command import WS_DISPATCH, nonce, private_json
+    from tools.ewelink.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
+    from tools.ewelink.probe_ota_command import WS_DISPATCH, nonce, private_json
     from archive.tools.probe_vendor_header import private_bytes, request_header
-    from tools.query_ota import ota_identity, query_ota
-    from tools.websocket_minimal import WebSocket, WebSocketError
+    from tools.ewelink.query_ota import ota_identity, query_ota
+    from tools.ewelink.websocket_minimal import WebSocket, WebSocketError
 except ModuleNotFoundError:
     from download_ota import DownloadError, ota_files
-    from tools.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
-    from tools.probe_ota_command import WS_DISPATCH, nonce, private_json
+    from tools.ewelink.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
+    from tools.ewelink.probe_ota_command import WS_DISPATCH, nonce, private_json
     from probe_vendor_header import private_bytes, request_header
-    from tools.query_ota import ota_identity, query_ota
-    from tools.websocket_minimal import WebSocket, WebSocketError
+    from tools.ewelink.query_ota import ota_identity, query_ota
+    from tools.ewelink.websocket_minimal import WebSocket, WebSocketError
 
 
 SAFETY_FLAG = "--i-confirm-the-router-block-was-tested"

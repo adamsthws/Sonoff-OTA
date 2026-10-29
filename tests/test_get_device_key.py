@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.get_device_key import (
+from tools.ewelink.get_device_key import (
     APP_SECRET,
     EwelinkError,
     select_device,
@@ -48,7 +48,7 @@ class DeviceKeyTests(unittest.TestCase):
         import urllib.error
         from unittest import mock
 
-        from tools import get_device_key
+        from tools.ewelink import get_device_key
         failure = urllib.error.URLError(ssl.SSLCertVerificationError("certificate verify failed"))
         with mock.patch.object(get_device_key.urllib.request, "urlopen", side_effect=failure):
             with self.assertRaises(EwelinkError) as caught:

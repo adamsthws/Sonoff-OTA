@@ -50,9 +50,9 @@ sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import esphome, imprint, plugs, tasmota_settings as ts  # noqa: E402
 from tools.espressif.emulator.copy_plug import MAC_AT  # noqa: E402
-from tools.inspect_stock_nvs import parse as parse_nvs  # noqa: E402
+from tools.espressif.inspect_stock_nvs import parse as parse_nvs  # noqa: E402
 from tools.sonoff_secrets import PUBLIC_FIELDS, sonoff_values  # noqa: E402,F401
-from tools.safeboot_migration import (  # noqa: E402
+from tools.espressif.safeboot.safeboot_migration import (  # noqa: E402
     PUBLISHED_BLUETOOTH_FILE,
     PUBLISHED_RECOVERY_FILE,
     SOURCE_TABLE_SHA256,

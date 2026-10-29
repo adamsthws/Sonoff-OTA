@@ -34,12 +34,12 @@ from typing import Any, Callable
 
 try:
     from tools.autoflash.prompts import ask_secret
-    from tools.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session
-    from tools.probe_ota_command import WS_DISPATCH, nonce
-    from tools.query_ota import ota_identity, query_ota
+    from tools.ewelink.get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session
+    from tools.ewelink.probe_ota_command import WS_DISPATCH, nonce
+    from tools.ewelink.query_ota import ota_identity, query_ota
     from tools.autoflash import kinds
-    from tools.websocket_minimal import WebSocket, WebSocketError, encode_client_frame
-except ModuleNotFoundError:  # Support direct execution as tools/watch_sonoff_updates.py.
+    from tools.ewelink.websocket_minimal import WebSocket, WebSocketError, encode_client_frame
+except ModuleNotFoundError:  # Support direct execution as tools/ewelink/watch_sonoff_updates.py.
     from autoflash.prompts import ask_secret
     from get_device_key import API, APP_ID, EwelinkError, api_json, get_devices, login_session
     from probe_ota_command import WS_DISPATCH, nonce

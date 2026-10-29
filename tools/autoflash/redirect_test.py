@@ -8,7 +8,7 @@ unplugged. Two connections are made to the vendor's update server:
      this computer, where nothing is listening yet, so it is refused);
   2. from this computer's own address - must still reach the vendor.
 
-The same test as tools/test_ota_firewall.sh, made to run on Linux, macOS and
+The same test as tools/espressif/test_ota_firewall.sh, made to run on Linux, macOS and
 Windows. Adding and removing the borrowed address needs administrator rights,
 asked for through the system's own prompt.
 """

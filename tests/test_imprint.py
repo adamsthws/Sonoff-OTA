@@ -3,7 +3,7 @@ import struct
 import unittest
 from pathlib import Path
 
-from tools.analyze_vendor_ota import parse_esp_image
+from tools.espressif.analyze_vendor_ota import parse_esp_image
 from tools.autoflash.imprint import (
     FILLER,
     PASSWORD_FIELD_BYTES,
@@ -48,7 +48,7 @@ def build_image(payload: bytes, hash_appended: bool = True) -> bytes:
 
 
 def placeholder_payload() -> bytes:
-    """Exactly what tools/configure_imprintable_safeboot.py makes the compiler emit."""
+    """Exactly what tools/espressif/safeboot/configure_imprintable_safeboot.py makes the compiler emit."""
     return (
         b"some other rodata\x00"
         + SSID_MARKER + FILLER * SSID_FIELD_BYTES + b"\x00"
@@ -240,9 +240,7 @@ class RecoverySafebootHeaderTests(unittest.TestCase):
     """The published build is unchanged unless settings-saving is asked for."""
 
     def header(self, persist: bool) -> str:
-        import sys
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-        from configure_imprintable_safeboot import render_header
+        from tools.espressif.safeboot.configure_imprintable_safeboot import render_header
         return render_header(persist).decode()
 
     def test_the_default_build_is_the_published_one(self):
@@ -254,7 +252,7 @@ class RecoverySafebootHeaderTests(unittest.TestCase):
 
     def test_the_patch_guards_against_being_used_alone(self):
         patch = (Path(__file__).resolve().parents[1]
-                 / "repartition/recovery-safeboot/persist-settings.patch").read_text()
+                 / "tools/espressif/safeboot/repartition/recovery-safeboot/persist-settings.patch").read_text()
         # It must refuse to build without the Wi-Fi defaults it saves, and must
         # never overwrite settings a configured device already has.
         self.assertIn("#error AUTOFLASH_RECOVERY_PERSIST_SETTINGS requires", patch)

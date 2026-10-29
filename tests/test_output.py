@@ -623,7 +623,7 @@ class FailureReasonTests(OutputTestCase):
         self.assertIn("preflight-server.log", screen)
 
     def test_the_bundle_download_is_logged_not_drawn_over_the_stage(self):
-        from tools.prepare_safeboot_migration import obtain
+        from tools.espressif.safeboot.prepare_safeboot_migration import obtain
         source = Path(self.tmp.name) / "source.bin"
         source.write_bytes(b"x" * 10)
 
@@ -1082,10 +1082,10 @@ class StageGapTests(OutputTestCase):
     def test_verbose_output_under_a_stage_heading_has_the_gap(self):
         def body():
             output.stage_begin(4, 14, "Querying Sonoff firmware")
-            output.detail("$ python tools/query_ota.py")
+            output.detail("$ python tools/ewelink/query_ota.py")
         rows = self.screen(body, verbose=True)
         heading = rows.index("== Stage 4 of 14 - Querying Sonoff firmware")
-        self.assertEqual(rows[heading + 1:heading + 3], ["", "$ python tools/query_ota.py"])
+        self.assertEqual(rows[heading + 1:heading + 3], ["", "$ python tools/ewelink/query_ota.py"])
 
     def test_piped_output_gets_the_gap_too(self):
         def body():

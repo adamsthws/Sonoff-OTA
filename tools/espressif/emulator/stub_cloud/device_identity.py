@@ -22,7 +22,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from tools.inspect_stock_nvs import parse  # noqa: E402
+from tools.espressif.inspect_stock_nvs import parse  # noqa: E402
 
 NVS_OFFSET, NVS_SIZE = 0x9000, 0x10000
 # eWeLink's names for the S60 (S60TPG UK, S60TPF Europe), as the tool accepts them.

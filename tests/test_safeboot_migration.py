@@ -9,7 +9,7 @@ import unittest
 import zlib
 from pathlib import Path
 
-from tools.safeboot_migration import (
+from tools.espressif.safeboot.safeboot_migration import (
     MD5_MAGIC,
     PARTITION_MAGIC,
     PINNED_ARTIFACTS,
@@ -27,9 +27,9 @@ from tools.safeboot_migration import (
 )
 from tools.autoflash import esphome as esphome_files
 from tools.autoflash import plans
-from tools.configure_recovery_safeboot import render_header
-from tools.validate_recovery_safeboot import header_value
-from tools.serve_safeboot_migration import (
+from tools.espressif.safeboot.configure_recovery_safeboot import render_header
+from tools.espressif.safeboot.validate_recovery_safeboot import header_value
+from tools.espressif.safeboot.serve_safeboot_migration import (
     COMMIT_FLAG,
     RESTORE_FLAG,
     MigrationHandler,
@@ -283,7 +283,7 @@ class MigrationValidationTests(unittest.TestCase):
         # A run that installed that release at F2, carried on by a version
         # that pins a later one, finishes with its bundle.
         from unittest import mock
-        from tools import safeboot_migration as sm
+        from tools.espressif.safeboot import safeboot_migration as sm
         earlier = {"version": "1.0.0", "files": {
             name: {"name": name, "size": 10 + index, "sha256": f"{index}" * 64}
             for index, name in enumerate(("factory", "safeboot", "app"))}}
@@ -461,7 +461,7 @@ class MigrationValidationTests(unittest.TestCase):
             self.assertIn(sha256_bytes(fixture.target_table), rendered)
 
     def test_the_interim_layout_moves_only_the_low_regions_clear_of_the_commit(self):
-        import tools.safeboot_migration as migration
+        import tools.espressif.safeboot.safeboot_migration as migration
         table = migration.interim_table()
         self.assertEqual(sha256_bytes(table), migration.INTERIM_TABLE_SHA256)
         source = {e["label"]: e for e in migration.parse_partition_sector(
@@ -494,7 +494,7 @@ class MigrationValidationTests(unittest.TestCase):
             rendered = state.render_berry().decode()
             self.assertEqual(MigrationHandler._answer_get("/interim-table", state)[1],
                              state.interim_table.hex().encode())
-        import tools.safeboot_migration as migration
+        import tools.espressif.safeboot.safeboot_migration as migration
         self.assertIn(migration.INTERIM_TABLE_SHA256, rendered)
         commit = rendered[rendered.index("def run_commit"):]
         order = [commit.index(text) for text in (
@@ -535,7 +535,7 @@ class MigrationValidationTests(unittest.TestCase):
 
     def factory(self, official, recovery, official_sectors):
         """The factory partition as a restore cut off after `official_sectors` leaves it."""
-        from tools.serve_safeboot_migration import SAFEBOOT_SIZE, SECTOR_SIZE
+        from tools.espressif.safeboot.serve_safeboot_migration import SAFEBOOT_SIZE, SECTOR_SIZE
         off = official + b"\xff" * (SAFEBOOT_SIZE - len(official))
         rec = recovery + b"\xff" * (SAFEBOOT_SIZE - len(recovery))
         cut = official_sectors * SECTOR_SIZE
@@ -547,7 +547,7 @@ class MigrationValidationTests(unittest.TestCase):
                 for i in range(0, len(partition), SECTOR_SIZE)]
 
     def test_a_restore_cut_off_part_way_carries_on_where_it_stopped(self):
-        from tools.serve_safeboot_migration import restore_resume_point
+        from tools.espressif.safeboot.serve_safeboot_migration import restore_resume_point
         official = bytes((i * 7) & 0xFF for i in range(20_000))
         recovery = bytes((i * 11 + 3) & 0xFF for i in range(21_000))
         for done, expected in ((0, 0), (2, 2), (4, 4), (5, 5), (40, 5)):
@@ -559,7 +559,7 @@ class MigrationValidationTests(unittest.TestCase):
         # Seen in the fault suite: the plug switched off during G1 left the
         # sector being written erased and part written - and every later
         # restore refused, the conversion stuck for good.
-        from tools.serve_safeboot_migration import restore_resume_point
+        from tools.espressif.safeboot.serve_safeboot_migration import restore_resume_point
         official = bytes((i * 7) & 0xFF for i in range(20_000))
         recovery = bytes((i * 11 + 3) & 0xFF for i in range(21_000))
         for written in (0, 256, 2048, SECTOR_SIZE - 256):
@@ -574,7 +574,7 @@ class MigrationValidationTests(unittest.TestCase):
             restore_resume_point(self.digests(bytes(partition)), official, recovery)
 
     def test_anything_else_in_the_partition_is_refused(self):
-        from tools.serve_safeboot_migration import restore_resume_point
+        from tools.espressif.safeboot.serve_safeboot_migration import restore_resume_point
         official = bytes((i * 7) & 0xFF for i in range(20_000))
         recovery = bytes((i * 11 + 3) & 0xFF for i in range(21_000))
         partition = bytearray(self.factory(official, recovery, 2))
@@ -585,7 +585,7 @@ class MigrationValidationTests(unittest.TestCase):
     def test_unproven_whatever_follows_the_official_sectors_is_written_over(self):
         # A run begun by 1.2.0: its startup firmware, which this checkout cannot
         # rebuild, is in the partition - after any official sectors a cut left.
-        from tools.serve_safeboot_migration import restore_resume_point
+        from tools.espressif.safeboot.serve_safeboot_migration import restore_resume_point
         official = bytes((i * 7) & 0xFF for i in range(20_000))
         theirs = bytes((i * 13 + 5) & 0xFF for i in range(22_000))
         for done, expected in ((0, 0), (2, 2), (5, 5), (40, 5)):
@@ -763,7 +763,7 @@ class MigrationValidationTests(unittest.TestCase):
 
     def test_waiting_stops_when_the_plug_falls_silent(self):
         from unittest import mock
-        import tools.serve_safeboot_migration as server_module
+        import tools.espressif.safeboot.serve_safeboot_migration as server_module
         with tempfile.TemporaryDirectory() as directory:
             _, state = self.staging(directory)
             clock = iter(range(0, 10_000, 30))
@@ -773,7 +773,7 @@ class MigrationValidationTests(unittest.TestCase):
 
     def test_a_plug_still_talking_is_given_the_whole_wait(self):
         from unittest import mock
-        import tools.serve_safeboot_migration as server_module
+        import tools.espressif.safeboot.serve_safeboot_migration as server_module
         with tempfile.TemporaryDirectory() as directory:
             _, state = self.staging(directory)
             clock = iter(range(0, 10_000, 30))
@@ -855,7 +855,7 @@ class MigrationValidationTests(unittest.TestCase):
         import socket
         import time as clock
         from unittest import mock
-        import tools.serve_safeboot_migration as server_module
+        import tools.espressif.safeboot.serve_safeboot_migration as server_module
         with tempfile.TemporaryDirectory() as directory:
             fixture = MigrationFixture(Path(directory))
             state = fixture.state("preflight")
@@ -961,7 +961,7 @@ class ChunkBodyTests(unittest.TestCase):
 
     def test_the_hash_follows_the_hex(self):
         import hashlib
-        from tools.serve_safeboot_migration import chunk_body
+        from tools.espressif.safeboot.serve_safeboot_migration import chunk_body
         chunk = bytes(range(256)) * 16
         body = chunk_body(chunk).decode("ascii")
         self.assertEqual(body[:-64], chunk.hex())
@@ -969,7 +969,7 @@ class ChunkBodyTests(unittest.TestCase):
 
     def test_every_phase_that_fetches_chunks_checks_them_and_asks_again(self):
         for phase in ("stage", "restore", "plan"):
-            source = (Path(__file__).resolve().parents[1] / f"repartition/berry/{phase}.be.tmpl").read_text()
+            source = (Path(__file__).resolve().parents[1] / f"tools/espressif/safeboot/repartition/berry/{phase}.be.tmpl").read_text()
             fetch = source[source.index("def fetch_chunk"):]
             fetch = fetch[:fetch.index("\nend\n")]
             with self.subTest(phase=phase):

@@ -35,9 +35,9 @@ try:
     from tools.autoflash.imprint import ImprintError, imprint, imprinted_ssid
     from tools.autoflash import output
     from tools.autoflash.prompts import QuitRun, ask_secret, ask_text
-    from tools.prepare_safeboot_migration import artifact_record, obtain
-    from tools.get_device_key import INSPECTED
-    from tools.safeboot_migration import (
+    from tools.espressif.safeboot.prepare_safeboot_migration import artifact_record, obtain
+    from tools.ewelink.get_device_key import INSPECTED
+    from tools.espressif.safeboot.safeboot_migration import (
         APP0_OFFSET,
         APP0_SIZE,
         IMPRINTED_MODE,
@@ -102,7 +102,7 @@ except ModuleNotFoundError:  # running from inside tools/
         verify_manifest_files,
     )
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = ROOT / "captures" / "safeboot-recovery-migration"
 RECOVERY_FILE = "tasmota32c3-safeboot-recovery.bin"
 

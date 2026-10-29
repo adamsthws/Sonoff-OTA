@@ -17,10 +17,10 @@ Its build environment is `tasmota32c3-bluetooth` in
 from upstream Tasmota commit
 [`db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892`](https://github.com/arendst/Tasmota/tree/db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892).
 The corresponding project changes and build tooling are
-`repartition/recovery-safeboot/volatile-wifi-defaults.patch`,
-`repartition/recovery-safeboot/persist-settings.patch`,
-`tools/configure_imprintable_safeboot.py`, and
-`tools/build_recovery_safeboot.sh`.
+`tools/espressif/safeboot/repartition/recovery-safeboot/volatile-wifi-defaults.patch`,
+`tools/espressif/safeboot/repartition/recovery-safeboot/persist-settings.patch`,
+`tools/espressif/safeboot/configure_imprintable_safeboot.py`, and
+`tools/espressif/safeboot/build_recovery_safeboot.sh`.
 
 The older custom `s60-tasmota-15.6.0-*.bin` builds and their corresponding
 configuration, patch, documentation and helper are retained together under
@@ -55,7 +55,7 @@ How they are built and published is in
 
 `artifacts/autoflash-bridge-sonoff-s60-4.4.4.ota` is this project's own firmware, under
 this repository's licence ([`LICENSE`](LICENSE)). Its source is in
-`archive/bridge/`, and `tools/build_vendor_ota.py` wraps it for the stock
+`archive/bridge/`, and `tools/espressif/build_vendor_ota.py` wraps it for the stock
 updater. It is built with ESP-IDF through PlatformIO, as pinned by
 `archive/bridge/platformio.ini`.
 

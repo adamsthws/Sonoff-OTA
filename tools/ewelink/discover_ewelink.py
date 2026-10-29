@@ -31,7 +31,7 @@ from typing import Any
 
 try:
     from tools.autoflash import hostsys
-except ModuleNotFoundError:  # Support direct execution as tools/discover_ewelink.py.
+except ModuleNotFoundError:  # Support direct execution as tools/ewelink/discover_ewelink.py.
     from autoflash import hostsys
 
 # The link-local multicast group and port reserved for mDNS (RFC 6762 §3).

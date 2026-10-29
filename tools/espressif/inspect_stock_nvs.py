@@ -9,7 +9,7 @@ written to disk and the password is never printed.
 
 Join the bridge's network first, then run:
 
-    python tools/inspect_stock_nvs.py
+    python tools/espressif/inspect_stock_nvs.py
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.autoflash.prompts import ask_secret, ask_text  # noqa: E402
 

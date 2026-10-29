@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 try:
-    from tools.analyze_vendor_ota import parse_esp_image
+    from tools.espressif.analyze_vendor_ota import parse_esp_image
     from tools.autoflash.imprint import find_build_paths, redact_build_paths
 except ModuleNotFoundError:  # running from inside tools/
     from analyze_vendor_ota import parse_esp_image
@@ -64,7 +64,7 @@ def main() -> int:
     print(f"\nWrote {output}")
     print(f"  {len(cleaned):,} bytes, checksum and SHA-256 repaired, no paths remaining")
     print("\nConfirm before publishing:")
-    print(f"  python3 tools/validate_imprintable_safeboot.py {output}")
+    print(f"  python3 tools/espressif/safeboot/validate_imprintable_safeboot.py {output}")
     return 0
 
 

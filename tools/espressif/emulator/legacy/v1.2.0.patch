@@ -1,5 +1,5 @@
---- a/tools/get_device_key.py
-+++ b/tools/get_device_key.py
+--- a/tools/ewelink/get_device_key.py
++++ b/tools/ewelink/get_device_key.py
 @@ -37,6 +37,12 @@
      "eu": "https://eu-apia.coolkit.cc",
  }
@@ -13,8 +13,8 @@
  
  # A certificate this computer does not trust, from a site that has a good one -
  # even after Windows was asked for the root it needs (hostsys.urlopen): almost
---- a/tools/probe_ota_command.py
-+++ b/tools/probe_ota_command.py
+--- a/tools/ewelink/probe_ota_command.py
++++ b/tools/ewelink/probe_ota_command.py
 @@ -37,6 +37,10 @@
      "us": "https://us-dispa.coolkit.cc/dispatch/app",
      "eu": "https://eu-dispa.coolkit.cc/dispatch/app",

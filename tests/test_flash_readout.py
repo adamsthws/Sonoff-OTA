@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools import flash_readout
+from tools.espressif import flash_readout
 
 
 class FindBridgeTests(unittest.TestCase):

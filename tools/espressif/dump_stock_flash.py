@@ -9,10 +9,10 @@ each application slot holds and which one otadata selects.
 The dump holds the plug's Wi-Fi password and eWeLink keys in cleartext. It is
 written only under captures/ (never committed), readable by you alone.
 
-tools/flash_readout.py does the whole readout and uses this; run this alone
+tools/espressif/flash_readout.py does the whole readout and uses this; run this alone
 only to read again from a readout bridge that is already on a plug:
 
-    python3 tools/dump_stock_flash.py --host <bridge address>
+    python3 tools/espressif/dump_stock_flash.py --host <bridge address>
 """
 
 from __future__ import annotations
@@ -31,12 +31,12 @@ from pathlib import Path
 from typing import Any
 
 if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.analyze_vendor_ota import parse_esp_image  # noqa: E402
+from tools.espressif.analyze_vendor_ota import parse_esp_image  # noqa: E402
 from tools.autoflash import plugs  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PARTITION_TABLE = 0x8000
 PARTITION_MAGIC = 0x50AA
 MD5_MAGIC = 0xEBEB

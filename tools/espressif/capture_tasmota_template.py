@@ -18,7 +18,7 @@ What happens to the plug, in about three minutes:
 While its settings are reset, the plug forgets its own template, so whatever is
 plugged into it may switch off until step 4.
 
-    python tools/capture_tasmota_template.py --host 192.168.0.53
+    python tools/espressif/capture_tasmota_template.py --host 192.168.0.53
 
 With --verify, the saved template itself is tested instead (steps 1, 3 and 4,
 no reset): exactly the file D1 will send, filled with the plug's own Wi-Fi.
@@ -31,14 +31,14 @@ import sys
 from pathlib import Path
 
 if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.autoflash import tasmota_settings as ts  # noqa: E402
 from tools.autoflash.device import Device, DeviceError  # noqa: E402
 from tools.autoflash.prompts import QuitRun, ask_yes_no, section  # noqa: E402
-from tools.safeboot_migration import INTERIM_TASMOTA_COMMIT, PINNED_ARTIFACTS  # noqa: E402
+from tools.espressif.safeboot.safeboot_migration import INTERIM_TASMOTA_COMMIT, PINNED_ARTIFACTS  # noqa: E402
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def say(message: str = "") -> None:

@@ -10,9 +10,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools import prepare_imprinted_bundle as bundle
-from tools import safeboot_migration
-from tools.safeboot_migration import RECOVERY_ARTIFACT
+from tools.espressif.safeboot import prepare_imprinted_bundle as bundle
+from tools.espressif.safeboot import safeboot_migration
+from tools.espressif.safeboot.safeboot_migration import RECOVERY_ARTIFACT
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL = ROOT / "captures" / "safeboot-recovery-migration"
@@ -22,7 +22,7 @@ OFFICIAL = {name: LOCAL / name for name in
 
 def _is_pinned(path: Path, name: str) -> bool:
     import hashlib
-    from tools.safeboot_migration import PINNED_ARTIFACTS
+    from tools.espressif.safeboot.safeboot_migration import PINNED_ARTIFACTS
     return path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == PINNED_ARTIFACTS[name]["sha256"]
 
 

@@ -13,7 +13,7 @@ from typing import Any
 
 try:
     from tools.autoflash.prompts import ask_secret
-    from tools.get_device_key import (
+    from tools.ewelink.get_device_key import (
         API,
         EwelinkError,
         api_json,
@@ -22,7 +22,7 @@ try:
         select_device,
         target_id_from_mdns,
     )
-except ModuleNotFoundError:  # Support direct execution as tools/query_ota.py.
+except ModuleNotFoundError:  # Support direct execution as tools/ewelink/query_ota.py.
     from autoflash.prompts import ask_secret
     from get_device_key import (
         API,

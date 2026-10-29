@@ -25,7 +25,7 @@ try:
         SSID_FIELD_BYTES,
         SSID_MARKER,
     )
-    from tools.configure_recovery_safeboot import atomic_private_write
+    from tools.espressif.safeboot.configure_recovery_safeboot import atomic_private_write
 except ModuleNotFoundError:  # running from inside tools/
     from autoflash.imprint import (
         FILLER,
@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # running from inside tools/
     )
     from configure_recovery_safeboot import atomic_private_write
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = ROOT / "captures" / "safeboot-imprintable" / "user_config_override.h"
 
 
@@ -97,12 +97,12 @@ def main() -> int:
     print()
     print("2. Build, pointing at this header and this output directory - the")
     print("   defaults are the private build and would use real credentials:")
-    print("     tools/build_recovery_safeboot.sh /tmp/autoflash-tasmota-imprintable \\")
+    print("     tools/espressif/safeboot/build_recovery_safeboot.sh /tmp/autoflash-tasmota-imprintable \\")
     print(f"       {args.output} \\")
     print(f"       {output_dir}")
     print()
     print("3. Confirm it is safe to publish and can be written into:")
-    print(f"     python3 tools/validate_imprintable_safeboot.py {image}")
+    print(f"     python3 tools/espressif/safeboot/validate_imprintable_safeboot.py {image}")
     return 0
 
 

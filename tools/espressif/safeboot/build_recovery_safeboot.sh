@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-project_dir=$(cd -- "$script_dir/.." && pwd)
+project_dir=$(cd -- "$script_dir/../../.." && pwd)
 source_dir=${1:-/tmp/autoflash-tasmota-recovery-src}
 private_header=${2:-$project_dir/captures/safeboot-recovery/user_config_override.h}
 output_dir=${3:-$project_dir/captures/safeboot-recovery}
@@ -11,9 +11,9 @@ environment=tasmota32c3-safeboot
 expected_commit=db3ae7e0276fdc38b7aeb241a2a8e33d8ffd6892
 settings_file="$source_dir/tasmota/tasmota_support/settings.ino"
 source_header="$source_dir/tasmota/user_config_override.h"
-patch_file="$project_dir/repartition/recovery-safeboot/volatile-wifi-defaults.patch"
+patch_file="$project_dir/tools/espressif/safeboot/repartition/recovery-safeboot/volatile-wifi-defaults.patch"
 # Applied only when the header asks for it, so the default build is unchanged.
-persist_patch="$project_dir/repartition/recovery-safeboot/persist-settings.patch"
+persist_patch="$project_dir/tools/espressif/safeboot/repartition/recovery-safeboot/persist-settings.patch"
 build_dir="$source_dir/.pio/build/$environment"
 variant_copy="$source_dir/variants/tasmota/tasmota32c3-safeboot.bin"
 output_image="$output_dir/tasmota32c3-safeboot-recovery.bin"
@@ -47,7 +47,7 @@ if [[ ! -f "$settings_file" ]]; then
 fi
 if [[ ! -f "$private_header" ]]; then
   echo "Private Wi-Fi header not found: $private_header" >&2
-  echo "Run tools/configure_recovery_safeboot.py locally first." >&2
+  echo "Run tools/espressif/safeboot/configure_recovery_safeboot.py locally first." >&2
   exit 1
 fi
 if [[ $(git -C "$source_dir" rev-parse HEAD) != "$expected_commit" ]]; then
@@ -91,7 +91,7 @@ if [[ ! -s "$build_dir/firmware.bin" ]]; then
   exit 1
 fi
 install -m 0600 "$build_dir/firmware.bin" "$output_image"
-python3 "$project_dir/tools/validate_recovery_safeboot.py" \
+python3 "$project_dir/tools/espressif/safeboot/validate_recovery_safeboot.py" \
   --image "$output_image" \
   --private-header "$private_header" \
   --output "$output_report"

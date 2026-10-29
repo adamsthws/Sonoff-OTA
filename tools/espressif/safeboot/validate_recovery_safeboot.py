@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 try:
-    from tools.safeboot_migration import (
+    from tools.espressif.safeboot.safeboot_migration import (
         INTERIM_TASMOTA_COMMIT,
         PINNED_ARTIFACTS,
         RECOVERY_KIND,

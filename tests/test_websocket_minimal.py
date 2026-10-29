@@ -1,7 +1,7 @@
 import struct
 import unittest
 
-from tools.websocket_minimal import encode_client_frame
+from tools.ewelink.websocket_minimal import encode_client_frame
 
 
 class WebSocketTests(unittest.TestCase):

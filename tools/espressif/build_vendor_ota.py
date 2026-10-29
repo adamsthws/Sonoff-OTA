@@ -16,7 +16,7 @@ import zlib
 from pathlib import Path
 
 try:
-    from tools.analyze_vendor_ota import ESP32_C3_CHIP_ID, WRAPPER_SIZE, parse_esp_image
+    from tools.espressif.analyze_vendor_ota import ESP32_C3_CHIP_ID, WRAPPER_SIZE, parse_esp_image
     from tools.autoflash import kinds
 except ModuleNotFoundError:
     from analyze_vendor_ota import ESP32_C3_CHIP_ID, WRAPPER_SIZE, parse_esp_image

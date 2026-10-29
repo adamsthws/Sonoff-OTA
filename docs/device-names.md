@@ -71,17 +71,17 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 - Our build of Tasmota's Safeboot. The pattern is `WIFI_DEFAULT_HOSTNAME`
   (`"autoflash-recovery-%4X"`, Tasmota's `%4X` being the MAC's last four hex
   digits), written into the build's `user_config_override.h` by
-  [`tools/configure_imprintable_safeboot.py`](../tools/configure_imprintable_safeboot.py)
-  and [`tools/configure_recovery_safeboot.py`](../tools/configure_recovery_safeboot.py).
-- [`repartition/recovery-safeboot/persist-settings.patch`](../repartition/recovery-safeboot/persist-settings.patch)
+  [`tools/espressif/safeboot/configure_imprintable_safeboot.py`](../tools/espressif/safeboot/configure_imprintable_safeboot.py)
+  and [`tools/espressif/safeboot/configure_recovery_safeboot.py`](../tools/espressif/safeboot/configure_recovery_safeboot.py).
+- [`tools/espressif/safeboot/repartition/recovery-safeboot/persist-settings.patch`](../tools/espressif/safeboot/repartition/recovery-safeboot/persist-settings.patch)
   saves the name, written out, with the Wi-Fi, for the official Tasmota
   after it. It has to be written out: at every start Tasmota replaces a
   stored hostname that has a `%` in it with its own compiled default
   (`tasmota.ino`).
 - Published as [`artifacts/README.md`](../artifacts/README.md) says: the
   header from `configure_imprintable_safeboot.py`, the build from
-  [`tools/build_recovery_safeboot.sh`](../tools/build_recovery_safeboot.sh),
-  then `tools/sanitise_safeboot.py` and `tools/validate_imprintable_safeboot.py`,
+  [`tools/espressif/safeboot/build_recovery_safeboot.sh`](../tools/espressif/safeboot/build_recovery_safeboot.sh),
+  then `tools/espressif/safeboot/sanitise_safeboot.py` and `tools/espressif/safeboot/validate_imprintable_safeboot.py`,
   into `artifacts/autoflash-recovery-safeboot-imprintable.bin`; a test checks
   the pattern is in the image (`tests/test_published_artifacts.py`).
 
@@ -170,7 +170,7 @@ All in [`tools/autoflash_cli.py`](../tools/autoflash_cli.py) unless said:
   `PROVISIONAL_PREFIX` (`ESP_`) last and looked at again.
 - [`tools/autoflash/output.py`](../tools/autoflash/output.py): the patterns
   that keep a plug's name out of the report one shares.
-- [`tools/flash_readout.py`](../tools/flash_readout.py): the names it waits
+- [`tools/espressif/flash_readout.py`](../tools/espressif/flash_readout.py): the names it waits
   for while reading a stock plug.
 
 ## Tasmota's own names

@@ -102,22 +102,22 @@ class PinnedReleaseTests(unittest.TestCase):
            "tasmota_types.h (TSettings offsets), tasmota.h (SettingsTextIndex), "
            "settings_text_size, CFG_HOLDER and SettingsDelta between the template's "
            "release and the new firmware; then capture a new template with "
-           "tools/capture_tasmota_template.py from a plug running that release, test "
+           "tools/espressif/capture_tasmota_template.py from a plug running that release, test "
            "it with --verify, and update artifacts/ and SHA256SUMS. Until then D1 gives "
            "Tasmota its Wi-Fi by hand. See archive/docs/reference/automatic-wifi.md.")
 
     def test_the_berry_firmware_is_the_one_the_template_was_checked_against(self):
-        from tools.safeboot_migration import PINNED_ARTIFACTS
+        from tools.espressif.safeboot.safeboot_migration import PINNED_ARTIFACTS
         self.assertEqual(PINNED_ARTIFACTS["bluetooth"]["sha256"], ts.BERRY_FIRMWARE_SHA256,
                          "The Berry Tasmota pin changed." + self.HOW)
 
     def test_the_interim_tasmota_is_the_one_the_template_came_from(self):
-        from tools.safeboot_migration import INTERIM_TASMOTA_COMMIT
+        from tools.espressif.safeboot.safeboot_migration import INTERIM_TASMOTA_COMMIT
         self.assertEqual(INTERIM_TASMOTA_COMMIT, ts.TEMPLATE_SOURCE_COMMIT,
                          "The interim Tasmota pin changed." + self.HOW)
 
     def test_the_committed_template_loads_and_is_pinned(self):
-        from tools.safeboot_migration import PINNED_ARTIFACTS
+        from tools.espressif.safeboot.safeboot_migration import PINNED_ARTIFACTS
         template, reason = ts.load_template(ROOT, PINNED_ARTIFACTS["bluetooth"]["sha256"])
         self.assertIsNotNone(template, reason)
         name = ts.template_path(ROOT).relative_to(ROOT).as_posix()

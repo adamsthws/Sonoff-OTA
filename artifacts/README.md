@@ -22,7 +22,7 @@ is `f5b34a2`; corresponding source is
 [`arendst/Tasmota@f5b34a26be51be2469737d2c43a62acb237c264f`](https://github.com/arendst/Tasmota/tree/f5b34a26be51be2469737d2c43a62acb237c264f).
 
 The settings template is Tasmota 15.6.0's defaults, captured from a converted
-plug with `tools/capture_tasmota_template.py` and tested on one with
+plug with `tools/espressif/capture_tasmota_template.py` and tested on one with
 `--verify`. Its Wi-Fi names, passwords, last access point, and addresses are
 blank or Tasmota's defaults; it holds nothing about any network. It is only
 used with the Berry Tasmota pinned above (15.6.0.1, same settings layout). If
@@ -32,7 +32,7 @@ official release a converted plug ends on can change without it
 ([`../docs/updating-firmware.md`](../docs/updating-firmware.md)).
 
 The imprintable Safeboot is built from the pinned Tasmota source with
-`repartition/recovery-safeboot/volatile-wifi-defaults.patch` and
+`tools/espressif/safeboot/repartition/recovery-safeboot/volatile-wifi-defaults.patch` and
 `persist-settings.patch`. On its first boot after the repartition it wipes NVS -
 by then only what the Sonoff firmware left and part of an earlier Tasmota
 record - saves its settings, with the Wi-Fi, where Tasmota reads them, and
@@ -51,10 +51,10 @@ was `s60-recovery-NNNN` (four decimal digits) and "S60 recovery", saving no
 name, and the file was `s60-recovery-safeboot-imprintable.bin`; the run still
 reads the older log lines, from a plug a run of an older checkout left on it.
 
-To publish a new one: `tools/configure_imprintable_safeboot.py` writes the
-header with the placeholders, `tools/build_recovery_safeboot.sh` builds it from
-the pinned Tasmota source, `tools/sanitise_safeboot.py` blanks the build
-machine's paths in place, and `tools/validate_imprintable_safeboot.py` must
+To publish a new one: `tools/espressif/safeboot/configure_imprintable_safeboot.py` writes the
+header with the placeholders, `tools/espressif/safeboot/build_recovery_safeboot.sh` builds it from
+the pinned Tasmota source, `tools/espressif/safeboot/sanitise_safeboot.py` blanks the build
+machine's paths in place, and `tools/espressif/safeboot/validate_imprintable_safeboot.py` must
 then say it is publishable. A rebuild holds the same text as the published file
 but its build date and time; one built in a directory whose path is not as
 long as this one's (38 characters) has everything after the first such path a
@@ -66,7 +66,7 @@ bundle-preparation path must imprint and validate a per-device copy first.
 
 From 4.4.1 on, a bridge is named by one version: the one the stock updater is
 given, the one in its app description, and the one its status page reports
-(`bridge 4.4.4`). `tools/build_vendor_ota.py` takes it from the image and
+(`bridge 4.4.4`). `tools/espressif/build_vendor_ota.py` takes it from the image and
 refuses any other. The next bridge is 4.4.5. 4.4.1 has the Wi-Fi behaviour tried on a
 stock plug as "v6" on 8 October 2026; beyond that only its version, its name
 and a larger buffer for the status reply differ. 4.4.2 is 4.4.1 with the

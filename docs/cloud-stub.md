@@ -79,8 +79,8 @@ Tracing the conversion ([`tools/autoflash_cli.py`](../tools/autoflash_cli.py)
 It is needed for two things:
 
 - **Touchpoint A — the tool → eWeLink account API** (`*-apia.coolkit.cc`, via
-  [`get_device_key.py`](../tools/get_device_key.py) and
-  [`query_ota.py`](../tools/query_ota.py)). The tool logs into the account to
+  [`get_device_key.py`](../tools/ewelink/get_device_key.py) and
+  [`query_ota.py`](../tools/ewelink/query_ota.py)). The tool logs into the account to
   (1) fetch the plug's **LAN-control key** — eWeLink LAN commands are
   AES-encrypted with a per-device key the cloud normally hands out — and (2) read
   the plug's model and firmware version and confirm it is online.
@@ -883,7 +883,7 @@ Added under `tools/espressif/emulator/stub_cloud/`: `__init__.py`, `make_ca.py`,
 (`--dis-server`/`--dis-port`), `emu.sh` and `unattended-test.sh` (`--stub-cloud`,
 `AUTOFLASH_EMU_IMAGE`), `container/entrypoint.sh` (stub DNS/firewall/launch),
 `fault_suite.py` (drop the cloud lock under `--stub-cloud`), and
-`tools/get_device_key.py` / `tools/probe_ota_command.py` (the
+`tools/ewelink/get_device_key.py` / `tools/ewelink/probe_ota_command.py` (the
 `AUTOFLASH_EWELINK_API_BASE` override).
 
 ## Ground rules

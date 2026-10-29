@@ -555,7 +555,7 @@ The S61 uses the **same CoolKit OTA mechanism as the S60**: the cloud pushes an
 (`ais_qota_task`, user-agent `FOTA/1.0`) downloads from whatever `downloadUrl` the
 command carries, over HTTP with a ranged `bytes=%lu-%lu` request, independent of
 the WebSocket session. There is **no separate update-server setting** — the command
-dictates the URL, exactly as `tools/probe_ota_command.py` relies on for the S60.
+dictates the URL, exactly as `tools/ewelink/probe_ota_command.py` relies on for the S60.
 
 Reproduced on the emulator: with the plug ONLINE on the local stub, pushing the
 `upgrade` command (the stub holds the device's socket, so it sends the frame

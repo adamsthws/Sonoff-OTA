@@ -14,7 +14,7 @@ from typing import Any
 try:
     from tools.autoflash import output
     from tools.autoflash.hostsys import urlopen
-    from tools.safeboot_migration import (
+    from tools.espressif.safeboot.safeboot_migration import (
         APP0_OFFSET,
         APP0_SIZE,
         CANONICAL_NVS_OFFSET,

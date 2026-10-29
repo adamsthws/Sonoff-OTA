@@ -143,7 +143,7 @@ class BackupCalibrationTests(unittest.TestCase):
 
     def read(self, content):
         import tools.autoflash_cli as autoflash
-        from tools.inspect_stock_nvs import Value
+        from tools.espressif.inspect_stock_nvs import Value
         value = Value(namespace=5, key="content", kind=0x42, chunks={0: content})
         with mock.patch.object(autoflash.inspect_stock_nvs, "parse",
                                return_value=({5: "user_unusual"}, {(5, "content"): value})):

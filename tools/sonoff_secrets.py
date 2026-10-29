@@ -3,7 +3,7 @@ network it is: what must never leave the computer the backup is on.
 
 Used by tools/espressif/emulator/sanitise_plug.py, to show a public plug holds none of
 them, and tools/leak_scan.py, to keep them out of Git. Only the standard
-library and tools/inspect_stock_nvs.py: a Git hook imports it.
+library and tools/espressif/inspect_stock_nvs.py: a Git hook imports it.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 try:
-    from tools.inspect_stock_nvs import parse as parse_nvs
+    from tools.espressif.inspect_stock_nvs import parse as parse_nvs
 except ModuleNotFoundError:  # run from inside tools/
     from inspect_stock_nvs import parse as parse_nvs
 

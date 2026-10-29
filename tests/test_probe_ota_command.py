@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from tools.probe_ota_command import CaptureHandler
+from tools.ewelink.probe_ota_command import CaptureHandler
 
 
 class OtaCommandProbeTests(unittest.TestCase):

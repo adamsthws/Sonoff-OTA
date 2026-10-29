@@ -4,8 +4,8 @@ import unittest
 
 from unittest import mock
 
-from tools import discover_ewelink
-from tools.discover_ewelink import _keep, answered_ids, encode_name, sweep_targets, is_response, make_query, parse_packet, read_name
+from tools.ewelink import discover_ewelink
+from tools.ewelink.discover_ewelink import _keep, answered_ids, encode_name, sweep_targets, is_response, make_query, parse_packet, read_name
 
 
 class MdnsTests(unittest.TestCase):

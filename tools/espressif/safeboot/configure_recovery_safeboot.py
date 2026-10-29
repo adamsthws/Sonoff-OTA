@@ -16,7 +16,7 @@ except ModuleNotFoundError:  # running from inside tools/
     from autoflash.prompts import ask_secret
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = ROOT / "captures" / "safeboot-recovery" / "user_config_override.h"
 
 

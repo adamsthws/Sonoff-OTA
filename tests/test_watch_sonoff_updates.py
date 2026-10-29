@@ -7,8 +7,8 @@ import time
 import unittest
 from pathlib import Path
 
-from tools.get_device_key import EwelinkError
-from tools.watch_sonoff_updates import (PacketParser, Recorder, describe, end_process, find_plug, offers,
+from tools.ewelink.get_device_key import EwelinkError
+from tools.ewelink.watch_sonoff_updates import (PacketParser, Recorder, describe, end_process, find_plug, offers,
                                         redact, remote_capture, summarise)
 
 # Real tcpdump 4.99 output (-l -e -nn -tttt -A -s 0) for a plug that boots,

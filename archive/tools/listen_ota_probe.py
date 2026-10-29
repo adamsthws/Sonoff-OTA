@@ -8,9 +8,9 @@ import ipaddress
 import time
 
 try:
-    from tools.probe_ota_command import CaptureServer
+    from tools.ewelink.probe_ota_command import CaptureServer
 except ModuleNotFoundError:
-    from tools.probe_ota_command import CaptureServer
+    from tools.ewelink.probe_ota_command import CaptureServer
 
 
 def main() -> int:

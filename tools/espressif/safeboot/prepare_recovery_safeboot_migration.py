@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 try:
-    from tools.safeboot_migration import (
+    from tools.espressif.safeboot.safeboot_migration import (
         INTERIM_TASMOTA_COMMIT,
         RECOVERY_ARTIFACT,
         RECOVERY_MODE,
@@ -26,7 +26,7 @@ try:
         sha256_bytes,
         verify_manifest_files,
     )
-    from tools.validate_recovery_safeboot import validate
+    from tools.espressif.safeboot.validate_recovery_safeboot import validate
 except ModuleNotFoundError:
     from safeboot_migration import (
         INTERIM_TASMOTA_COMMIT,
@@ -42,7 +42,7 @@ except ModuleNotFoundError:
     from validate_recovery_safeboot import validate
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_BASE = ROOT / "captures" / "safeboot-migration" / "manifest.json"
 DEFAULT_PRIVATE = ROOT / "captures" / "safeboot-recovery"
 DEFAULT_OUTPUT = ROOT / "captures" / "safeboot-recovery-migration"

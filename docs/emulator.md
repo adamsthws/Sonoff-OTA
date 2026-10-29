@@ -16,7 +16,7 @@ another regional version's power meter.
   built or run lives in containers; nothing is installed on the host.
 - **A Sonoff backup of a stock plug.** Every conversion keeps one for each
   plug, in `captures/plugs/<MAC>/sonoff-backup/`;
-  `tools/flash_readout.py` takes one without converting (over Wi-Fi; the plug is
+  `tools/espressif/flash_readout.py` takes one without converting (over Wi-Fi; the plug is
   put back to stock afterwards). `emu.sh` lists them by MAC address - on the
   plug's label, and in your router and the eWeLink app - and asks which plug
   to run when there are several (`--plug <MAC>` says beforehand; with nobody

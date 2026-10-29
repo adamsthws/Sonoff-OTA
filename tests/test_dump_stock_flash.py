@@ -3,7 +3,7 @@ import struct
 import unittest
 import zlib
 
-from tools import dump_stock_flash
+from tools.espressif import dump_stock_flash
 
 FLASH_SIZE = 0x400000
 # The stock S60 layout (archive/docs/reference/s60-actual-partition-map.md).
@@ -111,7 +111,7 @@ class PlugHashTests(unittest.TestCase):
         import hashlib
         import urllib.error
         from unittest import mock
-        from tools import dump_stock_flash
+        from tools.espressif import dump_stock_flash
         image = bytes(flash())
         answers = {
             "/flash": (image, {"X-Flash-Size": str(len(image))}),
@@ -133,7 +133,7 @@ class PlugHashTests(unittest.TestCase):
         self.assertIs(report["matches_plug"], True)
 
     def test_a_backup_that_differs_from_the_plug_is_refused(self):
-        from tools.dump_stock_flash import IncompleteDump
+        from tools.espressif.dump_stock_flash import IncompleteDump
         with self.assertRaises(IncompleteDump):
             self.read(lambda digest: "0" * 64)
 
