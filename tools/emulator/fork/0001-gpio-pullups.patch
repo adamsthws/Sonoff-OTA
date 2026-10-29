@@ -1,5 +1,18 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 20:10:56 +0000
+Subject: [PATCH 1/7] esp32c3 gpio: input pins idle high, as with pull-ups
+
+Run on its own, the fork drives no input pins, so they all read low. The
+S60's button (GPIO9) is active low, so Tasmota saw it held, and after 40
+seconds reset itself to its defaults, losing its Wi-Fi. Inputs now idle high,
+as with pull-ups. Offered upstream as lcgamboa/qemu #17.
+---
+ hw/gpio/esp32c3_gpio.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
 diff --git a/hw/gpio/esp32c3_gpio.c b/hw/gpio/esp32c3_gpio.c
-index b9cf603..efbf556 100644
+index b9cf603..8bcd9fe 100644
 --- a/hw/gpio/esp32c3_gpio.c
 +++ b/hw/gpio/esp32c3_gpio.c
 @@ -167,6 +167,11 @@ static void esp32c3_gpio_init(Object *obj)

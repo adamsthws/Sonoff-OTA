@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 20:10:56 +0000
+Subject: [PATCH 5/7] esp32c3 wifi: the signal strength keeps its minus sign
+
+The fork added 96 to the strength of every frame the plug received, so the
+-25 dBm of the plug's network reached the firmware as +71 to +80 dBm, and the
+firmware passes it on as it is: the conversion's report said "Plug Wi-Fi
+signal: 72 dBm", where runs on the real plugs recorded -44 to -52 dBm. A frame
+now carries its access point's own strength, as the hardware gives it, plus
+the fork's jitter of up to 9 dB: -25 to -16 dBm for the plug's network.
+Offered upstream as lcgamboa/qemu #16.
+---
+ hw/misc/esp32c3_wifi.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/hw/misc/esp32c3_wifi.c b/hw/misc/esp32c3_wifi.c
+index 6b14720..a6f548c 100644
+--- a/hw/misc/esp32c3_wifi.c
++++ b/hw/misc/esp32c3_wifi.c
+@@ -153,7 +153,11 @@ void Esp32_sendFrame(Esp32WifiState *s, mac80211_frame *frame,int length, int si
+     memset(header,0,sizeof(wifi_pkt_rx_ctrl_c3_t)+length);
+     wifi_pkt_rx_ctrl_c3_t *pkt=(wifi_pkt_rx_ctrl_c3_t *)header;
+     *pkt=(wifi_pkt_rx_ctrl_c3_t){
+-        .rssi=(signal_strength+(rand()%10)+96),
++        /* Autoflash emulator: the signal in dBm, as the hardware gives it - the
++         * access point's own strength (-25 dBm for the plug's network), give
++         * or take. The fork added 96, and the firmware passes the value on
++         * as it is: Tasmota reported +71 to +80 dBm, which no Wi-Fi gives. */
++        .rssi=(signal_strength+(rand()%10)),
+         .rate=11,
+         .sig_len=length,
+         .sig_len_copy=length,

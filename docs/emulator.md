@@ -563,20 +563,25 @@ Copies only; the original dump is never written.
 
 ### The QEMU fork (`tools/emulator/fork/*.patch`)
 
-- **`station-bridge.patch` - real addresses on the wire.** The fork rewrote
+Each patch is `git format-patch` output - one change, its reasoning in its
+header - applied in name order, each on top of those before it, when the
+image is built. To change one, apply them all to the fork's source, make the
+change, and regenerate them. What they do:
+
+- **`0003-station-bridge.patch` - real addresses on the wire.** The fork rewrote
   every frame's MAC addresses to its access point's, which works behind
   QEMU's NAT (slirp) but not on a real network: Linux dropped the frames, so
   the plug never got an address, and the tool could not find it by MAC. It now
   bridges the real addresses. It also gives the fork's virtual station a
   proper MAC after a cold start (it was all zeros).
-- **`softap-status.patch` - the plug's own network is visible.** The fork
+- **`0002-softap-status.patch` - the plug's own network is visible.** The fork
   writes the name of the network the plug broadcasts, and the MAC its virtual
   station joins it with, to a file the `nmcli` stand-in and `wifi join` read.
-- **`gpio-pullups.patch` - the button is not held down.** Run on its own, the
+- **`0001-gpio-pullups.patch` - the button is not held down.** Run on its own, the
   fork drives no input pins, so they all read low. The S60's button (GPIO9)
   is active low, so Tasmota saw it held, and after 40 seconds reset itself to
   its defaults, losing its Wi-Fi. Inputs now idle high, as with pull-ups.
-- **`wifi-switch.patch` - the router can be restarted.** The fork's access
+- **`0006-wifi-switch.patch` - the router can be restarted.** The fork's access
   points live inside QEMU, so blocking traffic outside it only cuts the plug
   off from the computer; its Wi-Fi stays up. While the file
   `$ESP32_WIFI_AP_OFF_FILE` exists (`plug router off`), they send no beacons
@@ -588,7 +593,7 @@ Copies only; the original dump is never written.
   destination and signal strength unset, so the patch sets both, or the plug
   drops the frame. To cut the plug off from the computer instead, block its
   traffic in the container (`iptables -I INPUT -s 192.168.60.50 -j DROP`).
-- **`wifi-to-softap.patch` - the computer can join the plug's own network,
+- **`0007-wifi-to-softap.patch` - the computer can join the plug's own network,
   while the plug also tries the home one.** The fork treated a guest
   broadcasting its own network as a guest that was now only an access point:
   its virtual station probed it once (never answered), then ran a DHCP
@@ -603,14 +608,14 @@ Copies only; the original dump is never written.
   whatever channel the radio is on, as the plug's own network keeps it on its
   channel. How far the station has got is written to
   `$ESP32_WIFI_SOFTAP_STATE_FILE`, which `wifi join` waits on.
-- **`wifi-dma.patch` - frames go only where the hardware would put them.** The
+- **`0004-wifi-dma.patch` - frames go only where the hardware would put them.** The
   fork wrote each received frame through the next receive descriptor whether
   or not the driver had handed it over, and however big the buffer. Writing
   into buffers the driver had taken back corrupted its heap, which then failed
   in `free()` (`tlsf_free`) - seen as a crash when the plug's Wi-Fi stopped. A
   frame is now written only into a descriptor the driver owns with room for it,
   and dropped otherwise, as the hardware drops it.
-- **`wifi-rssi.patch` - the signal strength has its minus sign.** The fork
+- **`0005-wifi-rssi.patch` - the signal strength has its minus sign.** The fork
   added 96 to the strength of every frame the plug received, so the -25 dBm of
   the plug's network reached the firmware as +71 to +80 dBm, and the firmware
   passes it on as it is: the conversion's report said "Plug Wi-Fi signal:

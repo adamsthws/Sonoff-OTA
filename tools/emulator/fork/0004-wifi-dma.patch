@@ -1,6 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 20:10:56 +0000
+Subject: [PATCH 4/7] esp32c3 wifi: write a received frame only where the
+ hardware would
+
+The fork wrote each received frame through the next receive descriptor
+whether or not the driver had handed it over, and however big the buffer.
+Writing into buffers the driver had taken back corrupted its heap, which then
+failed in free() (tlsf_free) - seen as a crash when the plug's Wi-Fi stopped.
+A frame is now written only into a descriptor the driver owns with room for
+it, and dropped otherwise, as the hardware drops it. Offered upstream as
+lcgamboa/qemu #13.
+---
+ hw/misc/esp32c3_wifi.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/hw/misc/esp32c3_wifi.c b/hw/misc/esp32c3_wifi.c
+index df9d964..6b14720 100644
 --- a/hw/misc/esp32c3_wifi.c
 +++ b/hw/misc/esp32c3_wifi.c
-@@ -179,6 +179,21 @@
+@@ -179,6 +179,21 @@ void Esp32_sendFrame(Esp32WifiState *s, mac80211_frame *frame,int length, int si
      // do a DMA transfer from the hardware to esp32 memory
      dma_list_item item;
      address_space_read(&address_space_memory, s->dma_inlink_ptr, MEMTXATTRS_UNSPECIFIED, &item, 12);
