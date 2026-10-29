@@ -110,8 +110,13 @@ eWeLink accounts and plugs' identities.
 
 ## Elsewhere
 
-A bug found in another project - Tasmota, ESPHome, ESP-IDF, the emulator's
-QEMU - is reported there, and recorded in
-[docs/upstream-contributions.md](docs/upstream-contributions.md).
+A bug found in another project - Tasmota, ESPHome, ESP-IDF, OpenBeken, the
+emulator's QEMU - is reported there, and every pull request or issue opened
+because of work here gets an entry in
+[docs/upstream-contributions.md](docs/upstream-contributions.md) in the same
+change, in that document's style: a row in the table of the topic it belongs
+to (or a new topic, with a short introduction), giving the project, a link
+and one line on what it fixes, and a note on how the fix was proven. Open the
+pull request, then write the entry, so the link is real.
 
 AI assistants working here: [AGENTS.md](AGENTS.md).
