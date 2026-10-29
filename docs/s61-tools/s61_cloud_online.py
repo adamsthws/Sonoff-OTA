@@ -34,7 +34,7 @@ Two synthesised pieces, as in s61_cloud_dial.py: Wi-Fi creds seeded at
 ef_get_env_blob, and the pairing-success trigger (force-call the start-cloud
 handler 0x2c204) once Wi-Fi is up.
 
-  BK_EMU_ROOT=../BekenEmulator python3 s61_cloud_online.py
+  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_online.py
 """
 import os
 import sys
@@ -47,7 +47,7 @@ import base64
 import tempfile
 import subprocess
 from pathlib import Path
-ROOT = Path(os.environ.get("BK_EMU_ROOT", str(Path.home()/"Git"/"BekenEmulator"))); sys.path.insert(0, str(ROOT))
+ROOT = Path(os.environ.get("BK_EMU_ROOT", "/opt/beken-emulator")); sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "emulator" / "stub_cloud"))
 from src.main import build_emulator  # noqa: E402
 from unicorn import UC_HOOK_CODE  # noqa: E402

@@ -41,8 +41,8 @@ Verified 2026-10-27: the default dials our AP gateway `192.168.1.1:80`; `DISPATC
 leaves the factory `8.8.8.8:80`. Either way the netstack logs
 `TCP connect .. -> ..:80` + `HTTP GET /dispatch/device`, retried with backoff.
 
-  BK_EMU_ROOT=../BekenEmulator python3 s61_cloud_dial.py              # local stub (default)
-  DISPATCH= BK_EMU_ROOT=../BekenEmulator python3 s61_cloud_dial.py    # factory placeholder
+  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_dial.py              # local stub (default)
+  DISPATCH= $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_cloud_dial.py    # factory placeholder
 """
 import os
 import sys
@@ -53,7 +53,7 @@ import collections
 import re
 import types
 from pathlib import Path
-ROOT = Path(os.environ.get("BK_EMU_ROOT", str(Path.home()/"Git"/"BekenEmulator"))); sys.path.insert(0, str(ROOT))
+ROOT = Path(os.environ.get("BK_EMU_ROOT", "/opt/beken-emulator")); sys.path.insert(0, str(ROOT))
 from src.main import build_emulator  # noqa: E402
 from unicorn import UC_HOOK_CODE  # noqa: E402
 from unicorn.arm_const import (  # noqa: E402

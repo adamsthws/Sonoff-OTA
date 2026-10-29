@@ -16,7 +16,7 @@ The long-press *action* (enter pairing mode) is consumed in the app layer, which
 stays parked, so this reaches "long-press timer armed", not pairing mode. It is a
 research/validation tool, not a converter. Drives the fork, not this repo's code.
 
-  BK_EMU_ROOT=../BekenEmulator python3 s61_button_sim.py [pin]   # default pin 3
+  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_button_sim.py [pin]   # default pin 3
 """
 import sys
 import os
@@ -24,7 +24,7 @@ import threading
 import time
 import collections
 from pathlib import Path
-ROOT = Path(os.environ.get("BK_EMU_ROOT", str(Path.home()/"Git"/"BekenEmulator")))
+ROOT = Path(os.environ.get("BK_EMU_ROOT", "/opt/beken-emulator"))
 sys.path.insert(0, str(ROOT))
 from src.main import build_emulator  # noqa: E402
 from unicorn import UC_HOOK_CODE  # noqa: E402

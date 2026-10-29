@@ -1,0 +1,194 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 20:17:26 +0000
+Subject: [PATCH 3/4] emulator: BK7238 OTA self-reprogramming (flash RDID + XIP
+ write-through)
+
+Model the two flash-hardware pieces the rt_ota bootloader uses only when
+reprogramming its own flash, gated behind emu.flash_writethrough (default off,
+so normal device emulation is unchanged):
+  * REG_FLASH RDID result (0x803010): return a JEDEC id whose capacity byte
+    matches the backing image size (and whose maker/type match the bootloader's
+    chip table), so the bootloader derives a non-zero flash size. Otherwise the
+    size is 0 and every bootloader write fails its (addr+len <= size) bounds
+    check and is silently skipped - the apply "succeeds" having written nothing.
+  * XIP write-through (_mirror_xip): mirror each flash program/erase into the
+    memory-mapped image, de-striped over the 32+2 CRC grid, so
+    part_fw_hash_verify and the app jump read what was just written.
+With it on, the stock bootloader runs a full OTA apply from a staged rt_ota RBL
+(erase -> decompress -> program -> hash verify -> jump) and boots the new app.
+
+Flash-write speedups (behaviour-neutral, always on): bulk big-integer AND for
+the NOR page program; the 0x803004/0x803024 write-FIFO handlers trim only when
+they exceed a page instead of on every byte (was O(n^2) per page).
+---
+ src/emulator.py | 114 +++++++++++++++++++++++++++++++++++++++++-------
+ 1 file changed, 99 insertions(+), 15 deletions(-)
+
+diff --git a/src/emulator.py b/src/emulator.py
+index 828446e..8b9caf0 100644
+--- a/src/emulator.py
++++ b/src/emulator.py
+@@ -707,6 +707,55 @@ class BekenEmulator:
+             self.raw_flash = bytearray(self.raw_flash)
+         return self.raw_flash
+ 
++    def _stripe_offset(self):
++        """Offset (0 or 2) of the 34-byte CRC stripe grid in the physical image,
++        or None if the backing is flat. Cached."""
++        o = getattr(self, "_stripe_off", "?")
++        if o == "?":
++            try:
++                from .crypto import detect_stripe_offset
++                o = detect_stripe_offset(bytes(self._flash_backing()[:0x80]))
++            except Exception:
++                o = None
++            self._stripe_off = o
++        return o
++
++    def _mirror_xip(self, addr, length):
++        """Reflect a physical-flash program/erase into the memory-mapped XIP
++        image (unicorn flash memory), de-striped, so code and the OTA
++        hash-verify that read the mapped flash see what was just written.  Real
++        hardware does this live through the flash controller's 32+2 CRC framing;
++        our XIP image is otherwise loaded once at setup and never updated, so a
++        bootloader OTA apply would program the physical dump yet read back the
++        stale pre-apply bytes and fail its own hash check.  Only the striped XIP
++        window (logical offset < FLASH_SIZE) is mirrored; the non-striped data
++        partitions map outside it and are skipped."""
++        if not getattr(self, "flash_writethrough", False):
++            return
++        off = self._stripe_offset()
++        if off is None or length <= 0:
++            return
++        # Fast reject: the striped XIP window is only logical [0, FLASH_SIZE).
++        # Writes to the data partitions (config, download, NVS) map above it, so
++        # skip them in O(1) rather than walking their CRC grids - that per-grid
++        # walk otherwise slows flash-writing firmware enough to time out.
++        if 32 * ((addr - off) // 34) >= self.FLASH_SIZE:
++            return
++        buf = self._flash_backing()
++        k0 = (addr - off) // 34
++        if k0 < 0:
++            k0 = 0
++        k1 = (addr + length - 1 - off) // 34
++        for k in range(k0, k1 + 1):
++            p = off + 34 * k
++            logical = 32 * k
++            if logical < 0 or logical + 32 > self.FLASH_SIZE or p < 0 or p + 32 > len(buf):
++                continue
++            try:
++                self.mu.mem_write(logical, bytes(buf[p:p + 32]))
++            except Exception:
++                pass
++
+     def _flash_program(self, addr, words):
+         """Page program: AND the staged words into flash (NOR bits only clear)."""
+         if not words:
+@@ -714,13 +763,22 @@ class BekenEmulator:
+         buf = self._flash_backing()
+         data = b"".join(struct.pack("<I", w) for w in words)
+         base = addr & ~0x1F                      # programs are page aligned
+-        for i, byte in enumerate(data):
+-            pos = base + i
+-            if pos < len(buf):
+-                # Real NOR flash can only turn 1 bits into 0; an erase is what
+-                # restores them. Modelling that keeps program-without-erase
+-                # behaving as the firmware expects rather than silently working.
+-                buf[pos] &= byte
++        # Real NOR flash can only turn 1 bits into 0; an erase restores them.
++        # AND the whole span in one big-integer op rather than byte-by-byte -
++        # the per-byte loop is slow enough to time out flash-writing firmware.
++        self._and_into(buf, base, data)
++        self._mirror_xip(base, len(data))
++
++    @staticmethod
++    def _and_into(buf, base, data):
++        """buf[base:base+n] &= data, as a single big-integer AND (NOR program)."""
++        end = min(base + len(data), len(buf))
++        n = end - base
++        if n <= 0:
++            return
++        cur = int.from_bytes(bytes(buf[base:end]), "little")
++        new = int.from_bytes(bytes(data[:n]), "little")
++        buf[base:end] = (cur & new).to_bytes(n, "little")
+ 
+     def _flash_program_page(self, addr, data):
+         """256-byte page program (BK7238 REG_FLASH_PW_CONF at 0x00803024)."""
+@@ -728,10 +786,9 @@ class BekenEmulator:
+             return
+         buf = self._flash_backing()
+         base = addr & ~0xFF
+-        for i, byte in enumerate(data[:256]):
+-            pos = base + i
+-            if pos < len(buf):
+-                buf[pos] &= byte
++        chunk = bytes(data[:256])
++        self._and_into(buf, base, chunk)
++        self._mirror_xip(base, len(chunk))
+ 
+     def _flash_erase(self, addr, size):
+         """Sector/block erase: restore the region to erased (0xFF)."""
+@@ -740,6 +797,7 @@ class BekenEmulator:
+         end = min(start + size, len(buf))
+         if start < end:
+             buf[start:end] = b"\xff" * (end - start)
++            self._mirror_xip(start, end - start)
+ 
+     def _use_uart2_rx(self):
+         """True when RT-Thread FinSH (msh />) listens on UART2 instead of UART1."""
+@@ -2502,8 +2560,10 @@ class BekenEmulator:
+         # flash_write_data() pushes eight of them (one 32-byte page) before
+         # triggering the PP opcode below.
+         if address == 0x00803004:
+-            self.flash_state.write_buf.append(value & 0xFFFFFFFF)
+-            del self.flash_state.write_buf[:-8]      # keep only the last page
++            wb = self.flash_state.write_buf
++            wb.append(value & 0xFFFFFFFF)
++            if len(wb) > 8:                          # keep only the last 32-byte page
++                del wb[:-8]
+             mu.mem_write(address, struct.pack("<I", value))
+             return
+ 
+@@ -2517,8 +2577,10 @@ class BekenEmulator:
+             if value & 0x80000000:
+                 self.flash_state.pw_buf.clear()
+             else:
+-                self.flash_state.pw_buf.append(value & 0xFF)
+-                del self.flash_state.pw_buf[:-256]
++                pb = self.flash_state.pw_buf
++                pb.append(value & 0xFF)
++                if len(pb) > 256:                    # keep only the last 256-byte page
++                    del pb[:-256]
+             mu.mem_write(address, struct.pack("<I", value))
+             return
+ 
+@@ -3109,6 +3171,28 @@ class BekenEmulator:
+             mu.mem_write(address, struct.pack("<I", sta))
+             return
+ 
++        if address == 0x00803010 and getattr(self, "flash_writethrough", False):
++            # REG_FLASH_RDID result. The rt_ota bootloader issues an RDID
++            # operate-write then reads this register for the SPI flash's JEDEC
++            # id, from which it derives the total flash size as
++            # 2 << ((id & 0xff) - 1) and looks the id up in its 27-entry chip
++            # table. A zero here (the default for an unmodelled register) gives
++            # size 0, so every bootloader flash write fails its
++            # (addr + len <= size) bounds check and is silently skipped - the
++            # OTA apply then logs "erase/write success" having written nothing.
++            # Return an id whose capacity byte matches the backing image size,
++            # and whose manufacturer/type (EON 0x1c70xx) match a chip-table
++            # entry so the part is recognised too.  Gated on flash_writethrough
++            # (set only when emulating firmware that reprograms its own flash,
++            # e.g. an OTA apply): modelling real flash size lets the bootloader's
++            # writes proceed, which is correct but makes flash-writing firmware
++            # do real work and run slower, so normal emulation leaves it off.
++            src = self.physical_flash if self.physical_flash is not None else self.raw_flash
++            cap = max(1, len(src).bit_length() - 1)   # 4 MiB -> 0x16, 2 MiB -> 0x15
++            rdid = 0x001c7000 | (cap & 0xff)
++            mu.mem_write(address, struct.pack("<I", rdid))
++            return
++
+         if address == 0x00803008:
+             # REG_FLASH_DATA_FLASH_SW. The SDK's flash_read_data reads this
+             # register 8 times after one operate-write to pull a whole 32-byte

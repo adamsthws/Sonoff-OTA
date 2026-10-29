@@ -20,7 +20,7 @@ the eWeLink cloud dispatch needs the eWeLink identity too — see the main doc).
 This is the integrity-gate bypass (0x29c3c) plus the credential injection; no
 other intervention. Requires the BekenEmulator fork.
 
-  BK_EMU_ROOT=../BekenEmulator python3 s61_seed_join.py
+  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_seed_join.py
   SSID=MyNet PASS=mypassword CH=6 SECS=40 python3 s61_seed_join.py
 """
 import os
@@ -33,7 +33,7 @@ import re
 import types
 from pathlib import Path
 
-ROOT = Path(os.environ.get("BK_EMU_ROOT", str(Path.home()/"Git"/"BekenEmulator"))); sys.path.insert(0, str(ROOT))
+ROOT = Path(os.environ.get("BK_EMU_ROOT", "/opt/beken-emulator")); sys.path.insert(0, str(ROOT))
 from src.main import build_emulator  # noqa: E402
 from unicorn import UC_HOOK_CODE  # noqa: E402
 from unicorn.arm_const import (  # noqa: E402

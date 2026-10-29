@@ -32,7 +32,7 @@ path. The eWeLink-provisioned/bound state that gates the cloud task (`ais_link_t
 not locatable by static xref (the firmware loads it `adr`-relative). See the main
 doc's "eWeLink BLE provisioning protocol" section.
 
-  BK_EMU_ROOT=../BekenEmulator python3 s61_ble_provision.py
+  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_ble_provision.py
   SEQ=devinfo,auth,wifi,server SSID=MyNet PASS=mypass python3 s61_ble_provision.py
 """
 import os
@@ -43,7 +43,7 @@ import struct
 import collections
 import types
 from pathlib import Path
-ROOT = Path(os.environ.get("BK_EMU_ROOT", str(Path.home()/"Git"/"BekenEmulator"))); sys.path.insert(0, str(ROOT))
+ROOT = Path(os.environ.get("BK_EMU_ROOT", "/opt/beken-emulator")); sys.path.insert(0, str(ROOT))
 from src.main import build_emulator  # noqa: E402
 from unicorn import UC_HOOK_CODE  # noqa: E402
 from unicorn.arm_const import (  # noqa: E402

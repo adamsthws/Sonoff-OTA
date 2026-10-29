@@ -1,0 +1,9 @@
+# The emulator the S61 work runs on: openshwprojects/BekenEmulator at this commit,
+# unmodified and without its firmwares/, as the archive this repository's
+# release emulator-source-beken-<commit> holds (bk-emu.sh source makes it from
+# a clone, reproducibly). bk-emu.sh downloads the archive, checks it against this hash
+# and applies patches/ in name order; firmware dumps it fetches from the repo.
+repo https://github.com/openshwprojects/BekenEmulator.git
+commit d9a3772a26fa92158be72faf46855726ef8e21d7
+archive bekenemulator-d9a3772.tar.xz
+sha256 f4e3169f0b240e1978febafe2bb8452c5f6f8727ebb8ff4ac36c18a890588abf

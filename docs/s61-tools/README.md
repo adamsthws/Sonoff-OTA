@@ -2,13 +2,27 @@
 
 Research tooling for the Sonoff S61 (BK7238) work — see
 [../beken-s61-emulation.md](../beken-s61-emulation.md). These are not part of the
-Autoflash tool; they drive the **BekenEmulator fork** (`../BekenEmulator`) or
+Autoflash tool; they drive the **BekenEmulator** with this project's patches, or
 analyse the firmware image statically.
 
-**Requirements.** The static-analysis tools need `capstone` (all) and `angr`
-(`s61_decomp.py` only); the emulator tools need the fork checked out. Install into
-a virtual environment, never the system. The emulator tools take paths via env
-`BK_EMU_ROOT` (default `~/Git/BekenEmulator`) and `S61_DUMP`.
+**The emulator** comes with this repository as a container image, kept as the
+S60's is: [`emulator/`](emulator/) pins the upstream commit and its source
+archive (on the repository's `emulator-source-beken-<commit>` release) and holds
+this project's patches, and its `bk-emu.sh` pulls the published image for that
+version or builds it, fetches the public S61s dump from upstream's repository
+(Sonoff's firmware, which this repository never holds) and runs a tool in the
+container, with this checkout at `/work`:
+
+```sh
+docs/s61-tools/emulator/bk-emu.sh python docs/s61-tools/s61_integrity_gate.py
+```
+
+In the container the emulator is at `/opt/beken-emulator`, the tools' default
+`BK_EMU_ROOT`, and the fetched dump their default `S61_DUMP`; the image's Python
+has `capstone` for the static tools too (`angr`, for `s61_decomp.py` only, goes
+into a virtual environment of your own, never the system). The examples below
+leave out the `bk-emu.sh python` prefix and assume the current directory is
+`docs/s61-tools`.
 
 ## Static analysis
 
@@ -18,7 +32,7 @@ the other tools at it.
 
 - **`s61_unstripe.py`** — un-stripe a raw Beken dump to a logical image and decode
   its RBL update headers. Uses the fork's CRC routine.
-  `BK_EMU_ROOT=../BekenEmulator python3 s61_unstripe.py <raw-dump> logical.bin`
+  `python3 s61_unstripe.py <raw-dump> logical.bin`
 - **`s61_dis.py`** — disassemble a window (capstone), Thumb by default.
   `python3 s61_dis.py logical.bin 0x4203c 24`
 - **`s61_xref.py`** — find references to an address: BL/BLX callers over the code
@@ -41,7 +55,7 @@ the other tools at it.
   the provisioned-check runs, and `ais_appfw_task` is created. This operates only
   inside the emulator, on a dump of the owner's own plug; it is never written to or
   run on a real plug.
-  `BK_EMU_ROOT=../BekenEmulator python3 s61_integrity_gate.py`
+  `python3 s61_integrity_gate.py`
 
 - **`s61_long_press.py`** — with the gate cleared, drive the button long-press end
   to end through the firmware's own key stack. Two interventions: the integrity
@@ -50,7 +64,7 @@ the other tools at it.
   emulator does not raise (it raises only Timer 3, the RTOS tick). With both, the
   key-driver timer thread (`0x3eba0`) wakes naturally, its scan (`0x421e0`) runs,
   and a press-and-hold of pins 0/2 trips the real long-press action `0x42250`.
-  `BK_EMU_ROOT=../BekenEmulator python3 s61_long_press.py`
+  `python3 s61_long_press.py`
 
 - **`s61_pair_drive.py`** — drive the firmware into pairing mode and watch the
   emulated radio follow. With the gate cleared and the app framework cycling,
@@ -63,7 +77,7 @@ the other tools at it.
   AirKiss monitor callback `0x403b20` is only ever a **stub** in this build, so
   there is no decoder behind it (see the main doc). Shares the integrity bypass +
   Timer-5 raise with `s61_long_press.py`.
-  `BK_EMU_ROOT=../BekenEmulator python3 s61_pair_drive.py 0` (soft-AP) `| 1`
+  `python3 s61_pair_drive.py 0` (soft-AP) `| 1`
   (station) `| airkiss`. Env `SSID`/`PASS`, `SECS`, `FIRE_AT`.
 
 - **`s61_seed_join.py`** — put the emulated plug on a network the faithful way.
@@ -74,7 +88,7 @@ the other tools at it.
   associate → WPA2 four-way → **IPv4 DHCP → 192.168.1.100**). This corrects the old
   "seeding creds leaves it idle" result — that was the integrity gate, which this
   clears too. Env `SSID`/`PASS`/`CH`/`SECS`.
-  `BK_EMU_ROOT=../BekenEmulator python3 s61_seed_join.py`
+  `python3 s61_seed_join.py`
 
 - **`s61_ble_provision.py`** — synthesise the eWeLink **BLE provisioning session**
   without a BLE radio: feed the provisioning messages (DEVICE_INFO, AUTH_TOKEN,
@@ -85,7 +99,7 @@ the other tools at it.
   The handlers run and the plug joins our AP (WPA2 + DHCP). This exercises the real
   eWeLink provisioning path, but does not by itself dial the cloud — that needs the
   pairing-completion trigger (`s61_cloud_dial.py`). Env `SEQ`/`SSID`/`PASS`/`SECS`.
-  `BK_EMU_ROOT=../BekenEmulator python3 s61_ble_provision.py`
+  `python3 s61_ble_provision.py`
 
 - **`s61_cloud_dial.py`** — the full provisioning outcome: the emulated plug dials
   the **eWeLink (CoolKit) cloud**. Seeds Wi-Fi creds (join + DHCP), then synthesises
@@ -98,7 +112,7 @@ the other tools at it.
   stays on this host.** `DISPATCH` steers it elsewhere; `DISPATCH=` keeps the factory
   placeholder. **Owner's own account only:** never point it at the real eWeLink cloud
   with anyone's account or plug but your own. Env `DISPATCH`/`SSID`/`PASS`/`SECS`/`FORCE_AT`.
-  `BK_EMU_ROOT=../BekenEmulator python3 s61_cloud_dial.py`
+  `python3 s61_cloud_dial.py`
 
 - **`s61_cloud_online.py`** — complete the eWeLink cloud cycle: the plug reaches
   **ONLINE**. Stands up the CoolKit stub (`tools/emulator/stub_cloud/stub_server.py`,
@@ -113,13 +127,13 @@ the other tools at it.
   assembles its CoolKit CA in RAM rather than keeping it in flash. It generates its
   own EC P-256 CA + leaf (openssl) and serves the leaf; the firmware's verify path
   is untouched. Env `SSID`/`PASS`/`SECS`/`FORCE_AT`/`HB`.
-  `BK_EMU_ROOT=../BekenEmulator python3 s61_cloud_online.py`
+  `python3 s61_cloud_online.py`
 
 - **`s61_button_sim.py`** — older button sim (predates the integrity-gate finding
   and natural registration; defaults to the wrong pin 3). Force-runs the block init
   and `key_add`, then presses by driving the GPIO low and latching the capture
   status in `state.pwmn_stat`, reaching the armed long-press timer.
-  `BK_EMU_ROOT=../BekenEmulator python3 s61_button_sim.py [pin]`
+  `python3 s61_button_sim.py [pin]`
 
 - **`s61_airkiss_capture.sh`** — put the laptop's Intel AX200 into monitor mode on
   the router's channel and capture a phone's eWeLink AirKiss/smartconfig broadcast
@@ -130,7 +144,7 @@ the other tools at it.
   S61's Wi-Fi MAC (monitor mode) so the firmware's own AirKiss decoder can consume
   them; an AP-role peer with the known SSID/pass then lets the device associate.
   Stdlib-only pcap/radiotap parsing (DLT 127/105).
-  - `BK_EMU_ROOT=../BekenEmulator python3 s61_airkiss_replay.py capture.pcap --ssid MyNet --pass MyPass`
+  - `python3 s61_airkiss_replay.py capture.pcap --ssid MyNet --pass MyPass`
   - `python3 s61_airkiss_replay.py --selftest`  (synthetic-frame pipeline check)
 
 ### AirKiss end-to-end procedure
@@ -139,7 +153,7 @@ the other tools at it.
 2. `sudo ./s61_airkiss_capture.sh <router-channel> wlp1s0 airkiss.pcap`
 3. On the phone: eWeLink app → add the plug → Wi-Fi/quick (AirKiss) pairing →
    enter that SSID/password → start. Let it run ~30-60 s, Ctrl-C the capture.
-4. `BK_EMU_ROOT=../BekenEmulator python3 s61_airkiss_replay.py airkiss.pcap --ssid <SSID> --pass <PASS>`
+4. `python3 s61_airkiss_replay.py airkiss.pcap --ssid <SSID> --pass <PASS>`
 5. Watch whether the firmware leaves monitor mode, probes/associates, gets DHCP.
 
 ## Conversion and config migration

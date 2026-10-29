@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 20:06:53 +0000
+Subject: [PATCH 1/4] emulator: Wi-Fi MAC monitor-mode RX delivery for
+ AirKiss/smartconfig
+
+Deliver sniffed frames to RX descriptors while in monitor mode even when the
+scan state machine is not HW_ACTIVE. The firmware's smartconfig/AirKiss path
+sets the wide-open RX filter but never drives the normal RX-enable handshake,
+so without this it receives nothing. Off by default (behaviour identical to
+before); enable with BK_MONITOR_RX=1 or MacHw.monitor_rx_deliver = True.
+---
+ src/wifimac.py | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/src/wifimac.py b/src/wifimac.py
+index c5f0e9d..f8b9800 100644
+--- a/src/wifimac.py
++++ b/src/wifimac.py
+@@ -232,6 +232,13 @@ class MacHw:
+         self.rx_queue = []                      # frames waiting for descriptors
+         self.rx_dropped = 0
+         self.monitor = False                    # RX filter wide open (see RX_CNTRL in write())
++        # Opt-in: deliver sniffed frames to RX descriptors while in monitor mode
++        # even when the scan state machine is not HW_ACTIVE. The firmware's
++        # smartconfig/AirKiss path sets the wide-open filter but never drives the
++        # normal RX-enable handshake, so without this it receives nothing. Off by
++        # default (behaviour identical to not having it); enable with BK_MONITOR_RX=1
++        # or by setting .monitor_rx_deliver = True (used by the AirKiss frame relay).
++        self.monitor_rx_deliver = bool(os.environ.get("BK_MONITOR_RX"))
+         self.last_tbtt_idx = None
+         self.on_tx = None                       # callback(frame_bytes, info_dict)
+         self.stats = {"tx": 0, "rx": 0, "rx_nodesc": 0, "tx_bad": 0}
+@@ -651,7 +658,7 @@ class MacHw:
+         if self.state == HW_DOZE and len(frame) >= 10 and not (frame[4] & 1):
+             self.rx_queue.append((bytes(frame), rssi, rate, decr, keyidx))
+             return
+-        if self.state != HW_ACTIVE:
++        if self.state != HW_ACTIVE and not (self.monitor and self.monitor_rx_deliver):
+             self.stats["rx_not_listening"] = self.stats.get("rx_not_listening", 0) + 1
+             return
+         self.rx_queue.append((bytes(frame), rssi, rate, decr, keyidx))
+@@ -679,7 +686,7 @@ class MacHw:
+         return None
+ 
+     def _rx_flush(self, insns):
+-        if self.state != HW_ACTIVE:
++        if self.state != HW_ACTIVE and not (self.monitor and self.monitor_rx_deliver):
+             return
+         changed = False
+         while self.rx_queue:
