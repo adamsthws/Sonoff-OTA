@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="432" height="395" viewBox="0 0 432 395" role="img" aria-labelledby="title">
-<title id="title">Sonoff (eWeLink), Tasmota and ESPHome, with arrows both ways between each pair: any one converts to any other</title>
+<title id="title">Sonoff (eWeLink), Tasmota or OpenBeken, and ESPHome, with arrows both ways between each pair: any one converts to any other</title>
 <defs><marker id="head" viewBox="0 0 10 10" refX="0" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="pf"/></marker></defs>
 <g class="ps" stroke-width="2" marker-start="url(#head)" marker-end="url(#head)">
 <line x1="171" y1="153.9" x2="121" y2="240.5"/>
@@ -7,9 +7,9 @@
 <line x1="166" y1="318.5" x2="266" y2="318.5"/>
 </g>
 <g fill="none" class="ps" stroke-width="2">
-<circle cx="216" cy="76" r="74"/><text><tspan x="216" y="66">Sonoff</tspan><tspan x="216" y="86">(eWeLink)</tspan></text>
-<circle cx="76" cy="318.5" r="74"/><text><tspan x="76" y="318.5">Tasmota</tspan></text>
-<circle cx="356" cy="318.5" r="74"/><text><tspan x="356" y="318.5">ESPHome</tspan></text>
+<circle cx="216" cy="76" r="74"/><text><tspan x="216" y="66">Sonoff</tspan><tspan x="216" y="86" class="or">eWeLink</tspan></text>
+<circle cx="76" cy="318.5" r="74"/><text><tspan x="76" y="298.5">Tasmota</tspan><tspan x="76" y="318.5" class="or">- or -</tspan><tspan x="76" y="338.5">OpenBeken</tspan></text>
+<circle cx="356" cy="318.5" r="74"/><text><tspan x="356" y="308.5">ESPHome</tspan><tspan x="356" y="328.5" class="or">Home Assistant</tspan></text>
 </g>
-<style>:root{--pp:#7c3aed}@media(prefers-color-scheme:dark){:root{--pp:#af5fff}}.ps{stroke:var(--pp)}.pf{fill:var(--pp)}text{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#1f2328;stroke:none;text-anchor:middle;dominant-baseline:central}@media(prefers-color-scheme:dark){text{fill:#ffffff}}</style>
+<style>:root{--pp:#7c3aed}@media(prefers-color-scheme:dark){:root{--pp:#af5fff}}.ps{stroke:var(--pp)}.pf{fill:var(--pp)}text{font-family:"trebuchet ms",verdana,arial,sans-serif;font-size:16px;fill:#1f2328;stroke:none;text-anchor:middle;dominant-baseline:central}.or{font-size:14px;fill:#6e7781}@media(prefers-color-scheme:dark){text{fill:#ffffff}.or{fill:#9198a1}}</style>
 </svg>
