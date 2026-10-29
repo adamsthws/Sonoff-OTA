@@ -41,7 +41,8 @@ REGION_END = 0x400000
 # lwIP keeps each closed connection in TIME_WAIT for a while, so few, larger,
 # paced requests are what it copes with.
 CHUNK = 0x4000
-GAP_S = 1.0
+GAP_S = 1.0      # between chunks
+RETRY_S = 1.0    # after a failed read, growing with each retry
 BACKUP_BIN = "config-0x3e0000.bin"
 MANIFEST = "backup.json"
 
@@ -60,7 +61,7 @@ def read_flash(base: str, start: int, length: int, timeout: float = 30.0) -> byt
                     break
             except Exception:
                 data = b""
-            time.sleep(1.0 + attempt)
+            time.sleep(RETRY_S * (attempt + 1))
         if len(data) != n:
             raise RuntimeError("short read at 0x%x: got %d of %d bytes" % (a, len(data), n))
         out += data
