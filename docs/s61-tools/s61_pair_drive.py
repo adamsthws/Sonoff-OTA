@@ -37,9 +37,9 @@ integrity-gate bypass (force the compare at 0x29c3c to "equal") and raising
 Timer 5's interrupt status each slow tick (the key/app periodics run on
 bk_timer = Timer 5, which the emulator does not raise on its own).
 
-  BK_EMU_ROOT=../BekenEmulator python3 s61_pair_drive.py 0        # soft-AP (coexist)
-  BK_EMU_ROOT=../BekenEmulator python3 s61_pair_drive.py 1        # station
-  BK_EMU_ROOT=../BekenEmulator python3 s61_pair_drive.py airkiss  # sniffer-start
+  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_pair_drive.py 0        # soft-AP (coexist)
+  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_pair_drive.py 1        # station
+  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_pair_drive.py airkiss  # sniffer-start
 
 Env: SECS (run seconds, 18), FIRE_AT (when to drive, 8), SSID/PASS (peer AP to
 join for method 1 / credentials written into the config buffer).
@@ -53,7 +53,7 @@ import re
 import types
 from pathlib import Path
 
-ROOT = Path(os.environ.get("BK_EMU_ROOT", str(Path.home()/"Git"/"BekenEmulator"))); sys.path.insert(0, str(ROOT))
+ROOT = Path(os.environ.get("BK_EMU_ROOT", "/opt/beken-emulator")); sys.path.insert(0, str(ROOT))
 from src.main import build_emulator  # noqa: E402
 from unicorn import UC_HOOK_CODE  # noqa: E402
 from unicorn.arm_const import (  # noqa: E402

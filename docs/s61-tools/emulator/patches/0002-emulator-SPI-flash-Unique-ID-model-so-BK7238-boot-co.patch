@@ -1,0 +1,156 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 20:17:26 +0000
+Subject: [PATCH 2/4] emulator: SPI flash Unique-ID model so BK7238 boot
+ completes
+
+Minimal SPI-master model serving the on-board flash's 64-bit Read Unique ID
+(command 0x4B) at the SPI controller 0x802700. The Beken SDK boot reads it
+soon after ais_evt_task starts; with the controller unmodelled the read loop
+spins and the task watchdog reboots the chip - the reboot loop seen on the
+S61 (BK7238) stock dump. New src/spi_flash.py plus its wiring in emulator.py.
+---
+ src/emulator.py  | 11 +++++++
+ src/spi_flash.py | 84 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 95 insertions(+)
+ create mode 100644 src/spi_flash.py
+
+diff --git a/src/emulator.py b/src/emulator.py
+index c3a92a0..828446e 100644
+--- a/src/emulator.py
++++ b/src/emulator.py
+@@ -16,12 +16,14 @@ try:
+     from . import wifimac as _wifimac
+     from . import gpio as _gpio
+     from . import periph as _periph
++    from . import spi_flash as _spi_flash
+ except ImportError:
+     import tuyamcu as _tuyamcu
+     import blecore as _blecore
+     import wifimac as _wifimac
+     import gpio as _gpio
+     import periph as _periph
++    import spi_flash as _spi_flash
+ 
+ # Known chip identities served from the SCTRL id registers (0x00800000 chip
+ # id, 0x00800004 device id), selectable with --chip. Values extracted from
+@@ -424,6 +426,9 @@ class BekenEmulator:
+ 
+     def __init__(self, raw_flash, bootloader, app, with_boot=False, only_uart=False, chip_identity=None, uart1_hex=False, physical_flash=None, uart1_rx=b"", uart1_rx_delay=CONSOLE_RX_HOLDOFF_INSNS, tuyamcu_enabled=False, tuyamcu_pid=None, tuyamcu_raw=False, xvr_selfclear=False, tuyamcu_dps=None, tuyamcu_injects=None, uart_sink=None, ble_core=None, wifi=False, exception_vector_base=0, chip_variant=None, deep_sleep_wakes=None, gpio_inputs=None, adc_inputs=None):
+         self.raw_flash = raw_flash
++        # SPI-master path to the on-board flash (src/spi_flash.py): serves the
++        # Read-Unique-ID the Beken SDK boot issues, which is otherwise a hang.
++        self.spi_flash = _spi_flash.SpiFlashMaster()
+         self.xvr_selfclear = xvr_selfclear
+         self.chip_variant = (chip_variant or "").strip().upper()
+         # Opt-in RivieraWaves Wi-Fi MAC model over 0xC0000000 (src/wifimac.py).
+@@ -2235,6 +2240,8 @@ class BekenEmulator:
+                 # transfer above already happened.
+                 self.state.gdma_conf[channel] = value & ~self.GDMA_EN
+                 return
++        if self.spi_flash.write(address, value):
++            return
+         if 0x00802300 <= address < 0x0080230C:
+             self._hw_i2c_write(1, address - 0x00802300, value)
+             return
+@@ -2663,6 +2670,10 @@ class BekenEmulator:
+             if served is not None:
+                 mu.mem_write(address, struct.pack("<I", served & 0xFFFFFFFF))
+             return
++        served = self.spi_flash.read(address)
++        if served is not None:
++            mu.mem_write(address, struct.pack("<I", served & 0xFFFFFFFF))
++            return
+         if 0x00802300 <= address < 0x0080230C:
+             val = self._hw_i2c_read(1, address - 0x00802300)
+             mu.mem_write(address, struct.pack("<I", val & 0xFFFFFFFF))
+diff --git a/src/spi_flash.py b/src/spi_flash.py
+new file mode 100644
+index 0000000..55de1d2
+--- /dev/null
++++ b/src/spi_flash.py
+@@ -0,0 +1,84 @@
++"""Minimal SPI-master model: serve the on-board SPI NOR flash's Read Unique ID.
++
++The BK7231/BK7238 SPI controller at 0x802700 can drive the external SPI NOR
++flash directly, separate from the memory-mapped XIP path the emulator already
++serves for code and data. Soon after ais_evt_task starts, the Beken SDK boot
++reads the flash's 64-bit Unique ID this way: command 0x4B, four dummy bytes,
++then eight data bytes clocked out of the DATA register. With the controller
++unmodelled the STATUS register never signals "transfer done", the read loop
++spins, and the task watchdog reboots the chip - the reboot loop seen on the
++Sonoff S61 (BK7238) stock dump.
++
++This models just enough of the controller - a status register and a one-byte
++shift register - plus a flash that answers 0x4B, so the boot completes. The
++Unique ID is synthetic: it lives in the flash chip's own registers, not in the
++flash array, so a dump cannot carry it, and nothing here needs the real value -
++only a stable one.
++
++Registers (offsets from SPI_BASE 0x802700): CTRL +0x00, CONFIG +0x04,
++STATUS +0x08, DATA +0x0c. A non-zero CONFIG brackets a transfer (CONFIG back to
++zero ends it), which is what frames one command, the way chip-select would on
++real hardware.
++"""
++
++SPI_CTRL = 0x00802700
++SPI_CONFIG = 0x00802704
++SPI_STATUS = 0x00802708
++SPI_DATA = 0x0080270C
++
++# STATUS bits the SDK's transfer loop tests.
++TX_FIFO_READY = 1 << 1    # the controller can accept another byte to shift out
++RX_FIFO_READY = 1 << 2    # a received byte is waiting in the RX FIFO
++TX_FINISHED = 1 << 13     # the current transmission has completed
++
++CMD_READ_UNIQUE_ID = 0x4B
++
++# Synthetic 64-bit flash Unique ID - never a real part's, just stable. ASCII
++# "S61EMU" plus two bytes, so it is recognisable in a trace.
++SYNTHETIC_UID = b"S61EMU\x00\x01"
++
++
++class SpiFlashMaster:
++    """The SPI controller plus the one flash command the boot needs."""
++
++    def __init__(self, uid=SYNTHETIC_UID):
++        self.uid = uid
++        self.active = False   # a transfer is configured (CONFIG != 0)
++        self._cmd = None      # byte index within the current command, or None
++        self._rx = []         # bytes waiting to be read back from DATA
++
++    def write(self, address, value):
++        """Handle a CPU MMIO write. Returns True if it should not fall through."""
++        if address == SPI_CONFIG:
++            self.active = value != 0
++            if not self.active:   # transfer framed off: reset for the next one
++                self._cmd = None
++                self._rx.clear()
++            return False          # let the emulator keep its own CONFIG state
++        if address == SPI_DATA and self.active:
++            self._rx.append(self._shift(value & 0xFF))
++            return True
++        return False
++
++    def read(self, address):
++        """Handle a CPU MMIO read. Returns the value to serve, or None to fall
++        through to the emulator's default handling (so other, non-SPI firmwares
++        that never configure a transfer are unaffected)."""
++        if not self.active:
++            return None
++        if address == SPI_STATUS:
++            return TX_FIFO_READY | (RX_FIFO_READY if self._rx else TX_FINISHED)
++        if address == SPI_DATA:
++            return self._rx.pop(0) if self._rx else 0xFF
++        return None
++
++    def _shift(self, out_byte):
++        """Clock one byte out to the flash; return the byte it clocks back."""
++        if self._cmd is None:                      # first byte: the command
++            self._cmd = 0 if out_byte == CMD_READ_UNIQUE_ID else -1
++            return 0xFF
++        if self._cmd < 0:                          # a command we don't model
++            return 0xFF
++        self._cmd += 1
++        i = self._cmd - 5                          # 1 command + 4 dummy bytes
++        return self.uid[i] if 0 <= i < len(self.uid) else 0xFF

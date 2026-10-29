@@ -9,7 +9,7 @@ import time
 import collections
 import re
 from pathlib import Path
-ROOT = Path(os.environ.get("BK_EMU_ROOT", str(Path.home()/"Git"/"BekenEmulator"))); sys.path.insert(0, str(ROOT))
+ROOT = Path(os.environ.get("BK_EMU_ROOT", "/opt/beken-emulator")); sys.path.insert(0, str(ROOT))
 from src.main import build_emulator  # noqa: E402
 from unicorn import UC_HOOK_CODE  # noqa: E402
 from unicorn.arm_const import (  # noqa: E402

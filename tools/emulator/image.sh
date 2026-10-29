@@ -3,6 +3,7 @@
 #
 #   tools/emulator/image.sh tag          the hash of what it is built from
 #                                        (emu.Dockerfile, fork/, container/)
+#                                        - so a change to a patch rebuilds it
 #   tools/emulator/image.sh build IMAGE  build it, labelled with that hash
 #   tools/emulator/image.sh pull IMAGE   the published one with that hash
 #                                        (ghcr.io/adamsthws/autoflash-emu:<hash>,
@@ -30,11 +31,13 @@ tag() {
 }
 
 # The QEMU fork's source, as emu.Dockerfile pins it (QEMU_SOURCE_SHA256): from
-# this repository's release, downloaded once into captures/emulation/cache and
-# checked, so the image builds from nothing but this repository - and again
-# without a network once it is there.
+# this repository's release emulator-source-qemu-<commit>, which holds that one
+# archive and never changes (a new pin is a new release), downloaded once into
+# captures/emulation/cache and checked, so the image builds from nothing but
+# this repository - and again without a network once it is there.
 QEMU_SOURCE=qemu-lcgamboa-e39508f.tar.xz
-QEMU_SOURCE_URL=${AUTOFLASH_QEMU_SOURCE_URL:-https://github.com/adamsthws/Sonoff-OTA/releases/download/emulator-source/$QEMU_SOURCE}
+QEMU_COMMIT=${QEMU_SOURCE%.tar.xz}; QEMU_COMMIT=${QEMU_COMMIT##*-}
+QEMU_SOURCE_URL=${AUTOFLASH_QEMU_SOURCE_URL:-https://github.com/adamsthws/Sonoff-OTA/releases/download/emulator-source-qemu-$QEMU_COMMIT/$QEMU_SOURCE}
 qemu_source() {
     local want cache=$EMU/cache/$QEMU_SOURCE
     want=$(sed -n 's/^ARG QEMU_SOURCE_SHA256=//p' "$ROOT/tools/emulator/emu.Dockerfile")

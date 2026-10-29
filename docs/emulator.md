@@ -495,13 +495,20 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
   which emulates the ESP32-C3's Wi-Fi hardware and offers three open access
   points. Its Wi-Fi is wired to a tap device in the container. The fork's
   source at the pinned commit (`e39508f`), with the subprojects its build
-  fetches, is a release asset of this repository
-  ([`emulator-source`](https://github.com/adamsthws/Sonoff-OTA/releases/tag/emulator-source));
+  fetches, is an archive on a release of this repository named after that
+  commit
+  ([`emulator-source-qemu-e39508f`](https://github.com/adamsthws/Sonoff-OTA/releases/tag/emulator-source-qemu-e39508f));
   `emu.sh` downloads it once into `captures/emulation/cache/`, checks it
   against the SHA-256 in `emu.Dockerfile`, and the image is built from it with
-  no network - so building needs nothing outside this repository. QEMU is
+  no network - so building needs nothing outside this repository. Releases
+  here are immutable, so such a release holds one archive and never changes:
+  moving the pin is a new archive on a new release, and the old one stays for
+  older checkouts (the S61's emulator is kept the same way,
+  `emulator-source-beken-<commit>`; the earlier `emulator-source` release
+  was deleted on 2026-10-29, and its name cannot be used again). QEMU is
   GPL-2.0: the archive is its unmodified source, and this project's changes
-  to it are the patches in `tools/emulator/fork/`. The image is labelled with
+  to it are the patches in `tools/emulator/fork/`, so a change to the
+  emulator is a new patch, not a new release. The image is labelled with
   a hash of what it is built from (`tools/emulator/image.sh tag`), and the
   repository's `emulator-image` workflow publishes each one as
   `ghcr.io/adamsthws/autoflash-emu:<that hash>`: `emu.sh` pulls that, and

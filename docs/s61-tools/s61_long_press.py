@@ -21,7 +21,7 @@ ISR -> handler -> periodic scan -> long-press action 0x42250. (That action is
 the relay/LED path via bk_gpio_output; the eWeLink pairing long-press is a
 further app-layer step -- see the doc.)
 
-  BK_EMU_ROOT=../BekenEmulator python3 s61_long_press.py
+  $(docs/s61-tools/emulator/bk-emu.sh python) docs/s61-tools/s61_long_press.py
 """
 import sys
 import os
@@ -30,7 +30,7 @@ import time
 import collections
 import types
 from pathlib import Path
-ROOT = Path(os.environ.get("BK_EMU_ROOT", str(Path.home()/"Git"/"BekenEmulator"))); sys.path.insert(0, str(ROOT))
+ROOT = Path(os.environ.get("BK_EMU_ROOT", "/opt/beken-emulator")); sys.path.insert(0, str(ROOT))
 from src.main import build_emulator  # noqa: E402
 from unicorn import UC_HOOK_CODE  # noqa: E402
 from unicorn.arm_const import (  # noqa: E402

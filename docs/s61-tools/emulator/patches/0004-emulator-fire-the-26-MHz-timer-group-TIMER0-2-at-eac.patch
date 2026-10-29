@@ -1,0 +1,112 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 14:01:09 +0000
+Subject: [PATCH 4/4] emulator: fire the 26 MHz timer group (TIMER0-2) at each
+ channel's period
+
+LibreTiny's BK7231N/BK7238 builds keep their FreeRTOS tick on hardware Timer 0
+(the 26 MHz group, for a 26 MHz micros()), where OpenBeken and the stock Beken
+SDK use Timer 3. The emulator raised only Timer 3's status, so under it a
+LibreTiny firmware's timer ISR acknowledged a channel with no handler while
+xTaskIncrementTick never ran: every log line said 0.000, the first delay()
+never returned and Wi-Fi stalled at "Waiting for init_thread". Each enabled
+channel of group 0-2 now raises its status when its programmed period (the
+divided 26 MHz count at 0x802A00 + 4n) has elapsed, at the slow tick's
+resolution.
+
+The period matters: OpenBeken's BK7238 build feeds its interrupt watchdog from
+a 10 s channel of this group, and raising every channel on every tick ran that
+feed - two key writes with a busy delay between - back to back and starved the
+firmware after Main_Init_Before_Delay. The DX-WF24A AT module blinks its P26
+status LED from such a timer, so that pin is no longer asserted in its case:
+only pins that never change are.
+
+An ESPHome (LibreTiny 1.13.0) S61 image now boots, joins and serves its API
+under the emulator; the OpenBK7238 and BK7238 stock-dump cases pass as before.
+---
+ src/emulator.py    | 25 +++++++++++++++++++++++++
+ tests/self_test.py | 14 +++++++++-----
+ 2 files changed, 34 insertions(+), 5 deletions(-)
+
+diff --git a/src/emulator.py b/src/emulator.py
+index 8b9caf0..360bd1d 100644
+--- a/src/emulator.py
++++ b/src/emulator.py
+@@ -185,6 +185,7 @@ class SimulatorState:
+         self.pwm_status = 0
+         self.timer0_2_ctl = 0
+         self.timer3_5_ctl = 0
++        self.timer0_2_due = [0, 0, 0]  # slow ticks until each 26 MHz-group channel fires
+         self.efuse_ctrl = 0
+         self.saradc_cfg = 0        # shadow of SARADC_ADC_CONFIG (0x802c00)
+         self.saradc_cfg2 = 0       # shadow of SARADC_ADC_CONFIG2 (0x802c08, BK7238/BK7252N)
+@@ -2078,6 +2079,30 @@ class BekenEmulator:
+                 pwm_ctl = state.pwm_regs.get(0, 0)
+                 state.pwm_status |= self._old_pwm_timer_status_mask(pwm_ctl)
+             if state.icu_int_enable & (1 << 8): # BKTIMER (OpenBK + BK7252 camera Timer 5)
++                # The 26 MHz group 0-2 (TIMER0_2_CTL: bits 0-2 enable, 3-5
++                # clock divider minus one, 7-9 interrupt status; the period
++                # of channel n in divided 26 MHz counts at 0x802A00 + 4n):
++                # each enabled channel raises its status when its period
++                # has elapsed, at the slow tick's resolution. LibreTiny's
++                # BK7231N/BK7238 builds keep their FreeRTOS tick on Timer 0
++                # (1 ms, for a 26 MHz micros()); with only Timer 3 raised
++                # their tick ISR acknowledged a channel with no handler and
++                # time stood still. The period matters: OpenBeken's BK7238
++                # build feeds its interrupt watchdog from a 10 s channel of
++                # this group, and raised every tick that feed (a busy delay
++                # between its two key writes) ran back to back and starved
++                # the firmware.
++                ctl = state.timer0_2_ctl
++                div = ((ctl >> 3) & 0x7) + 1
++                for ch in range(3):
++                    if not (ctl & (1 << ch)):
++                        continue
++                    state.timer0_2_due[ch] -= 1
++                    if state.timer0_2_due[ch] > 0:
++                        continue
++                    period = state.pwm_regs.get(4 * ch, 0) * div
++                    state.timer0_2_due[ch] = max(1, period // (26000 * SLOW_TICK_MS))
++                    state.timer0_2_ctl |= (1 << (7 + ch))
+                 if self.is_bk7252 or self.is_bk7252n:
+                     state.timer3_5_ctl |= (((state.timer3_5_ctl & 0x7) or 0x1) << 7)
+                 else:
+diff --git a/tests/self_test.py b/tests/self_test.py
+index 6c7c053..52a341c 100644
+--- a/tests/self_test.py
++++ b/tests/self_test.py
+@@ -4003,9 +4003,12 @@ TEST_CASES = [
+     {
+         # Plaintext BK7238 dump from a DX-Smart DX-WF24A AT-command Wi-Fi + BLE
+         # combo module.  Suppresses Beken SDK boot chatter, prints 'power on' on
+-        # UART, configures P6 and P26 low (0x00), brings up the BLE 5.2
+-        # controller and stages its 'WF24-BLE' Complete Name advertisement in
+-        # exchange memory at 0x0040e480 +0x0a54.
++        # UART, configures P6 low (0x00), brings up the BLE 5.2 controller and
++        # stages its 'WF24-BLE' Complete Name advertisement in exchange memory
++        # at 0x0040e480 +0x0a54.  P26 is its status LED, blinked from a 26 MHz-
++        # group hardware timer (about once a second): once the emulator fired
++        # that group it toggled between 0x00 and 0x02 across the run, so it is
++        # no longer asserted - only pins that never change are.
+         "name": "BK7238 DX-Smart DX-WF24A AT module prints 'power on' and advertises 'WF24-BLE'",
+         "binary": os.path.join(ROOT_DIR, "firmwares",
+                                "BK7238_DX-Smart_DX-WF24A_AT.bin"),
+@@ -4019,7 +4022,7 @@ TEST_CASES = [
+             "WF24-BLE",
+         ],
+         "expected_pins": {
+-            0: 0x78, 1: 0x78, 6: 0x00, 10: 0x78, 11: 0x78, 26: 0x00,
++            0: 0x78, 1: 0x78, 6: 0x00, 10: 0x78, 11: 0x78,
+         },
+     },
+     {
+@@ -5108,7 +5111,8 @@ DESCRIPTIONS = {
+         "PWRRCD store index 23, and completes RF calibration.",
+     "BK7238 DX-Smart DX-WF24A AT module prints 'power on' and advertises 'WF24-BLE'":
+         "A plaintext BK7238 dump from a DX-Smart DX-WF24A AT-command Wi-Fi + BLE combo module. "
+-        "It suppresses SDK boot messages, prints 'power on', drives P6 and P26 low (0x00), "
++        "It suppresses SDK boot messages, prints 'power on', drives P6 low (0x00) and blinks "
++        "its P26 status LED from a hardware timer, "
+         "initializes the BLE 5.2 controller, and stages its 'WF24-BLE' Complete Name "
+         "advertisement in exchange memory at 0x0040e480 +0x0a54.",
+     "BK7238 BrizLabs Fairy LED RGB (SDK 3.0.65, 1.0.1) configures SPI/GPIO and scans for tuyatest":

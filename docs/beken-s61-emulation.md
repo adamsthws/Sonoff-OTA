@@ -41,16 +41,32 @@ the project adds. See [legal.md](legal.md).
 - The BLE controller **registers** are modelled (`src/blecore.py`) and host
   commands complete, but there is **no BLE radio**: nothing is transmitted and no
   peer can connect.
-- Work happens in the fork `adamsthws/BekenEmulator` (local checkout
-  `../BekenEmulator`); changes there are tracked in that repo, not this one.
+- It comes with this repository as a container image, as the S60's QEMU does:
+  its source at the commit `s61-tools/emulator/UPSTREAM` pins, unmodified, is
+  an archive of the
+  [`emulator-source-beken-d9a3772`](https://github.com/adamsthws/Sonoff-OTA/releases/tag/emulator-source-beken-d9a3772)
+  release - named after the commit, holding that one archive, never changed;
+  a new pin is a new release - and this project's changes to it are the patches in
+  [`s61-tools/emulator/patches/`](s61-tools/emulator/patches/).
+  `s61-tools/emulator/bk-emu.sh` builds the image from them
+  (`bk-emu.Dockerfile`), or pulls the one the `beken-emulator-image` workflow
+  published for that version (`ghcr.io/adamsthws/autoflash-beken-emu:<hash>`),
+  and runs the tools in it with this checkout at `/work` (see
+  [the fork](#the-fork-s61-toolsemulator)). Upstream publishes no licence;
+  its source is kept here so the emulator depends on nothing outside this
+  repository. Neither the archive nor the image holds any of upstream's
+  `firmwares/`: the public S61s dump is Sonoff's firmware, which this
+  repository never holds, so `bk-emu.sh` fetches it from upstream's
+  repository, which publishes it, into `captures/emulation/beken-firmwares/`,
+  mounted into the container.
 - BK7238 CPU is ARM968E-S (ARMv5TE), which Unicorn runs directly.
 
 Run the S61 dump:
 
 ```sh
-cd ../BekenEmulator
-<venv>/bin/python src/main.py firmwares/<S61 dump>.bin \
-    --with-boot -chip BK7238 --only-uart --wifi-peer auto
+docs/s61-tools/emulator/bk-emu.sh run captures/<S61 dump>.bin --wifi-peer auto
+# which is, in the container:
+python /opt/beken-emulator/src/main.py <S61 dump>.bin --with-boot -chip BK7238 --only-uart --wifi-peer auto
 ```
 
 Always pass `--only-uart`. Without it the emulator logs every MMIO access
@@ -503,7 +519,7 @@ changes, and the stub serves a leaf signed by that CA.
 against the name the firmware verifies (it sends SNI `8.8.8.8`) — and a
 **serverAuth EKU**. With those the verification passes.
 
-**Verified** (`BK_EMU_ROOT=../BekenEmulator python3 s61_cloud_online.py`):
+**Verified** (`docs/s61-tools/emulator/bk-emu.sh python docs/s61-tools/s61_cloud_online.py`):
 
 ```
 dispatch -> {"error":0,...,"domain":"8.8.8.8","port":"443"}   (accepted)
@@ -1484,11 +1500,42 @@ from another context does not complete the round-trip. `IsWiFiStationProvisioned
 is `0x7388e` (reads `wifi-ssid` via `0x5ad84` → `0x12f438`), reached from CHIP
 `DriveStationState` `0x73b28`.
 
-## Fork state (uncommitted, in `../BekenEmulator`)
+## The fork (`s61-tools/emulator/`)
 
-- `src/spi_flash.py` (new) + `src/emulator.py` (wiring) — the boot fix. 6/6
-  regression; a good standalone upstream-PR candidate.
-- `src/wifimac.py` — the opt-in monitor-RX delivery described above.
+The emulator is upstream BekenEmulator at the commit `UPSTREAM` pins - the
+archive on the release `emulator-source-beken-<commit>`, whose hash `UPSTREAM` also pins -
+with these patches applied in name order when the image is built
+(`bk-emu.sh ensure` builds or pulls it; `bk-emu.sh dump` fetches the public
+S61s dump from upstream's repository; `bk-emu.sh test` runs upstream's
+self-tests under them, fetching its other devices' dumps the same way). Each is one commit's worth, with its reasoning in
+its header; none has been offered upstream yet.
+
+- **`0001` - monitor-mode RX delivery** (`src/wifimac.py`): sniffed frames
+  reach the RX descriptors in monitor mode even when the scan state machine is
+  not active, as the AirKiss path needs. Opt-in (`monitor_rx_deliver`), so
+  nothing else changes.
+- **`0002` - the SPI flash's Unique ID** (`src/spi_flash.py`, new, wired in
+  `src/emulator.py`): the boot fix above. Without it the SDK's UID read spins
+  and the watchdog reboots the chip.
+- **`0003` - OTA self-reprogramming** (`src/emulator.py`): the flash JEDEC id
+  and XIP write-through the stock bootloader needs to apply an update to its
+  own flash (`flash_writethrough`, off by default), plus flash-write speedups.
+- **`0004` - the 26 MHz timer group** (`src/emulator.py`, `tests/self_test.py`):
+  Timer 0-2 fire at each channel's programmed period, which LibreTiny's
+  FreeRTOS tick needs; OpenBeken's watchdog feed and the stock dump are
+  unchanged.
+
+To change the fork: extract the archive (`captures/emulation/cache/`), apply
+the patches to it in order, make the change as a commit there, `git
+format-patch` it into `patches/`, and `bk-emu.sh ensure` builds the image
+again from the new set (its hash, `bk-emu.sh tag`, changed; the workflow
+publishes that version once it is pushed).
+Moving to a newer upstream commit: put its hash in `UPSTREAM`, `bk-emu.sh
+source` makes the new archive (`git archive` of that commit, so anyone can
+reproduce its bytes), publish it as the release `emulator-source-beken-<its
+commit>` (draft first, with the archive attached, then publish: releases are
+immutable), pin its SHA-256 and name in `UPSTREAM`, and rework whatever
+patches no longer apply.
 
 ## Tools and methods
 

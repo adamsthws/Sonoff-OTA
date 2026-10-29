@@ -7,7 +7,7 @@ the dump with every block's 2 CRC bytes removed. Produce it once, then point the
 disassembler / xref / decompiler tools at the logical image.
 
 Uses the emulator fork's CRC routine (so it always matches the model); set
-BK_EMU_ROOT if the fork is not at ~/Git/BekenEmulator.
+BK_EMU_ROOT if the fork is not where docs/s61-tools/emulator/bk-emu.sh puts it.
 
 Usage:
   s61_unstripe.py [RAW_DUMP] [OUT_LOGICAL]
@@ -20,7 +20,7 @@ import struct
 import time
 from pathlib import Path
 
-ROOT = Path(os.environ.get("BK_EMU_ROOT", str(Path.home() / "Git" / "BekenEmulator")))
+ROOT = Path(os.environ.get("BK_EMU_ROOT", "/opt/beken-emulator"))
 sys.path.insert(0, str(ROOT))
 from src import crypto  # noqa: E402  (Beken CRC16 + strip_crcs, kept in one place)
 

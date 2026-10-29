@@ -1,0 +1,5 @@
+# What BekenEmulator imports (its requirements.txt, unpinned), at the versions
+# the S61 route was proven with. Installed into the checkout's .venv by bk-emu.sh.
+unicorn==2.1.4
+capstone==5.0.9
+pycryptodome==4.2.0
