@@ -191,11 +191,11 @@ caught on its way out. It finds two kinds of thing:
   any form, and as raw bytes in any file; the Sonoff settings in each backup
   that say which plug, account or network it is (its eWeLink keys, the Wi-Fi it
   was set up on); the addresses real runs - not the emulator's - found plugs
-  and your computer at; and each line of `.leak-scan.local`, a file Git
+  and your computer at; and each line of `tools/repo/leak-scan.local`, a file Git
   ignores, for anything else of yours (a router's name, a public address).
 - **Anyone's, by shape**: a MAC address that could be a real device's - one
   not locally administered, so not `12:34:56:...` or `aa:bb:...`, and not a
-  made-up example listed in `.leak-scan-allow`; a UUID that could be a device's
+  made-up example listed in `tools/repo/leak-scan-allow`; a UUID that could be a device's
   apikey or id (listed the same way); a private key, or a GitHub, AWS, Google or
   Slack token; disassembly or decompiler output, the shape the S61 research
   tools print, so a pasted dump is caught - commit the tool, not its dump; and
@@ -204,12 +204,12 @@ caught on its way out. It finds two kinds of thing:
 
   A secret with no safe shape - a device's `device_secret`, `app-apikey` or
   `secureCertSha256`, which look like the repository's own hashes - is found by
-  value instead: list it in `.leak-scan.local` (Git-ignored), and the scan keeps
+  value instead: list it in `tools/repo/leak-scan.local` (Git-ignored), and the scan keeps
   that exact value out, as it does anything else of yours.
 
 It says where each finding is and what kind, never the value. Take it out, or
 for something meant to be there - a new made-up example MAC, say, which
-belongs in `.leak-scan-allow` - `git commit --no-verify` lets it through. The
+belongs in `tools/repo/leak-scan-allow` - `git commit --no-verify` lets it through. The
 repository's `leak-scan` workflow runs the shape checks on each push to
 `main` and each pull request, and GitHub's own secret scanning and push protection, on for
 the repository, refuse pushes with known kinds of token. In examples, use
@@ -304,7 +304,7 @@ once the plug is converted, the account is no longer needed.
 ## Locks on the destructive steps
 
 Besides the PROCEED confirmation, the destructive steps are locked by default:
-the `RECOVERY_LOCK` and `REPARTITION_LOCK` files in this repository have to be
+the `RECOVERY_LOCK` and `REPARTITION_LOCK` files in `tools/espressif/` have to be
 deliberately renamed before the underlying tools will run them on their own.
 
 ## The finished memory layout

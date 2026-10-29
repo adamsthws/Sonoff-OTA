@@ -82,9 +82,9 @@ class OwnValueTests(unittest.TestCase):
                 {"inputs": {"plug_ip": "10.9.8.7", "listen_ip": "192.168.60.10"}}))
             (root / "captures/settings.json").write_text(json.dumps({"ewelink_email": "someone@example.org"}))
             (root / ".env").write_text("EWELINK_PASSWORD=Fake-Passw0rd\n")
-            (root / ".leak-scan.local").write_text("# mine\nmy-router-name\n")
+            (root / "leak-scan.local").write_text("# mine\nmy-router-name\n")
             with mock.patch.object(ls, "CAPTURES", root / "captures"), \
-                 mock.patch.object(ls, "LOCAL_FILE", root / ".leak-scan.local"), \
+                 mock.patch.object(ls, "LOCAL_FILE", root / "leak-scan.local"), \
                  mock.patch.object(ls, "ALLOW_FILE", root / "none"), \
                  mock.patch("tools.autoflash.credentials.ENV_FILE", root / ".env"):
                 values = ls.own_values()

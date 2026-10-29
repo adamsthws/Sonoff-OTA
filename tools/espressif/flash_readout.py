@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools.espressif.analyze_vendor_ota import analyze  # noqa: E402
-from tools.autoflash import hostsys, kinds, output  # noqa: E402
+from tools.autoflash import hostsys, kinds, output, safety_locks  # noqa: E402
 from tools.autoflash.output import PROBLEM_RE  # noqa: E402
 from tools.autoflash.prompts import (  # noqa: E402
     QuitRun,
@@ -206,8 +206,8 @@ def deliver(plug_ip: str, listen_ip: str, port: int, email: str, version: str,
     HTTP lines become one progress line and the cloud's running commentary is
     left out, unless in verbose mode; anything reporting a problem is shown.
     """
-    lock = ROOT / "RECOVERY_LOCK"
-    moved = ROOT / "RECOVERY_LOCK.owner-authorized"
+    lock = ROOT / safety_locks.DIR / "RECOVERY_LOCK"
+    moved = ROOT / safety_locks.DIR / "RECOVERY_LOCK.owner-authorized"
     hostsys.replace_file(lock, moved)
     try:
         process = subprocess.Popen(
@@ -334,7 +334,7 @@ def run(args: argparse.Namespace) -> int:
     else:
         firmware, probe, name = Path(args.firmware), is_readout_bridge, "the readout firmware"
         check_readout_file(ROOT / firmware)
-    if not (ROOT / "RECOVERY_LOCK").exists():
+    if not (ROOT / safety_locks.DIR / "RECOVERY_LOCK").exists():
         raise Stop("RECOVERY_LOCK is not in place; refusing to start from an unsafe state")
     print(f"{name[0].upper()}{name[1:]} and safety lock: OK")
 

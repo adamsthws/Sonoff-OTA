@@ -83,7 +83,7 @@ eWeLink accounts and plugs' identities.
 - In examples, tests and docs, use the made-up MAC `12:34:56:ab:cd:ef` and
   addresses that are nobody's - never your plug's, network's or account's.
 - If the leak scan stops a commit, take the finding out. A new made-up
-  example belongs in `.leak-scan-allow`; nothing real is ever let through
+  example belongs in `tools/repo/leak-scan-allow`; nothing real is ever let through
   with `--no-verify`.
   [docs/technical-details.md](docs/technical-details.md#keeping-secrets-out-of-git)
 - No third party's proprietary firmware - Sonoff's stock images, a plug's

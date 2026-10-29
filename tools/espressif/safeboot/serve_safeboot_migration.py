@@ -96,7 +96,7 @@ except ModuleNotFoundError:
 
 ROOT = Path(__file__).resolve().parents[3]
 TEMPLATE_DIR = Path(__file__).resolve().parent / "repartition" / "berry"
-LOCK_PATH = ROOT / "REPARTITION_LOCK"
+LOCK_PATH = Path(__file__).resolve().parents[1] / "REPARTITION_LOCK"
 COMMIT_FLAG = "--i-accept-power-loss-may-require-opening-the-plug"
 PHASES = ("preflight", "stage", "commit", "restore", "plan")
 # plan: whatever tools/autoflash/plans.py planned (installing ESPHome, leaving

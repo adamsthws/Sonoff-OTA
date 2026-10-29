@@ -4929,7 +4929,8 @@ class DeliveryPortTests(unittest.TestCase):
         import tools.autoflash.cli as autoflash
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "RECOVERY_LOCK").write_text("locked")
+            (root / autoflash.safety_locks.DIR).mkdir(parents=True)
+            (root / autoflash.safety_locks.DIR / "RECOVERY_LOCK").write_text("locked")
             state = RunState.open(root)
             state.set_input("plug_ip", "192.168.1.96")
             state.set_input("stock_version", "1.2.0")
@@ -5105,13 +5106,14 @@ class LeftLockTests(unittest.TestCase):
         import tools.autoflash.cli as autoflash
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "RECOVERY_LOCK.owner-authorized").write_text("locked\n")
-            (root / "REPARTITION_LOCK").write_text("locked\n")
+            (root / autoflash.safety_locks.DIR).mkdir(parents=True)
+            (root / autoflash.safety_locks.DIR / "RECOVERY_LOCK.owner-authorized").write_text("locked\n")
+            (root / autoflash.safety_locks.DIR / "REPARTITION_LOCK").write_text("locked\n")
             with mock.patch.object(autoflash, "ROOT", root), mock.patch.object(autoflash, "say"):
                 autoflash.restore_left_locks()
-            self.assertTrue((root / "RECOVERY_LOCK").exists())
-            self.assertFalse((root / "RECOVERY_LOCK.owner-authorized").exists())
-            self.assertTrue((root / "REPARTITION_LOCK").exists())
+            self.assertTrue((root / autoflash.safety_locks.DIR / "RECOVERY_LOCK").exists())
+            self.assertFalse((root / autoflash.safety_locks.DIR / "RECOVERY_LOCK.owner-authorized").exists())
+            self.assertTrue((root / autoflash.safety_locks.DIR / "REPARTITION_LOCK").exists())
 
 
 class ComputerDescriptionTests(unittest.TestCase):

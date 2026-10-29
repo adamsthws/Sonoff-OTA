@@ -7,7 +7,7 @@
 
 Each linter is handed the files of its kind:
 
-    ruff          Python (ruff.toml)
+    ruff          Python (.ruff.toml)
     shellcheck    shell scripts: *.sh, and files starting #!/bin/sh or bash
     actionlint    the workflows (with shellcheck on their scripts)
     zizmor        the workflows and dependabot.yml, for what an attacker could use;

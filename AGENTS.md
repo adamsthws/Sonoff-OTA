@@ -18,7 +18,7 @@ eWeLink accounts and plugs' identities.
   addresses that are nobody's. Never a real plug's, network's or account's.
 - **The leak scan** (`tools/repo/leak_scan.py`, run by the hooks in `.githooks/`)
   stops a commit or push holding one. Take it out; never pass `--no-verify`
-  to get past a finding. A new made-up example goes in `.leak-scan-allow`.
+  to get past a finding. A new made-up example goes in `tools/repo/leak-scan-allow`.
   [docs/technical-details.md](docs/technical-details.md#keeping-secrets-out-of-git)
 - **A plug's stock Sonoff backup cannot be made again** once the plug is
   converted: never overwrite, move or delete one.

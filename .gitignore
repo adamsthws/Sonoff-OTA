@@ -16,11 +16,11 @@ bridge/.pio/
 sdkconfig.*
 # The unit tests' coverage (python -m coverage run).
 .coverage
-# How long each unit test took last time, for tests/run.py's order.
-.test-times.json
 # Generated configs stay out; the bridge's chosen settings must not.
 !sdkconfig.defaults
 __pycache__/
+# ruff writes a .gitignore of its own in here; said here too, as for __pycache__.
+.ruff_cache/
 *.py[cod]
 *.elf
 
@@ -43,12 +43,12 @@ __pycache__/
 .env
 
 # Local authorization markers must never replace the shipped safety lock.
-RECOVERY_LOCK.owner-authorized*
-REPARTITION_LOCK.owner-authorized*
+tools/espressif/RECOVERY_LOCK.owner-authorized*
+tools/espressif/REPARTITION_LOCK.owner-authorized*
 
 # Accidental/temporary files from development.
 0
 *.bak
 
 # tools/repo/leak_scan.py: your own values to keep out of Git.
-.leak-scan.local
+tools/repo/leak-scan.local

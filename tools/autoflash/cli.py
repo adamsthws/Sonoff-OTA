@@ -5971,7 +5971,7 @@ def cmd_run(ctx: Context) -> int:
 
 
 def say_lock_back(name: str) -> None:
-    if (ROOT / name).exists():
+    if (ROOT / safety_locks.DIR / name).exists():
         say(f"{name} restored")
     else:
         say(f"{name} left lifted: another run, on another plug, still needs it")

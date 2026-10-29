@@ -15,9 +15,9 @@ Two kinds of finding:
   each backed-up plug's MAC, in any form, and the Sonoff settings in its backup
   (its eWeLink keys, the Wi-Fi it was set up on); the addresses real runs - not
   the emulator's - found plugs and this computer at; and each line of
-  .leak-scan.local, which Git ignores: more of your own (a router, a name).
+  tools/repo/leak-scan.local, which Git ignores: more of your own (a router, a name).
 - **Anyone's**, by their shape: a MAC address that could be a real device's -
-  not locally administered, and not one of the made-up ones .leak-scan-allow
+  not locally administered, and not one of the made-up ones tools/repo/leak-scan-allow
   lists; a UUID that could be a device's apikey or id (same allow-list); a
   private key; a GitHub, AWS, Google or Slack token; disassembly or decompiler
   output (the S61 research tools make it - commit the tool, not its dump); and
@@ -25,7 +25,7 @@ Two kinds of finding:
 
 An arbitrary secret with no safe shape - a device_secret, an app-apikey, a
 secureCertSha256 - cannot be found by shape without flagging the repository's
-own hashes, so list its value in .leak-scan.local (Git-ignored) to have it
+own hashes, so list its value in tools/repo/leak-scan.local (Git-ignored) to have it
 found by value, as with anything else of yours.
 
 Nothing found is printed: only where, and what kind. A finding stops the
@@ -47,8 +47,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-ALLOW_FILE = ROOT / ".leak-scan-allow"
-LOCAL_FILE = ROOT / ".leak-scan.local"
+# Beside this script: the made-up examples the repository allows, and your own
+# values to keep out (leak-scan.local, which Git ignores).
+ALLOW_FILE = Path(__file__).resolve().parent / "leak-scan-allow"
+LOCAL_FILE = Path(__file__).resolve().parent / "leak-scan.local"
 CAPTURES = ROOT / "captures"
 # The emulator's own network and the computer itself: not anyone's real address.
 EMULATOR_NETWORKS = [ipaddress.ip_network(n) for n in ("192.168.60.0/24", "127.0.0.0/8", "0.0.0.0/32")]
@@ -166,7 +168,7 @@ def own_values() -> dict[str, str]:
     if LOCAL_FILE.exists():
         for line in LOCAL_FILE.read_text(encoding="utf-8").splitlines():
             if line.strip() and not line.lstrip().startswith("#"):
-                add(line.strip(), "a value in .leak-scan.local")
+                add(line.strip(), "a value in tools/repo/leak-scan.local")
     allow = allowed()
     return {value: what for value, what in found.items() if value.lower() not in allow}
 
@@ -208,7 +210,7 @@ class Scanner:
             if first & 0x02 or first & 0x01 or mac in self.allow or mac.replace(":", "-") in self.allow:
                 continue  # locally administered or multicast: no device's own; or a known example
             self.findings.append(Finding(where, "a MAC address that could be a real device's "
-                                                "(use 12:34:56:ab:cd:ef, or list it in .leak-scan-allow)"))
+                                                "(use 12:34:56:ab:cd:ef, or list it in tools/repo/leak-scan-allow)"))
         for what, pattern in TOKENS.items():
             if pattern.search(text):
                 self.findings.append(Finding(where, what))
@@ -216,7 +218,7 @@ class Scanner:
             if match.group(0).lower() in self.allow:
                 continue  # a known example: a fixed public constant, or one listed
             self.findings.append(Finding(where, "a UUID that could be a device's apikey or id "
-                                                "(list a made-up example in .leak-scan-allow)"))
+                                                "(list a made-up example in tools/repo/leak-scan-allow)"))
         if DISASM_LINE.search(text) or DECOMP_BANNER.search(text):
             self.findings.append(Finding(where, "disassembly or decompiler output "
                                                 "(commit the tool that makes it, not its dump)"))

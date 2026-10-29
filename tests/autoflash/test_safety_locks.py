@@ -17,10 +17,12 @@ class SafetyLockTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
-        (self.root / NAME).write_text("shipped lock\n")
+        self.lock = self.root / safety_locks.DIR / NAME
+        self.lock.parent.mkdir(parents=True)
+        self.lock.write_text("shipped lock\n")
 
     def lock_in_place(self):
-        return (self.root / NAME).exists()
+        return self.lock.exists()
 
     def other_run(self, then):
         """Another run, in a process of its own, with the lock lifted."""
@@ -43,7 +45,7 @@ class SafetyLockTests(unittest.TestCase):
         with safety_locks.lifted(self.root, NAME):
             self.assertFalse(self.lock_in_place())
         self.assertTrue(self.lock_in_place())
-        self.assertEqual((self.root / NAME).read_text(), "shipped lock\n")
+        self.assertEqual(self.lock.read_text(), "shipped lock\n")
 
     def test_put_back_even_when_the_block_fails(self):
         with self.assertRaises(RuntimeError):
@@ -73,7 +75,7 @@ class SafetyLockTests(unittest.TestCase):
 
     def test_a_lift_from_before_this_record_is_put_back(self):
         # A run of an earlier version moved it aside and stopped there.
-        (self.root / NAME).rename(self.root / f"{NAME}.owner-authorized")
+        self.lock.rename(self.lock.with_name(f"{NAME}.owner-authorized"))
         self.assertEqual(safety_locks.restore_left(self.root), [NAME])
         self.assertTrue(self.lock_in_place())
 

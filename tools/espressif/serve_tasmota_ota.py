@@ -241,7 +241,7 @@ def main():
     parser.add_argument(SAFETY_FLAG, action="store_true")
     args = parser.parse_args()
 
-    recovery_lock = Path(__file__).resolve().parents[2] / "RECOVERY_LOCK"
+    recovery_lock = Path(__file__).resolve().parent / "RECOVERY_LOCK"
     if recovery_lock.exists():
         print(f"Refusing: recovery lock is active at {recovery_lock}", file=sys.stderr)
         return 2

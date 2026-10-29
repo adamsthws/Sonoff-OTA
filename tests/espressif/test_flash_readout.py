@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tools.autoflash import safety_locks
 from tools.espressif import flash_readout
 
 
@@ -34,7 +35,7 @@ class FakeSender:
         self.root, self.seen, self.lines, self.code = root, seen, lines, code
 
     def __call__(self, command, **kwargs):
-        self.seen["lock_present"] = (self.root / "RECOVERY_LOCK").exists()
+        self.seen["lock_present"] = (self.root / safety_locks.DIR / "RECOVERY_LOCK").exists()
         self.seen["command"] = command
         self.stdout = iter(self.lines)
         return self
@@ -47,18 +48,20 @@ class DeliverTests(unittest.TestCase):
     def test_recovery_lock_is_restored_when_the_sender_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "RECOVERY_LOCK").write_text("lock")
+            (root / safety_locks.DIR).mkdir(parents=True)
+            (root / safety_locks.DIR / "RECOVERY_LOCK").write_text("lock")
             with mock.patch.object(flash_readout, "ROOT", root), \
                  mock.patch.object(flash_readout.subprocess, "Popen", side_effect=KeyboardInterrupt):
                 with self.assertRaises(KeyboardInterrupt):
                     flash_readout.deliver("192.168.0.50", "192.168.0.110", 8088, "a@b", "1.2.0", root, {})
-            self.assertTrue((root / "RECOVERY_LOCK").exists())
-            self.assertFalse((root / "RECOVERY_LOCK.owner-authorized").exists())
+            self.assertTrue((root / safety_locks.DIR / "RECOVERY_LOCK").exists())
+            self.assertFalse((root / safety_locks.DIR / "RECOVERY_LOCK.owner-authorized").exists())
 
     def test_sender_runs_with_the_lock_lifted_and_its_output_is_kept(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "RECOVERY_LOCK").write_text("lock")
+            (root / safety_locks.DIR).mkdir(parents=True)
+            (root / safety_locks.DIR / "RECOVERY_LOCK").write_text("lock")
             seen = {}
             sender = FakeSender(root, seen, lines=("  Cloud: the plug went offline\n",))
             with mock.patch.object(flash_readout, "ROOT", root), \
@@ -68,7 +71,7 @@ class DeliverTests(unittest.TestCase):
             self.assertFalse(seen["lock_present"])
             self.assertIn(str(flash_readout.READOUT_OTA), seen["command"])
             self.assertIn("1.2.0", seen["command"])
-            self.assertTrue((root / "RECOVERY_LOCK").exists())
+            self.assertTrue((root / safety_locks.DIR / "RECOVERY_LOCK").exists())
             self.assertIn("went offline", (root / "sender.log").read_text())
 
     def test_the_readout_file_is_the_conversion_bridge_version(self):
@@ -87,7 +90,8 @@ class CloudChatterTests(unittest.TestCase):
     def test_hidden_lines_still_reach_the_log(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "RECOVERY_LOCK").write_text("lock")
+            (root / safety_locks.DIR).mkdir(parents=True)
+            (root / safety_locks.DIR / "RECOVERY_LOCK").write_text("lock")
             sender = FakeSender(root, {}, lines=("  Cloud: the plug is back online\n", "Serving\n"))
             with mock.patch.object(flash_readout, "ROOT", root), \
                  mock.patch.object(flash_readout.subprocess, "Popen", side_effect=sender), \
@@ -118,7 +122,8 @@ class SenderOutputTests(unittest.TestCase):
     def test_non_verbose_screen_has_progress_not_requests(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "RECOVERY_LOCK").write_text("lock")
+            (root / safety_locks.DIR).mkdir(parents=True)
+            (root / safety_locks.DIR / "RECOVERY_LOCK").write_text("lock")
             sender = FakeSender(root, {}, lines=(self.REQUEST, self.SERVED, "  Complete firmware byte coverage observed\n"))
             with mock.patch.object(flash_readout, "ROOT", root), \
                  mock.patch.object(flash_readout.subprocess, "Popen", side_effect=sender), \
