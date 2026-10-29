@@ -32,6 +32,8 @@ several other HTTP clients, and following it led to a few more bugs nearby.
 - [A build failure, followed to its root](#a-build-failure-followed-to-its-root) -
   LibreTiny, SCons
 - [The emulator's Wi-Fi](#the-emulators-wi-fi) - QEMU (lcgamboa's fork)
+- [OpenBeken on a 4 MB BK7238](#openbeken-on-a-4-mb-bk7238) - OpenBeken,
+  beken_freertos_sdk
 - [Smaller fixes found along the way](#smaller-fixes-found-along-the-way) -
   Tasmota, ESPHome
 - [Other people's reports, reproduced on the emulator](#other-peoples-reports-reproduced-on-the-emulator) -
@@ -146,6 +148,29 @@ offered back:
 
 #15 let the emulator test what a person does when a plug falls back
 to its own setup network: join it, and let the conversion carry on through it.
+
+## OpenBeken on a 4 MB BK7238
+
+The Sonoff S61 is a Beken BK7238 with 4 MB of flash. OpenBeken's BK7238 build
+assumed the SDK's 2 MB partition table, which on a 4 MB plug puts its OTA slot
+and its config inside the stock app partition - where the stock bootloader
+never looks - and the SDK's packager could not produce a 4 MB image at all.
+Two changes make the build follow the chip: a `FLASH_SIZE=4M` switch, with the
+OTA slot and the flash size read from the partition table the firmware was
+built with, and a packager that names its outputs by flash size, sizes the
+4 MB app to its partition and packs the image with a 4 MB bootloader - which
+turned out to be, byte for byte, the S61's factory bootloader.
+
+| Project | Pull request | What it fixes |
+|---|---|---|
+| beken_freertos_sdk (NonPIayerCharacter) | [#13](https://github.com/NonPIayerCharacter/beken_freertos_sdk/pull/13) | Packing a 4 MB BK7238 image failed on a `_2M` filename, the 4 MB app profile overran the OTA partition, and no 4 MB bootloader was shipped |
+| OpenBeken (OpenBK7231T_App) | [#2290](https://github.com/openshwprojects/OpenBK7231T_App/pull/2290) | No way to build for a 4 MB flash; the REST/web-UI OTA slot and the flash-read bound were 2 MB constants whatever table the firmware used |
+
+Proven in the BekenEmulator on a dump of the owner's own S61: the default
+2 MB build unchanged, and the 4 MB build saving its config at `0x3e1000`,
+serving flash reads at the top of the chip, and `ota_http` downloading to
+`0x286000`, where the bootloader applies it.
+[docs/beken-s61-emulation.md](beken-s61-emulation.md) has the detail.
 
 ## Smaller fixes found along the way
 

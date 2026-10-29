@@ -54,7 +54,7 @@ index 89488b7..09ea9f3 100644
  
  
 diff --git a/tools/beken_packager/beken_packager_wrapper b/tools/beken_packager/beken_packager_wrapper
-index 7f8fbe8..7a96993 100755
+index 7f8fbe8..b6091f7 100755
 --- a/tools/beken_packager/beken_packager_wrapper
 +++ b/tools/beken_packager/beken_packager_wrapper
 @@ -69,7 +69,7 @@ out_json_4M = {
@@ -76,7 +76,7 @@ index 7f8fbe8..7a96993 100755
      'bk7252n': {'boot': 'bootloader_bk7252n_uart1_v1.0.15.bin', 'firmware': '../../out/bk7231_bsp.bin'},
      'bk7253': {'boot': 'bootloader_bk7253_uart2_v1.0.15.bin', 'firmware': '../../out/bk7231_bsp.bin'},
      'bk7252_tuya':  {'boot': 'bootloader_bk7251_uart2_v1.0.15_enc.bin', 'firmware': '../../out/bk7231_bsp.bin'},
-@@ -156,6 +157,15 @@ if args.size.startswith("0x"):
+@@ -156,6 +157,16 @@ if args.size.startswith("0x"):
      args.size = int(args.size.replace("0x", ""),16)
  else:
      args.size = int(args.size)
@@ -86,6 +86,7 @@ index 7f8fbe8..7a96993 100755
 +if not args.boot and args.size >= 0x400000 and 'boot_4M' in default_info[chip]:
 +    bootloader_str = default_info[chip]['boot_4M']
 +    if not os.path.exists(bootloader_str):
++        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 +        import make_bootloader_4m
 +        make_bootloader_4m.convert(default_info[chip]['boot'], bootloader_str)
 +

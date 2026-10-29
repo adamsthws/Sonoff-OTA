@@ -900,8 +900,10 @@ dedicated empty sector, and lets it read the plug's real radio calibration.
 table. Verified in the emulator: the 4 MB build writes its config at `0x3e1000`
 and `0x1e1000` stays blank.
 
-The build is a `FLASH_SIZE=4M` switch, in two patches written for upstream and
-kept in [`docs/s61-tools/openbeken/upstream/`](../s61-tools/openbeken/upstream/)
+The build is a `FLASH_SIZE=4M` switch, in two patches kept in
+[`docs/s61-tools/openbeken/upstream/`](../s61-tools/openbeken/upstream/) and
+offered upstream — OpenBK7231T_App#2290 and beken_freertos_sdk#13, see
+[upstream-contributions.md](upstream-contributions.md#openbeken-on-a-4-mb-bk7238)
 (the recipe is in [its README](../s61-tools/openbeken/README.md#building-bk7238-4-mb-table)).
 Packing a whole 4 MB image needed a 4 MB bootloader, and that turned up a tidy
 fact: **the S61's factory bootloader is the SDK's shipped

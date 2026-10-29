@@ -65,8 +65,10 @@ stock bootloader applies from — so both OpenBeken updates and reversion to sto
 work through the ordinary `ota_http` — its config moves to the dedicated empty
 `0x3e1000`, and it reads the plug's real radio calibration at `0x3e0000`.
 
-Two patches, written for upstream and kept in [`upstream/`](upstream/), add a
-`FLASH_SIZE=4M` build switch:
+Two patches, kept in [`upstream/`](upstream/) and offered upstream as
+[OpenBK7231T_App#2290](https://github.com/openshwprojects/OpenBK7231T_App/pull/2290)
+and [beken_freertos_sdk#13](https://github.com/NonPIayerCharacter/beken_freertos_sdk/pull/13),
+add a `FLASH_SIZE=4M` build switch:
 
 - [`openbk7231t_app-bk7238-4m-flash.patch`](upstream/openbk7231t_app-bk7238-4m-flash.patch)
   (against `openshwprojects/OpenBK7231T_App`): `make FLASH_SIZE=4M` builds with
@@ -81,8 +83,9 @@ Two patches, written for upstream and kept in [`upstream/`](upstream/), add a
   profile's app size matches the table (2516 K — the 2890 K it had ran into the
   OTA slot); and a 4 MB QIO is packed with a 4 MB bootloader — the shipped
   `bootloader_bk7238_uart1_v1.0.15.bin` with the 4 MB partition table written
-  into its tail (`make_bootloader_4m.py`), which is byte for byte the S61's
-  factory bootloader.
+  into its tail, which is byte for byte the S61's factory bootloader. The pull
+  request ships that file; the patch here has `make_bootloader_4m.py` generate
+  it on the first pack.
 
 The Beken SDK bundles its own `arm-none-eabi-gcc` that needs **GLIBC ≥ 2.34**, so
 build in a current environment (Ubuntu 24.04 / 22.04 — OpenBeken's own Docker
