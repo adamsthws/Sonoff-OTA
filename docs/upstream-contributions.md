@@ -1,6 +1,6 @@
 # Fixes sent upstream
 
-Building this converter meant pushing ESP32 firmware, HTTP clients and OTA
+Building this converter meant pushing ESP32/Beken firmware, HTTP clients and OTA
 code harder than most projects do: downloading firmware in pieces, over Wi-Fi
 that is allowed to drop at any moment, with a plug that has to survive it. When
 something went wrong and the cause was not ours, we chased it into the project
@@ -164,7 +164,7 @@ turned out to be, byte for byte, the S61's factory bootloader.
 | Project | Pull request | What it fixes |
 |---|---|---|
 | beken_freertos_sdk (NonPIayerCharacter) | [#13](https://github.com/NonPIayerCharacter/beken_freertos_sdk/pull/13) | Packing a 4 MB BK7238 image failed on a `_2M` filename, the 4 MB app profile overran the OTA partition, and no 4 MB bootloader was shipped |
-| OpenBeken (OpenBK7231T_App) | [#2290](https://github.com/openshwprojects/OpenBK7231T_App/pull/2290) | No way to build for a 4 MB flash; the REST/web-UI OTA slot and the flash-read bound were 2 MB constants whatever table the firmware used |
+| OpenBeken (OpenBK7231T_App) | [#2290](https://github.com/openshwprojects/OpenBK7231T_App/pull/2290) | No way to build for a 4 MB flash; the REST/web-UI OTA slot, the flash-read and flash-write bounds and LittleFS's bounds were 2 MB constants whatever table the firmware used (on 4 MB, LittleFS inside the app partition) |
 
 Proven in the BekenEmulator on a dump of the owner's own S61: the default
 2 MB build unchanged, and the 4 MB build saving its config at `0x3e1000`,

@@ -1,8 +1,8 @@
 diff --git a/BUILDING.md b/BUILDING.md
-index 8b17824..2f423ae 100644
+index 8b17824..c45f8bb 100644
 --- a/BUILDING.md
 +++ b/BUILDING.md
-@@ -45,6 +45,25 @@ The output binaries can be found at `apps/<appname>/output/<appversion>`.
+@@ -45,6 +45,27 @@ The output binaries can be found at `apps/<appname>/output/<appversion>`.
  Same as for BK7231T, but use BK7231N SDK and you also might need to rename project directory from OpenBK7231T_App to OpenBK7231N_App:
  https://github.com/openshwprojects/OpenBK7231N
  
@@ -24,15 +24,17 @@ index 8b17824..2f423ae 100644
 +The outputs then carry a `_4M` suffix, and the QIO image is packed with the 4 MB
 +bootloader (the shipped one with the 4 MB table in its tail; see
 +`tools/beken_packager/make_bootloader_4m.py` in the SDK).
++Switching between the two sizes needs no `make clean`: the app's objects are
++rebuilt when the size changes.
 +
  ## Building for XR809
  
  Get XR809 SDK:
 diff --git a/Makefile b/Makefile
-index 991394e..4b49dcb 100644
+index 991394e..31683dc 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -732,11 +732,25 @@ OpenRTL8720E: prebuild_OpenRTL8720E
+@@ -732,11 +732,30 @@ OpenRTL8720E: prebuild_OpenRTL8720E
  	cp sdk/ameba-rtos/amebalite_gcc_project/ota_all.bin output/$(APP_VERSION)/OpenRTL8720E_$(APP_VERSION)_ota.img
  
  .PHONY: OpenBK7238
@@ -51,7 +53,12 @@ index 991394e..4b49dcb 100644
 +BK7238_SED += -e 's/^\(\#define CFG_FLASH_SELECTION_TYPE[ \t]*\)FLASH_SELECTION_TYPE_2M/\1FLASH_SELECTION_TYPE_4M/'
 +BK7238_SUFFIX = _4M
 +endif
++# The app's objects (out/app) do not depend on the SDK's config header, so a
++# change of flash size since the last build throws them away (as does a tree
++# built before this stamp existed); the SDK's own objects already rebuild.
++# out/.obk_flash_size remembers the last size.
 +OpenBK7238: prebuild_OpenBK7238
++	if [ ! -f sdk/beken_freertos_sdk/out/.obk_flash_size ] || [ "$$(cat sdk/beken_freertos_sdk/out/.obk_flash_size)" != "$(FLASH_SIZE)" ]; then rm -rf sdk/beken_freertos_sdk/out/app; fi
 +ifneq ($(strip $(BK7238_SED)),)
  	cd sdk/beken_freertos_sdk && \
  	cp -f beken378/app/config/sys_config_bk7238.h beken378/app/config/sys_config_bk7238.h.bak && \
@@ -60,9 +67,11 @@ index 991394e..4b49dcb 100644
  	ARM_GCC_TOOLCHAIN=$(PWD)/sdk/beken_freertos_sdk/toolchain/arm-none-eabi/bin/ OBK_VARIANT=$(OBK_VARIANT) sh build.sh bk7238 $(APP_VERSION); \
  	rc=$$?; \
  	mv -f beken378/app/config/sys_config_bk7238.h.bak beken378/app/config/sys_config_bk7238.h; \
-@@ -745,10 +759,10 @@ else
+@@ -744,11 +763,12 @@ ifeq ($(OBK_VARIANT), 8)
+ else
  	cd sdk/beken_freertos_sdk && ARM_GCC_TOOLCHAIN=$(PWD)/sdk/beken_freertos_sdk/toolchain/arm-none-eabi/bin/ OBK_VARIANT=$(OBK_VARIANT) sh build.sh bk7238 $(APP_VERSION)
  endif
++	mkdir -p sdk/beken_freertos_sdk/out && echo "$(FLASH_SIZE)" > sdk/beken_freertos_sdk/out/.obk_flash_size
  	mkdir -p output/$(APP_VERSION)
 -	cp sdk/beken_freertos_sdk/out/bk7238.bin output/$(APP_VERSION)/OpenBK7238_${APP_VERSION}.bin
 -	cp sdk/beken_freertos_sdk/out/bk7238_QIO.bin output/$(APP_VERSION)/OpenBK7238_QIO_${APP_VERSION}.bin
@@ -138,7 +147,7 @@ index a2f9fb7..3975efd 100644
  // TODO
  #define START_ADR_OF_BK_PARTITION_OTA 0x132000
 diff --git a/src/httpserver/rest_interface.c b/src/httpserver/rest_interface.c
-index 695c602..4e36fc3 100644
+index 695c602..c86212a 100644
 --- a/src/httpserver/rest_interface.c
 +++ b/src/httpserver/rest_interface.c
 @@ -23,6 +23,10 @@
@@ -152,3 +161,38 @@ index 695c602..4e36fc3 100644
  #endif
  
  #include "../new_cfg.h"
+@@ -1398,7 +1402,7 @@ static int http_rest_post_flash_advanced(http_request_t* request) {
+ 	sres = sscanf(params, "%x", &startaddr);
+ 	if (sres == 1 && startaddr >= START_ADR_OF_BK_PARTITION_OTA) {
+ 		// allow up to end of flash
+-		return http_rest_post_flash(request, startaddr, 0x200000);
++		return http_rest_post_flash(request, startaddr, DEFAULT_FLASH_LEN);
+ 	}
+ 	return http_rest_error(request, -1, "invalid url");
+ }
+diff --git a/src/littlefs/our_lfs.h b/src/littlefs/our_lfs.h
+index 30d6251..ac0374c 100644
+--- a/src/littlefs/our_lfs.h
++++ b/src/littlefs/our_lfs.h
+@@ -53,11 +53,19 @@
+ #define LFS_BLOCKS_END 0x1D0000
+ 
+ #elif PLATFORM_BK7238
+-// start 0x1000 after OTA addr (OTA start 0x132000)
++// LittleFS lives inside the OTA partition, 0x1000 after its start, so its
++// bounds follow the partition table the SDK was built with (sys_config.h):
++// OTA is 0x132000-0x1E0000 on the 2 MB table, 0x286000-0x3E0000 on the 4 MB one.
++#include "sys_config.h"
++#if CFG_FLASH_SELECTION_TYPE == FLASH_SELECTION_TYPE_4M
++#define LFS_BLOCKS_START 0x287000
++#define LFS_BLOCKS_START_MIN 0x287000
++#define LFS_BLOCKS_END 0x3E0000
++#else
+ #define LFS_BLOCKS_START 0x133000
+ #define LFS_BLOCKS_START_MIN 0x133000
+-// end of OTA flash / before RF firmware (OTA end 0x1E0000)
+ #define LFS_BLOCKS_END 0x1E0000
++#endif
+ 
+ #elif PLATFORM_BK7252N
+ // start 0x1000 after OTA addr

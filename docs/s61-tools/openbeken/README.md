@@ -76,7 +76,11 @@ add a `FLASH_SIZE=4M` build switch:
   firmware was built with instead of a hard-coded `0x132000` (the REST and web-UI
   OTA path used the constant — on the first 4 MB build without this, the download
   still went to `0x132000`); and `DEFAULT_FLASH_LEN` follows the table too, so
-  `GET /api/flash/...` can read the config region for the backup.
+  `GET /api/flash/...` can read the config region for the backup. LittleFS's
+  bounds and the raw flash-write cap, both 2 MB constants as well, follow the
+  table (on a 4 MB build LittleFS would otherwise have sat inside the app
+  partition); and a change of flash size between builds rebuilds the app's
+  objects, which the SDK build would otherwise reuse from the previous size.
 - [`beken_freertos_sdk-4m-pack-profile.patch`](upstream/beken_freertos_sdk-4m-pack-profile.patch)
   (against the SDK it clones, `NonPIayerCharacter/beken_freertos_sdk`): the pack
   step names its outputs by flash size instead of always `_2M`; the 4 MB QIO
