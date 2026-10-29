@@ -13,6 +13,13 @@ code: what worked, what did not, and on which plug and computer.
   so on - but its folder is named after the plug's MAC address: attach the
   file, do not paste its path. [docs/troubleshooting.md](docs/troubleshooting.md)
   covers what has gone wrong before.
+- **A plug we do not list yet** - if you got the tool working on a model or a
+  stock firmware version that is not in the compatibility list, please
+  contribute it back so the list keeps growing. Tell us what the plug was and
+  what the conversion took - the addresses, config and wiring a new model
+  needed, and anything that differed from a listed one. A report alone is
+  welcome; a pull request that adds the support is more welcome still, and the
+  notes behind it are what we most want to receive.
 - **A security problem**: privately, never as an issue - see [SECURITY.md](SECURITY.md).
 
 ## Setting up

@@ -1,5 +1,6 @@
-# Sonoff → Tasmota, OpenBeken, ESPHome
-> **Firmware Flasher**  
+# Smart Device Liberator
+**Sonoff eWeLink → Tasmota, OpenBeken, ESPHome**
+> **Your Firmware Flasher Tool**  
 (Fully OTA - 'Over The Air' - I.e Flash over Wi-Fi)
 
 <br>
