@@ -385,7 +385,7 @@ The key is let in at logon (`start.ps1`), so about a minute after a run
 starts. SSH is a session of its own, beside the console the run opens, not
 in it: what the conversion shows there is read through its `run.log`. A
 conversion can also be run over SSH itself (`windows-ssh.sh`, then
-`cd C:\Autoflash\repo; .\start.ps1`), in the console SSH gives it, which is neither
+`cd C:\Autoflash\repo; .\start.cmd`), in the console SSH gives it, which is neither
 OpenConsole nor the classic one.
 
 Server Core has no desktop, which is what makes it quick to install and run,
@@ -436,7 +436,7 @@ From the repository in PowerShell:
 
 ```powershell
 tools\emulator\emu.ps1 -Cloud     # opens the emulator and the link, each in a window
-.\start.ps1                       # once the link says Connected - as a Windows user would
+.\start.cmd                       # once the link says Connected - as a Windows user would
 ```
 
 `emu.ps1` first runs `tools\emulator\windows-bootstrap.ps1 -LocalEmulator`,

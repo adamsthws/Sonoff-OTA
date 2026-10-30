@@ -156,7 +156,7 @@ the files a commit changes, and the `lint` workflow on every file:
 | [shellcheck](https://www.shellcheck.net/) | shell scripts | unquoted expansions, mistakes in tests and traps, what `sh` does not have |
 | [actionlint](https://github.com/rhysd/actionlint) | the workflows | wrong keys, expressions and types; shellcheck on each `run:` script |
 | [zizmor](https://docs.zizmor.sh/) | the workflows, `dependabot.yml` | what an attacker could use: write access a job does not need, a value expanded into a script, a token left in the checkout; with `GH_TOKEN` set (the workflow sets it), a pinned commit that is not the action's own, or a version with an advisory |
-| [PSScriptAnalyzer](https://learn.microsoft.com/powershell/utility-modules/psscriptanalyzer/overview) | PowerShell (`PSScriptAnalyzerSettings.psd1`) | syntax Windows PowerShell 5.1 does not have, which every Windows runs `start.ps1` with; likely mistakes |
+| [PSScriptAnalyzer](https://learn.microsoft.com/powershell/utility-modules/psscriptanalyzer/overview) | PowerShell (`PSScriptAnalyzerSettings.psd1`) | syntax Windows PowerShell 5.1 does not have, which every Windows runs `tools/windows-start.ps1` with; likely mistakes |
 | `esphome config` | the ESPHome configs `firmware.json` builds | what ESPHome would refuse to build, checked by the ESPHome image the next build uses (Docker) |
 
 The linters come from `requirements/lint.txt`, pinned with their hashes,

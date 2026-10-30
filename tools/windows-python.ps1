@@ -1,5 +1,5 @@
 <#
-The Python the conversion tool runs on, on Windows: dot-sourced by start.ps1,
+The Python the conversion tool runs on, on Windows: dot-sourced by windows-start.ps1,
 tools\emulator\emu.ps1, windows-bootstrap.ps1 and the emulator's Windows VM.
 
 The tool needs Python 3.10 or newer, 64-bit, and nothing beyond its standard

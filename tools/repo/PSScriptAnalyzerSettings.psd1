@@ -9,7 +9,7 @@
         'PSUseShouldProcessForStateChangingFunctions'
     )
     Rules        = @{
-        # start.ps1 and what it runs run on Windows PowerShell 5.1, which every
+        # windows-start.ps1 and what it runs run on Windows PowerShell 5.1, which every
         # Windows has, as well as on PowerShell 7.
         PSUseCompatibleSyntax = @{
             Enable         = $true

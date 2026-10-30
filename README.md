@@ -126,7 +126,7 @@ sh start.sh
 ```sh
 git clone https://github.com/adamsthws/Sonoff-OTA.git
 cd Sonoff-OTA
-.\start.ps1
+.\start.cmd
 ```
   -- or -- 
   [download as a zip](https://github.com/adamsthws/Sonoff-OTA/archive/refs/heads/main.zip), double-click `start.cmd`  

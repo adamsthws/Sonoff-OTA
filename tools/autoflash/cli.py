@@ -5934,7 +5934,7 @@ def confirm_skip(ctx: Context, step: str, title: str) -> bool:
 def tell_how_to_carry_on() -> None:
     tell("")
     tell("Fix the cause, then carry on with the same command again:")
-    tell("    start.cmd, or .\\start.ps1 in PowerShell" if hostsys.IS_WINDOWS else "    sh start.sh")
+    tell("    start.cmd (double-click it, or .\\start.cmd in a terminal)" if hostsys.IS_WINDOWS else "    sh start.sh")
     if output.log_path():
         tell(f"What happened, in full: {display_path(output.log_path())}")
     tell("Stuck? Start a discussion or open an issue:")
@@ -6176,7 +6176,7 @@ def computer_description() -> str:
 
 
 def python_description() -> str:
-    """The Python the tool ran on, and where it came from (start.sh, start.ps1)."""
+    """The Python the tool ran on, and where it came from (start.sh, start.cmd)."""
     running = Path(sys.executable).resolve()
     portable = Path(os.environ.get("AUTOFLASH_PYTHON_HOME") or ROOT / ".python").resolve()
     if portable in running.parents:

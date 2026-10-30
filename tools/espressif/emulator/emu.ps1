@@ -12,7 +12,7 @@ Opens the emulator (emu.sh --windows, under WSL) in a window of its own - the
 plug's power and serial log are there - and the link that puts Windows on its
 home network in another. This window is left for the conversion:
 
-    .\start.ps1
+    .\start.cmd
 
 Anything this computer is missing - WSL, Docker in it, Python, the TAP driver,
 the adapter - is listed first, and installed after one question
@@ -26,7 +26,7 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 & (Join-Path $PSScriptRoot "windows-bootstrap.ps1") -LocalEmulator -Distro $Distro
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }   # it has said why, or that Windows needs a restart
 
-# Windows' own Python, for the link (start.ps1 finds the same one for the tool).
+# Windows' own Python, for the link (windows-start.ps1 finds the same one for the tool).
 . (Join-Path $Root "tools\windows-python.ps1")
 $Python = Get-ToolPython
 $wsl = @("-d", $Distro)
@@ -69,7 +69,7 @@ Write-Host @"
 The emulator is starting in its own window$(if ($Cloud) { " - confirm the real plug is unplugged there" }),
 and the link in another. Once the link says Connected, run the conversion here:
 
-    .\start.ps1
+    .\start.cmd
 
 When it asks you to switch the plug off and on, type in the emulator window:
     plug restart | plug off | plug on | plug cycle 7
