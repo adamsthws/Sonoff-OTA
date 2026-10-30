@@ -5,10 +5,11 @@
 # nested. Windows is wired onto the plug's home network, you work in it in a
 # browser (noVNC) or over Remote Desktop, and every run starts from a clean copy of it.
 #
-#   tools/espressif/emulator/windows-test.sh [--cloud] [--fresh] [--no-firewall] [--rebuild]
+#   tools/espressif/emulator/windows-test.sh [--cloud|--stub-cloud] [--fresh] [--no-firewall] [--rebuild]
 #       [--plug=MAC] [--classic-console] [--first-run] [--rebuild-layer=installed|rig|tool]
 #
-# Options as emu.sh's (a conversion needs --cloud); which backed-up plug runs
+# Options as emu.sh's (a conversion from stock needs --cloud, or --stub-cloud with a
+# plug a Linux run converted against the stub: docs/emulator.md); which backed-up plug runs
 # is asked first when there are several. The conversion runs in
 # OpenConsole, Windows Terminal's own console, as on Windows 11; with
 # --classic-console in Windows' classic one, as on Windows 10. Windows is kept
@@ -62,9 +63,9 @@ for arg in "$@"; do
     --rebuild-layer=installed|--rebuild-layer=rig|--rebuild-layer=tool) rebuild_layer=${arg#*=} ;;
     --classic-console) console=classic ;;
     --fresh) fresh=1; emu_flags+=("$arg") ;;
-    --cloud|--no-firewall|--pcap) emu_flags+=("$arg") ;;
+    --cloud|--stub-cloud|--no-firewall|--pcap) emu_flags+=("$arg") ;;
     --rebuild) rebuild=1; emu_flags+=("$arg") ;;
-    *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    *) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
     esac
 done
 

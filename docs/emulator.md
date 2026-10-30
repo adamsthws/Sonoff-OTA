@@ -311,6 +311,7 @@ tools/espressif/emulator/windows-test.sh --cloud --classic-console  # ... in the
 tools/espressif/emulator/windows-test.sh --cloud --first-run        # ... on a Windows that has never seen the tool
 tools/espressif/emulator/windows-test.sh --cloud --fresh            # ... with the plug back to stock and no earlier run
 tools/espressif/emulator/windows-test.sh --rebuild-layer=rig        # set Windows' rig layer (and tool) up again first
+tools/espressif/emulator/windows-test.sh --stub-cloud               # the local cloud stub instead of eWeLink: a plug a Linux run converted against it
 ```
 
 `--fresh`, `--pcap`, `--no-firewall`, `--rebuild` and `--plug=<MAC>` are `emu.sh`'s;
