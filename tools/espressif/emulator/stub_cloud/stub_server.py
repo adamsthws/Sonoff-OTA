@@ -190,6 +190,11 @@ def send_to_device(deviceid: str, msg: dict) -> bool:
 
 # -- the server ----------------------------------------------------------------
 
+def _timestamp(when: dt.datetime) -> str:
+    """A time as eWeLink writes one: 2026-10-30T20:00:00.000Z."""
+    return when.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
 class Stub:
     def __init__(self, iot_host: str, iot_port: int, hb_interval: int, device: dict | None = None):
         self.iot_host = iot_host
@@ -201,6 +206,10 @@ class Stub:
         # account API reports that, as the real cloud does, rather than
         # anything assumed about the dump.
         self.reported: dict[str, dict] = {}
+
+    def silence_limit(self) -> float:
+        """How long a device may say nothing, not even a ping, and be online."""
+        return 2.0 * self.hb_interval + 15.0
 
     def heard(self, msg: dict) -> None:
         deviceid = msg.get("deviceid")
@@ -217,6 +226,8 @@ class Stub:
             seen["fwVersion"] = version
         if msg.get("model"):
             seen["model"] = msg["model"]
+        if msg.get("action") == "register" and msg.get("apikey"):
+            seen["apikey"] = msg["apikey"]
 
     def dispatch_response(self) -> dict:
         # The plug connects to this host by numeric IP without DNS (it
@@ -238,12 +249,26 @@ class Stub:
     # from or sent to the real cloud.
 
     def account_login(self) -> dict:
-        apikey = (self.device or {}).get("apikey", "stub-user-apikey")
+        apikey = (self.account_device() or {}).get("apikey", "stub-user-apikey")
         return {"error": 0, "data": {"at": "stub-access-token", "rt": "stub-refresh-token",
                                      "region": "eu", "user": {"apikey": apikey}}}
 
+    def account_device(self) -> dict | None:
+        """This plug's account record: --device-json's, its identity filled in
+        from the plug's own register where that does not give it - as the
+        S61's, whose identity is sealed in its store, does not."""
+        d = dict(self.device or {})
+        if not d.get("deviceid"):
+            registered = [(i, seen) for i, seen in self.reported.items() if seen.get("apikey")]
+            if not registered:
+                return None
+            d["deviceid"], seen = registered[-1]
+            d.setdefault("apikey", seen["apikey"])
+            d.setdefault("devicekey", seen["apikey"])
+        return d
+
     def device_thing(self) -> dict:
-        d = self.device
+        d = self.account_device()
         if not d:
             return {"error": 404, "msg": "no device configured in the stub"}
         seen = self.reported.get(d["deviceid"], {})
@@ -288,7 +313,14 @@ class Stub:
             base["config"] = {"hb": 1, "hbInterval": self.hb_interval}
             return base
         if action == "date":
-            base["date"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+            base["date"] = _timestamp(dt.datetime.now(dt.timezone.utc))
+            return base
+        if action == "query" and isinstance(msg.get("params"), list) and "TZ" in msg["params"]:
+            # The S61 asks its time zone after it registers, and closes the
+            # channel when it is not told: UTC, no daylight saving to come.
+            now = dt.datetime.now(dt.timezone.utc)
+            base["params"] = {"TZ": {"utc": _timestamp(now), "dst": 0, "offset": 0,
+                                     "nextDst": _timestamp(now + dt.timedelta(days=365)), "nextOffset": 0}}
             return base
         if action in ("update", "query", "upgrade", "sysmsg"):
             return base
@@ -422,6 +454,10 @@ class Handler(socketserver.BaseRequestHandler):
                 if role is None:
                     role = "device" if msg.get("userAgent") == "device" or msg.get("action") == "register" else "app"
                     log(peer, f"role: {role}")
+                    if role == "device":
+                        # A device that misses its heartbeats is offline, as at
+                        # eWeLink: one switched off sends nothing, not a close.
+                        sock.settimeout(self.stub.silence_limit())
                 if role == "device":
                     deviceid = self._device_message(conn, msg, deviceid)
                 else:

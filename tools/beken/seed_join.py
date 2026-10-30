@@ -22,6 +22,12 @@ other intervention. Requires the BekenEmulator fork.
 
   $(tools/beken/emulator/bk-emu.sh python) tools/beken/seed_join.py
   SSID=MyNet PASS=mypassword CH=6 SECS=40 python3 seed_join.py
+
+SECS=0 runs the plug until it is stopped.
+
+TAP=tap0 bridges the plug to that TAP device (the fork's --net-tap) instead of
+the emulator's own network: the host's DHCP server gives it its address, and
+the summary reports what that network saw.
 """
 import os
 import sys
@@ -48,6 +54,7 @@ SECS = float(os.environ.get("SECS", "40"))
 SSID = os.environ.get("SSID", "AutoflashNet").encode()
 PASS = os.environ.get("PASS", "autoflash1234").encode()
 CH = int(os.environ.get("CH", "1"))
+TAP = os.environ.get("TAP") or None
 
 AFTER_MEMCMP = 0x29c3c          # integrity-gate compare; force "equal"
 TIMER5_BIT = 1 << 9             # bk_timer = Timer 5, which the emulator doesn't raise
@@ -60,7 +67,7 @@ emu = build_emulator(DUMP, chip="BK7238", with_boot=True, only_uart=True,
 emu.setup()
 emu.net_sink = lambda m: netlog.append(str(m))
 emu.attach_wifi_peer(role="ap", ssid=SSID.decode(), passphrase=PASS.decode(),
-                     channel=CH, peer_mac=b"\x02\x00\x00\x00\x00\x01")
+                     channel=CH, peer_mac=b"\x02\x00\x00\x00\x00\x01", tap=TAP)
 mac, mu = emu.wifimac, emu.mu
 inj = collections.Counter()
 
@@ -97,6 +104,9 @@ def hooked_tick(self, insns):
 mac.tick = types.MethodType(hooked_tick, mac)
 
 w = threading.Thread(target=emu.run, daemon=True); w.start()
+if SECS <= 0:
+    # As long as it is wanted: a plug on a network (bk-emu.sh plug).
+    w.join()
 time.sleep(SECS)
 try:
     emu.stop()
@@ -114,9 +124,18 @@ print("  peer role=%s  stations=%s" % (getattr(p, "active_role", None),
       {k.hex(): v for k, v in getattr(p, "stations", {}).items()}), flush=True)
 print("  device IP = %s  leases=%s" % (ips(ip),
       {k.hex(): ips(v) for k, v in (getattr(net, "leases", {}) or {}).items()}), flush=True)
-ok = got and any(st.get("encrypted") for st in getattr(p, "stations", {}).values())
-print("  %s: the plug associated (WPA2) and %s an IP on our network."
-      % ("PASS" if ok else "INCOMPLETE", "got" if got else "did NOT get"), flush=True)
+encrypted = any(st.get("encrypted") for st in getattr(p, "stations", {}).values())
+if TAP:
+    # The host's network gave the address: its DHCP server's log has it.
+    stats = net.summary()
+    ok = encrypted and stats["to_host"] and stats["to_device"]
+    print("  bridged to %s: %d frames to the host, %d to the plug" % (TAP, stats["to_host"], stats["to_device"]))
+    print("  %s: the plug associated (WPA2) and %s traffic with the host's network."
+          % ("PASS" if ok else "INCOMPLETE", "exchanged" if ok else "did NOT exchange"), flush=True)
+else:
+    ok = got and encrypted
+    print("  %s: the plug associated (WPA2) and %s an IP on our network."
+          % ("PASS" if ok else "INCOMPLETE", "got" if got else "did NOT get"), flush=True)
 pat = re.compile(r"DHCP:|four-way|associated|authenticated|got 192|device IP", re.I)
 for ln in netlog:
     if pat.search(str(ln)):

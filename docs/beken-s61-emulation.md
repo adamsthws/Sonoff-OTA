@@ -1537,6 +1537,15 @@ its header; none has been offered upstream yet.
   Timer 0-2 fire at each channel's programmed period, which LibreTiny's
   FreeRTOS tick needs; OpenBeken's watchdog feed and the stock dump are
   unchanged.
+- **`0005` - the device's Ethernet on a host TAP device** (`src/tapnet.py`,
+  new, `src/emulator.py`, `src/main.py`, `tests/tapnet.py`): `--net-tap
+  IFACE` bridges the Wi-Fi peer to a TAP device instead of the built-in
+  network, which is the device's router itself and reachable only through
+  port forwards. The device is then a station on the host's network, given
+  its address by that network's DHCP server and reached at it by every
+  protocol: how `bk-emu.sh plug` puts the S61 on a Docker network of its
+  own, where `bk-emu.sh computer` reaches it. The built-in network's own options are refused
+  beside it.
 
 To change the fork: extract the archive (`captures/emulation/cache/`), apply
 the patches to it in order, make the change as a commit there, `git

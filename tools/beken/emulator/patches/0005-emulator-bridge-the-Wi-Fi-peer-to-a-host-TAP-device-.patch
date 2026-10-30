@@ -1,0 +1,452 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 18:50:30 +0000
+Subject: [PATCH] emulator: bridge the Wi-Fi peer to a host TAP device
+ (--net-tap)
+
+The built-in network (src/netstack.py) is the device's whole world: it is its
+router, DHCP server and DNS, and the host reaches it only through 127.0.0.1
+port forwards, one port at a time. That cannot put the device on a real LAN
+beside other machines, as a plug on a home Wi-Fi is - reached at its own
+address by any tool, by every protocol, with the LAN's own router handing
+out its address.
+
+--net-tap IFACE swaps that network for src/tapnet.py: every Ethernet frame
+the device sends through the Wi-Fi peer goes to the host's TAP device IFACE,
+and every frame written there is delivered to the device, on device time as
+the built-in stack moves its sockets' bytes. It answers nothing itself; the
+network the TAP device is part of does. The device is made by the caller
+(ip tuntap add dev IFACE mode tap user $USER), so the emulator itself needs
+no privileges. The options only the built-in network has are refused beside
+it, not ignored.
+---
+ src/emulator.py |  30 +++++--
+ src/main.py     |  12 ++-
+ src/tapnet.py   | 220 ++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/tapnet.py |  91 ++++++++++++++++++++
+ 4 files changed, 343 insertions(+), 10 deletions(-)
+ create mode 100644 src/tapnet.py
+ create mode 100644 tests/tapnet.py
+
+diff --git a/src/emulator.py b/src/emulator.py
+index 360bd1d..011f08d 100644
+--- a/src/emulator.py
++++ b/src/emulator.py
+@@ -1538,7 +1538,7 @@ class BekenEmulator:
+ 
+     def attach_wifi_peer(self, role="auto", ssid=None, channel=1, peer_mac=None,
+                          forwards=(), net_out=False, pcap=None, http_gets=(), mqtt_pubs=(),
+-                         passphrase=None, tls_psks=(), tuya_legacy_identity_psk=False):
++                         passphrase=None, tls_psks=(), tuya_legacy_identity_psk=False, tap=None):
+         """Put a virtual station/access point and an IP network behind the MAC model.
+ 
+         role "auto" lets the peer take the opposite role of whatever the
+@@ -1550,7 +1550,9 @@ class BekenEmulator:
+         http_gets are paths requested from the device's port 80 once it is
+         reachable, each reply logged as a [NET] line; mqtt_pubs are (topic,
+         payload) messages the offline broker pushes to the device once it
+-        subscribes to a matching filter.
++        subscribes to a matching filter. tap names a host TAP device the
++        device's Ethernet is bridged to instead (src/tapnet.py): the network
++        is then the host's, and the options for the built-in one do not apply.
+         """
+         if self.wifimac is None:
+             raise ValueError("a Wi-Fi peer needs the MAC model: pass wifi=True / --wifi")
+@@ -1560,11 +1562,25 @@ class BekenEmulator:
+             import wifipeer as _wifipeer
+             import netstack as _netstack
+         mac = peer_mac or b"\x02\x00\x00\x00\x00\x01"
+-        net = _netstack.NetStack(mac, log=self.net_log, gateway=(role == "ap"),
+-                                 ip=_netstack.str2ip("192.168.1.1") if role == "ap" else None,
+-                                 net_out=net_out, forwards=forwards, http_gets=http_gets,
+-                                 mqtt_pubs=mqtt_pubs, tls_psks=tls_psks,
+-                                 tuya_legacy_identity_psk=tuya_legacy_identity_psk)
++        if tap:
++            if forwards or net_out or http_gets or mqtt_pubs:
++                raise ValueError("a TAP device is the device's whole network: port forwards, "
++                                 "--net-out, --net-http-get and --mqtt-publish are for the built-in one")
++            try:
++                from . import tapnet as _tapnet
++            except ImportError:
++                import tapnet as _tapnet
++            try:
++                net = _tapnet.TapNet(tap, log=self.net_log)
++            except OSError as e:
++                raise ValueError("cannot open the TAP device %s: %s (make it first: "
++                                 "ip tuntap add dev %s mode tap user $USER)" % (tap, e, tap)) from e
++        else:
++            net = _netstack.NetStack(mac, log=self.net_log, gateway=(role == "ap"),
++                                     ip=_netstack.str2ip("192.168.1.1") if role == "ap" else None,
++                                     net_out=net_out, forwards=forwards, http_gets=http_gets,
++                                     mqtt_pubs=mqtt_pubs, tls_psks=tls_psks,
++                                     tuya_legacy_identity_psk=tuya_legacy_identity_psk)
+         # Late binding on purpose: a front end may attach its frame sink after
+         # the peer, and the snapshot path rebuilds this stack.
+         net.on_frame = lambda d, f, us: (self.net_frame_sink(d, f, us)
+diff --git a/src/main.py b/src/main.py
+index 5186d11..773c8a5 100644
+--- a/src/main.py
++++ b/src/main.py
+@@ -256,6 +256,11 @@ def parse_args():
+                              "to the device's port DPORT over the virtual network, e.g. "
+                              "--net-forward 8080:80 then open http://127.0.0.1:8080/ for the "
+                              "firmware's own web panel. Repeatable.")
++    parser.add_argument("--net-tap", dest="net_tap", default=None, metavar="IFACE",
++                        help="Bridge the device's Ethernet to the host's TAP device IFACE (made "
++                             "first: ip tuntap add dev IFACE mode tap user $USER) instead of the "
++                             "built-in network: the device is a station on the host's network, "
++                             "which gives it its address. Linux only.")
+     parser.add_argument("--net-out", dest="net_out", action="store_true",
+                         help="Let the device's outgoing DNS/TCP/UDP reach real hosts through "
+                              "the host's sockets. For Tuya this can reconnect an identity "
+@@ -441,7 +446,7 @@ def main():
+     # once: --net-out and --pcap-ip given alone used to be silently ignored.
+     want_peer = bool(args.wifi_peer or args.net_forwards or args.pcap or args.wifi_ssid
+                      or args.net_http_gets or args.mqtt_pubs or args.wifi_pass
+-                     or args.net_out or args.pcap_ip)
++                     or args.net_out or args.pcap_ip or args.net_tap)
+ 
+     try:
+         # Everything that turns a command-line string into emulator input, so a
+@@ -464,7 +469,7 @@ def main():
+             # The offline TLS peer needs the image's PSK to authenticate its
+             # local broker session.  --net-out is an opaque end-to-end relay,
+             # so do not recover or retain a redundant host-side copy there.
+-            decoded_config = None if args.net_out else tuya_config.extract(args.dump_file)
++            decoded_config = None if args.net_out or args.net_tap else tuya_config.extract(args.dump_file)
+             tls_psks, tuya_legacy_identity_psk = tuya_config.offline_tls_config(
+                 decoded_config, net_out=args.net_out)
+             emu.attach_wifi_peer(role=args.wifi_peer or "auto", ssid=args.wifi_ssid,
+@@ -475,7 +480,8 @@ def main():
+                                  http_gets=parse_http_gets(args.net_http_gets),
+                                  mqtt_pubs=parse_mqtt_pubs(args.mqtt_pubs),
+                                  tls_psks=tls_psks,
+-                                 tuya_legacy_identity_psk=tuya_legacy_identity_psk)
++                                 tuya_legacy_identity_psk=tuya_legacy_identity_psk,
++                                 tap=args.net_tap)
+         if args.pcap_ip:
+             from src import netstack as _netstack
+             ip_cap = _netstack.EthPcap(args.pcap_ip)
+diff --git a/src/tapnet.py b/src/tapnet.py
+new file mode 100644
+index 0000000..f27db17
+--- /dev/null
++++ b/src/tapnet.py
+@@ -0,0 +1,220 @@
++"""The device's Ethernet on a host TAP device, as a real access point bridges it.
++
++src/netstack.py is a network inside the emulator: it is the device's router,
++DHCP server and DNS, and reaches the host only through sockets and port
++forwards. This module is the other choice: every Ethernet frame the device
++sends through the Wi-Fi peer is written to a TAP device on the host, and
++every frame the host writes there is delivered to the device. The device is
++then a station on whatever network that TAP device is part of - a bridge, a
++container's LAN with its own DHCP server - with its own address, reached as
++any other computer on it is, by every protocol.
++
++It answers nothing itself: no ARP, DHCP or DNS. Whatever is on the host's
++side of the TAP device does, as on a real LAN. The TAP device is made by the
++caller (`ip tuntap add dev tap0 mode tap user $USER`), so the emulator needs
++no privileges of its own to open it.
++
++Frames from the host are read on a helper thread and handed to the device
++from tick(), on device time, as src/netstack.py moves its sockets' bytes.
++Linux only.
++"""
++import collections
++import fcntl
++import os
++import select
++import struct
++import threading
++
++TUNSETIFF = 0x400454CA
++IFF_TAP = 0x0002
++IFF_NO_PI = 0x1000
++MAX_FRAME = 65536
++# Frames read from the host and not yet delivered: beyond this the oldest
++# go, as a busy access point drops them, rather than memory growing.
++QUEUE_LIMIT = 512
++
++
++def open_tap(name):
++    """The file descriptor of the existing TAP device `name`."""
++    fd = os.open("/dev/net/tun", os.O_RDWR)
++    try:
++        fcntl.ioctl(fd, TUNSETIFF, struct.pack("16sH", name.encode(), IFF_TAP | IFF_NO_PI))
++    except OSError:
++        os.close(fd)
++        raise
++    return fd
++
++
++class TapNet:
++    """What WifiPeer needs of a network (output, input, tick, link_up,
++    device_reset, close), with the host's TAP device as that network."""
++
++    def __init__(self, name=None, log=None, fd=None):
++        self.log = log or (lambda *a: None)
++        self.name = name
++        self.fd = open_tap(name) if fd is None else fd
++        self.output = None              # callback(eth_frame), set by WifiPeer
++        self.on_frame = None            # callback(direction, frame, now_us), as NetStack's
++        # Kept for WifiPeer, which sets them when it picks its role; the host
++        # side owns every address here.
++        self.gateway = True
++        self.ip = None
++        self.device_mac = None
++        self.link = False
++        self.now_us = 0
++        self.stats = {"to_host": 0, "to_device": 0, "dropped": 0}
++        self._inbox = collections.deque()
++        self._lock = threading.Lock()
++        self._stop_r, self._stop_w = os.pipe()
++        self._thread = threading.Thread(target=self._read, name="tapnet", daemon=True)
++        self._thread.start()
++        if name:
++            self.log("[NET] the device's Ethernet is bridged to the host's %s" % name)
++
++    def _read(self):
++        while True:
++            ready, _, _ = select.select([self.fd, self._stop_r], [], [])
++            if self._stop_r in ready:
++                return
++            try:
++                frame = os.read(self.fd, MAX_FRAME)
++            except OSError:
++                return
++            if not frame:
++                return
++            with self._lock:
++                if len(self._inbox) >= QUEUE_LIMIT:
++                    self._inbox.popleft()
++                    self.stats["dropped"] += 1
++                self._inbox.append(frame)
++
++    def _trace(self, direction, frame):
++        if self.on_frame is None:
++            return
++        try:
++            self.on_frame(direction, bytes(frame), self.now_us)
++        except Exception:
++            pass                            # a front end must never break the run
++
++    def input(self, frame):
++        """A frame from the device: onto the host's network."""
++        if len(frame) < 14:
++            return
++        self._trace("from device", frame)
++        try:
++            os.write(self.fd, frame)
++            self.stats["to_host"] += 1
++        except OSError as e:
++            # The TAP device down (no one has it up yet): the frame is lost,
++            # as on a cable not plugged in.
++            self.stats["dropped"] += 1
++            self.log("[NET] %s: frame not written (%s)" % (self.name or "tap", e))
++
++    def tick(self, now_us):
++        self.now_us = now_us
++        with self._lock:
++            frames = list(self._inbox)
++            self._inbox.clear()
++        for frame in frames:
++            if self.output is None:
++                break
++            self._trace("to device", frame)
++            self.output(frame)
++            self.stats["to_device"] += 1
++
++    def link_up(self, device_mac=None):
++        if device_mac:
++            self.device_mac = device_mac
++        self.link = True
++
++    def device_reset(self, now_us):
++        """The device rebooted: what the host sent its old boot is dropped.
++        The host's network, like a real one, carries on."""
++        self.now_us = now_us
++        with self._lock:
++            self._inbox.clear()
++        self.link = False
++        self.device_mac = None
++
++    def summary(self):
++        return {"tap": self.name, **self.stats}
++
++    def close(self):
++        if self._stop_w is None:
++            return
++        os.write(self._stop_w, b"x")
++        self._thread.join(2.0)
++        for fd in (self._stop_r, self._stop_w, self.fd):
++            try:
++                os.close(fd)
++            except OSError:
++                pass
++        self._stop_w = None
++        self.output = None
++        self.on_frame = None
++
++
++# ---------------------------------------------------------------------------
++# Self-tests. Run: python src/tapnet.py
++# ---------------------------------------------------------------------------
++def _run_selftests():
++    import socket
++    import time
++
++    n = 0
++
++    def check(cond, msg):
++        nonlocal n
++        assert cond, "FAIL: " + msg
++        n += 1
++        print("  [PASS]", msg)
++
++    # A datagram socket pair keeps frame boundaries as a TAP device does, so
++    # the bridge is tested without the privileges making one takes.
++    host, mine = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
++    logs, to_device = [], []
++    net = TapNet(log=logs.append, fd=os.dup(mine.fileno()))
++    mine.close()
++    net.output = to_device.append
++    traced = []
++    net.on_frame = lambda d, f, us: traced.append(d)
++
++    frame = bytes.fromhex("ffffffffffff" "c8478c000001" "0806") + bytes(28)
++    net.input(frame)
++    check(host.recv(MAX_FRAME) == frame, "a frame from the device reaches the host unchanged")
++    net.input(b"short")
++    check(net.stats["to_host"] == 1, "a runt frame is not passed on")
++
++    reply = bytes.fromhex("c8478c000001" "020000000099" "0800") + b"\x45" + bytes(40)
++    host.send(reply)
++    for _ in range(100):
++        net.tick(1000)
++        if to_device:
++            break
++        time.sleep(0.01)
++    check(to_device == [reply], "a frame from the host is delivered to the device on tick()")
++    check(traced == ["from device", "to device"], "both directions are traced, as NetStack's are")
++
++    host.send(reply)
++    time.sleep(0.1)
++    net.device_reset(2000)
++    net.tick(3000)
++    check(to_device == [reply], "frames waiting at a device reset are dropped, not sent to the new boot")
++
++    for i in range(QUEUE_LIMIT + 5):
++        host.send(reply[:-1] + bytes([i & 0xFF]))
++    time.sleep(0.3)
++    to_device.clear()
++    net.tick(4000)
++    check(len(to_device) == QUEUE_LIMIT and net.stats["dropped"] == 5,
++          "a flood from the host is bounded: the oldest frames are dropped")
++
++    net.close()
++    net.close()
++    check(not net._thread.is_alive(), "close() stops the reader, and twice is harmless")
++    host.close()
++    print("tapnet: %d checks passed" % n)
++
++
++if __name__ == "__main__":
++    _run_selftests()
+diff --git a/tests/tapnet.py b/tests/tapnet.py
+new file mode 100644
+index 0000000..75c4d5a
+--- /dev/null
++++ b/tests/tapnet.py
+@@ -0,0 +1,91 @@
++"""The Wi-Fi peer bridged to a host TAP device (src/tapnet.py)."""
++
++import os
++import socket
++import sys
++import time
++from pathlib import Path
++
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT))
++
++from src.emulator import BekenEmulator
++from src import tapnet, wifipeer
++
++
++def make_emulator():
++    emu = BekenEmulator(b"\xff" * 0x20000, None, b"", only_uart=True, wifi=True)
++    emu.setup()
++    return emu
++
++
++def test_station_traffic_crosses_the_bridge():
++    # A datagram socket pair stands in for the TAP device, which takes
++    # privileges to make; it keeps frame boundaries as one does.
++    host, mine = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
++    real_open = tapnet.open_tap
++    tapnet.open_tap = lambda name: os.dup(mine.fileno())
++    emu = make_emulator()
++    try:
++        peer = emu.attach_wifi_peer(role="ap", ssid="HomeNet", tap="tap0")
++        assert isinstance(peer.net, tapnet.TapNet)
++        peer.latency_us = 0
++        delivered = []
++        # Data frames only: the access point beacons on its own ticks too.
++        peer.inject = lambda f, decr=None: delivered.append(f) if f[0] & 0x0C == 0x08 else None
++        device = bytes.fromhex("c8478c000001")
++        peer.stations[device] = {"state": "ASSOC", "aid": 1}
++
++        # The device's DHCP discover, as a to-DS data frame: on the host's
++        # network unchanged, for the host's DHCP server to answer.
++        ether = b"\x08\x00" + b"\x45" + bytes(40)
++        frame = peer._data(b"\xff" * 6, device, peer.ap_bssid, wifipeer.LLC_SNAP + ether, to_ds=True)
++        peer.on_device_tx(frame)
++        assert host.recv(65536) == b"\xff" * 6 + device + ether
++
++        # The host's reply, delivered to the device as a from-DS frame.
++        host.send(device + bytes.fromhex("020000000099") + ether)
++        for _ in range(100):
++            peer.tick()
++            if delivered:
++                break
++            time.sleep(0.01)
++        assert len(delivered) == 1 and delivered[0][4:10] == device
++        assert delivered[0].endswith(wifipeer.LLC_SNAP + ether)
++    finally:
++        tapnet.open_tap = real_open
++        emu.close_network()
++        host.close()
++        mine.close()
++
++
++def test_built_in_network_options_are_refused():
++    emu = make_emulator()
++    try:
++        emu.attach_wifi_peer(role="ap", tap="tap0", forwards=((8080, 80),))
++    except ValueError as e:
++        assert "port forwards" in str(e)
++    else:
++        raise AssertionError("a TAP device with port forwards was accepted")
++
++
++def test_a_missing_tap_device_is_a_plain_error():
++    emu = make_emulator()
++    try:
++        emu.attach_wifi_peer(role="ap", tap="no-such-tap-device")
++    except ValueError as e:
++        assert "cannot open the TAP device no-such-tap-device" in str(e)
++    else:
++        raise AssertionError("a TAP device that cannot be opened was accepted")
++
++
++def main():
++    test_station_traffic_crosses_the_bridge()
++    test_built_in_network_options_are_refused()
++    test_a_missing_tap_device_is_a_plain_error()
++    print("TAP bridge self-tests passed.")
++
++
++if __name__ == "__main__":
++    main()

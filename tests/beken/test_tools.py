@@ -764,3 +764,159 @@ class StagedTests(unittest.TestCase):
         self.assertFalse(stage_apply.staged(flash, image))
         self.assertFalse(stage_apply.staged(bytes(0x400000), image))
 
+
+
+class CloudStubTests(unittest.TestCase):
+    """The S61's stub serves a leaf for its own router's address."""
+
+    def test_a_plug_started_on_another_network_is_served_a_leaf_for_it(self):
+        made = []
+
+        def make_certs(folder, address):
+            made.append(address)
+            for name in ("ca.crt", "leaf.crt", "leaf.key"):
+                Path(folder, name).write_text(address, encoding="utf-8")
+            return b"", "", ""
+
+        online = SimpleNamespace(_make_certs=make_certs)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(sys.modules, {"cloud_online": online}):
+            sys.modules.pop("cloud_stub", None)
+            import cloud_stub
+            state = Path(tmp)
+            cloud_stub.certificates(state, "198.18.62.1")
+            cloud_stub.certificates(state, "198.18.62.1")       # kept: the same router
+            leaf, _ = cloud_stub.certificates(state, "198.18.63.1")
+            sys.modules.pop("cloud_stub", None)
+            self.assertEqual(made, ["198.18.62.1", "198.18.63.1"])
+            self.assertEqual(leaf.read_text(encoding="utf-8"), "198.18.63.1")
+
+
+class StockHooksTests(unittest.TestCase):
+    """The help Sonoff's firmware is given to come online is at Sonoff's
+    addresses: with another firmware started there (plug.py turns it off),
+    none of it may touch the CPU, or it would corrupt that firmware's run."""
+
+    def hooks(self):
+        regs = SimpleNamespace(**{name: index for index, name in enumerate(
+            ("UC_ARM_REG_R0 UC_ARM_REG_R1 UC_ARM_REG_R2 UC_ARM_REG_R3 UC_ARM_REG_R4 UC_ARM_REG_R5 UC_ARM_REG_R6 "
+             "UC_ARM_REG_R7 UC_ARM_REG_R8 UC_ARM_REG_R9 UC_ARM_REG_R10 UC_ARM_REG_R11 UC_ARM_REG_R12 UC_ARM_REG_SP "
+             "UC_ARM_REG_LR UC_ARM_REG_PC UC_ARM_REG_CPSR").split())})
+        fakes = {"src": SimpleNamespace(), "src.main": SimpleNamespace(build_emulator=None),
+                 "unicorn": SimpleNamespace(UC_HOOK_CODE=4), "unicorn.arm_const": regs}
+        with mock.patch.dict(sys.modules, fakes):
+            sys.modules.pop("cloud_online", None)
+            import cloud_online
+        self.addCleanup(sys.modules.pop, "cloud_online", None)
+        touched, installed = [], []
+        mu = SimpleNamespace(
+            hook_add=lambda kind, callback, user, begin, end: installed.append((begin, callback)),
+            reg_read=lambda reg: 0x404000, reg_write=lambda reg, value: touched.append(("reg", reg, value)),
+            mem_read=lambda address, size: b"wifi-ssid\0" + bytes(size),
+            mem_write=lambda address, data: touched.append(("mem", address)))
+        state = SimpleNamespace(timer3_5_ctl=0)
+        emu = SimpleNamespace(mu=mu, wifimac=SimpleNamespace(tick=lambda insns: 0), state=state, _exc_epoch=0)
+        hooks = cloud_online.StockHooks(emu, b"net", b"password", b"CA", 0.0, [])
+        return hooks, emu, installed, touched
+
+    def test_nothing_is_touched_while_off(self):
+        hooks, emu, installed, touched = self.hooks()
+        hooks.active = False
+        hooks._started = 0.0
+        for address, callback in installed:
+            callback(emu.mu, address, 2, None)
+        emu.wifimac.tick(1)
+        self.assertEqual(touched, [])
+        self.assertEqual(emu.state.timer3_5_ctl, 0)
+
+    def test_on_they_act(self):
+        hooks, emu, installed, touched = self.hooks()
+        gate = dict(installed)[0x29C3C]   # the integrity gate: its compare made "equal"
+        gate(emu.mu, 0x29C3C, 2, None)
+        self.assertIn(("reg", 0, 0), touched)
+        emu.wifimac.tick(1)
+        self.assertTrue(emu.state.timer3_5_ctl & (1 << 9))
+
+
+class PlugTests(unittest.TestCase):
+    """The emulated plug's own decisions (tools/beken/plug.py)."""
+
+    def plug(self, tmp):
+        fakes = {"cloud_online": SimpleNamespace(SSID=b"net", PW=b"password"), "src": SimpleNamespace(),
+                 "src.main": SimpleNamespace(build_emulator=None), "unicorn": SimpleNamespace(UC_HOOK_CODE=4),
+                 "unicorn.arm_const": SimpleNamespace(UC_ARM_REG_LR=14, UC_ARM_REG_R0=0, UC_ARM_REG_R1=1,
+                                                      UC_ARM_REG_R2=2, UC_ARM_REG_R3=3)}
+        with mock.patch.dict(sys.modules, fakes):
+            sys.modules.pop("plug", None)
+            import plug
+        self.addCleanup(sys.modules.pop, "plug", None)
+        return plug.Plug(Path(tmp), "tap0")
+
+    def test_sonoffs_app_is_the_one_its_first_boot_started(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plug = self.plug(tmp)
+            self.assertTrue(plug.is_stock(b"sonoff app"))     # the dump as it came
+            self.assertFalse(plug.is_stock(b"openbeken app"))
+            self.assertTrue(plug.is_stock(b"sonoff app"))     # back again, as after O2 or E2
+
+    def test_the_power_switch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plug = self.plug(tmp)
+            self.assertTrue(plug.powered())                   # no switch yet: on
+            (Path(tmp) / "power").write_text("off\n", encoding="utf-8")
+            self.assertFalse(plug.powered())
+            (Path(tmp) / "power").write_text("on\n", encoding="utf-8")
+            self.assertTrue(plug.powered())
+
+
+class StubMemoryTests(unittest.TestCase):
+    def test_what_a_plug_said_of_itself_is_kept_across_a_restart(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(sys.modules, {"cloud_online": SimpleNamespace(_make_certs=None)}):
+            sys.modules.pop("cloud_stub", None)
+            import cloud_stub
+            import stub_server
+            path = Path(tmp, "stub-reported.json")
+            first = stub_server.Stub("192.0.2.1", 443, 10)
+            cloud_stub.remember(first, path)
+            first.heard({"action": "register", "deviceid": "1000abcdef", "apikey": "made-up"})
+            again = stub_server.Stub("192.0.2.1", 443, 10)
+            cloud_stub.remember(again, path)
+            sys.modules.pop("cloud_stub", None)
+        self.assertEqual(again.account_device()["deviceid"], "1000abcdef")
+
+
+class BusyPlugTests(unittest.TestCase):
+    """A plug whose updater an update cut off part way still holds answers a
+    new one with error 410: through ota_push.deliver to the step's advice."""
+
+    def test_the_plugs_410_reaches_the_step_as_switch_it_off_and_on(self):
+        from tools.autoflash.routes.beken import stock
+        from tools.ewelink import ota_push
+        device = {"deviceid": "1000abcdef", "apikey": "made-up", "devicekey": "made-up", "online": True,
+                  "extra": {"model": "SN-BK7238-S61-01"}, "params": {"fwVersion": "1.0.2"}}
+
+        class Socket:
+            sent: list = []
+
+            def send_json(self, value):
+                self.sent.append(value)
+
+            def receive_json(self, timeout=None):
+                last = self.sent[-1]
+                if last.get("action") == "userOnline":
+                    return {"error": 0}
+                return {"error": 410, "sequence": last["sequence"], "deviceid": "1000abcdef"}
+
+            def close(self):
+                pass
+
+        with mock.patch.object(ota_push, "login_session", return_value=("eu", {"at": "t", "user": {"apikey": "a"}})), \
+                mock.patch.object(ota_push, "get_devices", return_value=[device]), \
+                mock.patch.object(ota_push, "api_json", return_value={"domain": "192.0.2.1", "port": 443}), \
+                mock.patch.object(ota_push.WebSocket, "connect", return_value=Socket()):
+            delivered = ota_push.deliver(email="someone@example.invalid", password="made-up-password",
+                                         country_code="+44", region="eu", device_id="1000abcdef",
+                                         firmware=b"image", version="9.9.9", listen_ip="127.0.0.1",
+                                         listen_port=0, device_ip="127.0.0.1", wait=5, say=lambda *a: None)
+        self.assertTrue(delivered.sent, delivered.error)
+        self.assertRegex(delivered.error or "", stock.BUSY)

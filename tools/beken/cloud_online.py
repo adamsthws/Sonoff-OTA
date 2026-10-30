@@ -31,8 +31,9 @@ plaintext dispatch on one port, TLS IoT on another. Everything stays on this
 host; nothing reaches the real cloud.
 
 Two synthesised pieces, as in cloud_dial.py: Wi-Fi creds seeded at
-ef_get_env_blob, and the pairing-success trigger (force-call the start-cloud
-handler 0x2c204) once Wi-Fi is up.
+ef_get_env_blob, and the pairing-success trigger once Wi-Fi is up: what the
+firmware runs then, its LAN service published (0x2bf7c, the mDNS record the
+tool's local discovery finds) and the cloud started (0x2c204).
 
   tools/beken/emulator/bk-emu.sh python tools/beken/cloud_online.py
 
@@ -94,6 +95,11 @@ HB = int(os.environ.get("HB", "10"))
 SSID = os.environ.get("SSID", "AutoflashNet").encode(); PW = os.environ.get("PASS", "autoflash1234").encode()
 AFTER_MEMCMP = 0x29c3c; TIMER5 = 1 << 9; APPFW_LOOP = 0x319c4; EFGET = 0x12f438
 CTXP = 0x4044ac; FLAG = 0x403e31; START_HANDLER = 0x2c204; URL_OFF = 0x5f
+# What the firmware runs once a joined plug's network is up (0x48fc8, 0x49b4e):
+# its LAN service published - the mDNS record eWeLink's local discovery
+# finds, with its id - then the cloud started. The trigger calls both in turn.
+LAN_PUBLISH = 0x2bf7c
+ON_NETWORK = (LAN_PUBLISH, START_HANDLER)
 # mbedtls_x509_crt_parse: where the firmware installs a cert into a trust store
 # (r0=chain, r1=PEM buffer, r2=len). We swap the CoolKit root CA here.
 X509_CRT_PARSE = 0x125e4c
@@ -144,6 +150,130 @@ def _is_coolkit(buf):
     return COOLKIT_CN in der
 
 
+class StockHooks:
+    """What the stock firmware needs of the emulator to come online, put on
+    `emu`: the integrity gate passed, the Wi-Fi credentials answered as a
+    provisioned store gives them, the trust-anchor swap to `ca_pem`, the
+    pairing-success trigger `force_at` seconds into a boot, and Timer 5.
+
+    Each acts only while `active`: the addresses are Sonoff's firmware's, and
+    another firmware the plug is converted to runs other code there
+    (tools/beken/plug.py turns them off when it starts one). `boot()` starts
+    the clock for the trigger again, as each boot of the plug needs."""
+
+    def __init__(self, emu, ssid, password, ca_pem, force_at, netlog):
+        self.emu, self.netlog = emu, netlog
+        self._ssid, self._password, self._our_ca, self._force_at = ssid, password, ca_pem, force_at
+        self.active = True
+        self.swap = {"n": 0, "skip": []}
+        self.dial = {"ais_cloud_start": 0}
+        self._started = time.time()
+        self._st = {"forced": False, "calling": False, "prepped": False, "next": []}
+        self._install()
+
+    def boot(self):
+        self._started = time.time()
+        self._st.update(forced=False, calling=False, prepped=False, next=[])
+
+    def _read(self, address, n):
+        try:
+            return bytes(self.emu.mu.mem_read(address, n))
+        except Exception:
+            return b""
+
+    def _string(self, address, n=40):
+        b = self._read(address, n); z = b.find(0); return b[:z if z >= 0 else n]
+
+    def _install(self):
+        mu = self.emu.mu
+        on = lambda f: (lambda m, a, s, u: f(m, a, s, u) if self.active else None)  # noqa: E731
+        mu.hook_add(UC_HOOK_CODE, on(lambda m, a, s, u: mu.reg_write(UC_ARM_REG_R0, 0)), None, AFTER_MEMCMP, AFTER_MEMCMP)
+
+        def ef_get(m, a, s, u):   # the Wi-Fi credentials, as a provisioned plug's store gives them
+            key = self._string(mu.reg_read(UC_ARM_REG_R0)); buf = mu.reg_read(UC_ARM_REG_R1)
+            outp = mu.reg_read(UC_ARM_REG_R3)
+            val = self._ssid if key == b"wifi-ssid" else (self._password if key == b"wifi-pass" else None)
+            if val is None:
+                return
+            try:
+                mu.mem_write(buf, val)
+                if outp:
+                    mu.mem_write(outp, struct.pack("<I", len(val)))
+            except Exception:
+                pass
+            mu.reg_write(UC_ARM_REG_R0, len(val)); mu.reg_write(UC_ARM_REG_PC, mu.reg_read(UC_ARM_REG_LR))
+        mu.hook_add(UC_HOOK_CODE, on(ef_get), None, EFGET, EFGET)
+
+        # --- the faithful trust swap (the S60's --trust-ca, applied at the parse point) ---
+        # When the firmware loads the CoolKit root CA into a trust store, replace the PEM
+        # it is about to parse with our own CA's PEM. Identified by the CoolKit CN inside
+        # the decoded DER, so only the trust anchor is touched; the server leaf and any
+        # other cert parse untouched. The firmware passes len incl. the NUL terminator.
+        def trust(m, a, s, u):
+            r1 = mu.reg_read(UC_ARM_REG_R1); r2 = mu.reg_read(UC_ARM_REG_R2)
+            if r1 == 0 or not (0 < r2 <= 8192):
+                return
+            if not _is_coolkit(self._read(r1, min(r2, 4096))):
+                return
+            repl = (self._our_ca if self._our_ca.endswith(b"\n") else self._our_ca + b"\n") + b"\x00"
+            if len(repl) > r2:   # must fit the firmware's buffer; our EC CA PEM does
+                self.swap["skip"].append("%d>%d" % (len(repl), r2)); return
+            try:
+                mu.mem_write(r1, repl); mu.reg_write(UC_ARM_REG_R2, len(repl)); self.swap["n"] += 1
+            except Exception as e:
+                self.swap["skip"].append(str(e))
+        mu.hook_add(UC_HOOK_CODE, on(trust), None, X509_CRT_PARSE, X509_CRT_PARSE)
+        mu.hook_add(UC_HOOK_CODE, on(lambda m, a, s, u: self.dial.__setitem__(
+            "ais_cloud_start", self.dial["ais_cloud_start"] + 1)), None, 0x35744, 0x35744)
+
+        # The pairing-success trigger: force-call the start-cloud handler once Wi-Fi is up.
+        st = self._st
+
+        def trap(m, a, s, u):
+            if st["calling"]:
+                for r, v in zip(REGS, st["saved"]):
+                    mu.reg_write(r, v)
+                self.emu._exc_epoch += 1; st["calling"] = False
+                if st["next"]:
+                    force_thumb(st["next"].pop(0))
+        mu.hook_add(UC_HOOK_CODE, trap, None, 0x4, 0x4)
+
+        def force_thumb(pc):
+            st["saved"] = [mu.reg_read(x) for x in REGS]; cpsr = mu.reg_read(UC_ARM_REG_CPSR)
+            mu.reg_write(UC_ARM_REG_LR, 0x5); mu.reg_write(UC_ARM_REG_CPSR, cpsr | 0x20)
+            mu.reg_write(UC_ARM_REG_PC, pc | 1)
+            self.emu._exc_epoch += 1; st["calling"] = True
+
+        def appfw(m, a, s, u):
+            if st["forced"] or st["calling"] or time.time() - self._started < self._force_at:
+                return
+            if not st["prepped"]:
+                st["prepped"] = True
+                p = struct.unpack("<I", self._read(CTXP, 4))[0]
+                self.netlog.append("[dispatch url (factory) = %r -> redirected to the stub]"
+                                   % self._string(p + URL_OFF, 32))
+                try:
+                    mu.mem_write(FLAG, b"\x01")
+                except Exception:
+                    pass
+                return
+            st["forced"] = True
+            self.netlog.append("[pairing-success trigger @%.1f]" % (time.time() - self._started))
+            st["next"] = list(ON_NETWORK[1:])
+            force_thumb(ON_NETWORK[0])
+        mu.hook_add(UC_HOOK_CODE, on(appfw), None, APPFW_LOOP, APPFW_LOOP)
+
+        mac = self.emu.wifimac
+        tick = mac.tick
+
+        def hooked_tick(_self, insns):
+            r = tick(insns)
+            if self.active:
+                self.emu.state.timer3_5_ctl |= TIMER5
+            return r
+        mac.tick = types.MethodType(hooked_tick, mac)
+
+
 class CloudSession:
     """The emulated S61 and its eWeLink stub, set up and not yet running.
 
@@ -155,8 +285,6 @@ class CloudSession:
     def __init__(self, dump=DUMP, *, ssid=SSID, password=PW, heartbeat=HB, force_at=FORCE_AT,
                  routes=None, flash_writethrough=False):
         self.stublog, self.netlog = [], []
-        self.swap = {"n": 0, "skip": []}
-        self.dial = {"ais_cloud_start": 0}
         self._ssid, self._password, self._force_at = ssid, password, force_at
         self._certs = Path(tempfile.mkdtemp(prefix="s61stub-"))
         self._our_ca, leaf_crt, leaf_key = _make_certs(self._certs, DISPATCH_IP)
@@ -202,100 +330,15 @@ class CloudSession:
             return connect(conn, "127.0.0.1", 1)                        # refuse anything else
         io.connect = redirect
 
-    def _read(self, address, n):
-        try:
-            return bytes(self.emu.mu.mem_read(address, n))
-        except Exception:
-            return b""
-
-    def _string(self, address, n=40):
-        b = self._read(address, n); z = b.find(0); return b[:z if z >= 0 else n]
-
     def _hooks(self):
-        mu = self.emu.mu
-        mu.hook_add(UC_HOOK_CODE, lambda m, a, s, u: mu.reg_write(UC_ARM_REG_R0, 0), None, AFTER_MEMCMP, AFTER_MEMCMP)
-
-        def ef_get(m, a, s, u):   # the Wi-Fi credentials, as a provisioned plug's store gives them
-            key = self._string(mu.reg_read(UC_ARM_REG_R0)); buf = mu.reg_read(UC_ARM_REG_R1)
-            outp = mu.reg_read(UC_ARM_REG_R3)
-            val = self._ssid if key == b"wifi-ssid" else (self._password if key == b"wifi-pass" else None)
-            if val is None:
-                return
-            try:
-                mu.mem_write(buf, val)
-                if outp:
-                    mu.mem_write(outp, struct.pack("<I", len(val)))
-            except Exception:
-                pass
-            mu.reg_write(UC_ARM_REG_R0, len(val)); mu.reg_write(UC_ARM_REG_PC, mu.reg_read(UC_ARM_REG_LR))
-        mu.hook_add(UC_HOOK_CODE, ef_get, None, EFGET, EFGET)
-
-        # --- the faithful trust swap (the S60's --trust-ca, applied at the parse point) ---
-        # When the firmware loads the CoolKit root CA into a trust store, replace the PEM
-        # it is about to parse with our own CA's PEM. Identified by the CoolKit CN inside
-        # the decoded DER, so only the trust anchor is touched; the server leaf and any
-        # other cert parse untouched. The firmware passes len incl. the NUL terminator.
-        def trust(m, a, s, u):
-            r1 = mu.reg_read(UC_ARM_REG_R1); r2 = mu.reg_read(UC_ARM_REG_R2)
-            if r1 == 0 or not (0 < r2 <= 8192):
-                return
-            if not _is_coolkit(self._read(r1, min(r2, 4096))):
-                return
-            repl = (self._our_ca if self._our_ca.endswith(b"\n") else self._our_ca + b"\n") + b"\x00"
-            if len(repl) > r2:   # must fit the firmware's buffer; our EC CA PEM does
-                self.swap["skip"].append("%d>%d" % (len(repl), r2)); return
-            try:
-                mu.mem_write(r1, repl); mu.reg_write(UC_ARM_REG_R2, len(repl)); self.swap["n"] += 1
-            except Exception as e:
-                self.swap["skip"].append(str(e))
-        mu.hook_add(UC_HOOK_CODE, trust, None, X509_CRT_PARSE, X509_CRT_PARSE)
-        mu.hook_add(UC_HOOK_CODE, lambda m, a, s, u: self.dial.__setitem__(
-            "ais_cloud_start", self.dial["ais_cloud_start"] + 1), None, 0x35744, 0x35744)
-
-        # The pairing-success trigger: force-call the start-cloud handler once Wi-Fi is up.
-        st = {"forced": False, "calling": False, "prepped": False}
-
-        def trap(m, a, s, u):
-            if st["calling"]:
-                for r, v in zip(REGS, st["saved"]):
-                    mu.reg_write(r, v)
-                self.emu._exc_epoch += 1; st["calling"] = False
-        mu.hook_add(UC_HOOK_CODE, trap, None, 0x4, 0x4)
-
-        def force_thumb(pc):
-            st["saved"] = [mu.reg_read(x) for x in REGS]; cpsr = mu.reg_read(UC_ARM_REG_CPSR)
-            mu.reg_write(UC_ARM_REG_LR, 0x5); mu.reg_write(UC_ARM_REG_CPSR, cpsr | 0x20)
-            mu.reg_write(UC_ARM_REG_PC, pc | 1)
-            self.emu._exc_epoch += 1; st["calling"] = True
-
-        def appfw(m, a, s, u):
-            if st["forced"] or st["calling"] or time.time() - self._started < self._force_at:
-                return
-            if not st["prepped"]:
-                st["prepped"] = True
-                p = struct.unpack("<I", self._read(CTXP, 4))[0]
-                self.netlog.append("[dispatch url (factory) = %r -> redirected to the stub]"
-                                   % self._string(p + URL_OFF, 32))
-                try:
-                    mu.mem_write(FLAG, b"\x01")
-                except Exception:
-                    pass
-                return
-            st["forced"] = True
-            self.netlog.append("[pairing-success trigger @%.1f]" % (time.time() - self._started))
-            force_thumb(START_HANDLER)
-        mu.hook_add(UC_HOOK_CODE, appfw, None, APPFW_LOOP, APPFW_LOOP)
-
-        mac = self.emu.wifimac
-        tick = mac.tick
-
-        def hooked_tick(_self, insns):
-            r = tick(insns); self.emu.state.timer3_5_ctl |= TIMER5; return r
-        mac.tick = types.MethodType(hooked_tick, mac)
+        self.hooks = StockHooks(self.emu, self._ssid, self._password, self._our_ca, self._force_at,
+                                self.netlog)
+        self.swap, self.dial = self.hooks.swap, self.hooks.dial
 
     def run(self, secs, until=None):
         """Run the plug for `secs` seconds, or until `until()` is true (asked
         every 2 s), then stop it."""
+        self.hooks.boot()
         self._started = time.time()
         threading.Thread(target=self.emu.run, daemon=True).start()
         while time.time() - self._started < secs and not (until and until()):

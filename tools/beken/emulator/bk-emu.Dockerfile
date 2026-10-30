@@ -3,10 +3,12 @@
 # applied, and the Python it imports. Build it with bk-emu.sh, never by hand:
 # that script downloads the source archive, checks it and labels the image.
 # No firmware is in the image: dumps are fetched at run time (bk-emu.sh dump)
-# and mounted in at /opt/beken-emulator/firmwares.
+# and mounted in at /opt/beken-emulator/firmwares. iproute2, iptables and
+# dnsmasq are the plug's home router on its Docker network (bk-emu.sh plug);
+# ping, the sweep a computer on it makes for the plug (bk-emu.sh computer).
 FROM ubuntu:24.04
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        python3 python3-venv patch xz-utils openssl ca-certificates \
+        python3 python3-venv patch xz-utils openssl ca-certificates iproute2 iptables dnsmasq iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 # The archive's hash, as UPSTREAM pins it; bk-emu.sh passes it.
 ARG SOURCE_SHA256
