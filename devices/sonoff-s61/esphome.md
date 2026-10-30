@@ -75,7 +75,9 @@ carries the stock app RBL (rebuilt from a dump with
 [`../stock_app.py`](../../tools/beken/stock_app.py) and the SDK packer, as the
 OpenBeken README says) as its download part, sent through the ordinary
 ESPHome OTA, is a reversion: the stock bootloader applies it on the reboot
-that follows. ltchiptool (LibreTiny's tool) builds it:
+that follows. [`../uf2.py`](../../tools/beken/uf2.py) writes one
+(`uf2.write(rbl, name="sonoff-stock", version="1.0.2")`), byte for byte what
+ltchiptool (LibreTiny's tool) writes for the S61's board:
 
 ```sh
 ltchiptool uf2 write -o stock_revert.uf2 -b board.json -L 1.13.0 \

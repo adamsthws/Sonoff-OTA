@@ -5,28 +5,54 @@ CRC-striped (32 data bytes, 2 CRC bytes). Its rt_ota RBL header survives just
 before the download partition (logical 0x25ffa0) and carries the decompressed
 size and the FNV-1a hash of the decompressed image, so the extraction can be
 checked byte-for-byte. The compressed OTA body itself is not kept anywhere, so to
-put a converted plug back to stock the app is repackaged with the Beken SDK's
-own packer - the recipe OpenBeken's build uses, which the stock bootloader
-accepts:
-
-    rt_ota_packaging_tool_cli -f stock_app_1.0.2.bin -o stock_app_1.0.2.rbl \
-        -p app -c gzip -s aes -k 0123456789ABCDEF0123456789ABCDEF \
-        -i 0123456789ABCDEF -v 1.0.2
-
-(the key is RT-Thread's public default; see docs/beken-s61-emulation.md).
+put a converted plug back to stock the app is packed again as an RBL (rbl.py,
+byte for byte what the Beken SDK's packer makes with -c gzip -s aes and
+RT-Thread's public default key), which the stock bootloader applies from the
+download slot: `extract()` for the app, `stock_rbl()` for the RBL, which the
+conversion tool makes from the public S61 dump when a plug goes back.
 
   python3 stock_app.py dump.bin [-o stock_app_1.0.2.bin]
 """
 from __future__ import annotations
 
 import argparse
-import struct
 import sys
-import zlib
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from tools.beken import rbl  # noqa: E402
 
 STRIPE_DATA, STRIPE_CRC = 32, 2
 APP_LOGICAL = 0x10000
 APP_RBL_LOGICAL = 0x25FFA0
+
+
+class DumpError(ValueError):
+    """Not an S61 dump with a stock app in it."""
+
+
+def extract(dump: bytes) -> tuple[bytes, rbl.Header]:
+    """The stock app in a raw S61 flash dump, checked against the RBL header
+    the bootloader left beside it, and that header."""
+    logical = unstripe(dump)
+    try:
+        header = rbl.header(logical[APP_RBL_LOGICAL:APP_RBL_LOGICAL + rbl.HEADER])
+    except rbl.RblError as exc:
+        raise DumpError(f"no app RBL header at logical 0x{APP_RBL_LOGICAL:x}: {exc}") from None
+    if header.name != "app":
+        raise DumpError(f"no app RBL header at logical 0x{APP_RBL_LOGICAL:x}: the one there is {header.name!r}")
+    app = logical[APP_LOGICAL:APP_LOGICAL + header.size_raw]
+    if len(app) != header.size_raw or fnv1a32(app) != header.raw_hash:
+        raise DumpError("the app does not match its header's size and raw hash (FNV-1a)")
+    return app, header
+
+
+def stock_rbl(dump: bytes) -> tuple[bytes, str]:
+    """The stock app of `dump` packed as the rt_ota RBL the stock bootloader
+    applies - version, serial and time as the dump's own header has them - and
+    its version."""
+    app, header = extract(dump)
+    return rbl.pack(app, name="app", version=header.version, timestamp=header.timestamp, sn=header.sn), header.version
 
 
 def unstripe(physical: bytes) -> bytes:
@@ -50,24 +76,14 @@ def main() -> int:
     ap.add_argument("dump")
     ap.add_argument("-o", "--out", default=None)
     a = ap.parse_args()
-    logical = unstripe(open(a.dump, "rb").read())
-    hdr = logical[APP_RBL_LOGICAL:APP_RBL_LOGICAL + 96]
-    if hdr[:4] != b"RBL\x00" or hdr[12:28].split(b"\0")[0] != b"app":
-        print("no app RBL header at logical 0x%x" % APP_RBL_LOGICAL, file=sys.stderr)
+    try:
+        app, header = extract(open(a.dump, "rb").read())
+    except DumpError as exc:
+        print(exc, file=sys.stderr)
         return 1
-    if zlib.crc32(hdr[:92]) & 0xFFFFFFFF != struct.unpack_from("<I", hdr, 92)[0]:
-        print("app RBL header CRC mismatch", file=sys.stderr)
-        return 1
-    version = hdr[28:52].split(b"\0")[0].decode("latin1")
-    raw_hash, size_raw = struct.unpack_from("<II", hdr, 80)
-    app = logical[APP_LOGICAL:APP_LOGICAL + size_raw]
-    got = fnv1a32(app)
-    if got != raw_hash:
-        print("extracted app does not match the header's raw hash (0x%08x vs 0x%08x)" % (got, raw_hash), file=sys.stderr)
-        return 1
-    out = a.out or "stock_app_%s.bin" % version
+    out = a.out or "stock_app_%s.bin" % header.version
     open(out, "wb").write(app)
-    print("stock app %s: %d bytes, FNV-1a 0x%08x verified -> %s" % (version, len(app), got, out))
+    print("stock app %s: %d bytes, FNV-1a 0x%08x verified -> %s" % (header.version, len(app), header.raw_hash, out))
     return 0
 
 

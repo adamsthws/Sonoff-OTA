@@ -177,8 +177,9 @@ KV40 node with CRC validation.
 ### Update (RBL) format
 
 Images the bootloader applies are `rt_ota` **RBL** containers. The 96-byte header
-is verified byte-for-byte against the dump (a packer, `rbl_pack.py`, reproduces
-the real `bootloader` and `app` RBL headers exactly):
+is verified byte-for-byte against the dump ([`tools/beken/rbl.py`](../tools/beken/rbl.py)
+reproduces the real `bootloader` and `app` RBL headers exactly, and the body of
+every image the SDK's packer made - the stock app's, OpenBeken's, LibreTiny's):
 
 | offset | field | notes |
 |--------|-------|-------|
@@ -1055,9 +1056,10 @@ container:
 - `stage_apply.py` - the apply alone: an `.rbl` staged in the download slot of a
   copy of a dump, test credentials seeded, and the stock bootloader booted over
   it; a reversion's apply too, with the repackaged stock app.
-- `stock_app.py` (the stock app out of a dump, verified, for the reversion
-  image), `backup.py`, and the static tools (`unstripe.py`, `disasm.py`,
-  `xref.py`, `strxref.py`, `decomp.py`).
+- `stock_app.py` (the stock app out of a dump, verified, and packed again as
+  the reversion image with `rbl.py`), `uf2.py` (the update file a LibreTiny
+  ESPHome takes), `backup.py`, and the static tools (`unstripe.py`,
+  `disasm.py`, `xref.py`, `strxref.py`, `decomp.py`).
 
 The BK7238 UART transmit register is `0x0080210c` (for a boot-proof image). No
 per-device identifier from any run is kept in these notes.

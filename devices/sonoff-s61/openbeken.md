@@ -204,8 +204,13 @@ comes back with its own Wi-Fi, calibration and identity.
 
 The stock app RBL is rebuilt from a dump — the app partition holds only the
 decompressed image — with [`../stock_app.py`](../../tools/beken/stock_app.py)
-(extracts and verifies it against the stored FNV-1a hash) and the SDK's own
-packer, exactly as OpenBeken's build packages its app:
+(extracts and verifies it against the stored FNV-1a hash) and
+[`../rbl.py`](../../tools/beken/rbl.py), which packs it as the SDK's own packer
+does (`-c gzip -s aes`, RT-Thread's public key): the same body byte for byte,
+and the header's version, serial and time as the dump's own header has them.
+`stock_app.stock_rbl(dump)` does both, with nothing but Python; the conversion
+tool makes the image this way, from the public S61 dump, when a plug goes back.
+The SDK's packer gives the same file:
 
 ```sh
 python3 ../stock_app.py dump.bin -o stock_app_1.0.2.bin

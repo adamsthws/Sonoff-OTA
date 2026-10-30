@@ -214,8 +214,19 @@ signed-char `Tiny_CRC8`, the `0x1e1000` config offset).
   flash layout, the build, the reversion through ESPHome's own OTA, and what
   the emulator validated.
 - **`stock_app.py`** — extract the stock app from a dump, verified against the
-  FNV-1a hash in its RBL header, ready to repackage with the SDK packer for a
-  revert to stock. `python3 stock_app.py dump.bin -o stock_app_1.0.2.bin`
+  FNV-1a hash in its RBL header (`extract()`), and pack it again as the RBL the
+  stock bootloader applies for a revert to stock (`stock_rbl()`).
+  `python3 stock_app.py dump.bin -o stock_app_1.0.2.bin`
+- **`rbl.py`**, **`aes.py`** — rt_ota RBL images as the SDK's packer makes
+  them: gzip, PKCS#7 and AES-256-CBC under RT-Thread's public default key, and
+  the 96-byte header with its CRC-32s and FNV-1a hash. `rbl.pack()` gives the
+  same body byte for byte as `rt_ota_packaging_tool_cli -c gzip -s aes`;
+  `rbl.unpack()` checks and unpacks one. The AES is written out here because
+  the tool runs on Python's standard library, which has none.
+- **`uf2.py`** — the UF2 an ESPHome built on LibreTiny takes as an update,
+  with an RBL in its `download` part for the stock bootloader to apply: byte
+  for byte what `ltchiptool uf2 write --legacy IMAGE=device:download` writes
+  for the S61's board. How a plug on ESPHome goes to OpenBeken or back to stock.
 - **`backup.py`** — copy a converted plug's per-device flash region
   (factory TLV, EasyFlash store, system ENV; `0x3e0000-0x400000`) out over
   OpenBeken's REST API into `captures/plugs/<mac>/sonoff-backup/`, the S60's
