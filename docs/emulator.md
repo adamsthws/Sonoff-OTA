@@ -145,6 +145,14 @@ a time; after C2 nothing uses the cloud. A new instance has no plug yet, so name
 it with `--plug MAC` when there is more than one backup. Each takes about 0.6 of
 a CPU and 115 MB.
 
+Every instance, and the Windows container beside one, is on a Docker network of
+the emulator's own, `autoflash-emu`, which `emu.sh` makes the first time on
+any computer: a /24, on a subnet that none of the computer's routes or other
+Docker networks use (198.18.60.0/24 where it is free), kept for the next run as
+the image is. Docker's default bridge is a /16, and the conversion tool in the
+container sweeps the network it is on at its real size, up to a /22: some 2 s
+more a run. `AUTOFLASH_EMU_NETWORK` names another network to use instead.
+
 The terminal becomes a tmux session. Window **conversion** is "your computer
 on the home Wi-Fi": run the tool there exactly as on a real plug,
 

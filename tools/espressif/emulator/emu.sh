@@ -278,9 +278,35 @@ if [ "$tty" = -it ] && systemd-inhibit --what=sleep:idle true 2>/dev/null; then
     awake=(systemd-inhibit --what=sleep:idle --who="Autoflash emulator" --why="the emulated plug's conversion" --mode=block)
 fi
 # Capped: the plug, its router and the tool used about 80 MB between them.
+# The emulator's own Docker network, a /24 (AUTOFLASH_EMU_NETWORK names another).
+# The conversion tool in the container sweeps the network it is on at its real
+# size, and Docker's default bridge is a /16: a /22 swept, some 4 s, every run.
+# Made once, on a subnet neither this computer's routes nor another Docker
+# network use, and kept, as the image is; every instance shares it, as they
+# shared the default bridge, and Windows' container joins it (windows-test.sh).
+NETWORK=${AUTOFLASH_EMU_NETWORK:-autoflash-emu}
+if ! docker network inspect "$NETWORK" >/dev/null 2>&1; then
+    subnet=$( { ip -4 route 2>/dev/null | awk '{print $1}'
+                docker network ls -q | xargs docker network inspect \
+                    -f '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' 2>/dev/null; } | "$PY" -I -c '
+import ipaddress, sys
+taken = [ipaddress.ip_network(line.strip(), strict=False) for line in sys.stdin
+         if line.strip() and line.strip() != "default" and ":" not in line]
+for candidate in ("198.18.60.0/24", "172.31.60.0/24", "10.231.60.0/24"):
+    if not any(ipaddress.ip_network(candidate).overlaps(network) for network in taken):
+        print(candidate)
+        break')
+    if [ -z "$subnet" ]; then
+        echo "No free /24 for the emulator's Docker network: make one, and name it with AUTOFLASH_EMU_NETWORK" >&2
+        exit 1
+    fi
+    # Another instance starting at the same moment may have made it first.
+    docker network create --subnet "$subnet" --label autoflash.emulator=1 "$NETWORK" >/dev/null 2>&1 ||
+        docker network inspect "$NETWORK" >/dev/null
+fi
 exec "${awake[@]}" docker run --rm $tty --name "$NAME" --hostname autoflash-emu-computer \
     --memory "${AUTOFLASH_EMU_MEMORY:-256m}" --cpus "${AUTOFLASH_EMU_CPUS:-2}" \
-    --cap-add NET_ADMIN --device /dev/net/tun \
+    --network "$NETWORK" --cap-add NET_ADMIN --device /dev/net/tun \
     --sysctl net.ipv4.ip_forward="$(( cloud || windows ))" \
     "${publish[@]}" "${dev[@]}" \
     -v "$STATE:/state" -v "$SRC/flash.bin:/secrets/stock-flash.bin:ro" "${stubvol[@]}" \

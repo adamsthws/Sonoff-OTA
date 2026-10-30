@@ -27,6 +27,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 CACHE=${AUTOFLASH_WINDOWS_CACHE:-$HOME/.cache/autoflash-emu/windows}
 VM_IMAGE=autoflash-win
+NETWORK=${AUTOFLASH_EMU_NETWORK:-autoflash-emu}   # the emulator's network (emu.sh), which Windows joins
 # Microsoft's Windows Server 2025 evaluation ISO (en-US, build 26100.32230),
 # from the Evaluation Center. Pinned: a changed file is reported, never used unseen.
 ISO_URL="https://go.microsoft.com/fwlink/?linkid=2345730"
@@ -310,8 +311,10 @@ host_route() {  # replace|del
         route "$1" 192.168.60.0/24 via "$emu_ip" >/dev/null 2>&1
 }
 existing=$(ip route show 192.168.60.0/24 2>/dev/null)
-# Through Docker's bridge: one left by a run that was killed, replaced.
-if [ -z "$existing" ] || [[ $existing == *"dev docker0"* ]]; then
+# Through a Docker bridge - the emulator's network's, or the default one an
+# older run used: one left by a run that was killed, replaced.
+bridge=br-$(docker network inspect -f '{{.Id}}' "$NETWORK" | cut -c1-12)
+if [ -z "$existing" ] || [[ $existing == *"dev docker0"* ]] || [[ $existing == *"dev $bridge"* ]]; then
     host_route replace && routed=1
 fi
 [ "$routed" = 1 ] || say "This computer has a network of its own at 192.168.60.0/24, so the plug's page is at http://localhost:8080 only."
@@ -321,7 +324,7 @@ if [ ! -f "$CACHE/ssh/id_ed25519" ]; then
     mkdir -p "$CACHE/ssh" && chmod 700 "$CACHE/ssh"
     ssh-keygen -q -t ed25519 -N "" -C "autoflash-emulator" -f "$CACHE/ssh/id_ed25519"
 fi
-vm -d --name autoflash-win --stop-timeout 150 -e "LINK_HOST=$emu_ip" -e "CONSOLE=$console" -e "LAYER=$from" -e "FRESH=$fresh" \
+vm -d --name autoflash-win --network "$NETWORK" --stop-timeout 150 -e "LINK_HOST=$emu_ip" -e "CONSOLE=$console" -e "LAYER=$from" -e "FRESH=$fresh" \
     -p 127.0.0.1:3389:3389 -p 127.0.0.1:5900:5900 -p 127.0.0.1:6080:6080 -p "127.0.0.1:$SSH_PORT:22" -- run >/dev/null
 
 [ "$routed" = 1 ] && say "The plug's page is at http://192.168.60.50, as the conversion's last link says (or http://localhost:8080)."
