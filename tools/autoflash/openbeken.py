@@ -110,6 +110,27 @@ def read_flash(host: str, start: int, length: int, *, timeout: float = 30.0,
     return bytes(out)
 
 
+# How long OpenBeken takes to restart and answer again.
+RESTART_WAIT = 120.0
+
+
+def restart(host: str, wait: float = RESTART_WAIT) -> bool:
+    """Restart OpenBeken, and say whether it has, answering again, within
+    `wait` seconds: its uptime back below what it was."""
+    before = (info(host) or {}).get("uptime_s")
+    try:
+        command(host, "reboot", timeout=5.0)
+    except (OSError, CommandError):
+        pass   # the plug may restart before it answers
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        time.sleep(3)
+        found = info(host, timeout=3.0)
+        if found and (not isinstance(before, int) or int(found.get("uptime_s") or 0) < before):
+            return True
+    return False
+
+
 def ota_http(host: str, url: str, timeout: float = 15.0) -> str:
     """Have OpenBeken download the rt_ota image at `url` into its OTA slot - the
     stock bootloader's download slot, on the 4 MB-table build - and restart to

@@ -48,10 +48,10 @@ class NamesTests(unittest.TestCase):
         self.assertIsNone(S60.region(None))
 
     def test_before_the_plug_is_known_every_kind_is_named(self):
-        self.assertEqual(kinds.names(), "Sonoff S60")
-        self.assertEqual(kinds.names("short"), "S60")
-        self.assertEqual(kinds.stock_models(), "Sonoff S60: SN-ESP32C3-S60-01")
-        self.assertEqual(kinds.name_words(), {"sonoff", "s60"})
+        self.assertEqual(kinds.names(), "Sonoff S60 or Sonoff S61")
+        self.assertEqual(kinds.names("short"), "S60 or S61")
+        self.assertEqual(kinds.stock_models(), "Sonoff S60: SN-ESP32C3-S60-01, Sonoff S61: SN-BK7238-S61-01")
+        self.assertEqual(kinds.name_words(), {"sonoff", "s60", "s61"})
 
 
 class RunTests(unittest.TestCase):

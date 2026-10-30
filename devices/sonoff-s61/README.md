@@ -33,4 +33,9 @@ worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-e
   table (`artifacts/openbeken-sonoff-s61-<version>.rbl`) and ESPHome
   (`artifacts/esphome-sonoff-s61-<version>.rbl`), built and pinned by
   `tools/repo/update_firmware.py` ([docs/updating-firmware.md](../../docs/updating-firmware.md)).
-- **Not yet done**: a real plug, and the conversion tool's S61 route.
+- **The conversion tool's route**: [`tools/autoflash/routes/beken/`](../../tools/autoflash/routes/beken/)
+  - the push through eWeLink from Sonoff's firmware, OpenBeken and ESPHome each
+  taking the next firmware as an update of its own, Sonoff's firmware back
+  from the public dump, the backup through OpenBeken after the first
+  conversion. Written against the emulator's findings and tested against
+  stand-ins; not yet run end to end in the emulator, and never on a real plug.

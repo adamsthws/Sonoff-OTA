@@ -116,17 +116,15 @@ a run. The run's report gives the lowest reading.
 
 ## The run, step by step
 
-This is what `python3 -m tools.autoflash run` does, in order, for a plug
-still on Sonoff's firmware (one already converted is in
-[Changing firmware later](#changing-firmware-later)). First it asks which
-firmware you would like, Tasmota or ESPHome (`--firmware` answers in
-advance); steps 1-7 are the same for both.
+This is what `python3 -m tools.autoflash run` does, in order, for a Sonoff
+S60 still on Sonoff's firmware (one already converted is in
+[Changing firmware later](#changing-firmware-later); an S61's run is shorter,
+and its own: [devices/sonoff-s61/](../devices/sonoff-s61/README.md)). Steps
+1-8 are the same whichever firmware you choose.
 
 1. **List what has to be in place first** - the eWeLink app and account, the
    plug added with LAN Control on - and wait for a key press.
-2. **Download the firmware it needs**, on the first run only, and check every
-   file against a known fingerprint.
-3. **Find the plug on your network.** It signs in to your eWeLink account
+2. **Find the plug on your network.** It signs in to your eWeLink account
    (your email and password are asked here, once for the whole run) and
    looks on your network for the plugs in it that it converts, matched by
    their eWeLink id, so no other device can be mistaken for yours. With one
@@ -135,32 +133,37 @@ advance); steps 1-7 are the same for both.
    is given up to a minute to reach eWeLink before anything is
    asked. If yours does not answer, it says why: offline in eWeLink, LAN
    Control off, or on a different network.
-4. **Ask the plug what firmware it has** and where it downloads updates from.
+3. **Ask which firmware you would like** - Tasmota or ESPHome for an S60,
+   OpenBeken or ESPHome for an S61: which a plug can have depends on what
+   plug eWeLink says it is (`--firmware` answers in advance).
+4. **Download the firmware it needs**, on the first run only, and check every
+   file against a known fingerprint.
+5. **Ask the plug what firmware it has** and where it downloads updates from.
    It stops here, before anything is written, unless the device is a kind
-   it converts - so far, the Sonoff S60.
+   it converts - the Sonoff S60 or S61.
    It also reads the plug's Wi-Fi signal, from what Sonoff's firmware
    announces on your network (encrypted with the plug's own key, which your
    eWeLink account holds): a weak one is best fixed now, by moving the plug,
    while nothing has been written.
-5. **Replace the Sonoff firmware** with a small installer of ours. *This is the
+6. **Replace the Sonoff firmware** with a small installer of ours. *This is the
    point of no return,* and the one place it asks you to confirm: after a
    short warning - which also says the Sonoff firmware is backed up first,
    or already was - you type PROCEED, which covers the whole conversion,
-   including the backup in step 6 and the rewrite in step 8. Nothing is sent
+   including the backup in step 7 and the rewrite in step 9. Nothing is sent
    to the plug before that. If the computer's firewall is on, it adds a
    temporary rule for the plug first.
-6. **Back up the Sonoff firmware.** The installer, which has joined your
+7. **Back up the Sonoff firmware.** The installer, which has joined your
    Wi-Fi by itself, hands over a copy of the plug's whole memory - Sonoff
    firmware, settings and all - checked byte for byte against the plug, and
    kept under the plug's MAC address in `captures/plugs/` (see
    [Your Sonoff backup](technical-details.md#your-sonoff-backup)). A plug
    backed up before keeps that backup and is not read again; `--no-backup`
    skips it.
-7. **Install a first Tasmota through the installer**, and give it your Wi-Fi
+8. **Install a first Tasmota through the installer**, and give it your Wi-Fi
    details so it joins too. If the installer could not join, or Tasmota does
    not appear, it asks you to join the plug's own network instead, names it,
    does the rest itself, and tells you when to switch back.
-8. **Update the bootloader**, the small program that starts the plug's
+9. **Update the bootloader**, the small program that starts the plug's
    firmware, to ESPHome's, which starts Tasmota, ESPHome and Sonoff's firmware
    alike and rolls back an update that fails to start. There is only one, so
    it is fetched and checked whole first, then written in under a second and
@@ -177,7 +180,7 @@ advance); steps 1-7 are the same for both.
    since its checks. Only the moments the layout table itself is written - a
    few milliseconds, twice each time - would leave a plug that has to be
    opened.
-9. **Install official Tasmota**, which joins your Wi-Fi by itself, apply the
+10. **Install official Tasmota**, which joins your Wi-Fi by itself, apply the
    plug's template and settings, and check the result. Only if it does not
    appear on your network are you asked to join its setup network. Then
    **calibrate its meter** as Sonoff's firmware did: by the factor the plug's
@@ -189,15 +192,15 @@ tells you whether every byte matches, and removes the temporary firewall rule
 - which needs administrator rights again, so it says why before the system
 asks.
 
-For **ESPHome**, after the bootloader, steps 8 and 9 are instead:
+For **ESPHome**, after the bootloader, steps 9 and 10 are instead:
 
-8. **Install ESPHome** into the half of the plug's memory Tasmota is not
+9. **Install ESPHome** into the half of the plug's memory Tasmota is not
    running from - the published ESPHome for the S60, with your Wi-Fi written
    in, in memory only. Every block is read back and compared with the image,
    byte for byte. Only then does the plug switch to ESPHome, by clearing the
    note that says which half to start, and restart. Until that moment it
    still starts Tasmota. The memory layout itself is not changed.
-9. **Check ESPHome is running** and has joined your Wi-Fi. If it cannot, it
+10. **Check ESPHome is running** and has joined your Wi-Fi. If it cannot, it
    puts up its own network, named like `esphome-abcdef`, where its page
    asks for your Wi-Fi. Then give it the plug's factory calibration from its
    Sonoff backup, which it uses where the plug's own memory has lost it (on
@@ -232,7 +235,7 @@ says what it runs, and offers the other two (Sonoff's only where the plug's
 backup is on the computer). Every route has the same checks as above.
 
 On Tasmota it also offers keeping Tasmota (`--firmware tasmota` chooses it in
-advance), which changes nothing but its meter: calibrated as step 9 does it,
+advance), which changes nothing but its meter: calibrated as step 10 does it,
 if it is not already - on a plug converted before the tool did that, say. A
 meter calibrated by hand, against another meter, is left as it is.
 

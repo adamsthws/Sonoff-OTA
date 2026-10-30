@@ -2,9 +2,10 @@
 
 A plug still on Sonoff's firmware is found through eWeLink, as ever; one this
 tool converted is found here, by what answers: Tasmota's command interface
-naming the template of a kind of plug this tool converts (kinds), or
-ESPHome's page with the relay the ESPHome made for it names - each, behind
-its web login, once given that.  Midway through a conversion a plug can also be running the mover (an
+naming the template of a kind of plug this tool converts (kinds), ESPHome's
+page with the relay the ESPHome made for it names - each, behind its web
+login, once given that - or OpenBeken's /api/info giving the name the
+OpenBeken the tool installs on a kind of plug gives itself.  Midway through a conversion a plug can also be running the mover (an
 ESPHome with no page, only its update service) or the startup firmware (a
 Tasmota safeboot), which a run carrying on recognises.
 """
@@ -17,7 +18,7 @@ import socket
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from . import esphome, esphome_ota, hostsys, kinds, setup_network
+from . import esphome, esphome_ota, hostsys, kinds, openbeken, setup_network
 from .plans import INTERIM_TABLE_SHA256
 from .device import Device
 
@@ -25,6 +26,7 @@ NAMES = {
     "sonoff": "Sonoff's own firmware",
     "tasmota": "Tasmota",
     "esphome": "ESPHome",
+    "openbeken": "OpenBeken",
     "midway": "a firmware part way through a conversion",
     "untemplated": "Tasmota without the plug's template",
     "installer": "this tool's installer, part way from Sonoff's firmware",
@@ -172,6 +174,19 @@ def _esphome(host: str, timeout: float, login: tuple[str, str] | None) -> str | 
     return "esphome" if esphome.relay(host) is not None else "other"
 
 
+def _openbeken(host: str, timeout: float) -> Found | None:
+    """An OpenBeken at `host` named as the one the tool installs on a kind of
+    plug names itself; None for no OpenBeken, or another."""
+    found = openbeken.info(host, timeout)
+    if found is None:
+        return None
+    name = str(found.get("shortName") or "") or None
+    kind = kinds.for_openbeken(name)
+    if kind is None:
+        return None  # an OpenBeken, but not on a plug this tool converts
+    return Found(host, "openbeken", name=name, kind=kind.key)
+
+
 def answers_as_tasmota(host: str, timeout: float = 3.0) -> bool:
     try:
         status = Device(host, timeout=timeout).command("Status 0")
@@ -197,6 +212,8 @@ def identify(host: str, *, timeout: float = 3.0, password: str | None = None,
     if found:
         return None if found == "other" else found
     if _port_open(host, 80, timeout):
+        if _openbeken(host, timeout):
+            return "openbeken"
         if _is_installer(host, timeout):
             return "installer"
         try:
@@ -276,6 +293,10 @@ def _ask_neighbours(seen: dict[str, str], known_macs: set[str], timeout: float, 
         found = _esphome(host, timeout, esphome_login)
         if found:
             return None if found == "other" else Found(host, found, mac)
+        on_openbeken = _openbeken(host, timeout)
+        if on_openbeken:
+            on_openbeken.mac = mac
+            return on_openbeken
         if _is_installer(host, timeout):
             return Found(host, "installer", mac, "the installer")
         try:

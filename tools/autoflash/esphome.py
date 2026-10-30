@@ -233,6 +233,22 @@ def page(host: str, timeout: float = 4.0) -> str | None:
     return None
 
 
+def title(host: str, timeout: float = 4.0) -> str | None:
+    """The plug's ESPHome name, as its web page shows it: the friendly name,
+    and the MAC suffix name_add_mac_suffix adds (Sonoff S61 abcdef) - in the
+    first event its page is sent (/events, "ping"); None if none comes."""
+    try:
+        with _opener().open(f"http://{host}/events", timeout=timeout) as events:
+            for _ in range(20):
+                line = events.readline().decode("utf-8", errors="replace").strip()
+                if line.startswith("data:") and '"title"' in line:
+                    found = json.loads(line[5:]).get("title")
+                    return found if isinstance(found, str) else None
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError):
+        return None
+    return None
+
+
 def is_esphome(host: str, timeout: float = 4.0) -> bool:
     """Whether ESPHome's own web page answers at `host` (not merely "not Tasmota")."""
     return page(host, timeout) == "esphome"

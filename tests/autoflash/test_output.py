@@ -41,50 +41,70 @@ class ConciseTests(OutputTestCase):
     """By default the screen gets stage lines and what matters; the log gets everything."""
 
     def stages(self):
-        output.stage_begin(1, 2, "Checking the files")
+        output.stage_begin(1, "Checking the files")
         output.detail("bundle and pinned artifacts: OK")
         output.stage_end("complete")
-        output.stage_begin(2, 2, "Installing Tasmota")
+        output.stage_begin(2, "Installing Tasmota")
         output.show("Join the bridge's Wi-Fi network")
         output.stage_end("complete")
 
     def test_piped_output_gets_one_line_per_change(self):
         screen, log = self.run_with(io.StringIO(), False, self.stages)
-        self.assertIn("Stage 1 of 2 - Checking the files - Underway", screen)
-        self.assertIn("Stage 1 of 2 - Checking the files - Complete (0s)", screen)
+        self.assertIn("Stage 1 - Checking the files - Underway", screen)
+        self.assertIn("Stage 1 - Checking the files - Complete (0s)", screen)
         self.assertIn("Join the bridge's Wi-Fi network", screen)
         self.assertNotIn("bundle and pinned artifacts", screen)
         self.assertIn("bundle and pinned artifacts: OK", log)
-        self.assertRegex(log, r"\[\d\d:\d\d:\d\d\] Stage 2 of 2 - Installing Tasmota - complete")
+        self.assertRegex(log, r"\[\d\d:\d\d:\d\d\] Stage 2 - Installing Tasmota - complete")
 
     def test_on_a_terminal_underway_becomes_complete_on_the_same_line(self):
         def body():
-            output.stage_begin(1, 1, "Checking the files")
+            output.stage_begin(1, "Checking the files")
             output.stage_end("complete")
         screen, _ = self.run_with(FakeTerminal(), False, body)
         drawn = screen.split("\n")[0]
         self.assertIn("Checking the files - Underway", drawn)
-        self.assertTrue(drawn.split("\r")[-1].startswith(" Stage 1 of 1 - Checking the files - Complete"))
+        self.assertTrue(drawn.split("\r")[-1].startswith(" Stage 1 - Checking the files - Complete"))
 
     def test_stage_lines_line_up_in_columns(self):
         def body():
-            output.set_stage_width(len("Installing official Tasmota"))
+            output.set_stage_width(len("Installing official Tasmota"), 14)
             for number, name in ((1, "Checking you have everything"[:20]), (10, "Installing official Tasmota")):
-                output.stage_begin(number, 14, name)
+                output.stage_begin(number, name)
                 output.stage_end("complete")
         screen, log = self.run_with(io.StringIO(), False, body)
         done = [line for line in screen.splitlines() if line.endswith("Complete (0s)")]
         self.assertEqual(len(done), 2)
         self.assertEqual(done[0].index(" - Complete"), done[1].index(" - Complete"))
         self.assertEqual(done[0].index(" - Checking"), done[1].index(" - Installing"))
-        self.assertTrue(done[0].startswith(" Stage  1 of 14 - "))
-        self.assertIn("Stage 1 of 14 - Checking you have ev - complete", log)  # the log is not padded
+        self.assertTrue(done[0].startswith(" Stage  1 - "))
+        self.assertIn("Stage 1 - Checking you have ev - complete", log)  # the log is not padded
+
+    def test_no_stage_says_a_total(self):
+        # A run from Sonoff's firmware learns its route only after its third stage.
+        def body():
+            output.set_stage_width(len("Querying Sonoff firmware"), 17)
+            for number, name in ((3, "Choosing the firmware"), (4, "Querying Sonoff firmware")):
+                output.stage_begin(number, name)
+                output.stage_end("complete")
+        screen, log = self.run_with(io.StringIO(), False, body)
+        done = [line for line in screen.splitlines() if line.endswith("Complete (0s)")]
+        self.assertTrue(done[0].startswith(" Stage  3 - Choosing the firmware "))
+        self.assertTrue(done[1].startswith(" Stage  4 - Querying Sonoff firmware "))
+        self.assertNotIn(" of ", screen + log)
+        self.assertIn("Stage 3 - Choosing the firmware - complete (0s)", log)   # its time kept
+
+    def test_each_run_lays_its_stages_out_afresh(self):
+        output.set_stage_width(30, 17)   # the last run's
+        screen, _ = self.run_with(io.StringIO(), False, lambda: (output.stage_begin(1, "Checking the files"),
+                                                                 output.stage_end("complete")))
+        self.assertIn(" Stage 1 - Checking the files - Complete (0s)", screen)
 
     def test_an_answered_question_is_taken_off_the_screen(self):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True), \
                  mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 24))):
-                output.stage_begin(5, 14, "Installing the installer firmware")
+                output.stage_begin(5, "Installing the installer firmware")
                 output.transient_begin()          # the underway line: 1 row
                 prompts.warning_box("Before going on", ["One line."])  # 3 rows
                 output.before_input("Type PROCEED to go ahead: ")
@@ -102,7 +122,7 @@ class ConciseTests(OutputTestCase):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True), \
                  mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 5))):
-                output.stage_begin(5, 14, "Installing the installer firmware")
+                output.stage_begin(5, "Installing the installer firmware")
                 output.transient_begin()          # the underway line: 1 row
                 prompts.warning_box("Before going on", ["One line."])  # 3 rows
                 output.before_input("Type PROCEED to go ahead: ")
@@ -122,7 +142,7 @@ class ConciseTests(OutputTestCase):
                  mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, rows))), \
                  mock.patch.object(prompts, "ping_ok", side_effect=[False, False, True]), \
                  mock.patch("builtins.input", side_effect=["10.0.0.1", "10.0.0.2", "10.0.0.3"]):
-                output.stage_begin(3, 14, "Discovering the plug")
+                output.stage_begin(3, "Discovering the plug")
                 output.transient_begin()
                 self.assertEqual(prompts.ask_ipv4("The plug's address", help_lines=["Where to look."],
                                                   must_respond=True), "10.0.0.3")
@@ -143,7 +163,7 @@ class ConciseTests(OutputTestCase):
         now = [100.0]
         def body():
             with mock.patch.object(output.time, "monotonic", side_effect=lambda: now[0]):
-                output.stage_begin(3, 14, "Discovering the plug")
+                output.stage_begin(3, "Discovering the plug")
                 now[0] += 5                     # working
                 output.before_input("The plug's address: ")
                 now[0] += 60                    # the person thinking
@@ -161,7 +181,7 @@ class ConciseTests(OutputTestCase):
             output.before_input("The plug's address: ")   # never answered
             now[0] += 1000
             def body():
-                output.stage_begin(3, 14, "Discovering the plug")
+                output.stage_begin(3, "Discovering the plug")
                 output.before_input("The plug's address: ")
                 now[0] += 60
                 self.assertEqual(output.waited(), 60)
@@ -173,7 +193,7 @@ class ConciseTests(OutputTestCase):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True), \
                  mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 24))):
-                output.stage_begin(3, 14, "Discovering the plug")
+                output.stage_begin(3, "Discovering the plug")
                 output.transient_begin()
                 before = sys.stdout.getvalue()
                 output._tick()  # while the block's note is still being worked out
@@ -269,7 +289,7 @@ class ConciseTests(OutputTestCase):
             with mock.patch.object(output, "colour_ok", return_value=True), \
                  mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 6))), \
                  mock.patch("builtins.input", side_effect=["maybe", "192.168.0.50", "n"]):
-                output.stage_begin(3, 14, "Discovering the plug")
+                output.stage_begin(3, "Discovering the plug")
                 output.transient_begin()
                 self.assertFalse(prompts.ask_yes_no("Use it anyway?", default=False))
                 output.transient_end()
@@ -288,37 +308,37 @@ class ConciseTests(OutputTestCase):
     def test_success_is_green_and_underway_is_bold(self):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True):
-                output.stage_begin(1, 1, "Checking the files")
+                output.stage_begin(1, "Checking the files")
                 output.stage_end("complete")
         screen, log = self.run_with(FakeTerminal(), False, body)
         self.assertIn(f"{output.BOLD}Underway{output.RESET}", screen)
-        self.assertIn(f"{output.GREEN}Stage 1 of 1{output.RESET} - Checking the files - "
+        self.assertIn(f"{output.GREEN}Stage 1{output.RESET} - Checking the files - "
                       f"{output.GREEN}Complete{output.RESET} (0s)", screen)
-        self.assertIn("Stage 1 of 1 - Checking the files - complete (0s)", log)
+        self.assertIn("Stage 1 - Checking the files - complete (0s)", log)
 
     def test_a_stage_done_on_an_earlier_run_is_green_too(self):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True):
-                output.stage_begin(1, 1, "Checking the files")
+                output.stage_begin(1, "Checking the files")
                 output.stage_end("already done")
         screen, _ = self.run_with(FakeTerminal(), False, body)
-        self.assertIn(f"{output.GREEN}Stage 1 of 1{output.RESET} - Checking the files - "
+        self.assertIn(f"{output.GREEN}Stage 1{output.RESET} - Checking the files - "
                       f"{output.GREEN}Already done{output.RESET}", screen)
 
     def test_a_skipped_stage_is_green(self):
         # The backup, when the person carries on without one: nothing went wrong.
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True):
-                output.stage_begin(6, 15, "Backing up the Sonoff firmware")
+                output.stage_begin(6, "Backing up the Sonoff firmware")
                 output.stage_end("skipped")
         screen, log = self.run_with(FakeTerminal(), False, body)
-        self.assertIn(f"{output.GREEN}Stage  6 of 15{output.RESET} - Backing up the Sonoff firmware - "
+        self.assertIn(f"{output.GREEN}Stage 6{output.RESET} - Backing up the Sonoff firmware - "
                       f"{output.GREEN}Skipped{output.RESET}", screen)
-        self.assertIn("Stage 6 of 15 - Backing up the Sonoff firmware - skipped", log)
+        self.assertIn("Stage 6 - Backing up the Sonoff firmware - skipped", log)
 
     def test_without_cursor_control_the_question_stays(self):
         def body():
-            output.stage_begin(5, 14, "Installing the installer firmware")
+            output.stage_begin(5, "Installing the installer firmware")
             output.transient_begin()
             prompts.warning_box("Before going on", ["One line."])
             output.transient_end()
@@ -329,17 +349,17 @@ class ConciseTests(OutputTestCase):
 
     def test_a_message_mid_stage_starts_on_its_own_line(self):
         def body():
-            output.stage_begin(1, 1, "Installing Tasmota")
+            output.stage_begin(1, "Installing Tasmota")
             output.show("Join the bridge's Wi-Fi network")
             output.stage_end("complete")
         screen, _ = self.run_with(FakeTerminal(), False, body)
         lines = [line.split("\r")[-1] for line in screen.split("\n")]
         self.assertIn(" Join the bridge's Wi-Fi network", lines)
-        self.assertTrue(any(line.startswith(" Stage 1 of 1 - Installing Tasmota - Complete") for line in lines))
+        self.assertTrue(any(line.startswith(" Stage 1 - Installing Tasmota - Complete") for line in lines))
 
     def test_progress_stays_off_the_concise_screen_and_the_log(self):
         def body():
-            output.stage_begin(1, 1, "Installing Tasmota")
+            output.stage_begin(1, "Installing Tasmota")
             output.progress("looking for the installer on your network... 12s")
             output.progress_clear()
             output.stage_end("complete")
@@ -350,8 +370,8 @@ class ConciseTests(OutputTestCase):
 
     def test_a_stage_begun_twice_keeps_one_line(self):
         def body():
-            output.stage_begin(1, 1, "Installing Tasmota")
-            output.stage_begin(1, 1, "Installing Tasmota")
+            output.stage_begin(1, "Installing Tasmota")
+            output.stage_begin(1, "Installing Tasmota")
             output.stage_end("already done")
         screen, _ = self.run_with(io.StringIO(), False, body)
         self.assertEqual(screen.count("Underway"), 1)
@@ -381,11 +401,11 @@ class ConciseTests(OutputTestCase):
 class VerboseTests(OutputTestCase):
     def test_everything_is_shown_and_logged(self):
         def body():
-            output.stage_begin(1, 1, "Checking the files")
+            output.stage_begin(1, "Checking the files")
             output.detail("bundle and pinned artifacts: OK")
             output.stage_end("complete")
         screen, log = self.run_with(io.StringIO(), True, body)
-        self.assertIn("== Stage 1 of 1 - Checking the files", screen)
+        self.assertIn("== Stage 1 - Checking the files", screen)
         self.assertIn("bundle and pinned artifacts: OK", screen)
         self.assertIn("bundle and pinned artifacts: OK", log)
         self.assertIn("(verbose)", log)
@@ -458,7 +478,7 @@ class NarrowTerminalTests(OutputTestCase):
     def test_a_stage_line_too_long_for_the_terminal_is_cut_short(self):
         def body():
             with mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((40, 24))):
-                output.stage_begin(6, 14, "Installing the official startup firmware")
+                output.stage_begin(6, "Installing the official startup firmware")
                 output.stage_end("complete")
         screen, _ = self.run_with(FakeTerminal(), False, body)
         drawn = screen.split("\r")[1]
@@ -469,7 +489,7 @@ class NarrowTerminalTests(OutputTestCase):
         # Python 3.10 hands back the 0 a pseudo-terminal nobody sized reports.
         def body():
             with mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((0, 0))):
-                output.stage_begin(6, 14, "Installing the official startup firmware")
+                output.stage_begin(6, "Installing the official startup firmware")
                 output.stage_end("complete")
         screen, _ = self.run_with(FakeTerminal(), False, body)
         self.assertIn("Installing the official startup firmware", screen)
@@ -625,7 +645,7 @@ class FailureReasonTests(OutputTestCase):
         source.write_bytes(b"x" * 10)
 
         def body():
-            output.stage_begin(2, 14, "Checking the files on this computer")
+            output.stage_begin(2, "Checking the files on this computer")
             obtain(source, "http://unused.example/", Path(self.tmp.name) / "pinned.bin")
             output.stage_end("complete")
         screen, log = self.run_with(FakeTerminal(), False, body)
@@ -997,24 +1017,24 @@ class StageGapTests(OutputTestCase):
 
     def test_a_message_under_the_stage_line_has_a_blank_line_above_it(self):
         def body():
-            output.stage_begin(3, 14, "Discovering the plug")
+            output.stage_begin(3, "Discovering the plug")
             output.show("Looking for it on your network...")
             output.stage_end("complete")
         rows = self.screen(body)
-        self.assertTrue(rows[0].startswith("Stage 3 of 14 - Discovering the plug - Underway"))
+        self.assertTrue(rows[0].startswith("Stage 3 - Discovering the plug - Underway"))
         self.assertEqual(rows[1:3], ["", "Looking for it on your network..."])
-        self.assertTrue(rows[3].startswith("Stage 3 of 14 - Discovering the plug - Complete"))
+        self.assertTrue(rows[3].startswith("Stage 3 - Discovering the plug - Complete"))
 
     def test_a_section_s_own_blank_line_is_the_gap(self):
         def body():
-            output.stage_begin(4, 14, "Querying Sonoff firmware")
+            output.stage_begin(4, "Querying Sonoff firmware")
             prompts.section("What the plug reported", ["Firmware now 1.2.0"])
         rows = self.screen(body)
         self.assertEqual(rows[1:3], ["", "-- What the plug reported"])
 
     def test_a_question_has_the_gap_too(self):
         def body():
-            output.stage_begin(3, 14, "Discovering the plug")
+            output.stage_begin(3, "Discovering the plug")
             output.before_input("eWeLink account email: ")
             sys.stdout.write("eWeLink account email: ")
             output.answered("someone@example.com")
@@ -1024,7 +1044,7 @@ class StageGapTests(OutputTestCase):
 
     def test_the_gap_leaves_the_screen_with_an_answered_question(self):
         def body():
-            output.stage_begin(3, 14, "Discovering the plug")
+            output.stage_begin(3, "Discovering the plug")
             output.transient_begin()
             prompts.warning_box("Before going on", ["One line."])
             output.before_input("Type PROCEED to go ahead: ")
@@ -1034,22 +1054,22 @@ class StageGapTests(OutputTestCase):
             output.show("Sending the bridge...")
             output.stage_end("complete")
         rows = self.screen(body, colour=True)
-        self.assertTrue(rows[0].startswith("Stage 3 of 14 - Discovering the plug - Underway"))
+        self.assertTrue(rows[0].startswith("Stage 3 - Discovering the plug - Underway"))
         self.assertEqual(rows[1:3], ["", "Sending the bridge..."])
         self.assertNotIn("Before going on", "\n".join(rows))
 
     def test_stage_lines_follow_one_another_without_a_gap(self):
         def body():
             for number in (1, 2):
-                output.stage_begin(number, 14, f"Stage number {number}")
+                output.stage_begin(number, f"Stage number {number}")
                 output.stage_end("already done")
         rows = self.screen(body)
         self.assertEqual(len(rows), 2)
-        self.assertTrue(rows[1].startswith("Stage 2 of 14"))
+        self.assertTrue(rows[1].startswith("Stage 2"))
 
     def test_a_failure_under_a_stopped_stage_has_the_gap(self):
         def body():
-            output.stage_begin(5, 14, "Installing bridge firmware")
+            output.stage_begin(5, "Installing bridge firmware")
             output.stage_end("stopped")
             output.show("FAILED: bridge delivery failed")
         rows = self.screen(body)
@@ -1058,15 +1078,15 @@ class StageGapTests(OutputTestCase):
 
     def test_verbose_output_under_a_stage_heading_has_the_gap(self):
         def body():
-            output.stage_begin(4, 14, "Querying Sonoff firmware")
+            output.stage_begin(4, "Querying Sonoff firmware")
             output.detail("$ python tools/ewelink/query_ota.py")
         rows = self.screen(body, verbose=True)
-        heading = rows.index("== Stage 4 of 14 - Querying Sonoff firmware")
+        heading = rows.index("== Stage 4 - Querying Sonoff firmware")
         self.assertEqual(rows[heading + 1:heading + 3], ["", "$ python tools/ewelink/query_ota.py"])
 
     def test_piped_output_gets_the_gap_too(self):
         def body():
-            output.stage_begin(3, 14, "Discovering the plug")
+            output.stage_begin(3, "Discovering the plug")
             output.show("Found it.")
         with mock.patch("sys.stdout", io.StringIO()) as piped:
             output.start(self.log, verbose=False)

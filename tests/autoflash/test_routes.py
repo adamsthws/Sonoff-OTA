@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from tools.autoflash import kinds, routes
-from tools.autoflash.routes import espressif
+from tools.autoflash.routes import beken, espressif
 from tools.autoflash.state import RunState
 
 
@@ -39,23 +39,49 @@ class FamilyTests(unittest.TestCase):
         family = SimpleNamespace(FIRMWARES={"esphome": "ESPHome"}, SOURCES=("sonoff",),
                                  steps_for=lambda firmware, source="sonoff": [step],
                                  STAGE_NAMES={"Z1": "Doing its own thing"}, TARGET_STAGE_NAMES={},
-                                 POINT_OF_NO_RETURN="Z1")
+                                 POINT_OF_NO_RETURN="Z1", RESUME_CHECK=None)
         other = a_kind("made-up", "madeup")
         with mock.patch.object(kinds, "ALL", (kinds.SONOFF_S60, other)), \
                 mock.patch.dict(routes.FAMILIES, {"madeup": family}):
             state = self.state(plug_kind="made-up", firmware="esphome", source="sonoff")
             self.assertIs(routes.family_of(state), family)
-            self.assertEqual([s for s, _, _ in routes.steps_of(state)], ["Z1"])
+            self.assertEqual([s for s, _, _ in routes.steps_of(state)], ["A0", "A1", "A3", "Z1"])
             self.assertFalse(routes.past_the_point_of_no_return(state))
             state.mark("Z1", "done")
             self.assertTrue(routes.past_the_point_of_no_return(state))
             routes.apply_target("esphome", "sonoff", family)
             self.assertIs(routes.FAMILY, family)
             self.assertEqual(routes.stage_name("Z1"), "Doing its own thing")
-        # An S60's run, and one from before kinds were recorded, take the Espressif steps.
+        # An S60's run, and one from before kinds were recorded, take the Espressif steps:
+        # the shared start until the firmware is chosen, then the route.
         for state in (self.state(plug_kind="sonoff-s60"), self.state()):
             self.assertIs(routes.family_of(state), espressif)
-            self.assertEqual(routes.steps_of(state), espressif.steps_for("tasmota", "sonoff"))
+            self.assertEqual([s for s, _, _ in routes.steps_of(state)], ["A0", "A1", "A3"])
+            state.set_input("firmware", "tasmota")
+            self.assertEqual(routes.steps_of(state), routes.steps_for("tasmota", "sonoff", espressif))
+        # A run of 1.x recorded its steps and no choice: it was for Tasmota.
+        legacy = self.state()
+        legacy.mark("C2", "done")
+        self.assertEqual([s for s, _, _ in routes.steps_of(legacy)][-1], "H1")
+
+    def test_a_run_from_sonoff_lays_its_stages_out_the_same_before_and_after_its_route_is_known(self):
+        # The kind of plug, and with it the rest of the route, is known only
+        # after A1 and A3: the same columns before and after, and no total.
+        begun, layouts = [], []
+        with mock.patch.object(routes.output, "stage_begin", side_effect=lambda *a: begun.append(a)), \
+                mock.patch.object(routes.output, "set_stage_width", side_effect=lambda *a: layouts.append(a)):
+            routes.apply_target(None, "sonoff", beken)
+            routes.begin_stage("A3")
+            routes.apply_target("openbeken", "sonoff", beken)
+            routes.begin_stage("B1")
+            routes.apply_target("esphome", "sonoff", espressif)
+            routes.begin_stage("A3")
+        self.assertEqual(begun, [(3, "Choosing the firmware"), (4, "Querying Sonoff firmware"),
+                                 (3, "Choosing the firmware")])
+        self.assertEqual(len(set(layouts)), 1)
+        longest = max(len(routes.steps_for(firmware, "sonoff", family)) for family in (espressif, beken)
+                      for firmware in family.FIRMWARES if firmware != "sonoff")
+        self.assertEqual(layouts[0][1], longest)
 
     def test_every_family_gives_the_runner_the_same_names(self):
         for name, family in routes.FAMILIES.items():
@@ -63,7 +89,7 @@ class FamilyTests(unittest.TestCase):
                 for attribute in ("FIRMWARES", "SOURCES", "steps_for", "POINT_OF_NO_RETURN",
                                   "DESTRUCTIVE_STEPS", "RETRY_STEPS", "ERASED_CHECK_STEPS", "STAGE_NAMES",
                                   "TARGET_STAGE_NAMES", "PLAIN_DESCRIPTION", "ATTEMPTED_EVIDENCE",
-                                  "STEP_VERIFIERS"):
+                                  "STEP_VERIFIERS", "REDO_STEPS", "SONOFF_FROM_BACKUP", "RESUME_CHECK"):
                     self.assertTrue(hasattr(family, attribute), attribute)
                 # Every step of every route has a name for its stage line and a plain description.
                 steps = {step for firmware in family.FIRMWARES for source in family.SOURCES
@@ -78,14 +104,61 @@ class FamilyTests(unittest.TestCase):
 
     def test_a_firmware_another_family_takes_is_refused_for_this_plug(self):
         other = a_kind("made-up", "madeup")
-        family = SimpleNamespace(FIRMWARES={"openbeken": "OpenBeken", "sonoff": "Sonoff"})
+        family = SimpleNamespace(FIRMWARES={"openbeken": "OpenBeken", "sonoff": "Sonoff"}, SONOFF_FROM_BACKUP=True)
         state = self.state(plug_kind="made-up")
         ctx = SimpleNamespace(state=state, firmware_given="tasmota", esphome_firmware=None)
         with mock.patch.object(kinds, "ALL", (kinds.SONOFF_S60, other)), \
                 mock.patch.dict(routes.FAMILIES, {"madeup": family}), \
                 mock.patch.object(routes.source, "find_current_firmware", return_value="sonoff"):
-            with self.assertRaisesRegex(routes.Abort, "takes OpenBeken or Sonoff"):
+            # From Sonoff's firmware the kind is known only at A1; A3 refuses.
+            self.assertEqual(routes.settle_route(ctx), (None, "sonoff"))
+            with self.assertRaisesRegex(routes.Abort, "a Made Up takes OpenBeken"):
+                routes.step_choose(ctx)
+            # A converted plug's kind is known when the route is settled.
+            family.FIRMWARES["esphome"] = "ESPHome"
+            converted = SimpleNamespace(state=self.state(plug_kind="made-up"), firmware_given="tasmota",
+                                        esphome_firmware=None)
+            with mock.patch.object(routes.source, "find_current_firmware", return_value="esphome"):
+                with self.assertRaisesRegex(routes.Abort, "takes OpenBeken or Sonoff or ESPHome"):
+                    routes.settle_route(converted)
+
+
+class BekenTargetTests(unittest.TestCase):
+    """An S61 goes back to Sonoff's firmware from the public dump, not a
+    backup; and a run of one that stopped before its firmware was chosen is
+    resumed as that, not as an S60's of 1.x (both seen in the fault suite)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def state(self, **inputs):
+        state = RunState.open(Path(self.tmp.name) / "run")
+        for key, value in inputs.items():
+            state.set_input(key, value)
+        return state
+
+    def test_an_s61_on_esphome_can_go_back_to_sonoff_without_a_backup(self):
+        ctx = SimpleNamespace(state=self.state(plug_kind="sonoff-s61", plug_mac="12:34:56:ab:cd:ef"),
+                              firmware_given="sonoff", esphome_firmware=None)
+        with mock.patch.object(routes.source, "find_current_firmware", return_value="esphome"), \
+                mock.patch.object(routes.plugs, "find_backup", return_value=None), \
+                mock.patch.object(routes.output, "say"):
+            self.assertEqual(routes.settle_route(ctx), ("sonoff", "esphome"))
+
+    def test_an_s60_still_needs_its_backup(self):
+        ctx = SimpleNamespace(state=self.state(plug_kind="sonoff-s60", plug_mac="12:34:56:ab:cd:ef"),
+                              firmware_given="sonoff", esphome_firmware=None)
+        with mock.patch.object(routes.source, "find_current_firmware", return_value="esphome"), \
+                mock.patch.object(routes.plugs, "find_backup", return_value=None):
+            with self.assertRaisesRegex(routes.Abort, "no backup"):
                 routes.settle_route(ctx)
+
+    def test_an_s61_run_with_no_firmware_chosen_has_the_start_alone(self):
+        state = self.state(plug_kind="sonoff-s61", source="esphome")
+        self.assertIsNone(routes.recorded_firmware(state))
+        self.assertEqual(routes.steps_of(state), [])
+        self.assertEqual(routes.recorded_firmware(self.state(plug_kind="sonoff-s60", source="esphome")), "tasmota")
 
 
 class KindTests(unittest.TestCase):

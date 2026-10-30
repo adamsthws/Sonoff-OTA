@@ -11,6 +11,7 @@ from unittest import mock
 from tools.autoflash.phases import ARM_RE, LOADER_RE, PhaseRunner, PhaseError, short_loader
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED, RunState
 from tools.autoflash import (
+    handover,
     account,
     cli,
     context,
@@ -227,7 +228,7 @@ class ResumeTests(unittest.TestCase):
     def test_every_destructive_step_records_an_attempt_first(self):
 
         # Every route's steps: STEPS holds only the route chosen for the run.
-        known = {step for firmware in routes.FIRMWARES for source in espressif.SOURCES
+        known = {step for firmware in espressif.FIRMWARES for source in espressif.SOURCES
                  if firmware != source
                  for step, _, _ in espressif.steps_for(firmware, source)}
         self.assertTrue(evidence.DESTRUCTIVE_STEPS <= known)
@@ -253,6 +254,14 @@ class ConfirmSkipTests(unittest.TestCase):
              mock.patch.object(output, "transient_end"):
             skipped = runner.confirm_skip(SimpleNamespace(), "D1", "Install Tasmota")
         return skipped, asked, said.call_args.args[0] if said.called else ""
+
+    def test_the_question_defaults_to_no_but_for_the_familys_redo_steps(self):
+        _, asked, _ = self.skip(lambda ctx: (False, "the plug says otherwise"))
+        self.assertFalse(asked.call_args.kwargs["default"])
+        from tools.autoflash import routes
+        with mock.patch.object(routes.espressif, "REDO_STEPS", {"D1"}):
+            _, asked, _ = self.skip(lambda ctx: (False, "the plug says otherwise"))
+        self.assertTrue(asked.call_args.kwargs["default"])
 
     def test_a_step_with_no_check_is_taken_at_its_record(self):
         skipped, asked, said = self.skip(None)
@@ -497,7 +506,7 @@ class EsphomeSignalTests(unittest.TestCase):
         for patch in (mock.patch.object(output, "say"),
                       mock.patch.object(prompts, "section"),
                       mock.patch.object(hub, "run_plan", self.run_plan),
-                      mock.patch.object(mover, "consent_to_leave", self.consent),
+                      mock.patch.object(handover, "consent_to_leave", self.consent),
                       mock.patch.object(mover, "wait_for_mover"),
                       mock.patch.object(esphome, "is_esphome", return_value=False),
                       mock.patch.object(esphome, "image_for", return_value=b"\0" * 64),
@@ -2210,8 +2219,8 @@ class ConsentTests(unittest.TestCase):
         ctx = SimpleNamespace()
         with mock.patch.object(prompts, "require_word", return_value=True) as asked, \
              mock.patch.object(prompts, "warning_box"):
-            mover.consent_to_leave(ctx, "Tasmota")
-            mover.consent_to_leave(ctx, "Tasmota")
+            handover.consent_to_leave(ctx, "Tasmota")
+            handover.consent_to_leave(ctx, "Tasmota")
         self.assertEqual(asked.call_count, 1)
 
     def test_refused_it_says_nothing_was_written(self):
@@ -2219,7 +2228,7 @@ class ConsentTests(unittest.TestCase):
         from types import SimpleNamespace
         with mock.patch.object(prompts, "require_word", return_value=False), \
              mock.patch.object(prompts, "warning_box"), self.assertRaises(errors.NothingWritten):
-            mover.consent_to_leave(SimpleNamespace(), "Tasmota")
+            handover.consent_to_leave(SimpleNamespace(), "Tasmota")
 
     def test_proceed_in_any_case_goes_ahead(self):
         for reply in ("PROCEED", "proceed", " Proceed "):
@@ -2646,7 +2655,7 @@ class FromTasmotasSafebootTests(unittest.TestCase):
         return state
 
     def test_every_starting_point_is_named_in_the_report(self):
-        self.assertEqual(set(report.CONVERTED_FROM), set(espressif.SOURCES))
+        self.assertEqual(set(report.CONVERTED_FROM), {s for f in routes.FAMILIES.values() for s in f.SOURCES})
 
     def test_tasmota_runs_from_t1_until_it_is_left(self):
         self.assertFalse(runs.plug_runs_tasmota(self.state()))           # its safeboot
@@ -2947,7 +2956,7 @@ class PastTheCommitTests(unittest.TestCase):
         with mock.patch.object(unlock, "identify", return_value="tasmota"), \
                 mock.patch.object(mover, "startup_image", return_value=b"image"), \
                 mock.patch.object(join, "wait_for", side_effect=errors.Abort("did not answer")), \
-                mock.patch.object(mover, "send_as_esphome_update") as sent, \
+                mock.patch.object(handover, "send_as_esphome_update") as sent, \
                 self.assertRaises(errors.NothingWritten):
             mover.step_startup_from_esphome(ctx)
         sent.assert_not_called()
@@ -2963,9 +2972,9 @@ class PastTheCommitTests(unittest.TestCase):
         self.assertEqual(self.source([(["E1", "E2", "E3"], None)], running="untemplated"), "committed")
         for firmware in ("tasmota", "esphome", "sonoff"):
             steps = [step for step, _, _ in espressif.steps_for(firmware, "untemplated")]
-            self.assertIn(steps[2], ("L1", "F4"))  # leaving Tasmota, or given its template
+            self.assertIn(steps[1], ("L1", "F4"))  # leaving Tasmota, or given its template
         self.assertEqual([step for step, _, _ in espressif.steps_for("tasmota", "untemplated")],
-                         ["A0", "A5", "F4"])
+                         ["A5", "F4"])
         self.assertEqual(espressif.steps_for("sonoff", "untemplated"), espressif.steps_for("sonoff", "tasmota"))
 
 
@@ -3044,6 +3053,24 @@ class AdoptPlugTests(unittest.TestCase):
              mock.patch.object(output, "say"):
             source.adopt_plug(ctx, found)
         self.assertEqual(inputs["plug_kind"], "sonoff-s60")
+
+    def adopt_esphome(self, title):
+        from types import SimpleNamespace
+        inputs = {}
+        ctx = SimpleNamespace(state=SimpleNamespace(set_input=inputs.__setitem__, input=inputs.get),
+                              set_plug_ip=lambda ip: inputs.__setitem__("plug_ip", ip))
+        with mock.patch.object(hostsys, "mac_of", return_value=None), \
+             mock.patch.object(source.esphome, "title", return_value=title), \
+             mock.patch.object(output, "say"):
+            source.adopt_plug(ctx, detect.Found("192.168.0.137", "esphome"))
+        return inputs.get("plug_kind")
+
+    def test_an_esphome_is_the_kind_its_name_says(self):
+        # Every kind's ESPHome looks the same but for its name: an S61's was
+        # once taken for an S60, and sent the S60's startup firmware.
+        self.assertEqual(self.adopt_esphome("Sonoff S61 abcdef"), "sonoff-s61")
+        self.assertEqual(self.adopt_esphome("Sonoff S60 123456"), "sonoff-s60")
+        self.assertIsNone(self.adopt_esphome(None))
 
 
 class TasmotaAtHomeTests(unittest.TestCase):
@@ -5397,7 +5424,7 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
             "Type its update password", "Try again without one - once you have removed it yourself"])
         self.private.assert_any_call("s3cret-71", "esphome-password")  # kept out of the log
         with mock.patch.object(esphome_ota, "upload") as upload:
-            mover.send_as_esphome_update(ctx, b"image", "the startup firmware")
+            handover.send_as_esphome_update(ctx, b"image", "the startup firmware")
         self.assertEqual(upload.call_args.kwargs["password"], "s3cret-71")
 
     def test_given_in_advance_it_is_not_asked(self):
@@ -5435,7 +5462,7 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
         with mock.patch.object(esphome_ota, "upload", side_effect=[refused, None]) as upload, \
                 mock.patch.object(prompts, "ask_choice", return_value=0), \
                 mock.patch.object(prompts, "ask_secret", return_value="s3cret-71"):
-            mover.send_as_esphome_update(ctx, b"image", "the startup firmware")
+            handover.send_as_esphome_update(ctx, b"image", "the startup firmware")
         self.assertEqual([call.kwargs["password"] for call in upload.call_args_list], [None, "s3cret-71"])
 
     def test_with_its_key_given_no_password_is_asked_and_the_update_goes_encrypted(self):
@@ -5444,7 +5471,7 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
         unlock.unlock_esphome(ctx)  # nothing asked: its key unlocks the update too
         self.assertIsNone(ctx.esphome_password)
         with mock.patch.object(esphome_ota, "upload") as upload:
-            mover.send_as_esphome_update(ctx, b"image", "the startup firmware")
+            handover.send_as_esphome_update(ctx, b"image", "the startup firmware")
         self.assertEqual(upload.call_args.kwargs["key"], self.KEY)
 
     def test_where_it_takes_encrypted_updates_its_key_is_offered_instead(self):

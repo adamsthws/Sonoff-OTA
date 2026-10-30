@@ -19,6 +19,8 @@ class FakeOpenBeken(http.server.ThreadingHTTPServer):
         self.commands: list[str] = []
         self.unknown = {"NoSuchCommand"}
         self.flash_failures = 0   # the first this many flash reads come back short
+        self.uptime = 42
+        self.restarts_on_reboot = True
 
     @property
     def host(self):
@@ -39,7 +41,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/info":
             self._send(200, json.dumps({
-                "uptime_s": 42, "build": "Built on Oct 30 2026 12:00:00 version 1.0.0", "ip": "192.168.0.50",
+                "uptime_s": self.server.uptime, "build": "Built on Oct 30 2026 12:00:00 version 1.0.0", "ip": "192.168.0.50",
                 "mac": "12:34:56:AB:CD:EF", "flags": "0", "mqtthost": ":1883", "mqtttopic": "obk",
                 "chipset": "BK7238", "webapp": "", "shortName": "S61", "startcmd": "",
                 "supportsSSDP": 0, "supportsClientDeviceDB": True}).encode())
@@ -62,6 +64,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         self.server.commands.append(body)
         name = body.split()[0]
+        if name == "reboot" and self.server.restarts_on_reboot:
+            self.server.uptime = 1
         if name in self.server.unknown:
             self._send(200, json.dumps({"error": 501, "msg": "command not found", "res": ""}).encode())
         else:
@@ -111,6 +115,15 @@ class OpenBekenTests(unittest.TestCase):
     def test_ota_http_sends_the_url_as_one_argument(self):
         openbeken.ota_http(self.server.host, "http://192.168.0.2:8088/esphome.rbl")
         self.assertEqual(self.server.commands, ["ota_http http://192.168.0.2:8088/esphome.rbl"])
+
+    def test_a_restart_is_seen_by_its_uptime(self):
+        self.assertTrue(openbeken.restart(self.server.host, wait=10))
+        self.assertEqual(self.server.commands, ["reboot"])
+
+    def test_one_that_does_not_restart_is_said_so(self):
+        self.server.restarts_on_reboot = False
+        with mock.patch.object(openbeken.time, "monotonic", side_effect=[0, 0, 5, 11]):
+            self.assertFalse(openbeken.restart(self.server.host, wait=10))
 
     def test_channels_are_read(self):
         self.assertEqual(openbeken.channels(self.server.host), {"1": 1, "2": 0})

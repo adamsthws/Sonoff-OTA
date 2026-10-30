@@ -38,7 +38,7 @@ class ScrubTests(PrivacyTestCase):
     def test_what_is_needed_to_follow_a_run_stays(self):
         for line in ("The plug is at 192.168.0.50; this computer is 10.0.0.2 and 172.16.4.1",
                      "Tasmota 15.6.0(release-tasmota), template tasmota-settings-template-15.6.0.0.bin",
-                     "Stage 3 of 9 - Discovering the plug - Complete (4s)",
+                     "Stage 3 - Discovering the plug - Complete (4s)",
                      "Sonoff S60 Plug model S60TPG"):
             self.assertEqual(output.scrub(line), line)
 

@@ -124,6 +124,17 @@ def describe_plug(plug: AccountPlug) -> str:
     return f"'{plug.name}' ({plug.model})"
 
 
+def ready(sighting: Sighting) -> bool:
+    """Found, and ready to convert from here: answering eWeLink's discovery
+    and online in eWeLink - or, for a kind whose conversion needs no LAN
+    Control, online and at the hardware address the account gives it."""
+    if sighting.answering:
+        return not cut_off(sighting)
+    kind = kinds.by_key(sighting.plug.kind)
+    return (bool(sighting.ip) and sighting.plug.online is True
+            and kind is not None and not kind.uses_lan_control)
+
+
 def cut_off(sighting: Sighting) -> bool:
     """Answering here while eWeLink shows it offline: the plug is on the
     network but cannot reach the internet, so the upgrade command, which only
@@ -209,22 +220,21 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
         else:
             output.say("Looking for it on your network...")
             sightings = sight_plugs(plugs)
-            ready = [sighting for sighting in sightings
-                     if sighting.answering and not cut_off(sighting)]
-            if len(ready) == 1:
+            found = [sighting for sighting in sightings if ready(sighting)]
+            if len(found) == 1:
                 # The stage line completing says it all; the log keeps which plug.
-                output.say(f"    Found {describe_plug(ready[0].plug)} at {ready[0].ip}.")
-                ctx.account_plug = ready[0].plug
-                return str(ready[0].ip)
-            if ready:
+                output.say(f"    Found {describe_plug(found[0].plug)} at {found[0].ip}.")
+                ctx.account_plug = found[0].plug
+                return str(found[0].ip)
+            if found:
                 output.transient_begin()
                 choice = prompts.ask_choice(
                     "More than one plug in the account answered. Which one is this run for",
-                    [f"{describe_plug(sighting.plug)} at {sighting.ip}" for sighting in ready],
+                    [f"{describe_plug(sighting.plug)} at {sighting.ip}" for sighting in found],
                 )
                 output.transient_end()
-                ctx.account_plug = ready[choice].plug
-                return str(ready[choice].ip)
+                ctx.account_plug = found[choice].plug
+                return str(found[choice].ip)
             waited = time.monotonic() - started
             if all(sighting.plug.online is False for sighting in sightings) and waited < CLOUD_CATCH_UP:
                 # Offline in eWeLink: usually a plug that has only just started -

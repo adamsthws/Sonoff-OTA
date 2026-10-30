@@ -211,7 +211,7 @@ class RecordingTests(unittest.TestCase):
             sys.path.insert(0, {str(ROOT)!r})
             from tools.autoflash import output, prompts
             output.start(None, verbose=False)
-            output.stage_begin(1, 1, "Checking the files")
+            output.stage_begin(1, "Checking the files")
             output.transient_begin()
             prompts.warning_box("Read this first", ["taken away once read"])
             prompts.UNATTENDED = True

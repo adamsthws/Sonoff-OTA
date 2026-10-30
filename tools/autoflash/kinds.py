@@ -17,7 +17,7 @@ run takes (tools/autoflash/routes).  Official Tasmota ends up named after the ki
 template, and ESPHome by the image made for it; every firmware part way
 through a conversion is the tool's own, the same for every kind.
 
-One kind so far: the Sonoff S60.
+Two kinds: the Sonoff S60, an Espressif plug, and the Sonoff S61, a Beken one.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ class Kind:
     # Its chip family (routes.FAMILIES: how firmware gets onto its flash), its
     # chip, and the ecosystem its stock firmware belongs to - how it is paired,
     # found and sent its first new firmware.  Only the first is code of its
-    # own so far: every kind runs eWeLink's firmware on an Espressif chip.
+    # own so far: every kind runs eWeLink's firmware.
     family: str
     chip: str
     ecosystem: str
@@ -52,7 +52,7 @@ class Kind:
     stock_model: str
     # The model a file must be wrapped for, for the stock updater to take it.
     wrapper_model: str
-    # Its wiring, as a Tasmota template gives it.
+    # Its wiring, as a Tasmota template gives it; none for a kind Tasmota does not run on.
     tasmota_gpio: tuple[int, ...]
     # Its ESPHome's friendly name (the image made for it is named as every
     # final ESPHome is, esphome-abcdef), and the names its own network had in
@@ -60,6 +60,15 @@ class Kind:
     esphome_name: str
     esphome_legacy_setup_prefix: str
     esphome_legacy_prefix: str
+    # For a Beken plug: the command its OpenBeken (built with the plug's import
+    # module) takes to fetch and apply Sonoff's firmware again, checking the
+    # slot it goes to first; "" for a kind that has none.
+    openbeken_revert: str = ""
+    # Whether its conversion uses eWeLink's LAN API, so the plug must answer
+    # eWeLink's discovery on the network (LAN Control on in the app). The S61's
+    # goes through eWeLink alone, and the account's record of its hardware
+    # address finds it on the network.
+    uses_lan_control: bool = True
 
     def product_of(self, product_model: str | None) -> str:
         """`product_model` as eWeLink gives it, if it is one of this kind's; else ""."""
@@ -86,7 +95,18 @@ class Kind:
     def names_its_tasmota(self, named: str) -> bool:
         """Whether a Tasmota's module and template, as it names them, are this
         kind's: its template is named after it, whichever product model."""
-        return self.short in named
+        return bool(self.tasmota_gpio) and self.short in named
+
+    def names_its_openbeken(self, named: str | None) -> bool:
+        """Whether an OpenBeken's short device name is this kind's: the import
+        module built into the OpenBeken the tool installs names it so."""
+        return self.family == "beken" and (named or "").strip().upper() == self.short
+
+    def names_its_esphome(self, named: str | None) -> bool:
+        """Whether an ESPHome's friendly name is this kind's (devices/<kind>/esphome.yaml),
+        alone or with the MAC suffix its page shows (Sonoff S61 abcdef)."""
+        return re.fullmatch(re.escape(self.esphome_name.lower()) + r"( [0-9a-f]{6})?",
+                            (named or "").strip().lower()) is not None
 
 
 SONOFF_S60 = Kind(
@@ -112,8 +132,31 @@ SONOFF_S60 = Kind(
     esphome_legacy_prefix="sonoff-s60-",
 )
 
+SONOFF_S61 = Kind(
+    key="sonoff-s61",
+    family="beken",
+    chip="bk7238",
+    ecosystem="ewelink",
+    name="Sonoff S61",
+    maker="Sonoff",
+    short="S61",
+    # The S61S (iPlug Gen2): S61STP and the plug-type letter, Europe's S61STPF.
+    product=re.compile(r"S61STP[A-Z]"),
+    regions=(("F", "Europe (Type E/F)"), ("G", "UK (Type G)")),
+    stock_model="SN-BK7238-S61-01",
+    # The descriptor name in the FOTA container its stock updater stages (tools/beken/fota_wrap.py).
+    wrapper_model="FWSW-01-S61-BK7238",
+    tasmota_gpio=(),  # Tasmota does not run on the BK7238: OpenBeken does
+    # devices/sonoff-s61/esphome.yaml; no earlier builds, so no older names.
+    esphome_name="Sonoff S61",
+    esphome_legacy_setup_prefix="",
+    esphome_legacy_prefix="",
+    openbeken_revert="S61RevertToStock",
+    uses_lan_control=False,
+)
+
 # Every kind the tool converts.
-ALL = (SONOFF_S60,)
+ALL = (SONOFF_S60, SONOFF_S61)
 
 
 def by_key(key: str | None) -> Kind | None:
@@ -136,6 +179,16 @@ def for_stock_model(stock_model: str | None) -> Kind | None:
 def for_tasmota(named: str) -> Kind | None:
     """The kind of a converted Tasmota, by its module and template as it names them."""
     return next((kind for kind in ALL if kind.names_its_tasmota(named)), None)
+
+
+def for_openbeken(named: str | None) -> Kind | None:
+    """The kind of a converted OpenBeken, by its short device name."""
+    return next((kind for kind in ALL if kind.names_its_openbeken(named)), None)
+
+
+def for_esphome(named: str | None) -> Kind | None:
+    """The kind of a converted ESPHome, by its friendly name."""
+    return next((kind for kind in ALL if kind.names_its_esphome(named)), None)
 
 
 def names(attribute: str = "name") -> str:

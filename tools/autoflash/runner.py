@@ -30,7 +30,7 @@ from tools.autoflash.device import DeviceError
 from tools.autoflash.errors import Abort, NothingWritten
 from tools.autoflash.phases import PhaseError, PlugNeverConnected
 from tools.autoflash.prompts import QuitRun
-from tools.autoflash.routes.espressif import bundle, tasmota
+from tools.autoflash.routes.espressif import tasmota
 from tools.autoflash.runs import ROOT
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED
 
@@ -268,7 +268,8 @@ def confirm_skip(ctx: Context, step: str, title: str) -> bool:
     output.say("")
     output.tell(f"{step} is recorded as done, but {message}.")
     output.tell("The record and the device disagree, so the checklist cannot be trusted here.")
-    again = prompts.ask_yes_no(f"Run {step} again", default=False)
+    # Yes, where doing it again is plainly what is wanted (the family's REDO_STEPS).
+    again = prompts.ask_yes_no(f"Run {step} again", default=step in routes.FAMILY.REDO_STEPS)
     output.transient_end()
     return not again
 
@@ -356,14 +357,18 @@ def run_steps(ctx: Context) -> int:
     ctx.state.set_input("stopped_by", None)
     resumed = any(ctx.state.is_done(step) for step, _, _ in routes.STEPS)
     ctx.run_started, ctx.run_resumed = started, resumed
-    if resumed:
+    if resumed and routes.FAMILY.RESUME_CHECK is not None:
         try:
-            bundle.bundle_of_this_version(ctx)
+            routes.FAMILY.RESUME_CHECK(ctx)
         except Abort as refused:
             output.tell(f"Stopped before anything was done: {refused}.")
             return 2
     join.wait_while_plug_busy(ctx)
-    for step, title, _ in routes.STEPS:
+    # By index: A3 lengthens the route as it chooses the firmware.
+    index = 0
+    while index < len(routes.STEPS):
+        step, title, _ = routes.STEPS[index]
+        index += 1
         if ctx.state.is_done(step):
             routes.begin_stage(step)
             if confirm_skip(ctx, step, title):
@@ -391,7 +396,7 @@ def run_steps(ctx: Context) -> int:
                 output.stage_end("already done")
                 continue
             prompts.section("The last step was interrupted", [
-                f"The step that {routes.FAMILY.PLAIN_DESCRIPTION.get(step, title.lower())} was",
+                f"The step that {routes.plain_description(step, title)} was",
                 "stopped part way through, and the plug does not show whether it",
                 "finished. Doing it again is normally safe: every step checks the",
                 "plug before writing anything and refuses if it is not as expected.",
@@ -435,12 +440,12 @@ def run_steps(ctx: Context) -> int:
     firewall.close_firewall_rules(ctx)
     output.tell("")
     output.show("Conversion complete!", output.GREEN)
+    firmware = routes.ROUTE[0] or runs.run_firmware(ctx.state)
     if firmware == "sonoff":
         output.tell("The plug is running its own Sonoff firmware again, with the settings it")
         output.tell("had: it is back in the eWeLink app.")
     else:
-        output.tell("The plug is running ESPHome..." if firmware == "esphome"
-             else "The plug is running official Tasmota...")
+        output.tell(f"The plug is running {'official ' if firmware == 'tasmota' else ''}{routes.FIRMWARES[firmware]}...")
         url = report.plug_page_url(ctx.state.input("plug_ip"))
         if url:
             output.show_link(url, "Your plug")

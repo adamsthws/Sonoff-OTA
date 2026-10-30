@@ -182,6 +182,11 @@ the other tools at it.
 
 ## Conversion and config migration
 
+The conversion tool's own S61 route is `tools/autoflash/routes/beken/`,
+built on the pieces here: `fota_wrap` for the push through eWeLink, `rbl` and
+`stock_app` for Sonoff's firmware made again from the public dump, `uf2` for
+an update sent to ESPHome, `backup.factory_mac` for the backup.
+
 Reading the stock config and carrying the Wi-Fi credentials into OpenBeken. See
 [the config-migration section of the emulation reference](../../docs/beken-s61-emulation.md#carrying-wi-fi-across-the-conversion-the-openbeken-config)
 for the full findings (config partition map, OpenBeken `mainConfig_t` format, the

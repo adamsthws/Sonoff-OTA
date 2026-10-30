@@ -17,6 +17,7 @@ import threading
 import unittest
 import zlib
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 TOOLS = Path(__file__).resolve().parents[2] / "tools" / "beken"
@@ -370,6 +371,45 @@ class FotaWrapTests(unittest.TestCase):
             fota.rbl_version(b"RBL\x00" + bytes(50))     # too short for a header
         with self.assertRaises(ValueError):
             fota.wrap(bytes(200))
+
+    def test_the_announced_version_is_one_the_plug_takes(self):
+        # The stock updater fetches only a version newer than its own 1.0.2,
+        # compared as text: OpenBeken's own 1.0.0 was refused, nothing fetched.
+        self.assertGreater(fota.ANNOUNCED_VERSION, "1.0.2")
+        self.assertLessEqual(len(fota.ANNOUNCED_VERSION), fota.VERSION_MAX)
+
+    def test_cloud_push_announces_it(self):
+        sent = []
+
+        class Session:
+            def __init__(self, *args, **kwargs):
+                self.stub = SimpleNamespace(heard=lambda message: None)
+                self.stublog = []
+
+            def run(self, secs, until=None):
+                self.stub.heard({"action": "register", "deviceid": "1000abcdef", "apikey": "made-up"})
+                self.stub.heard({"action": "update", "deviceid": "1000abcdef"})
+
+            def flash(self):
+                return bytes(0x400000)
+
+            def online(self):
+                return True, True, True, True
+
+        online = SimpleNamespace(SSID=b"net", PW=b"password", DISPATCH_IP="192.0.2.1", DUMP="dump.bin",
+                                 CloudSession=Session,
+                                 ss=SimpleNamespace(send_to_device=lambda device, command: sent.append(command) or True))
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(sys.modules, {"cloud_online": online}):
+            sys.modules.pop("cloud_push", None)
+            import cloud_push
+            image, dump = Path(tmp, "image.rbl"), Path(tmp, "dump.bin")
+            image.write_bytes(self.RBL[:96].replace(b"1.18.319", b"1.0.0\0\0\0") + bytes(256))
+            dump.write_bytes(bytes(0x400000))
+            with mock.patch.object(cloud_push.os, "_exit", side_effect=SystemExit), \
+                 contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                cloud_push.main([str(image), str(Path(tmp, "out.bin")), "--dump", str(dump)])
+            sys.modules.pop("cloud_push", None)
+        self.assertEqual(sent[0]["params"]["version"], fota.ANNOUNCED_VERSION)
 
     def test_the_container_the_firmware_decodes(self):
         c = fota.wrap(self.RBL)

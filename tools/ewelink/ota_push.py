@@ -125,7 +125,7 @@ class FirmwareServer(http.server.ThreadingHTTPServer):
     block_on_close = False
 
     def __init__(self, addr, firmware: bytes, device_ip: str, say: Callable[[str], None] = print,
-                 names: tuple[str, ...] = ("user1.bin", "user2.bin")):
+                 names: tuple[str, ...] = ("user1.bin", "user2.bin"), live: bool | None = None):
         super().__init__(addr, FirmwareHandler)
         self.firmware = firmware
         # The file names it is served under: the stock updater's by default.
@@ -135,8 +135,9 @@ class FirmwareServer(http.server.ThreadingHTTPServer):
         self.bytes_served = 0
         self.served_ranges: list[tuple[int, int]] = []
         # One updating progress line on a terminal; full per-request lines in
-        # logs and tests.
-        self.live = sys.stdout.isatty()
+        # logs and tests, and to `say` whenever live is False (a caller that
+        # keeps the terminal to itself, as Autoflash does).
+        self.live = sys.stdout.isatty() if live is None else live
         self.progress_shown = False
 
     def end_progress(self) -> None:
@@ -244,10 +245,11 @@ def deliver(*, email: str, password: str, country_code: str, region: str, device
             firmware: bytes, version: str, listen_ip: str, listen_port: int, device_ip: str,
             names: tuple[str, ...] = ("user1.bin", "user2.bin"), wait: float = 120.0,
             check_device: Callable[[dict[str, Any], str], None] | None = None,
-            say: Callable[[str], None] = print) -> Delivery:
+            say: Callable[[str], None] = print, live: bool | None = None) -> Delivery:
     """Send `firmware` to the plug `device_id` through eWeLink, as `version` of
     its model.  `check_device(device, model)` may refuse the plug (EwelinkError)
     once eWeLink says what it is; nothing is sent before it has passed.
+    `live`: the progress line on the terminal (FirmwareServer).
     Failures before the command goes out leave `sent` False: the plug was
     never asked for anything.  Ctrl-C after every byte was served is a
     delivery completed; before, one interrupted."""
@@ -291,7 +293,7 @@ def deliver(*, email: str, password: str, country_code: str, region: str, device
             raise EwelinkError("Cloud WebSocket authentication failed")
 
         digest = hashlib.sha256(firmware).hexdigest()
-        server = FirmwareServer((listen_ip, listen_port), firmware, device_ip, say, names=names)
+        server = FirmwareServer((listen_ip, listen_port), firmware, device_ip, say, names=names, live=live)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         base_url = f"http://{listen_ip}:{listen_port}"

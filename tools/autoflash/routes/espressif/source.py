@@ -11,7 +11,7 @@ import shutil
 import time
 from typing import TYPE_CHECKING
 
-from tools.autoflash import detect, hostsys, output, plugs, prompts, runs, unlock
+from tools.autoflash import detect, esphome, hostsys, kinds, output, plugs, prompts, runs, unlock
 from tools.autoflash.device import DeviceError, PASSWORD_HINT
 from tools.autoflash.errors import Abort
 from tools.autoflash.routes.espressif import evidence
@@ -295,6 +295,12 @@ def adopt_plug(ctx: Context, found: "detect.Found") -> None:
         mac = hostsys.normalise_mac(mac)
         ctx.state.set_input("plug_mac", mac)
         runs.file_plug(ctx, mac, None)
-    if found.kind:
-        ctx.state.set_input("plug_kind", found.kind)
+    kind = found.kind
+    if kind is None and found.firmware == "esphome":
+        # Every kind's ESPHome looks the same but for its name: an S61's run
+        # must never take the S60's way.
+        named = kinds.for_esphome(esphome.title(found.host))
+        kind = named.key if named else None
+    if kind:
+        ctx.state.set_input("plug_kind", kind)
     output.say(f"    This run is for {found.describe()}.")

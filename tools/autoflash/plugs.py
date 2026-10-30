@@ -15,6 +15,7 @@ plug's eWeLink keys, and a MAC identifies the plug.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -164,14 +165,25 @@ BACKUP_OUTCOMES = {
 }
 
 
+# A Beken plug's own data, where it is in its flash: the factory record (MAC,
+# radio calibration), the stock store (Wi-Fi, meter calibration, eWeLink
+# identity) and the system store, 0x3e0000 to the end of the 4 MB.
+BEKEN_REGION = (0x3E0000, 0x20000)
+BEKEN_BACKUP_BIN = "config-0x3e0000.bin"
+BEKEN_MANIFEST = "backup.json"
+
+
 @dataclass(frozen=True)
 class Backup:
-    """One plug's Sonoff backup, as the emulator and later runs see it."""
+    """One plug's Sonoff backup, as the emulator and later runs see it: an
+    Espressif plug's whole flash and eFuses, or a Beken plug's own data with
+    Sonoff's firmware beside it (`family`)."""
     mac: str
     directory: Path
     version: str
     taken: str
     name: str
+    family: str = "espressif"
 
     def describe(self) -> str:
         """For a menu: the MAC first, since that is what tells plugs apart."""
@@ -183,12 +195,17 @@ class Backup:
 
 def find_backup(mac: str) -> Backup | None:
     directory = backup_dir(mac)
-    if not ((directory / "flash.bin").is_file() and (directory / "efuse.bin").is_file()):
+    if (directory / "flash.bin").is_file() and (directory / "efuse.bin").is_file():
+        family = "espressif"
+    elif (directory / BEKEN_BACKUP_BIN).is_file() and (directory / BEKEN_MANIFEST).is_file():
+        family = "beken"
+    else:
         return None
     record = read_plug(mac)
     return Backup(mac=folder_name(mac).replace("-", ":"), directory=directory,
                   version=str(record.get("stock_version") or "unknown version"),
-                  taken=str(record.get("backed_up") or ""), name=str(record.get("ewelink_name") or ""))
+                  taken=str(record.get("backed_up") or ""), name=str(record.get("ewelink_name") or ""),
+                  family=family)
 
 
 def backups() -> list[Backup]:
@@ -263,4 +280,66 @@ def save_backup(flash: bytes, efuse: bytes, report: dict[str, Any],
     # Whole or not at all: a backup is only ever seen complete.
     staging.rename(directory)
     remember_plug(mac, stock_version=version, backed_up=date)
+    return directory, True
+
+
+BEKEN_README = """\
+The {kind} with MAC address {mac}: its own data, read out of it through
+OpenBeken on {date}, just after Sonoff {version} was replaced; and
+Sonoff's firmware, as the image that puts it back.
+
+  config-0x3e0000.bin  the last 128 KiB of the plug's flash, as read: the
+                       factory record (MAC, radio calibration), the store
+                       Sonoff's firmware keeps its Wi-Fi, meter calibration
+                       and eWeLink identity in, and the system store. None of
+                       it is changed by a conversion: the plug keeps its own.
+  stock-app-*.rbl      Sonoff's firmware, the same for every plug of this kind,
+                       made from the public dump of a stock plug: what the
+                       plug's bootloader installs to go back
+  backup.json          what this is: offsets, hashes, when
+
+This is the original: nothing rewrites it, and the files are read-only. Keep
+it private. config-0x3e0000.bin holds your Wi-Fi password and the plug's
+eWeLink keys. It belongs to this plug only - the MAC above is on no other.
+
+Going back to the Sonoff firmware
+  Run the conversion tool and choose Sonoff's own firmware: the plug fetches
+  stock-app-*.rbl and its bootloader installs it, and it reads its own data
+  from where it still is on the plug. config-0x3e0000.bin is for the day that
+  data is lost, written back at 0x3e0000 over a serial connection.
+"""
+
+
+def save_beken_backup(mac: str, region: bytes, stock: bytes | None, stock_version: str,
+                      *, kind: str = "plug", date: str | None = None) -> tuple[Path, bool]:
+    """Keep a Beken plug's own data as its backup, Sonoff's firmware beside it
+    where there is one; `kind`, what the plug is called in the README.
+
+    Returns where it is, and whether it was saved now: a plug that has one
+    already keeps it, whatever was read this time.
+    """
+    directory = backup_dir(mac)
+    if find_backup(mac) is not None:
+        return directory, False
+    directory.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    staging = Path(tempfile.mkdtemp(prefix=f".{BACKUP}.", dir=directory.parent))
+    start, _size = BEKEN_REGION
+    manifest: dict[str, Any] = {
+        "device": kind, "mac": mac, "taken": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "source": "OpenBeken GET /api/flash after conversion",
+        "regions": {BEKEN_BACKUP_BIN: {"flash_offset": f"0x{start:x}", "length": len(region),
+                                       "sha256": hashlib.sha256(region).hexdigest()}},
+    }
+    _write_read_only(staging / BEKEN_BACKUP_BIN, region)
+    if stock is not None:
+        name = f"stock-app-{stock_version or 'unknown'}.rbl"
+        _write_read_only(staging / name, stock)
+        manifest["regions"][name] = {"sha256": hashlib.sha256(stock).hexdigest(),
+                                     "contents": "Sonoff's firmware as the rt_ota image the bootloader applies"}
+    _write_read_only(staging / BEKEN_MANIFEST, (json.dumps(manifest, indent=2) + "\n").encode())
+    date = date or time.strftime("%Y-%m-%d")
+    readme = BEKEN_README.format(kind=kind, mac=mac, date=date, version=stock_version or "(unknown version)")
+    _write_read_only(staging / "README.txt", readme.encode())
+    staging.rename(directory)  # whole or not at all: a backup is only ever seen complete
+    remember_plug(mac, stock_version=stock_version or None, backed_up=date)
     return directory, True

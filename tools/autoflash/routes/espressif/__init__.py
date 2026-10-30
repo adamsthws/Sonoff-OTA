@@ -7,10 +7,15 @@ from __future__ import annotations
 
 from typing import Any, Callable, TYPE_CHECKING
 
-from tools.autoflash import account, output, prompts, runs
+from tools.autoflash import account
 from tools.autoflash.routes.espressif import bundle, hub, installer, mover, sonoff, tasmota
 from tools.autoflash.routes.espressif.evidence import ATTEMPTED_EVIDENCE, DESTRUCTIVE_STEPS  # noqa: F401
 from tools.autoflash.routes.espressif.tasmota import STEP_VERIFIERS  # noqa: F401
+
+# Where a step recorded done is doubted, it is run again only when asked to.
+REDO_STEPS: set[str] = set()
+# Sonoff's firmware goes back on from the plug's own backup: there is no other.
+SONOFF_FROM_BACKUP = True
 
 if TYPE_CHECKING:
     from tools.autoflash.context import Context
@@ -21,41 +26,19 @@ FIRMWARES = {"tasmota": "Tasmota", "esphome": "ESPHome", "sonoff": "Sonoff"}
 POINT_OF_NO_RETURN = "C2"
 
 
-def step_prerequisites(ctx: Context) -> dict[str, Any]:
-    """A0 - what has to be in place first, for anyone who skipped the README."""
-    if any(ctx.state.is_done(step) for step in ctx.state.data["steps"] if step != "A0"):
-        return {"shown": False}  # a run from before this step existed
-    output.transient_begin()
-    if runs.run_source(ctx.state) == "sonoff":
-        needed = [
-            "- The eWeLink app on your phone, signed in to an eWeLink account",
-            "  (free - a throwaway account is fine).",
-            "- The plug set up in the app on the 2.4 GHz Wi-Fi it should stay on:",
-            "  it keeps that network after the conversion, and cannot use 5 GHz.",
-            "- LAN Control turned on in the plug's settings in the app.",
-        ]
-    else:
-        needed = [
-            "- The plug on the 2.4 GHz Wi-Fi it should stay on, as it is now: the",
-            "  firmware it gets keeps that network.",
-            "- This computer on the same network.",
-        ]
-    prompts.section("Before you start", needed + [
-        "- The plug in a socket nobody will switch off until the run finishes.",
-        "",
-        "Nothing on the plug changes until you confirm, once, just before the",
-        "point of no return - you will be asked then.",
-    ])
-    prompts.wait_for_key()
-    output.transient_end()  # read: the list leaves the screen, the stage line stays
-    return {"shown": True}
+def resume_check(ctx: Context) -> None:
+    """A resumed run checks its bundle first (routes.FAMILY.RESUME_CHECK)."""
+    bundle.bundle_of_this_version(ctx)
 
 
-# Shared prefix: stock Sonoff layout is still in place through D1 inclusive.
+RESUME_CHECK = resume_check
+
+
+# From Sonoff's firmware, after the start every route shares (routes.STOCK_START:
+# A0, the plug found in eWeLink, the firmware chosen): stock Sonoff layout is
+# still in place through D1 inclusive.
 COMMON_STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = [
-    ("A0", "Before you start", step_prerequisites),
     ("A5", "Offline preconditions", bundle.step_check),
-    ("A1", "Pair the plug in eWeLink", account.step_pair),
     ("A2", "Discover, metadata and device key", account.step_discover),
     ("C2", "Stock to recovery bridge", installer.step_bridge),
     ("C3", "Back up the Sonoff firmware", installer.step_backup),
@@ -93,8 +76,8 @@ TO_HUB_STEPS: list[tuple[str, str, Callable[[Context], dict[str, Any]]]] = [
     ("X1", "Startup firmware, sent as an ESPHome update", mover.step_startup_from_esphome),
     ("X2", "Berry Tasmota, uploaded to the startup firmware", mover.step_berry_from_startup),
 ]
-# What every run begins with: the checks on this computer.
-START_STEPS = [step for step in COMMON_STEPS if step[0] in ("A0", "A5")]
+# What every run of this family begins with, after A0: the checks on this computer.
+START_STEPS = [step for step in COMMON_STEPS if step[0] == "A5"]
 # "midway": a plug a run left part way, found by a new one: on Sonoff's layout,
 # running the mover, the startup firmware or the interim Tasmota.
 # "committed": one a run left past the commit (E3), on Tasmota's layout with the
@@ -167,9 +150,7 @@ ERASED_CHECK_STEPS = {"D4", "D5", "E1", "E2", "E3", "I1", "G1", "H1"}
 # Each step's name on its stage line, in words that need no knowledge of the
 # internals.
 STAGE_NAMES = {
-    "A0": "Confirming prerequisites",
     "A5": "Validating local files",
-    "A1": "Discovering the plug",
     "A2": "Querying Sonoff firmware",
     "C2": "Sending bridge firmware",
     "C3": "Backing up Sonoff firmware",
@@ -203,9 +184,7 @@ TARGET_STAGE_NAMES = {
 
 # What each step does, in words that assume no knowledge of the internals.
 PLAIN_DESCRIPTION = {
-    "A0": "lists what needs to be in place before starting",
     "A5": "checks the files on this computer before anything is touched",
-    "A1": "gets the plug onto your network through the eWeLink app",
     "A2": "asks the plug what firmware it is running",
     "C2": "replaces the plug's Sonoff firmware with our small installer firmware",
     "C3": "keeps a backup of the plug's Sonoff firmware on this computer",

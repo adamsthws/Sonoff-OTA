@@ -12,6 +12,7 @@ from tools.autoflash import (
     device,
     esphome,
     esphome_ota,
+    handover,
     imprint,
     join,
     names,
@@ -68,26 +69,6 @@ def step_esphome_install(ctx: Context) -> dict[str, Any]:
                                                    "signal_dbm": signal}
 
 
-def consent_to_leave(ctx: Context, what: str) -> None:
-    """The go-ahead, once, before the first write of a run from Tasmota or ESPHome.
-    Not asked again as a step that stopped is tried again by itself: seen, a
-    retry asked for it, and Enter stopped the run."""
-    if getattr(ctx, "consented", False):
-        return
-    output.transient_begin()
-    prompts.warning_box("Before going on", [
-        f"From here the plug's {what} is replaced. DO NOT UNPLUG IT during the",
-        "process. Changing firmware rewrites the memory map and the bootloader",
-        "for a moment each, when a power cut would leave a plug that has to be",
-        "opened to repair.",
-        "Only go ahead with a plug you can afford to lose",
-    ])
-    if not prompts.require_word(prompts.CONSENT_WORD):
-        raise NothingWritten("not confirmed - nothing has been written to the plug")
-    output.transient_end()
-    ctx.consented = True
-
-
 def step_leave_tasmota(ctx: Context) -> dict[str, Any]:
     """L1 - from Tasmota's layout to Sonoff's, the mover started there.
 
@@ -107,7 +88,7 @@ def step_leave_tasmota(ctx: Context) -> dict[str, Any]:
     signal = join.note_signal(ctx, join.plug_signal(ctx.device), [
         "After this stage the mover, and each firmware after it, has",
         "to join your Wi-Fi on its own, and a weak signal makes that less certain."])
-    consent_to_leave(ctx, "Tasmota")
+    handover.consent_to_leave(ctx, "Tasmota")
     try:
         plan = plans.leave_tasmota(esphome.mover_for(ssid, password), esphome.sonoff_table(),
                                    esphome.published_bootloader())
@@ -165,35 +146,6 @@ def table_written(ctx: Context) -> bool:
         return False
 
 
-def send_as_esphome_update(ctx: Context, image: bytes, what: str) -> float:
-    """`image` as an ordinary ESPHome update, to ESPHome or the mover."""
-    host = ctx.state.input("plug_ip")
-    started = time.monotonic()
-
-    def progress(sent: int, total: int) -> None:
-        output.progress(f"sending {what}: {100 * sent // total}%")
-
-    # Asked before the go-ahead (unlock_esphome); here again only for a plug
-    # that changed since, or a run sending it once more.
-    while True:
-        try:
-            esphome_ota.upload(host, image, progress=progress, password=ctx.esphome_password,
-                               key=ctx.esphome_key)
-            break
-        except esphome_ota.NeedsPassword:
-            output.progress_clear()
-            unlock.ask_esphome_password(ctx, host)
-        except (esphome_ota.NeedsEncryption, esphome_ota.WrongKey):
-            output.progress_clear()
-            unlock.ask_esphome_key(ctx, host)
-        except (esphome_ota.OTAError, OSError) as exc:
-            raise Abort(f"sending {what} to the plug failed: {exc}") from exc
-        finally:
-            output.progress_clear()
-        started = time.monotonic()  # the time asked is not the time sending
-    return round(time.monotonic() - started, 1)
-
-
 def step_esphome_from_mover(ctx: Context) -> dict[str, Any]:
     """M1 - ESPHome, sent to the mover as an ESPHome update: it writes it into
     the other slot, checks it, and starts it."""
@@ -215,7 +167,7 @@ def step_esphome_from_mover(ctx: Context) -> dict[str, Any]:
             image = esphome.image_for(ssid, password, own=ctx.esphome_firmware)
         except (esphome.ImageError, imprint.ImprintError, OSError) as exc:
             raise Abort(f"the ESPHome image cannot be used: {exc}") from exc
-    seconds = send_as_esphome_update(ctx, image, "ESPHome")
+    seconds = handover.send_as_esphome_update(ctx, image, "ESPHome")
     output.say(f"    ESPHome sent in {seconds}s; the plug restarts into it.")
     return {"seconds": seconds, "size": len(image)}
 
@@ -237,7 +189,7 @@ def step_startup_from_esphome(ctx: Context, *, again: bool = False) -> dict[str,
                 "Nothing has been written yet. From here the plug restarts several",
                 "times, and each time it has to rejoin your Wi-Fi on its own; a weak",
                 "signal makes that less certain."]))
-        consent_to_leave(ctx, "ESPHome" if runs.run_source(ctx.state) == "esphome" else "firmware")
+        handover.consent_to_leave(ctx, "ESPHome" if runs.run_source(ctx.state) == "esphome" else "firmware")
     running = unlock.identify(ctx, host) if host else None
     if running in ("startup", "hub"):
         output.say("The plug is already past this step.")
@@ -256,7 +208,7 @@ def step_startup_from_esphome(ctx: Context, *, again: bool = False) -> dict[str,
         join.wait_for(ctx, lambda address: esphome_ota.probe(address), "ESPHome's update service")
     except Abort as exc:
         raise NothingWritten(str(exc)) from exc
-    seconds = send_as_esphome_update(ctx, image, "the startup firmware")
+    seconds = handover.send_as_esphome_update(ctx, image, "the startup firmware")
     join.wait_for(ctx, lambda address: device.Device(address, timeout=4).is_safeboot(),
              "the startup firmware on your Wi-Fi")
     output.say(f"    The startup firmware is on your Wi-Fi (sent in {seconds}s).")

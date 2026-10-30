@@ -114,7 +114,7 @@ def stage_timings(ctx: Context, key: str) -> str:
 
 
 # What a run's starting point is called in its report: one for each of SOURCES.
-CONVERTED_FROM = {"sonoff": "Sonoff", "tasmota": "Tasmota", "esphome": "ESPHome",
+CONVERTED_FROM = {"sonoff": "Sonoff", "tasmota": "Tasmota", "esphome": "ESPHome", "openbeken": "OpenBeken",
                   "midway": "unfinished conversion", "committed": "unfinished conversion",
                   "installer": "unfinished conversion", "safeboot": "Tasmota's safeboot",
                   "untemplated": "Tasmota without its template"}

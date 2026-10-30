@@ -91,8 +91,11 @@ def describe_run(directory: Path) -> str:
     mac = plugs.mac_of_run(directory) or state.input("plug_mac")
     if mac and state.input("plug_ip"):
         where += f", MAC {mac}"
-    pending = next((step for step, _, _ in routes.steps_of(state)
-                    if not state.is_done(step)), None)
+    # The step after the last one done: a run of an earlier version has no
+    # record of a step added since, which is not where it stopped.
+    steps = [step for step, _, _ in routes.steps_of(state)]
+    done = [index for index, step in enumerate(steps) if state.is_done(step)]
+    pending = next((step for step in steps[done[-1] + 1 if done else 0:] if not state.is_done(step)), None)
     try:
         when = dt.datetime.fromisoformat(state.data.get("updated_utc", "")).astimezone()
         today = when.date() == dt.date.today()
@@ -427,7 +430,7 @@ def _main() -> int:
             args.run = resolve_run_name(args.run, args.new, args.plug_ip,
                                         ask=args.command == "run" and not args.unattended)
         ctx = Context(args)
-        routes.apply_target(runs.run_firmware(ctx.state), runs.run_source(ctx.state),
+        routes.apply_target(routes.recorded_firmware(ctx.state), runs.run_source(ctx.state),
                             routes.family_of(ctx.state))  # a run settles it at its start
     except QuitRun:
         output.say("Stopped. Nothing was changed.")

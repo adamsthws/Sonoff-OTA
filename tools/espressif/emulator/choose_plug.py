@@ -50,7 +50,7 @@ class Choice:
 
 
 def choices() -> list[Choice]:
-    found = [Choice(b.mac, b.directory, b.describe()) for b in plugs.backups()]
+    found = [Choice(b.mac, b.directory, b.describe()) for b in plugs.backups() if b.family == "espressif"]
     flash, efuse = LEGACY / "flash.bin", LEGACY / "efuse.bin"
     if flash.is_file() and efuse.is_file():
         mac = plugs.mac_from_efuse(efuse.read_bytes())

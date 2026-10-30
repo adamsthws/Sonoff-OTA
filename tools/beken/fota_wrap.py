@@ -38,6 +38,11 @@ import time
 import zlib
 
 STAGING_NAME = "FWSW-01-S61-BK7238"   # the image-type name the staging handler matches
+# The version an image is announced as, in the container and the upgrade
+# command: the stock updater takes only one newer than the firmware it runs
+# (1.0.2), comparing them as text, and does not fetch anything else - an image's
+# own version (OpenBeken's 1.0.0) would be refused. Well above any Sonoff release.
+ANNOUNCED_VERSION = "9.9.9"
 # The version is written NUL-terminated into the trailer (bytes 2..20, before its
 # CRC) and the descriptor (0x20..0x30, before the file offset): 15 characters at most.
 VERSION_MAX = 15

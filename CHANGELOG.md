@@ -21,13 +21,25 @@ check.
   eWeLink account - with each chip family's steps under
   `tools/autoflash/routes/<family>/`, where one file held it all before.
   Nothing a run does changes.
+- The tool converts the Sonoff S61 (`--firmware openbeken`, `esphome` or
+  `sonoff`), in every direction: from Sonoff's firmware through eWeLink, from
+  OpenBeken or ESPHome to the other or back to Sonoff's firmware, each one
+  update the plug installs as it restarts; the plug's own Wi-Fi and meter
+  calibration stay on the plug for each firmware to read. Its backup (the
+  plug's own data, and Sonoff's firmware from the public dump) is taken
+  through OpenBeken after the first conversion, the only firmware that can
+  read it. Tested against stand-ins so far: not in the emulator end to end,
+  nor on a real plug.
+- From Sonoff's firmware the run finds the plug in eWeLink before it asks
+  which firmware: which firmware a plug can have depends on what plug it is.
+  The question is a stage of its own (Choosing the firmware), after
+  Discovering the plug; a run given `--firmware` is not asked.
 - The S61's firmware is published: OpenBeken 1.0.0 (OpenBK7231T_App at
   `ce1abad` with the 4 MB table and the S61 import module) and ESPHome 1.0.0
   for the S61 (built with ESPHome
   [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0) on
   LibreTiny 1.13.0), built and pinned by `tools/repo/update_firmware.py
-  openbeken` and `esphome --plug sonoff-s61`. The tool's S61 route is still
-  to come.
+  openbeken` and `esphome --plug sonoff-s61`.
 - The repository is laid out by what things are: `tools/espressif/` and
   `tools/beken/` for each chip family's tooling and emulator, `tools/ewelink/`,
   `tools/repo/`, `devices/<plug>/` for what is one plug's alone, `tests/`

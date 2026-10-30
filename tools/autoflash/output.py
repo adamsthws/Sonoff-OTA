@@ -54,10 +54,11 @@ class _State:
     log: IO[str] | None = None
     log_path: Path | None = None
     concise = False
-    stage: str | None = None          # "Stage 5 of 14 - Installing Tasmota", as logged
-    stage_prefix = ""                 # "Stage  5 of 14", coloured with the outcome
-    stage_screen = ""                 # the same, numbers and name padded into columns
+    stage: str | None = None          # "Stage 5 - Installing Tasmota", as logged
+    stage_prefix = ""                 # "Stage  5", coloured with the outcome
+    stage_screen = ""                 # the same, number and name padded into columns
     name_width = 0                    # the longest stage name, so the columns line up
+    most_stages = 0                   # the most the run may have, its numbers' column as wide
     transient_rows: int | None = None  # rows on screen since transient_begin()
     pending_prompt: str | None = None  # a question on screen, waiting for its answer
     pending_answer = ""
@@ -149,6 +150,7 @@ def start(log_path: Path | None, *, verbose: bool) -> None:
             _write_log(f"=== run started, tool version {__version__}{' (verbose)' if verbose else ''} ===")
         _s.concise = not verbose
         _s.paused = False
+        _s.name_width = _s.most_stages = 0   # the run's own route sets them (set_stage_width)
         _s.run_waited = 0.0
         _s.waiting_since = None   # a question left unanswered is not this run's wait
         if _s.concise and sys.stdout.isatty() and _s.ticker is None:
@@ -493,20 +495,23 @@ def hold():
             _s.held = before
 
 
-def set_stage_width(width: int) -> None:
-    """The longest stage name in the run, so every stage line's status lines up."""
-    _s.name_width = width
+def set_stage_width(width: int, most: int = 0) -> None:
+    """The longest stage name in the run, and the most stages it may have, so
+    every stage line's name and status line up."""
+    _s.name_width, _s.most_stages = width, most
 
 
-def stage_begin(number: int, total: int, name: str) -> None:
+def stage_begin(number: int, name: str) -> None:
+    """No total: a run from Sonoff's firmware learns its route only part way
+    through, and every stage line says the same either way."""
     with _lock:
-        label = f"Stage {number} of {total} - {name}"
+        label = f"Stage {number} - {name}"
         if _s.stage == label:
             return  # already begun: keep its line and its clock
         _break()
-        digits = len(str(total))
+        digits = len(str(max(_s.most_stages, number)))
         _s.stage = label
-        _s.stage_prefix = f"Stage {number:>{digits}} of {total}"
+        _s.stage_prefix = f"Stage {number:>{digits}}"
         _s.stage_screen = f"{_s.stage_prefix} - {name:<{_s.name_width}}"
         _s.stage_started = time.monotonic()
         _s.stage_waited = 0.0

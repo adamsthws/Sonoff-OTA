@@ -10,6 +10,8 @@ from tools.ewelink import discover_ewelink
 S60 = {"deviceid": "1001234abc", "name": "Kitchen", "productModel": "S60TPG", "online": True,
        "devicekey": "secret", "extra": {"model": "SN-ESP32C3-S60-01"},
        "params": {"staMac": "AA:BB:CC:12:34:56", "ssid": "Home-2G"}}
+S61 = {"deviceid": "1001234abd", "name": "Desk", "productModel": "S61STPF", "online": True,
+       "extra": {"model": "SN-BK7238-S61-01"}, "params": {"staMac": "12:34:56:AB:CD:EF"}}
 SWITCH = {"deviceid": "1000aaaaaa", "name": "Hall light", "productModel": "MINIR4", "online": True,
           "extra": {"model": "SN-ESP32-MINIR4"}, "params": {}}
 
@@ -43,6 +45,21 @@ class MatchTests(unittest.TestCase):
         [seen] = account.match_plugs([self.plug], {}, {"192.168.0.50": "aa:bb:cc:12:34:56"})
         self.assertEqual((seen.ip, seen.answering), ("192.168.0.50", False))
         self.assertIn("turn on LAN Control", account.why_not_found(seen))
+
+    def test_an_s60_seen_by_hardware_address_alone_is_not_ready(self):
+        [seen] = account.match_plugs([self.plug], {}, {"192.168.0.50": "aa:bb:cc:12:34:56"})
+        self.assertFalse(account.ready(seen))
+
+    def test_an_s61_needs_no_lan_control(self):
+        # Its conversion goes through eWeLink alone: online there, and at the
+        # hardware address the account gives it, it is found.
+        [seen] = account.match_plugs([account.account_plug(S61)], {}, {"192.0.2.51": "12:34:56:ab:cd:ef"})
+        self.assertTrue(account.ready(seen))
+
+    def test_an_s61_offline_in_ewelink_is_not_ready(self):
+        [seen] = account.match_plugs([account.account_plug({**S61, "online": False})], {},
+                                     {"192.0.2.51": "12:34:56:ab:cd:ef"})
+        self.assertFalse(account.ready(seen))
 
     def test_offline_in_ewelink_says_so(self):
         [seen] = account.match_plugs([account.account_plug({**S60, "online": False})], {}, {})
@@ -81,7 +98,7 @@ class TypedAddressTests(unittest.TestCase):
         with self.found(["1000aaaaaa"]), mock.patch.object(output, "tell"):
             problem = account.plug_at({"1001234abc"})("192.168.0.60")
         self.assertEqual(problem, ["192.168.0.60 is a different eWeLink device, not one of this "
-                                   "account's Sonoff S60 plugs."])
+                                   "account's Sonoff S60 or Sonoff S61 plugs."])
 
     def test_without_an_account_any_ewelink_device_will_do(self):
         with self.found(["1000aaaaaa"]), mock.patch.object(output, "tell"):
@@ -188,7 +205,7 @@ class FindAccountPlugTests(unittest.TestCase):
              mock.patch.object(prompts, "ask_ipv4", return_value="192.168.0.50"), \
              mock.patch.object(prompts, "section") as shown:
             self.assertEqual(account.find_account_plug(ctx, [SWITCH]), "192.168.0.50")
-        self.assertIn("No Sonoff S60 in the eWeLink account owner@example.com", shown.call_args.args[0])
+        self.assertIn("No Sonoff S60 or Sonoff S61 in the eWeLink account owner@example.com", shown.call_args.args[0])
         self.assertIn("- 'Hall light' (MINIR4)", shown.call_args.args[1])
 
 

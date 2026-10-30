@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from tools.autoflash import (
+    handover,
     cli,
     detect,
     errors,
@@ -57,23 +58,39 @@ class RouteTestCase(unittest.TestCase):
 
 
 class FirmwareChoiceTests(RouteTestCase):
+    """From Sonoff's firmware the choice waits for A1 to say what kind of plug
+    it is (step_choose, A3); a converted plug's kind is known when the route
+    is settled."""
+
     def setUp(self):
         super().setUp()
         self.setUp_found()
+        self.addCleanup(routes.apply_target, "tasmota", "sonoff")
 
-    def test_it_is_asked_once_then_kept(self):
+    def test_it_is_asked_once_the_plug_is_known_then_kept(self):
         ctx = self.ctx()
+        self.assertEqual(routes.settle_route(ctx), (None, "sonoff"))
+        self.assertEqual([step for step, _, _ in routes.steps_of(ctx.state)], ["A0", "A1", "A3"])
         with mock.patch.object(prompts, "ask_choice", return_value=1) as asked:
-            self.assertEqual(routes.settle_firmware(ctx), "esphome")
+            self.assertEqual(routes.step_choose(ctx)["firmware"], "esphome")
         self.assertEqual(asked.call_args.args[1], ["Tasmota", "ESPHome"])
         self.assertEqual(ctx.state.input("firmware"), "esphome")
+        self.assertEqual([step for step, _, _ in routes.STEPS][-2:], ["I1", "I2"])
         with mock.patch.object(prompts, "ask_choice", side_effect=AssertionError("asked again")):
+            self.assertEqual(routes.step_choose(ctx)["firmware"], "esphome")
             self.assertEqual(routes.settle_firmware(ctx), "esphome")
 
     def test_given_on_the_command_line_it_is_not_asked(self):
         ctx = self.ctx(given="esphome")
         with mock.patch.object(prompts, "ask_choice", side_effect=AssertionError("asked")):
-            self.assertEqual(routes.settle_firmware(ctx), "esphome")
+            self.assertEqual(routes.step_choose(ctx), {"firmware": "esphome", "asked": False})
+
+    def test_a_firmware_the_plugs_family_does_not_take_is_refused(self):
+        ctx = self.ctx(given="openbeken")
+        with self.assertRaisesRegex(errors.Abort, "a Sonoff S60 takes Tasmota or ESPHome"):
+            routes.step_choose(ctx)
+        with self.assertRaisesRegex(errors.Abort, "already runs Sonoff"):
+            routes.step_choose(self.ctx(given="sonoff"))
 
     def test_a_conversion_cannot_switch_part_way(self):
         ctx = self.ctx(given="tasmota", firmware="esphome")
@@ -90,7 +107,7 @@ class FirmwareChoiceTests(RouteTestCase):
         ctx = self.ctx()
         with mock.patch.object(prompts, "UNATTENDED", True):
             with self.assertRaisesRegex(errors.Abort, "--firmware esphome"):
-                routes.settle_firmware(ctx)
+                routes.step_choose(ctx)
         self.assertIsNone(ctx.state.input("firmware"))
 
 
@@ -258,6 +275,56 @@ class ESPHomePageTests(unittest.TestCase):
     def test_a_tasmota_page_is_not(self):
         host = self.serve(b"<html><body>Tasmota</body></html>", {"Content-Type": "text/html"})
         self.assertFalse(esphome.is_esphome(host))
+
+
+class ESPHomeTitleTests(unittest.TestCase):
+    """The name an ESPHome's page shows, which says the kind of plug: read
+    from its event stream, which a real ESPHome never closes."""
+
+    def serve(self, events, then_hold=True):
+        import http.server
+        import threading
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        class Events(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+                self.wfile.write(events)
+                self.wfile.flush()
+                if then_hold:
+                    release.wait(30)   # the stream stays open, as ESPHome's does
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Events)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"127.0.0.1:{server.server_address[1]}"
+
+    def test_the_title_comes_from_the_first_ping_without_the_stream_ending(self):
+        host = self.serve(b'retry: 30000\nid: 1\nevent: ping\ndata: {"title":"Sonoff S61 abcdef",'
+                          b'"comment":"","ota":true,"log":true,"lang":"en","uptime":12}\n\n')
+        started = time.monotonic()
+        self.assertEqual(esphome.title(host, timeout=10), "Sonoff S61 abcdef")
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_a_stream_with_no_title_says_none(self):
+        host = self.serve(b"event: state\ndata: {}\n\n" * 25, then_hold=False)
+        self.assertIsNone(esphome.title(host, timeout=5))
+
+    def test_nothing_listening_says_none(self):
+        import socket
+        with socket.socket() as spare:
+            spare.bind(("127.0.0.1", 0))
+            port = spare.getsockname()[1]
+        self.assertIsNone(esphome.title(f"127.0.0.1:{port}", timeout=2))
 
 
 class SignalSensorTests(unittest.TestCase):
@@ -645,7 +712,7 @@ class SignalBeforeLeavingESPHomeTests(RouteTestCase):
     def x1(self, signal, carry_on=True):
         ctx = self.ctx(source="esphome")
         with mock.patch.object(esphome, "signal", return_value=signal), \
-                mock.patch.object(mover, "consent_to_leave") as consent, \
+                mock.patch.object(handover, "consent_to_leave") as consent, \
                 mock.patch.object(detect, "identify", return_value="startup"), \
                 mock.patch.object(prompts, "ask_yes_no", return_value=carry_on) as asked, \
                 mock.patch.object(prompts, "section"):
@@ -718,7 +785,7 @@ class FromAConvertedPlugTests(RouteTestCase):
     def test_every_route_ends_by_checking_its_firmware(self):
         last = {"tasmota": "H1", "esphome": "I2", "sonoff": "R2"}
         for running in espressif.SOURCES:
-            for firmware in routes.FIRMWARES:
+            for firmware in espressif.FIRMWARES:
                 if firmware == running or (running == "sonoff" and firmware == "sonoff"):
                     continue
                 steps = [step for step, _, _ in espressif.steps_for(firmware, running)]
@@ -726,11 +793,11 @@ class FromAConvertedPlugTests(RouteTestCase):
                     # Its own Tasmota put back, not converted: T1 sees it running,
                     # set up as before; H1 would hold its safeboot and bootloader,
                     # whatever made them, to this version's.
-                    self.assertEqual(steps, ["A0", "A5", "T1"])
+                    self.assertEqual(steps, ["A5", "T1"])
                     continue
                 if (running, firmware) == ("untemplated", "tasmota"):
                     # Given its template alone, likewise.
-                    self.assertEqual(steps, ["A0", "A5", "F4"])
+                    self.assertEqual(steps, ["A5", "F4"])
                     continue
                 self.assertEqual(steps[-1], last[firmware], (running, firmware))
                 self.assertEqual(len(steps), len(set(steps)), (running, firmware))
@@ -742,9 +809,9 @@ class FromAConvertedPlugTests(RouteTestCase):
     def test_past_the_commit_official_tasmota_goes_on_first(self):
         # Never the hub's steps: they need Sonoff's two slots, and Tasmota's
         # layout has one - the slot swap waits for a restart that never comes.
-        for firmware in routes.FIRMWARES:
+        for firmware in espressif.FIRMWARES:
             steps = [step for step, _, _ in espressif.steps_for(firmware, "committed")]
-            self.assertEqual(steps[:4], ["A0", "A5", "F2", "F4"], firmware)
+            self.assertEqual(steps[:3], ["A5", "F2", "F4"], firmware)
             if firmware != "tasmota":
                 self.assertIn("H1", steps)
                 self.assertEqual(steps[steps.index("H1") + 1], "L1", firmware)  # then on from Tasmota
@@ -755,9 +822,9 @@ class FromTheInstallerTests(RouteTestCase):
     def test_on_from_the_installer_it_needs_no_ewelink(self):
         # Left part way from Sonoff's firmware: the backup and D1 need only the
         # installer; the eWeLink steps, which a plug on it cannot answer, are not run.
-        for firmware in routes.FIRMWARES:
+        for firmware in espressif.FIRMWARES:
             steps = [step for step, _, _ in espressif.steps_for(firmware, "installer")]
-            self.assertEqual(steps[:4], ["A0", "A5", "C3", "D1"], firmware)
+            self.assertEqual(steps[:3], ["A5", "C3", "D1"], firmware)
             self.assertFalse({"A1", "A2", "C2"} & set(steps), firmware)
 
     def test_an_upload_to_the_installer_is_tried_again(self):

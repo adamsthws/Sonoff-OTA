@@ -53,10 +53,10 @@ def main(argv: list[str] | None = None) -> int:
     secs = float(os.environ.get("SECS", "400"))
 
     rbl = args.image.read_bytes()
-    version = fota_wrap.rbl_version(rbl)
-    container = fota_wrap.wrap(rbl)
+    version = fota_wrap.ANNOUNCED_VERSION
+    container = fota_wrap.wrap(rbl, version=version)
     digest = hashlib.sha256(container).hexdigest()
-    print("[push] %s: RBL %d bytes, version %s; FOTA container %d bytes, sha256 %s"
+    print("[push] %s: RBL %d bytes, announced as %s; FOTA container %d bytes, sha256 %s"
           % (args.image.name, len(rbl), version, len(container), digest[:16]), flush=True)
 
     flash = bytearray(args.dump.read_bytes())
