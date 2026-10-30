@@ -16,6 +16,15 @@
 //
 // Reversible by design: it reads the stock store, never writes it.
 //
+// Two things in one file, for now. The EF40 reader (the KV40 node format, its
+// CRC, the windowed scan, the wifi-ssid/wifi-pass keys) is eWeLink's on any
+// Beken plug, from the same firmware tree. Everything after it is the S61's:
+// where its store sits, its BL0937 meter's calibration block and constants,
+// its wiring, its names. The second Beken device this project takes on is
+// when they are split - the reader into tools/beken/openbeken/ for both to
+// share, a short module like this one per device - not before: splitting
+// against an imagined device would be guessing at which constants vary.
+//
 // Trigger it from the conversion (idempotent; a no-op once Wi-Fi is set):
 //     startDriver SonoffS61Import
 // or call Sonoff_S61_ImportStockWiFi() once from platform init.
