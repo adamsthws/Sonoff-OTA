@@ -54,6 +54,45 @@ class FirmwareServerTests(unittest.TestCase):
         status, _, body = self.request("/user1.bin?ignored=query")
         self.assertEqual((status, body), (200, self.firmware))
 
+    def test_serves_the_names_it_is_given(self):
+        # OpenBeken fetches by the URL it is given, firmware.rbl (routes/beken/onward.py).
+        named = FirmwareServer(("127.0.0.1", 0), self.firmware, "127.0.0.1", names=("firmware.rbl",))
+        thread = threading.Thread(target=named.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for path, status in (("/firmware.rbl", 200), ("/user1.bin", 404)):
+                connection = http.client.HTTPConnection("127.0.0.1", named.server_address[1], timeout=2)
+                connection.request("GET", path)
+                self.assertEqual(connection.getresponse().status, status, path)
+                connection.close()
+        finally:
+            named.shutdown()
+            named.server_close()
+            thread.join(timeout=2)
+
+    def test_a_download_cut_off_says_how_far_it_got(self):
+        import socket
+        big = FirmwareServer(("127.0.0.1", 0), bytes(16 * 1024 * 1024), "127.0.0.1")
+        thread = threading.Thread(target=big.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = socket.create_connection(("127.0.0.1", big.server_address[1]), timeout=2)
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+            client.sendall(b"GET /user1.bin HTTP/1.1\r\nHost: x\r\n\r\n")
+            got = 0
+            while got < 200 * 1024:
+                got += len(client.recv(65536))
+            client.close()
+            deadline = time.monotonic() + 5
+            while big.unique_bytes_served() == 0 and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertGreater(big.unique_bytes_served(), 0)
+            self.assertLess(big.unique_bytes_served(), 16 * 1024 * 1024)
+        finally:
+            big.shutdown()
+            big.server_close()
+            thread.join(timeout=2)
+
     def test_rejects_wrong_source(self):
         self.server.device_ip = "192.0.2.55"
         status, _, body = self.request()
@@ -95,7 +134,7 @@ class OfflineTests(unittest.TestCase):
 
     def test_one_that_comes_back_is_sent_to(self):
         from unittest import mock
-        import tools.espressif.serve_tasmota_ota as sender
+        from tools.ewelink import ota_push as sender
         looks = iter([{"online": False}, {"online": True}])
         with mock.patch("builtins.print"):
             device = sender.until_online({"online": False}, lambda: next(looks), sleep=lambda _: None)
@@ -103,7 +142,7 @@ class OfflineTests(unittest.TestCase):
 
     def test_one_that_stays_away_is_given_up_on(self):
         from unittest import mock
-        import tools.espressif.serve_tasmota_ota as sender
+        from tools.ewelink import ota_push as sender
         looks = []
 
         def look():
@@ -145,17 +184,17 @@ class FailureTests(unittest.TestCase):
 
 class DescribeCloudTests(unittest.TestCase):
     def test_offline_and_online(self):
-        from tools.espressif.serve_tasmota_ota import describe_cloud
+        from tools.ewelink.ota_push import describe_cloud
         self.assertIn("went offline", describe_cloud({"action": "sysmsg", "params": {"online": False}}, "1"))
         self.assertIn("back online", describe_cloud({"action": "sysmsg", "params": {"online": True}}, "1"))
 
     def test_upgrade_reply(self):
-        from tools.espressif.serve_tasmota_ota import describe_cloud
+        from tools.ewelink.ota_push import describe_cloud
         self.assertEqual(describe_cloud({"error": 0, "sequence": "7"}, "7"), "Cloud: upgrade command accepted")
         self.assertIn("error 406", describe_cloud({"error": 406, "sequence": "7"}, "7"))
 
     def test_update_shows_state_but_never_identifiers(self):
-        from tools.espressif.serve_tasmota_ota import describe_cloud
+        from tools.ewelink.ota_push import describe_cloud
         line = describe_cloud({"action": "update", "deviceid": "1001234abc", "apikey": "secret",
                                "params": {"fwVersion": "1.2.0", "ssid": "Home", "switch": "on"}}, "1")
         self.assertIn('"fwVersion": "1.2.0"', line)
@@ -164,6 +203,6 @@ class DescribeCloudTests(unittest.TestCase):
         self.assertNotIn("Home", line)
 
     def test_empty_messages_stay_quiet(self):
-        from tools.espressif.serve_tasmota_ota import describe_cloud
+        from tools.ewelink.ota_push import describe_cloud
         self.assertIsNone(describe_cloud({"action": "update", "params": {}}, "1"))
         self.assertIsNone(describe_cloud({"error": 0, "sequence": "other"}, "1"))

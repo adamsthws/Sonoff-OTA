@@ -10,14 +10,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import http.server
 import ipaddress
-import json
 import os
 import sys
-import threading
-import time
-import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -28,189 +23,11 @@ from tools.autoflash import kinds  # noqa: E402
 from tools.autoflash.prompts import ask_secret
 from tools.espressif.analyze_vendor_ota import analyze
 from tools.espressif.build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE
-from tools.ewelink.get_device_key import APP_ID, EwelinkError, api_json, get_devices, login_session, select_device, target_id_from_mdns
-from tools.ewelink.probe_ota_command import WS_DISPATCH, nonce
-from tools.ewelink.query_ota import ota_identity
-from tools.ewelink.websocket_minimal import WebSocket, WebSocketError
+from tools.ewelink.get_device_key import EwelinkError, target_id_from_mdns
+from tools.ewelink.ota_push import NOT_SENT, FirmwareServer, deliver, parse_single_range  # noqa: F401  (the server, for its tests)
 
 
 SAFETY_FLAG = "--i-understand-stock-has-no-automatic-rollback"
-
-
-class FirmwareHandler(http.server.BaseHTTPRequestHandler):
-    """Serve the wrapped Tasmota binary, including Range request support."""
-    server_version = "TasmotaOTA/1.0"
-    protocol_version = "HTTP/1.1"  # keep-alive by default
-    # The plug holds its keep-alive connection open after the last range. With
-    # no idle limit the handler waits on it forever, and shutdown() - which
-    # waits for the handler - never returns.
-    timeout = 10
-
-    def log_message(self, fmt, *args):
-        # Successful range requests become one progress line on a terminal;
-        # anything else - refusals, errors - is always printed in full.
-        if self.server.live and len(args) > 1 and str(args[1]).startswith("2"):
-            return
-        self.server.end_progress()
-        print(f"  [{self.client_address[0]}] {fmt % args}")
-
-    def _empty_response(self, status: int) -> None:
-        self.send_response(status)
-        self.send_header("Content-Length", "0")
-        self.send_header("Connection", "close")
-        self.end_headers()
-
-    def do_GET(self):
-        if self.client_address[0] != self.server.device_ip:
-            self._empty_response(403)
-            return
-        path = urllib.parse.urlsplit(self.path).path
-        if path not in {"/user1.bin", "/user2.bin"}:
-            self._empty_response(404)
-            return
-
-        fw: bytes = self.server.firmware
-        total = len(fw)
-
-        range_hdr = self.headers.get("Range", "")
-        if range_hdr:
-            try:
-                lo, hi = parse_single_range(range_hdr, total)
-            except ValueError:
-                self.send_response(416)
-                self.send_header("Content-Range", f"bytes */{total}")
-                self.send_header("Content-Length", "0")
-                self.send_header("Connection", "close")
-                self.end_headers()
-                return
-            chunk = fw[lo:hi + 1]
-            self.send_response(206)
-            self.send_header("Content-Range", f"bytes {lo}-{hi}/{total}")
-        else:
-            lo, hi = 0, total - 1
-            chunk = fw
-            self.send_response(200)
-
-        self.send_header("Content-Type", "application/octet-stream")
-        self.send_header("Content-Length", str(len(chunk)))
-        self.send_header("Accept-Ranges", "bytes")
-        self.end_headers()
-        self.wfile.write(chunk)
-        self.server.bytes_served += len(chunk)
-        self.server.served_ranges.append((lo, hi))
-        if self.server.live:
-            unique = self.server.unique_bytes_served()
-            sys.stdout.write(f"\r  Delivered {unique:,} of {total:,} bytes "
-                             f"({100 * unique // total}%)   ")
-            sys.stdout.flush()
-            self.server.progress_shown = True
-        else:
-            print(f"  Served {path} bytes {lo:,}-{hi:,} ({len(chunk):,} bytes)")
-
-
-class FirmwareServer(http.server.ThreadingHTTPServer):
-    # Connections are handled on their own threads, so the accept loop - and
-    # with it shutdown() - is never stuck behind an open connection.
-    daemon_threads = True
-    block_on_close = False
-
-    def __init__(self, addr, firmware: bytes, device_ip: str):
-        super().__init__(addr, FirmwareHandler)
-        self.firmware = firmware
-        self.device_ip = device_ip
-        self.bytes_served = 0
-        self.served_ranges: list[tuple[int, int]] = []
-        # One updating progress line on a terminal; full per-request lines in
-        # logs and tests.
-        self.live = sys.stdout.isatty()
-        self.progress_shown = False
-
-    def end_progress(self) -> None:
-        if self.progress_shown:
-            sys.stdout.write("\n")
-            self.progress_shown = False
-
-    def unique_bytes_served(self) -> int:
-        if not self.served_ranges:
-            return 0
-        merged = 0
-        lo, hi = sorted(self.served_ranges)[0]
-        for next_lo, next_hi in sorted(self.served_ranges)[1:]:
-            if next_lo <= hi + 1:
-                hi = max(hi, next_hi)
-            else:
-                merged += hi - lo + 1
-                lo, hi = next_lo, next_hi
-        return merged + hi - lo + 1
-
-
-def parse_single_range(value: str, total: int) -> tuple[int, int]:
-    """Parse the one explicit byte range supported by the stock updater."""
-    if not value.startswith("bytes=") or "," in value:
-        raise ValueError("unsupported Range header")
-    bounds = value[6:].split("-")
-    if len(bounds) != 2 or not bounds[0]:
-        raise ValueError("range start is required")
-    try:
-        lo = int(bounds[0])
-        hi = int(bounds[1]) if bounds[1] else total - 1
-    except ValueError as exc:
-        raise ValueError("non-numeric Range header") from exc
-    if lo < 0 or hi < lo or lo >= total or hi >= total:
-        raise ValueError("range is outside the firmware body")
-    return lo, hi
-
-
-# Never printed: they identify the account, the device or the network.
-CLOUD_PRIVATE_KEYS = {"apikey", "deviceid", "at", "ssid", "bssid", "ip", "mac", "staMac", "userAgent"}
-
-
-def describe_cloud(message: dict[str, Any], seq: str) -> str | None:
-    """One plain line for a cloud message during delivery, or None to stay quiet.
-
-    The upgrade reply, the plug going offline or coming back, and what the plug
-    reports about itself are what matter here; account and device identifiers
-    are never printed.
-    """
-    action = message.get("action")
-    params = message.get("params") if isinstance(message.get("params"), dict) else {}
-    if message.get("sequence") == seq and action is None:
-        error = message.get("error", 0)
-        return "Cloud: upgrade command accepted" if error == 0 else f"Cloud: upgrade command rejected (error {error})"
-    if action == "sysmsg" and "online" in params:
-        return ("Cloud: the plug is back online" if params["online"]
-                else "Cloud: the plug went offline - expected while it restarts to install")
-    shown = {key: value for key, value in params.items()
-             if key not in CLOUD_PRIVATE_KEYS and isinstance(value, (str, int, float, bool))}
-    if action == "update":
-        return f"Cloud: the plug reported {json.dumps(shown, sort_keys=True)}" if shown else None
-    if action is None and message.get("error", 0) == 0:
-        return None  # replies to the cloud's own keep-alives
-    detail = f" {json.dumps(shown, sort_keys=True)}" if shown else ""
-    error = f" error {message['error']}" if message.get("error") else ""
-    return f"Cloud: {action or 'message'}{error}{detail}"
-
-
-# How long a plug offline in eWeLink is waited for before the send is refused.
-OFFLINE_WAIT = 180.0
-
-
-def until_online(device: dict, look_again, *, sleep=time.sleep) -> dict:
-    """`device` as eWeLink has it once it is online, or after OFFLINE_WAIT."""
-    waited = 0.0
-    while not device.get("online") and waited < OFFLINE_WAIT:
-        if waited == 0:
-            print(f"Device is offline in eWeLink; waiting up to {OFFLINE_WAIT:.0f}s for it to come back...")
-        sleep(10)
-        waited += 10
-        device = look_again()
-    return device
-
-
-# Said when a send failed before the upgrade command went out: the plug was
-# never asked to fetch the installer, so it never came - which the run must
-# not blame on this computer's firewall (tools.autoflash.routes.espressif.installer.bridge_failure_advice).
-NOT_SENT = "The upgrade command was not sent: nothing reached the plug."
 
 
 def report_failure(exc: BaseException, sent: bool) -> None:
@@ -275,30 +92,17 @@ def main():
     if not valid:
         print("Refusing: firmware failed the complete wrapper/native-image preflight", file=sys.stderr)
         return 2
-    sha256_wrapped = hashlib.sha256(firmware).hexdigest()
-    print(f"Firmware: {args.firmware} ({len(firmware):,} bytes)")
+    print(f"Firmware: {args.firmware} ({len(firmware):,} bytes), SHA-256 {hashlib.sha256(firmware).hexdigest()}")
 
     password = os.environ.get("EWELINK_PASSWORD") or ask_secret("eWeLink password: ")
-    server: FirmwareServer | None = None
-    thread: threading.Thread | None = None
-    ws: WebSocket | None = None
-    sent = False
-    run_error: str | None = None
-    try:
-        region, session = login_session(args.email, password, args.country_code, args.region)
-        password = ""
-        devices = get_devices(region, session["at"])
-        device_id = target_id_from_mdns(args.mdns_capture)
-        device = select_device(devices, device_id)
-        identity = ota_identity(device)
-        print(f"Device: {device.get('name')} ({identity['model']}, stock {identity['version']})")
 
+    def check(device: dict[str, Any], model: str) -> None:
         # Only a plug of a kind this tool converts, and only a file wrapped
         # for it: another Sonoff on the same account must never be sent it.
-        kind = kinds.for_stock_model(identity["model"])
+        kind = kinds.for_stock_model(model)
         if kind is None:
             raise EwelinkError(
-                f"Device model is {identity['model']}, not one this tool converts "
+                f"Device model is {model}, not one this tool converts "
                 f"({kinds.stock_models()}); refusing"
             )
         if wrapper["model"] != kind.wrapper_model:
@@ -306,125 +110,30 @@ def main():
                 f"The file is wrapped for {wrapper['model']}, not the {kind.name}'s "
                 f"{kind.wrapper_model}; refusing"
             )
-        # Offline a while after a send cut off part way (this computer stopped
-        # mid-download, say): the plug keeps Sonoff's firmware and comes back
-        # to eWeLink in its own time - or, seen in the emulator, only once it
-        # is switched off and on.  Waited for, not refused at once.
-        device = until_online(device, lambda: select_device(get_devices(region, session["at"]), device_id))
-        if not device.get("online"):
+        version = str((device.get("params") or {}).get("fwVersion"))
+        if version != args.expected_current_version:
             raise EwelinkError(
-                "Device is offline in eWeLink; refusing to send - the upgrade command "
-                "reaches the plug only through eWeLink. If it has internet access, "
-                "switch the plug off and on (after a send cut off part way it can "
-                "stay away from eWeLink until it restarts), then run this again"
-            )
-        if identity["version"] != args.expected_current_version:
-            raise EwelinkError(
-                f"Device reports {identity['version']}, expected "
+                f"Device reports {version}, expected "
                 f"{args.expected_current_version}; refusing"
             )
 
-        dispatch = api_json(WS_DISPATCH[region], headers={"Authorization": "Bearer " + session["at"]})
-        ws = WebSocket.connect(dispatch["domain"], int(dispatch["port"]))
-        now = time.time()
-        ws.send_json({
-            "action": "userOnline", "at": session["at"], "apikey": session["user"]["apikey"],
-            "appid": APP_ID, "nonce": nonce(), "ts": int(now), "userAgent": "app",
-            "sequence": str(int(now * 1000)), "version": 8,
-        })
-        handshake = ws.receive_json(timeout=10)
-        if handshake.get("error", 0) != 0:
-            raise EwelinkError("Cloud WebSocket authentication failed")
-
-        server = FirmwareServer((args.listen_ip, args.listen_port), firmware, args.device_ip)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        base_url = f"http://{args.listen_ip}:{args.listen_port}"
-        print(f"Serving only {args.device_ip} at {base_url}/user1.bin and /user2.bin")
-        print(f"SHA-256 (complete wrapped file): {sha256_wrapped}")
-
-        entries = [
-            {"name": name, "downloadUrl": f"{base_url}/{name}", "digest": sha256_wrapped}
-            for name in ("user1.bin", "user2.bin")
-        ]
-        seq = str(int(time.time() * 1000))
-        ws.send_json({
-            "action": "upgrade", "deviceid": device["deviceid"],
-            "apikey": device["apikey"], "userAgent": "app", "sequence": seq,
-            "params": {"model": identity["model"], "version": wrapper["header_version"], "binList": entries},
-        })
-        sent = True
-        print("\nUpgrade command sent with owner-controlled private-LAN URLs.")
-        print(f"Waiting up to {args.wait:.0f}s for device to connect...")
-
-        deadline = time.monotonic() + args.wait
-        complete_at: float | None = None
-        import socket as _sock
-        while time.monotonic() < deadline:
-            # Delivery is checked first.  A quiet cloud socket must never delay
-            # the exit: every byte may already be on the device.
-            if server.unique_bytes_served() == len(firmware):
-                if complete_at is None:
-                    complete_at = time.monotonic()
-                    server.end_progress()
-                    print("  Complete firmware byte coverage observed; allowing verification time.")
-                elif time.monotonic() - complete_at >= 8:
-                    break
-
-            if ws is not None:
-                try:
-                    msg = ws.receive_json(timeout=0.5)
-                    server.end_progress()
-                    line = describe_cloud(msg, seq)
-                    if line:
-                        print(f"  {line}")
-                    if msg.get("sequence") == seq and msg.get("error", 0) != 0:
-                        raise EwelinkError(f"Cloud rejected upgrade command: error {msg['error']}")
-                except _sock.timeout:
-                    pass
-                except WebSocketError as exc:
-                    # The device going offline for its reboot commonly closes
-                    # the cloud stream. HTTP delivery must continue regardless.
-                    server.end_progress()
-                    print(f"  Cloud monitoring ended ({exc}); HTTP server remains active.")
-                    try:
-                        ws.close()
-                    except OSError:
-                        pass
-                    ws = None
-
-            else:
-                time.sleep(0.25)
-    except KeyboardInterrupt:
-        # Ctrl-C after the whole image has been delivered is not a failure: the
-        # device already has it and is rebooting.  Interrupting before that is.
-        if server is not None and server.unique_bytes_served() == len(firmware):
-            print("\n  Interrupted after every byte was delivered; treating as complete.")
-        else:
-            print("\n  Interrupted before the firmware was fully delivered.", file=sys.stderr)
-            run_error = "interrupted before the firmware was fully delivered"
-    except (EwelinkError, WebSocketError, OSError, KeyError, json.JSONDecodeError) as exc:
-        report_failure(exc, sent)
-        run_error = str(exc)
-    finally:
-        password = ""
-        if ws is not None:
-            ws.close()
-        if server is not None:
-            server.shutdown()
-            server.server_close()
-        if thread is not None:
-            thread.join(timeout=3)
-
-    if server is None:
+    delivered = deliver(email=args.email, password=password, country_code=args.country_code, region=args.region,
+                        device_id=target_id_from_mdns(args.mdns_capture), firmware=firmware,
+                        version=wrapper["header_version"], listen_ip=args.listen_ip, listen_port=args.listen_port,
+                        device_ip=args.device_ip, wait=args.wait, check_device=check)
+    password = ""
+    if delivered.error and not delivered.interrupted:
+        report_failure(EwelinkError(delivered.error), delivered.sent)
+    elif delivered.interrupted:
+        print("\n  Interrupted before the firmware was fully delivered.", file=sys.stderr)
+    if not delivered.sent and delivered.error:
         return 1
-    unique = server.unique_bytes_served()
-    print(f"\nTotal bytes served: {server.bytes_served:,}; unique firmware bytes: {unique:,}/{len(firmware):,}")
-    if not sent or server.bytes_served == 0:
+    print(f"\nUnique firmware bytes served: {delivered.bytes_served:,}/{len(firmware):,}")
+    if not delivered.sent or delivered.bytes_served == 0:
         print("Device did not connect; no firmware bytes were transferred.")
-    elif unique != len(firmware):
+    elif not delivered.complete:
         print("WARNING: the device did not request every firmware byte.")
-    return 0 if run_error is None and sent and unique == len(firmware) else 1
+    return 0 if delivered.error is None and delivered.complete else 1
 
 
 if __name__ == "__main__":
