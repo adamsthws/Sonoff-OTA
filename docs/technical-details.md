@@ -344,7 +344,10 @@ chip family: `routes/espressif/` holds the S60's - `installer.py`, `hub.py`,
 `tasmota.py`, `mover.py` and `sonoff.py` by where the plug is on its way,
 `source.py` for what it runs when a run starts, `evidence.py` for what a
 step cut off left behind, `bundle.py` for the firmware bundle - and
-`routes/__init__.py` settles which route a run takes. The modules call each
+`routes/__init__.py` settles which route a run takes, by the plug's kind: a
+family package gives it the same handful of names (its `FIRMWARES`, `SOURCES`
+and `steps_for`, and what the runner needs to know of each step), so a second
+chip family is a second package, not a change to the runner. The modules call each
 other's functions by module name (`installer.reach_bridge`), never imported
 bare, so a test patches a function on the one module that defines it.
 `archive/` holds the research

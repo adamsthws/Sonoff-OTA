@@ -9,10 +9,14 @@ from typing import Any, Callable, TYPE_CHECKING
 
 from tools.autoflash import account, output, prompts, runs
 from tools.autoflash.routes.espressif import bundle, hub, installer, mover, sonoff, tasmota
+from tools.autoflash.routes.espressif.evidence import ATTEMPTED_EVIDENCE, DESTRUCTIVE_STEPS  # noqa: F401
+from tools.autoflash.routes.espressif.tasmota import STEP_VERIFIERS  # noqa: F401
 
 if TYPE_CHECKING:
     from tools.autoflash.context import Context
 
+# What a plug of this family may run: the firmware a run installs, by its key.
+FIRMWARES = {"tasmota": "Tasmota", "esphome": "ESPHome", "sonoff": "Sonoff"}
 # After this step the plug no longer runs its Sonoff firmware.
 POINT_OF_NO_RETURN = "C2"
 

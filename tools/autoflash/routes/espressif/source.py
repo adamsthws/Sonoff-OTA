@@ -21,11 +21,6 @@ if TYPE_CHECKING:
     from tools.autoflash.context import Context
 
 
-def sonoff_backup_exists(ctx: Context) -> bool:
-    mac = ctx.state.input("plug_mac")
-    return bool(mac and plugs.find_backup(mac))
-
-
 def known_macs() -> set[str]:
     """The MACs of the plugs this computer has records of: their backups and their runs."""
     return {name.replace("-", ":") for name in

@@ -1,13 +1,21 @@
 """The route a run takes: from what the plug runs to the firmware asked for,
 as a list of steps.  Settled once at the run's start, then kept in STEPS
-for the run; each chip family has its own tables (espressif/).
+for the run.
+
+The steps are a chip family's (FAMILIES, by the kind of plug's family): a
+package under here with the same handful of names - FIRMWARES, SOURCES and
+steps_for(firmware, source) for its routes, and what the runner needs to know
+of each step: POINT_OF_NO_RETURN, DESTRUCTIVE_STEPS, RETRY_STEPS,
+ERASED_CHECK_STEPS, STAGE_NAMES, TARGET_STAGE_NAMES, PLAIN_DESCRIPTION,
+ATTEMPTED_EVIDENCE and STEP_VERIFIERS.  One so far: espressif/.
 """
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import Any, Callable, TYPE_CHECKING
 
-from tools.autoflash import detect, output, prompts, runs
+from tools.autoflash import detect, kinds, output, plugs, prompts, runs
 from tools.autoflash.errors import Abort
 from tools.autoflash.routes import espressif
 from tools.autoflash.routes.espressif import source
@@ -16,16 +24,33 @@ from tools.autoflash.state import RunState
 if TYPE_CHECKING:
     from tools.autoflash.context import Context
 
-# What a run installs, and what the plug runs to begin with, as settled at its start.
-FIRMWARES = {"tasmota": "Tasmota", "esphome": "ESPHome", "sonoff": "Sonoff"}
+Steps = list[tuple[str, str, Callable[["Context"], dict[str, Any]]]]
+
+# Each chip family's routes, by the name a kinds.Kind gives its family.
+FAMILIES: dict[str, ModuleType] = {"espressif": espressif}
+# What a run may install, every family's together: for the command line, and
+# for naming one.  Which a plug can have is its family's FIRMWARES.
+FIRMWARES = {name: label for family in FAMILIES.values() for name, label in family.FIRMWARES.items()}
 
 
-def steps_of(state: RunState) -> list[tuple[str, str, Callable[[Context], dict[str, Any]]]]:
-    return espressif.steps_for(runs.run_firmware(state), runs.run_source(state))
+def family_of(state: RunState) -> ModuleType:
+    """The family whose steps a run takes: its kind's (kinds.of_run)."""
+    return FAMILIES[kinds.of_run(state).family]
 
 
-# This run's steps: Tasmota's from Sonoff until the route is known (apply_target).
-TASMOTA_STEPS = espressif.steps_for("tasmota")
+def steps_for(firmware: str, source: str = "sonoff", family: ModuleType = espressif) -> Steps:
+    """The steps from `source` firmware to `firmware` on a plug of `family`."""
+    return family.steps_for(firmware, source)
+
+
+def steps_of(state: RunState) -> Steps:
+    return steps_for(runs.run_firmware(state), runs.run_source(state), family_of(state))
+
+
+# This run's route: Tasmota from Sonoff on an Espressif plug until it is known
+# (apply_target).  FAMILY is the module whose tables the runner reads.
+FAMILY = espressif
+TASMOTA_STEPS = steps_for("tasmota")
 STEPS = TASMOTA_STEPS
 STEP_INDEX = {step: (title, handler) for step, title, handler in STEPS}
 
@@ -33,11 +58,24 @@ STEP_INDEX = {step: (title, handler) for step, title, handler in STEPS}
 ROUTE = ("tasmota", "sonoff")
 
 
-def apply_target(firmware: str, source: str = "sonoff") -> None:
-    global STEPS, STEP_INDEX, ROUTE
+def apply_target(firmware: str, source: str = "sonoff", family: ModuleType = espressif) -> None:
+    global STEPS, STEP_INDEX, ROUTE, FAMILY
     ROUTE = (firmware, source)
-    STEPS = espressif.steps_for(firmware, source)
+    FAMILY = family
+    STEPS = steps_for(firmware, source, family)
     STEP_INDEX = {step: (title, handler) for step, title, handler in STEPS}
+
+
+def past_the_point_of_no_return(state: RunState) -> bool:
+    """Whether a run has written to its plug: past its family's POINT_OF_NO_RETURN."""
+    return state.is_done(family_of(state).POINT_OF_NO_RETURN)
+
+
+def sonoff_backup_exists(ctx: Context) -> bool:
+    """Whether this computer holds the plug's Sonoff backup: what going back
+    to Sonoff's firmware needs."""
+    mac = ctx.state.input("plug_mac")
+    return bool(mac and plugs.find_backup(mac))
 
 
 class NothingToDo(Exception):
@@ -77,12 +115,16 @@ def settle_route(ctx: Context) -> tuple[str, str]:
     else:
         running = source.find_current_firmware(ctx)
     # Tasmota stays a choice on Tasmota: its meter checked (rerun_on_tasmota).
-    choices = [name for name in FIRMWARES if name != running or running == "tasmota"]
-    if running != "sonoff" and not source.sonoff_backup_exists(ctx):
+    offered = family_of(ctx.state).FIRMWARES
+    choices = [name for name in offered if name != running or running == "tasmota"]
+    if running != "sonoff" and not sonoff_backup_exists(ctx):
         choices.remove("sonoff")  # going back needs this plug's backup
     if given:
         if given == running:
             nothing_to_convert(ctx, running)
+        if given not in offered:
+            raise Abort(f"this plug cannot go to {FIRMWARES[given]}: a {kinds.of_run(ctx.state).name} "
+                        f"takes {' or '.join(offered.values())}")
         if given not in choices:
             raise Abort(f"this plug cannot go to {FIRMWARES[given]}: there is no backup of its "
                         "Sonoff firmware on this computer")
@@ -129,10 +171,10 @@ def ask_firmware(source: str, choices: list[str]) -> str:
 
 
 def stage_name(step: str) -> str:
-    named = espressif.TARGET_STAGE_NAMES.get(ROUTE[0], {})
+    named = FAMILY.TARGET_STAGE_NAMES.get(ROUTE[0], {})
     if step in named:
         return named[step]
-    return espressif.STAGE_NAMES.get(step, STEP_INDEX[step][0])
+    return FAMILY.STAGE_NAMES.get(step, STEP_INDEX[step][0])
 
 
 def begin_stage(step: str) -> None:

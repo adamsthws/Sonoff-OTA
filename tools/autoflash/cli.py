@@ -45,7 +45,6 @@ from tools.autoflash.context import Context  # noqa: E402
 from tools.autoflash.errors import Abort  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.prompts import QuitRun  # noqa: E402
-from tools.autoflash.routes import espressif  # noqa: E402
 from tools.autoflash.routes.espressif import bundle, installer  # noqa: E402
 from tools.autoflash.state import RunState  # noqa: E402
 from tools.espressif.safeboot.prepare_imprinted_bundle import forget_stored_password  # noqa: E402
@@ -103,7 +102,7 @@ def describe_run(directory: Path) -> str:
     details = [f"stopped at step {pending}" if pending else "finished", stamp]
     if pending and state.input("stopped_by") == "window":
         details.append("when its window was closed")
-    if state.is_done(espressif.POINT_OF_NO_RETURN):
+    if routes.past_the_point_of_no_return(state):
         details.append("past the point of no return")
     if not state.input("plug_ip"):
         return f"a run that had not found its plug yet ({', '.join(details)})"
@@ -163,7 +162,7 @@ def resolve_run_name(
         # The menu leaves the screen once answered; after a removal it is
         # shown again, not stacked under the old one.
         output.transient_begin(before_start=True)
-        any_past = any(RunState.open(d).is_done(espressif.POINT_OF_NO_RETURN) for d in unfinished)
+        any_past = any(routes.past_the_point_of_no_return(RunState.open(d)) for d in unfinished)
         keep = ("the unfinished one stays" if len(unfinished) == 1
                 else "the unfinished ones stay")
         options = [f"Continue {describe_run(d)}" for d in unfinished] + [
@@ -203,7 +202,7 @@ def remove_run(directory: Path) -> bool:
     """Delete one run's record, after removing any firewall rule it left behind."""
     state = RunState.open(directory)
     description = describe_run(directory)
-    if state.is_done(espressif.POINT_OF_NO_RETURN):
+    if routes.past_the_point_of_no_return(state):
         prompts.section("This plug is part-converted", [
             "It no longer runs its Sonoff firmware, so it will not show up as a",
             "new plug either. Once its record is removed, this tool cannot finish",
@@ -428,7 +427,8 @@ def _main() -> int:
             args.run = resolve_run_name(args.run, args.new, args.plug_ip,
                                         ask=args.command == "run" and not args.unattended)
         ctx = Context(args)
-        routes.apply_target(runs.run_firmware(ctx.state), runs.run_source(ctx.state))  # a run settles it at its start
+        routes.apply_target(runs.run_firmware(ctx.state), runs.run_source(ctx.state),
+                            routes.family_of(ctx.state))  # a run settles it at its start
     except QuitRun:
         output.say("Stopped. Nothing was changed.")
         return 130

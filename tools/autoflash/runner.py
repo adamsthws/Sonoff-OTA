@@ -30,8 +30,7 @@ from tools.autoflash.device import DeviceError
 from tools.autoflash.errors import Abort, NothingWritten
 from tools.autoflash.phases import PhaseError, PlugNeverConnected
 from tools.autoflash.prompts import QuitRun
-from tools.autoflash.routes import espressif
-from tools.autoflash.routes.espressif import bundle, evidence, tasmota
+from tools.autoflash.routes.espressif import bundle, tasmota
 from tools.autoflash.runs import ROOT
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED
 
@@ -70,7 +69,7 @@ def _execute(ctx: Context, step: str) -> int:
         # Its errors are the step's: seen in the fault suite, an Abort from
         # it crashed the run.
         set_up_if_erased(ctx, step)
-        if step in evidence.DESTRUCTIVE_STEPS:
+        if step in routes.FAMILY.DESTRUCTIVE_STEPS:
             ctx.state.mark(step, ATTEMPTED, nothing_written=False)
         captured = handler(ctx)
     except QuitRun:
@@ -88,7 +87,7 @@ def _execute(ctx: Context, step: str) -> int:
         # A phase that ended with no result may have got as far as writing:
         # where the plug can show whether the step finished, the step stays
         # "attempted" and the next run asks it.
-        if not (isinstance(exc, PhaseError) and step in evidence.ATTEMPTED_EVIDENCE):
+        if not (isinstance(exc, PhaseError) and step in routes.FAMILY.ATTEMPTED_EVIDENCE):
             ctx.state.mark(step, FAILED, error=str(exc),
                            **({"nothing_written": True} if isinstance(exc, NothingWritten) else {}))
         output.stage_end("stopped")
@@ -101,7 +100,7 @@ def _execute(ctx: Context, step: str) -> int:
         # reply cut off, no answer - is no surprise, and worth another go.
         message = connection_lost(exc) if isinstance(exc, errors.NETWORK_ERRORS) else unexpected(exc)
         # As above: whether it got as far as writing is for the plug to say.
-        if step not in evidence.ATTEMPTED_EVIDENCE:
+        if step not in routes.FAMILY.ATTEMPTED_EVIDENCE:
             ctx.state.mark(step, FAILED, error=message)
         output.stage_end("stopped")
         ctx.last_failure = message
@@ -131,7 +130,7 @@ def execute_with_retries(ctx: Context, step: str) -> int:
         code = execute(ctx, step)
         if step != "E3":  # it counts its own tries (COMMIT_ATTEMPTS)
             ctx.state.capture(f"{step}.attempts", attempt)
-        if code != 1 or step not in espressif.RETRY_STEPS or attempt == ATTEMPTS:
+        if code != 1 or step not in routes.FAMILY.RETRY_STEPS or attempt == ATTEMPTS:
             return code
         # A step the plug is asked about later (ATTEMPTED_EVIDENCE) keeps no
         # error in its record, so what it failed with is taken from this run.
@@ -174,7 +173,7 @@ def set_up_if_erased(ctx: Context, step: str) -> bool:
     asked for Wi-Fi details for a plug it could not reach, run after run."""
     # Every route reaches these steps on such a Tasmota: from stock through D1,
     # from ESPHome or back to Sonoff through the mover and the startup firmware.
-    if step not in espressif.ERASED_CHECK_STEPS or not ctx.state.input("plug_mac"):
+    if step not in routes.FAMILY.ERASED_CHECK_STEPS or not ctx.state.input("plug_mac"):
         return False
     if ctx.state.input("plug_ip") and ctx.device.answers(timeout=3.0):
         return False
@@ -253,7 +252,7 @@ def wait_for_plug_back(ctx: Context, step: str | None = None) -> None:
 
 def confirm_skip(ctx: Context, step: str, title: str) -> bool:
     """Trust the checklist only as far as the plug agrees with it."""
-    verifier = tasmota.STEP_VERIFIERS.get(step)
+    verifier = routes.FAMILY.STEP_VERIFIERS.get(step)
     if verifier is None:
         output.say(f"[skip] {step} {title} (recorded as done)")
         return True
@@ -352,7 +351,7 @@ def run_steps(ctx: Context) -> int:
     except Abort as refused:
         output.tell(f"Stopped before anything was done: {refused}.")
         return 2
-    routes.apply_target(firmware, source)
+    routes.apply_target(firmware, source, routes.family_of(ctx.state))
     interrupt.clear()
     ctx.state.set_input("stopped_by", None)
     resumed = any(ctx.state.is_done(step) for step, _, _ in routes.STEPS)
@@ -378,7 +377,7 @@ def run_steps(ctx: Context) -> int:
             output.say("")
             output.tell(f"{step} was interrupted last time - checking whether it finished...")
             finished, reason = None, ""
-            check = evidence.ATTEMPTED_EVIDENCE.get(step)
+            check = routes.FAMILY.ATTEMPTED_EVIDENCE.get(step)
             if check is not None:
                 try:
                     finished, reason = check(ctx)
@@ -392,7 +391,7 @@ def run_steps(ctx: Context) -> int:
                 output.stage_end("already done")
                 continue
             prompts.section("The last step was interrupted", [
-                f"The step that {espressif.PLAIN_DESCRIPTION.get(step, title.lower())} was",
+                f"The step that {routes.FAMILY.PLAIN_DESCRIPTION.get(step, title.lower())} was",
                 "stopped part way through, and the plug does not show whether it",
                 "finished. Doing it again is normally safe: every step checks the",
                 "plug before writing anything and refuses if it is not as expected.",
@@ -416,7 +415,7 @@ def run_steps(ctx: Context) -> int:
         if code == 0 and stop_here_after_ctrl_c(step):
             firewall.close_firewall_rules(ctx)
             return 130
-        if code == 0 and step == espressif.POINT_OF_NO_RETURN and ctx.research_bridge:
+        if code == 0 and step == routes.FAMILY.POINT_OF_NO_RETURN and ctx.research_bridge:
             prompts.section("Research bridge installed - stopping here", [
                 f"{ctx.bridge.name} is on the plug. Join the bridge's network",
                 f"({names.our_setup_network(ctx)}, open) and run its research tool, e.g.:",

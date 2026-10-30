@@ -152,6 +152,18 @@ def remember_plug(mac: str, **details: Any) -> None:
     path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+# How a run's backup went, by the outcome its backup step records
+# ("backup_outcome"): what its stage line says, and what the report says.
+BACKUP_OUTCOMES = {
+    "saved": ("complete", "Completed"),
+    "existing": ("already done", "Taken by an earlier run"),
+    "failed": ("skipped", "Failed"),
+    "not wanted": ("skipped", "Not taken (--no-backup)"),
+    "unreadable": ("skipped", "Not taken (plug unreadable)"),
+    "not taken": ("skipped", "Not taken"),
+}
+
+
 @dataclass(frozen=True)
 class Backup:
     """One plug's Sonoff backup, as the emulator and later runs see it."""

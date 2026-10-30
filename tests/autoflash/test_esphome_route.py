@@ -682,7 +682,7 @@ class FromAConvertedPlugTests(RouteTestCase):
     def settle(self, running, *, backup=True, given=None, answer=0):
         ctx = self.ctx(given=given, run=f"{running}-{given}-{backup}")
         with mock.patch.object(source, "find_current_firmware", return_value=running), \
-                mock.patch.object(source, "sonoff_backup_exists", return_value=backup), \
+                mock.patch.object(routes, "sonoff_backup_exists", return_value=backup), \
                 mock.patch.object(prompts, "ask_choice", return_value=answer) as asked:
             route = routes.settle_route(ctx)
         return route, (asked.call_args.args[1] if asked.called else None)

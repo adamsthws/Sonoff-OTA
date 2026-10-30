@@ -312,7 +312,7 @@ def step_backup(ctx: Context) -> dict[str, Any]:
         else:
             outcome = back_up_stock(ctx, reach_bridge(ctx))
     ctx.state.set_input("backup_outcome", outcome)
-    return {"outcome": outcome, "stage_outcome": BACKUP_OUTCOMES[outcome][0]}
+    return {"outcome": outcome, "stage_outcome": plugs.BACKUP_OUTCOMES[outcome][0]}
 
 
 def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
@@ -365,17 +365,6 @@ def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
         prompts.section("Tasmota has not appeared on your network", quick_power_cycle_hint(ctx))
         return finish_tasmota_setup(ctx, route="home network", wait=900.0)
     return finish_tasmota_setup(ctx, route="home network")
-
-
-# How the backup went, for the stage line and the report: BACKUP_OUTCOMES.
-BACKUP_OUTCOMES = {
-    "saved": ("complete", "Completed"),
-    "existing": ("already done", "Taken by an earlier run"),
-    "failed": ("skipped", "Failed"),
-    "not wanted": ("skipped", "Not taken (--no-backup)"),
-    "unreadable": ("skipped", "Not taken (plug unreadable)"),
-    "not taken": ("skipped", "Not taken"),
-}
 
 
 def backup_not_needed(ctx: Context) -> tuple[str, str] | None:
@@ -435,7 +424,7 @@ def back_up_stock(ctx: Context, host: str) -> str:
 
     The bridge only reads it.  Taken automatically, under the consent typed at
     C2; if it fails the person decides whether to carry on without one, and an
-    unattended run carries on.  Returns how it went: a BACKUP_OUTCOMES key.
+    unattended run carries on.  Returns how it went: a plugs.BACKUP_OUTCOMES key.
     """
     skip = backup_not_needed(ctx)
     if skip:

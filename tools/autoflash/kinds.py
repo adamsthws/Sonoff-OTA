@@ -12,7 +12,8 @@ are the same for every kind: tasmota-abcdef and esphome-abcdef.
 
 A run keeps the kind it converts (its "plug_kind"): from the eWeLink account
 (A1), from what the stock firmware says it is (A2), or from a converted
-Tasmota's template.  Official Tasmota ends up named after the kind, by its
+Tasmota's template.  The kind names its chip family, which is whose steps the
+run takes (tools/autoflash/routes).  Official Tasmota ends up named after the kind, by its
 template, and ESPHome by the image made for it; every firmware part way
 through a conversion is the tool's own, the same for every kind.
 
@@ -32,6 +33,13 @@ class Kind:
 
     # In file names (autoflash-bridge-sonoff-s60-4.4.4.ota) and a run's record.
     key: str
+    # Its chip family (routes.FAMILIES: how firmware gets onto its flash), its
+    # chip, and the ecosystem its stock firmware belongs to - how it is paired,
+    # found and sent its first new firmware.  Only the first is code of its
+    # own so far: every kind runs eWeLink's firmware on an Espressif chip.
+    family: str
+    chip: str
+    ecosystem: str
     # What a person calls it, its maker, and its name for short in running text.
     name: str
     maker: str
@@ -83,6 +91,9 @@ class Kind:
 
 SONOFF_S60 = Kind(
     key="sonoff-s60",
+    family="espressif",
+    chip="esp32c3",
+    ecosystem="ewelink",
     name="Sonoff S60",
     maker="Sonoff",
     short="S60",

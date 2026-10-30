@@ -12,9 +12,8 @@ import time
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from tools.autoflash import __version__, esphome, hostsys, kinds, output, routes, runs
+from tools.autoflash import __version__, esphome, hostsys, kinds, output, plugs, routes, runs
 from tools.autoflash.device import DeviceError
-from tools.autoflash.routes.espressif import installer, source
 from tools.autoflash.runs import ROOT
 
 if TYPE_CHECKING:
@@ -159,8 +158,8 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Stock firmware", ctx.state.input("stock_version") or "__"),
         # How it went, never where it is or which plug: the path holds the MAC.
         # A run from a converted plug takes none: one is there or not.
-        ("Sonoff backup", installer.BACKUP_OUTCOMES[ctx.state.input("backup_outcome")
-                                          or ("existing" if source.sonoff_backup_exists(ctx) else "not taken")][1]),
+        ("Sonoff backup", plugs.BACKUP_OUTCOMES[ctx.state.input("backup_outcome")
+                                      or ("existing" if routes.sonoff_backup_exists(ctx) else "not taken")][1]),
         ("Computer", computer_description()),
         ("Python", python_description()),
         ("Time taken", took),
