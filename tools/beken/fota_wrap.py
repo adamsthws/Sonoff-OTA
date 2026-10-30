@@ -34,6 +34,7 @@ import argparse
 import hashlib
 import struct
 import sys
+import time
 import zlib
 
 STAGING_NAME = "FWSW-01-S61-BK7238"   # the image-type name the staging handler matches
@@ -42,7 +43,7 @@ STAGING_NAME = "FWSW-01-S61-BK7238"   # the image-type name the staging handler 
 VERSION_MAX = 15
 
 
-def _rbl_version(rbl: bytes) -> str:
+def rbl_version(rbl: bytes) -> str:
     """The version string from an rt_ota RBL header (offset 0x1c, 24 bytes)."""
     if len(rbl) < 96 or rbl[0:4] != b"RBL\x00":
         raise ValueError("input is not an rt_ota RBL (missing 'RBL\\0' magic)")
@@ -52,7 +53,7 @@ def _rbl_version(rbl: bytes) -> str:
 def wrap(rbl: bytes, name: str = STAGING_NAME, version: str | None = None) -> bytes:
     """Build the FOTA container around one .rbl payload."""
     if version is None:
-        version = _rbl_version(rbl)
+        version = rbl_version(rbl)
     ver = version.encode("ascii")
     if not ver or len(ver) > VERSION_MAX:
         raise ValueError("version %r must be 1 to %d ASCII characters to fit the container's fields"
@@ -79,8 +80,21 @@ def wrap(rbl: bytes, name: str = STAGING_NAME, version: str | None = None) -> by
     return bytes(header) + bytes(trailer) + bytes(desc) + rbl
 
 
-def _server(container: bytes, host: str, port: int):
-    """An HTTP server answering every GET with a 206 range of the container, keep-alive."""
+def upgrade_command(register: dict, url: str, digest: str, version: str,
+                    name: str = "user1.bin") -> dict:
+    """The eWeLink `upgrade` command that sends the plug to `url` for the FOTA
+    container whose SHA-256 is `digest`: what the cloud pushes over the IoT
+    WebSocket, addressed to the plug as its `register` message named itself."""
+    return {"action": "upgrade", "deviceid": register["deviceid"], "apikey": register.get("apikey", ""),
+            "userAgent": "app", "sequence": str(int(time.time() * 1000)),
+            "params": {"model": register.get("model", ""), "version": version,
+                       "binList": [{"downloadUrl": url, "digest": digest, "name": name}]}}
+
+
+def server(container: bytes, host: str, port: int, *, quiet: bool = False):
+    """An HTTP server answering every GET with a 206 range of the container,
+    keep-alive. Each range asked for is counted in the server's `requests`, and
+    logged to stderr ("[ota] GET bytes=0-15") unless `quiet`."""
     import http.server
     import socketserver
 
@@ -105,6 +119,10 @@ def _server(container: bytes, host: str, port: int):
                     "Content-Range: bytes %d-%d/%d\r\n"
                     "Content-Length: %d\r\nConnection: keep-alive\r\n\r\n"
                     % (start, end, len(container), len(chunk))).encode("latin1")
+            # The answer is written by hand, so send_response's own log never runs.
+            self.server.requests += 1
+            if not quiet:
+                self.log_message("")
             try:
                 self.wfile.write(head + chunk)
             except Exception:
@@ -113,12 +131,13 @@ def _server(container: bytes, host: str, port: int):
     class Server(socketserver.ThreadingTCPServer):
         allow_reuse_address = True
         daemon_threads = True
+        requests = 0
 
     return Server((host, port), Handler)
 
 
 def _serve(container: bytes, host: str, port: int, path: str = "/user1.bin") -> None:
-    srv = _server(container, host, port)
+    srv = server(container, host, port)
     bound = srv.server_address
     digest = hashlib.sha256(container).hexdigest()
     url = "http://%s:%d%s" % (bound[0], bound[1], path)
@@ -151,7 +170,7 @@ def main(argv=None):
     except ValueError as e:
         ap.error(str(e))
 
-    ver = args.version or _rbl_version(rbl)
+    ver = args.version or rbl_version(rbl)
     print("wrapped %s (%d bytes, RBL version %r) -> FOTA container %d bytes"
           % (args.input, len(rbl), ver, len(container)))
     print("sha256(container) = %s" % hashlib.sha256(container).hexdigest())

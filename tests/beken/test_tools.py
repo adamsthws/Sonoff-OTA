@@ -28,6 +28,7 @@ import obk_config  # noqa: E402
 import backup  # noqa: E402
 import ef40  # noqa: E402
 import fota_wrap as fota  # noqa: E402
+import stage_apply  # noqa: E402
 import stock_app  # noqa: E402
 import wifi_migrate  # noqa: E402
 
@@ -359,14 +360,14 @@ class FotaWrapTests(unittest.TestCase):
     RBL = rbl_header(version=b"1.18.319") + bytes(range(256)) * 4
 
     def test_the_version_comes_from_the_rbl_header(self):
-        self.assertEqual(fota._rbl_version(self.RBL), "1.18.319")
-        self.assertEqual(fota._rbl_version(self.RBL[:96]), "1.18.319")   # a header alone is enough
+        self.assertEqual(fota.rbl_version(self.RBL), "1.18.319")
+        self.assertEqual(fota.rbl_version(self.RBL[:96]), "1.18.319")   # a header alone is enough
 
     def test_only_an_rbl_is_wrapped(self):
         with self.assertRaises(ValueError):
-            fota._rbl_version(b"ELF\x00" + bytes(200))
+            fota.rbl_version(b"ELF\x00" + bytes(200))
         with self.assertRaises(ValueError):
-            fota._rbl_version(b"RBL\x00" + bytes(50))     # too short for a header
+            fota.rbl_version(b"RBL\x00" + bytes(50))     # too short for a header
         with self.assertRaises(ValueError):
             fota.wrap(bytes(200))
 
@@ -403,7 +404,7 @@ class FotaWrapTests(unittest.TestCase):
 
     def test_the_server_answers_each_range_as_the_plug_fetches(self):
         container = fota.wrap(self.RBL)
-        srv = fota._server(container, "127.0.0.1", 0)
+        srv = fota.server(container, "127.0.0.1", 0)
         self.addCleanup(srv.server_close)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         self.addCleanup(srv.shutdown)
@@ -429,7 +430,7 @@ class FotaWrapTests(unittest.TestCase):
 
     def test_the_response_head_is_what_the_plugs_parser_reads(self):
         container = fota.wrap(self.RBL)
-        srv = fota._server(container, "127.0.0.1", 0)
+        srv = fota.server(container, "127.0.0.1", 0)
         self.addCleanup(srv.server_close)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         self.addCleanup(srv.shutdown)
@@ -445,6 +446,23 @@ class FotaWrapTests(unittest.TestCase):
         for line in (b"Content-Type: application/octet-stream", b"Content-Range: bytes 16-39/%d" % len(container),
                      b"Content-Length: 24", b"Connection: keep-alive"):
             self.assertIn(line, lines)
+
+    def test_each_range_asked_for_is_logged_and_counted(self):
+        container = fota.wrap(self.RBL)
+        for quiet, lines in ((False, 2), (True, 0)):
+            srv = fota.server(container, "127.0.0.1", 0, quiet=quiet)
+            self.addCleanup(srv.server_close)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            self.addCleanup(srv.shutdown)
+            conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=10)
+            self.addCleanup(conn.close)
+            log = io.StringIO()
+            with contextlib.redirect_stderr(log):
+                for rng in ("bytes=0-15", "bytes=16-39"):
+                    conn.request("GET", "/user1.bin", headers={"Range": rng})
+                    conn.getresponse().read()
+            self.assertEqual(srv.requests, 2)
+            self.assertEqual(log.getvalue().count("[ota] GET bytes="), lines, log.getvalue())
 
     def test_the_command_writes_the_container_beside_the_input(self):
         tmp = Path(tempfile.mkdtemp())
@@ -654,3 +672,55 @@ class ConversionChainTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StageApplyTests(unittest.TestCase):
+    """stage_apply.py puts an rt_ota image where the stock bootloader applies
+    from, and test credentials where the installed firmware reads them."""
+
+    def flash(self):
+        flash = bytearray(b"\x00" * 0x286000 + b"\xa5" * (0x3e0000 - 0x286000) + b"\xff" * 0x20000)
+        flash[0x3e0000:0x3e1000] = kv40_store([("factory", b"x")])
+        return flash
+
+    def test_the_slot_is_erased_and_the_image_laid_at_its_start(self):
+        image = rbl_header() + b"body" * 100
+        flash = stage_apply.stage(self.flash(), image)
+        start, end = stage_apply.DOWNLOAD_SLOT
+        self.assertEqual(flash[start:start + len(image)], image)
+        self.assertEqual(set(flash[start + len(image):end]), {0xff})
+        self.assertEqual(flash[:start], b"\x00" * start)   # the app and bootloader untouched
+
+    def test_credentials_join_the_store_and_the_slot_can_be_left(self):
+        flash = stage_apply.stage(self.flash(), None, {"wifi-ssid": b"Net", "wifi-pass": b"secret12"})
+        self.assertEqual(ef40.parse_store(flash)["wifi-ssid"], b"Net")
+        self.assertEqual(set(flash[0x286000:0x3e0000]), {0xa5})
+
+    def test_only_an_rbl_that_fits_is_staged(self):
+        with self.assertRaises(ValueError):
+            stage_apply.stage(self.flash(), b"not an image")
+        with self.assertRaises(ValueError):
+            stage_apply.stage(self.flash(), rbl_header() + b"\0" * (0x3e0000 - 0x286000))
+
+
+class UpgradeCommandTests(unittest.TestCase):
+    def test_the_command_names_the_plug_the_container_and_its_digest(self):
+        register = {"action": "register", "deviceid": "1000abcdef", "apikey": "made-up-key",
+                    "model": "SN-BK7238-S61-01"}
+        command = fota.upgrade_command(register, "http://8.8.8.8:8080/user1.bin", "ab" * 32, "9.9.9")
+        self.assertEqual((command["action"], command["deviceid"], command["apikey"]),
+                         ("upgrade", "1000abcdef", "made-up-key"))
+        self.assertEqual(command["params"]["model"], "SN-BK7238-S61-01")
+        self.assertEqual(command["params"]["binList"],
+                         [{"downloadUrl": "http://8.8.8.8:8080/user1.bin", "digest": "ab" * 32, "name": "user1.bin"}])
+
+
+class StagedTests(unittest.TestCase):
+    def test_an_image_is_staged_only_byte_for_byte_at_the_slot(self):
+        image = rbl_header() + b"body" * 100
+        flash = stage_apply.stage(bytearray(b"\xff" * 0x400000), image)
+        self.assertTrue(stage_apply.staged(flash, image))
+        flash[0x286000 + 200] ^= 1
+        self.assertFalse(stage_apply.staged(flash, image))
+        self.assertFalse(stage_apply.staged(bytes(0x400000), image))
+

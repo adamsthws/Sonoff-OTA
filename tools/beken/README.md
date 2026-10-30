@@ -84,6 +84,25 @@ the other tools at it.
   `python3 pair_drive.py 0` (soft-AP) `| 1`
   (station) `| airkiss`. Env `SSID`/`PASS`, `SECS`, `FIRE_AT`.
 
+- **`cloud_push.py`** — a whole S61 conversion, the way the tool would drive
+  one: the plug online against the stub (`cloud_online.CloudSession`), pushed an
+  eWeLink `upgrade` for an rt_ota `.rbl` wrapped by `fota_wrap.py` and served
+  from a placeholder public address the relay sends to this host; the plug
+  downloads it in ranges and stages it at `0x286000`, checked byte for byte,
+  and with `--apply` the next boot has the stock bootloader apply it and the new
+  firmware start. The plug's Wi-Fi is written into a copy of the dump's
+  EasyFlash store first, so that firmware finds it as on a provisioned plug.
+  `python3 cloud_push.py image.rbl out.bin --apply` (env `SECS`, `APPLY_SECS`)
+
+- **`stage_apply.py`** — the apply half of a conversion, or of a reversion, in
+  one command: stage an rt_ota `.rbl` (OpenBeken's, the ESPHome build's, or the
+  repackaged stock app's) in the download slot of a copy of a dump, seed test
+  Wi-Fi credentials in its EasyFlash store, and boot the stock bootloader over it
+  with the emulator modelling the flash writes; the flash as the run leaves it
+  is saved, for `bk-emu.sh run OUT --wifi --wifi-peer ap ...` to show the
+  installed firmware start afresh and join.
+  `python3 stage_apply.py dump.bin image.rbl out.bin` (env `SECS`, `SSID`, `PASS`, `SEED=0`)
+
 - **`seed_join.py`** — put the emulated plug on a network the faithful way.
   Hooks the firmware's own `ef_get_env_blob` (EasyFlash V4, `0x12f438`) and returns
   our SSID/passphrase for `wifi-ssid`/`wifi-pass` — making it a provisioned plug at
@@ -131,7 +150,8 @@ the other tools at it.
   assembles its CoolKit CA in RAM rather than keeping it in flash. It generates its
   own EC P-256 CA + leaf (openssl) and serves the leaf; the firmware's verify path
   is untouched. Env `SSID`/`PASS`/`SECS`/`FORCE_AT`/`HB`.
-  `python3 cloud_online.py`
+  `python3 cloud_online.py`. Its set-up is a `CloudSession`, which `cloud_push.py`
+  builds on.
 
 - **`button_sim.py`** — older button sim (predates the integrity-gate finding
   and natural registration; defaults to the wrong pin 3). Force-runs the block init

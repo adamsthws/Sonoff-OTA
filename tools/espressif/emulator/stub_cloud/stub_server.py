@@ -177,6 +177,17 @@ def _online(deviceid: str) -> bool:
         return deviceid in _devices
 
 
+
+def send_to_device(deviceid: str, msg: dict) -> bool:
+    """Send `msg` to the device over its IoT WebSocket, as the cloud passes on an
+    app's command (an OTA `upgrade`, say). False if it is not online."""
+    with _relay_lock:
+        conn = _devices.get(deviceid)
+    if conn is None:
+        return False
+    conn.send(json.dumps(msg).encode())
+    return True
+
 # -- the server ----------------------------------------------------------------
 
 class Stub:

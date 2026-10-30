@@ -399,7 +399,7 @@ path copies only the ssid — a firmware quirk). `recv_ssid` packs a config
 the method dispatcher `0x21eb4`. Driving it in the appfw context (ARM force-call)
 with the password decoder bypassed, **the plug associates (WPA2) and gets DHCP
 `192.168.1.100`** — the eWeLink provisioning path, end to end
-(`docs/s61-tools/` scratchpad `recv_drive.py`).
+(a scratch driver, since retired; `archive/s61-research/ble_provision.py` drives the same handlers through the dispatcher).
 
 **What this reaches, and what it does not.** Driving these messages through the
 dispatcher runs the handlers and connects Wi-Fi (`ble_provision.py`), but does
@@ -1038,18 +1038,29 @@ route rests on:
 
 ### Tools (reproducibility)
 
-The drivers that produced the above: `find_dlpart.py` (locate the download
-partition via `0x803000` read logging), `rbl_pack.py` (the verified RBL header
-packer), `s61_ota_probe.py` (push `upgrade`, serve a 404, prove the server
-redirect), `s61_ota_flash.py` (build the FOTA container, serve the ranged download,
-log flash writes; an `OBK_RBL=` env serves a real OpenBeken `.rbl`), `s61_stage_boot.py`
-(stage an RBL and boot the gate chain, with the crypt-flag / custom-verify opt-ins),
-`app_apply_test.py` (boot the stock bootloader over a directly-staged RBL, no bypasses),
-`obk_apply_test.py` (the same with a real OpenBeken `.rbl`), and `fota_wrap.py`
-(wrap an `.rbl` in the FOTA container and optionally serve it), plus a Thumb/ARM
-disassembler over the de-striped image and `boot_qio.py` (boot an OpenBeken flash /
-the spliced conversion image). The BK7238 UART transmit register is `0x0080210c` (for
-a boot-proof image). No per-device identifier from any run is kept in these notes.
+The above was worked out with scratch drivers - `find_dlpart.py` (locate the
+download partition via `0x803000` read logging), `rbl_pack.py`,
+`s61_ota_probe.py` (push `upgrade`, serve a 404, prove the server redirect),
+`s61_ota_flash.py` (build the FOTA container, serve the ranged download, log
+flash writes), `s61_stage_boot.py`, `app_apply_test.py`, `obk_apply_test.py` and
+`boot_qio.py`. What they proved is written up above, and what a conversion needs
+of them is in [`tools/beken/`](../tools/beken/README.md), run in the emulator's
+container:
+
+- `cloud_push.py IMAGE.rbl OUT.bin --apply` - a whole conversion: the plug comes
+  online against the stub (`cloud_online.py`'s `CloudSession`), is pushed an
+  `upgrade` for the image wrapped by `fota_wrap.py`, downloads it in ranges and
+  stages it at `0x286000` (checked byte for byte), and on the next boot the
+  stock bootloader applies it and the new firmware starts.
+- `stage_apply.py` - the apply alone: an `.rbl` staged in the download slot of a
+  copy of a dump, test credentials seeded, and the stock bootloader booted over
+  it; a reversion's apply too, with the repackaged stock app.
+- `stock_app.py` (the stock app out of a dump, verified, for the reversion
+  image), `backup.py`, and the static tools (`unstripe.py`, `disasm.py`,
+  `xref.py`, `strxref.py`, `decomp.py`).
+
+The BK7238 UART transmit register is `0x0080210c` (for a boot-proof image). No
+per-device identifier from any run is kept in these notes.
 
 ## The button press (the pairing trigger)
 
@@ -1158,7 +1169,7 @@ runtime target), so a legitimate pass needs the real plug's flash UID; otherwise
 the gate must be satisfied as an emulator opt-in.
 
 **Proven effect of clearing the gate** (force the `0x29c3c` memcmp result to
-"equal", the real-HW outcome — `docs/s61-tools` / scratchpad `force_integrity.py`):
+"equal", the real-HW outcome — [`tools/beken/integrity_gate.py`](../tools/beken/integrity_gate.py)):
 within ~3.5 s the firmware takes the verified path, app-start continues,
 **`key_add` runs (the button registers itself on GPIO pins 0 and 2)**, the
 provisioned-check `0x48cc4` runs, and **`ais_appfw_task` is created** — all
