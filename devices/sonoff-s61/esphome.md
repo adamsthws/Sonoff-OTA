@@ -1,8 +1,8 @@
 # ESPHome (LibreTiny) for the Sonoff S61
 
-[`ESPHome/sonoff_s61.yaml`](../../ESPHome/sonoff_s61.yaml) is the ESPHome the
+[`esphome.yaml`](esphome.yaml) is the ESPHome the
 conversion installs on an S61, built on [LibreTiny](https://docs.libretiny.eu/)
-for its BK7238. It is the S60's config ([`ESPHome/sonoff_s60.yaml`](../../ESPHome/sonoff_s60.yaml))
+for its BK7238. It is the S60's config ([`devices/sonoff-s60/esphome.yaml`](../../devices/sonoff-s60/esphome.yaml))
 with the S61's wiring and storage: the same entities, actions, calibration
 handling and energy totals, so the two plugs look alike in Home Assistant.
 
@@ -51,9 +51,9 @@ As the S60's image is built: ESPHome's own Docker image, the config alone in a
 directory. The first build fetches LibreTiny, its Beken SDK and the toolchain.
 
 ```sh
-mkdir build && cp ESPHome/sonoff_s61.yaml build/ && cd build
+mkdir build && cp devices/sonoff-s61/esphome.yaml build/ && cd build
 docker run --rm -u "$(id -u):$(id -g)" -e HOME=/config -v "$PWD":/config \
-    ghcr.io/esphome/esphome:2026.10.0 compile sonoff_s61.yaml
+    ghcr.io/esphome/esphome:2026.10.0 compile esphome.yaml
 ```
 
 The outputs, in `.esphome/build/esphome/.pioenvs/esphome/`:

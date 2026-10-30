@@ -109,7 +109,7 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 
 ### The mover
 
-- [`ESPHome/autoflash_mover.yaml`](../ESPHome/autoflash_mover.yaml): ESPHome
+- [`devices/sonoff-s60/mover.yaml`](../devices/sonoff-s60/mover.yaml): ESPHome
   names must be lower case and ESPHome's own suffix is six hex digits, so the
   mover is built as `autoflash-moving` with `name_add_mac_suffix` and its
   `on_boot` writes `autoflash-recovery-%02X%02X` over that name before its
@@ -122,12 +122,12 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 
 ### ESPHome, converted
 
-- [`ESPHome/sonoff_s60.yaml`](../ESPHome/sonoff_s60.yaml): `name: esphome`
+- [`devices/sonoff-s60/esphome.yaml`](../devices/sonoff-s60/esphome.yaml): `name: esphome`
   with `name_add_mac_suffix: true` gives `esphome-abcdef`; `on_boot` sets
   its own network to `App.get_name()`. `friendly_name` says what plug it is.
 - The file name and `package_import_url` stay as they are: they are built
   into plugs converted already, and Home Assistant adopts them by it.
-- Rebuilt as [`ESPHome/README.md`](../ESPHome/README.md) says, a new version
+- Rebuilt as [`devices/sonoff-s60/esphome.md`](../devices/sonoff-s60/esphome.md) says, a new version
   each time: `artifacts/esphome-<kind>-imprintable-<version>.bin` and its
   bootloader, then `IMAGE`, its SHA-256 and size in
   [`tools/autoflash/esphome.py`](../tools/autoflash/esphome.py).

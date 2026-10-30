@@ -23,9 +23,8 @@ worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-e
   applies the wiring; the build recipe, the 4 MB table and reverting to stock:
   [`openbeken/README.md`](openbeken/README.md). The 4 MB patches offered
   upstream are [`tools/beken/openbeken/`](../../tools/beken/openbeken/).
-- **ESPHome** (LibreTiny): [`ESPHome/sonoff_s61.yaml`](../../ESPHome/sonoff_s61.yaml),
-  at that path because converted plugs name it as their `package_import_url`;
-  how it differs from the S60's, the build, the reversion and what the
+- **ESPHome** (LibreTiny): [`esphome.yaml`](esphome.yaml), the path converted
+  plugs will name as their `package_import_url`; how it differs from the S60's, the build, the reversion and what the
   emulator validated: [`esphome.md`](esphome.md).
 - **Stock firmware**: the public dump upstream BekenEmulator publishes is
   what the emulator and its tests run; this repository holds no Sonoff

@@ -24,12 +24,11 @@ from here; the tooling it shares with other Espressif plugs is
   when a release changes its layout
   ([docs/updating-firmware.md](../../docs/updating-firmware.md#1-tasmota)). Its
   names on the network: [docs/device-names.md](../../docs/device-names.md).
-- **ESPHome**: [`ESPHome/sonoff_s60.yaml`](../../ESPHome/sonoff_s60.yaml),
-  which stays at that path because every converted plug names it as its
-  `package_import_url` for Home Assistant to adopt it from; what it reports and
-  how to change it: [`ESPHome/README.md`](../../ESPHome/README.md). The mover
-  that changes a plug's memory layout is
-  [`ESPHome/autoflash_mover.yaml`](../../ESPHome/autoflash_mover.yaml).
+- **ESPHome**: [`esphome.yaml`](esphome.yaml); what it reports and how to
+  change it: [`esphome.md`](esphome.md). Its path is the `package_import_url`
+  a converted plug gives Home Assistant to adopt it from, so moving it means a
+  new image (2.3.0 did). The mover that changes a plug's memory layout is
+  [`mover.yaml`](mover.yaml).
 - **Flash layout**: Sonoff's, kept by Tasmota and ESPHome
   ([`artifacts/sonoff-s60-partition-table.bin`](../../artifacts/README.md)); the
   recovery Safeboot and the repartitioning route are

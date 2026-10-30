@@ -107,8 +107,8 @@ eWeLink accounts and plugs' identities.
   family's tooling, `tools/ewelink/` eWeLink whatever the chip,
   `devices/<plug>/` for what is one plug's alone, `tests/` mirroring `tools/`
   (`tests/run.py <directory>` runs one of them), `docs/` for prose only,
-  `archive/` for retired work (linted like the rest). The ESPHome configs stay
-  at their paths in `ESPHome/`: converted plugs name them.
+  `archive/` for retired work (linted like the rest). A plug's ESPHome config
+  path is its `package_import_url`: moving one means a new image.
 
 ## Firmware and releases
 

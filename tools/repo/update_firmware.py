@@ -16,7 +16,7 @@
 
     python3 tools/repo/update_firmware.py esphome [VERSION] [--image-version X.Y.Z]
                                      [--mover] [--new-bootloader]
-        build ESPHome/sonoff_s60.yaml with that ESPHome release (default: the
+        build devices/sonoff-s60/esphome.yaml with that ESPHome release (default: the
         latest) in ESPHome's own Docker image, check it, and publish it in
         artifacts/; --mover builds the mover too
 
@@ -74,8 +74,8 @@ TASMOTA_FILES = {
 }
 # Each ESPHome build: its config, and the file it is published as.
 ESPHOME_BUILDS = {
-    "image": ("ESPHome/sonoff_s60.yaml", "artifacts/esphome-sonoff-s60-imprintable-{version}.bin"),
-    "mover": ("ESPHome/autoflash_mover.yaml", "artifacts/autoflash-mover-{version}.bin"),
+    "image": ("devices/sonoff-s60/esphome.yaml", "artifacts/esphome-sonoff-s60-imprintable-{version}.bin"),
+    "mover": ("devices/sonoff-s60/mover.yaml", "artifacts/autoflash-mover-{version}.bin"),
 }
 BOOTLOADER_FILE = "artifacts/esphome-sonoff-s60-bootloader-{version}.bin"
 # Downloads ESPHome's builds need (ESP-IDF and its tools, a gigabyte or so),
@@ -83,7 +83,7 @@ BOOTLOADER_FILE = "artifacts/esphome-sonoff-s60-bootloader-{version}.bin"
 BUILD_CACHE = ROOT / "captures" / "esphome-build"
 # What the S60's config reaches into ESPHome for, beyond its documented
 # options: its last on_boot lambda saves the Wi-Fi under the one fixed key an
-# ESPHome build with no network of its own looks in (ESPHome/README.md says
+# ESPHome build with no network of its own looks in (devices/sonoff-s60/esphome.md says
 # why). An ESPHome that changes either is one the lambda must be changed for.
 ESPHOME_WIFI_SOURCE = "/esphome/esphome/components/wifi"
 ESPHOME_INTERNALS = {
@@ -379,7 +379,7 @@ def check_esphome_internals(builder: str) -> None:
             if needle not in text:
                 raise UpdateError(
                     f"ESPHome's {name} no longer has '{needle}': the last on_boot lambda of "
-                    "ESPHome/sonoff_s60.yaml must be checked against it (ESPHome/README.md)")
+                    "devices/sonoff-s60/esphome.yaml must be checked against it (devices/sonoff-s60/esphome.md)")
 
 
 def next_minor(version: str) -> str:
@@ -532,11 +532,11 @@ def command_esphome(args: argparse.Namespace) -> int:
     if args.no_docs:
         by_hand += ["artifacts/README.md: each changed file's row (name, SHA-256) and a paragraph on what changed",
                     "NOTICES.md: the files' names, the ESPHome release and ESP-IDF version",
-                    "ESPHome/README.md: the ESPHome release that built the current image",
+                    "devices/sonoff-s60/esphome.md: the ESPHome release that built the current image",
                     f"CHANGELOG.md: ESPHome is built with {release}"]
     else:
         write_texts(texts)
-        print(f"artifacts/README.md, NOTICES.md, ESPHome/README.md and CHANGELOG.md "
+        print(f"artifacts/README.md, NOTICES.md, devices/sonoff-s60/esphome.md and CHANGELOG.md "
               f"({release_version}) say so.")
         if args.mover or replaced:
             by_hand.append("the mover's or bootloader's own rows and paragraphs, which only the image's are written for")
@@ -558,7 +558,7 @@ CHANGELOG = ROOT / "CHANGELOG.md"
 VERSION_FILE = ROOT / "tools/autoflash/__init__.py"
 ARTIFACTS_README = ROOT / "artifacts/README.md"
 NOTICES = ROOT / "NOTICES.md"
-ESPHOME_README = ROOT / "ESPHome/README.md"
+ESPHOME_README = ROOT / "devices/sonoff-s60/esphome.md"
 
 
 def released(version: str) -> bool:
@@ -613,7 +613,7 @@ def tasmota_doc_texts(old: str, new: str) -> tuple[dict[Path, str], str]:
 
 def esphome_doc_texts(old: dict[str, Any], new: dict[str, Any], bootloader_same: bool,
                       replaced: bool = False) -> tuple[dict[Path, str], str]:
-    """artifacts/README.md, NOTICES.md, ESPHome/README.md and the
+    """artifacts/README.md, NOTICES.md, devices/sonoff-s60/esphome.md and the
     changelog for a new image: the same config with a new ESPHome release, or,
     with the same release, a change to the config, which a person describes -
     worked out before anything is written, so a passage not found changes
@@ -647,7 +647,7 @@ def esphome_doc_texts(old: dict[str, Any], new: dict[str, Any], bootloader_same:
                                  f"[ESPHome {new['esphome']} release](https://github.com/esphome/esphome/tree/{new['esphome']})",
                                  "the image's source release in NOTICES.md")
     texts[ESPHOME_README] = substituted(ESPHOME_README.read_text(encoding="utf-8"), r"ESPHome \S+ built the current",
-                                        f"ESPHome {new['esphome']} built the current", "ESPHome/README.md's release")
+                                        f"ESPHome {new['esphome']} built the current", "devices/sonoff-s60/esphome.md's release")
     release = f"[{new['esphome']}](https://github.com/{ESPHOME_REPO}/releases/tag/{new['esphome']})"
     version = changelog_with(
         f"ESPHome for the S60 is {new['version']}: "

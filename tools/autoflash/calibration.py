@@ -1,7 +1,7 @@
 """The S60's meter calibration, as Sonoff's firmware applies it, for Tasmota
 and ESPHome to read as Sonoff's did.
 
-Two parts, decoded from stock 1.2.0 (ESPHome/sonoff_s60.yaml applies both):
+Two parts, decoded from stock 1.2.0 (devices/sonoff-s60/esphome.yaml applies both):
 
 - The board's factor: at start-up stock reads GPIO6, GPIO10 and GPIO19 with
   pull-ups, and scales voltage and power by 1.02 unless all three read high.

@@ -94,7 +94,7 @@ SONOFF_S60 = Kind(
     # Relay GPIO4, status LED GPIO5, power meter GPIO7, button GPIO9.  The UK
     # S60TPG and the European S60TPF publish the same pins.
     tasmota_gpio=(1, 1, 1, 1, 224, 544, 1, 3104, 1, 32, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1),
-    # ESPHome/sonoff_s60.yaml. 1.1.0 raised Sonoff-Setup-CDEF; builds before
+    # devices/sonoff-s60/esphome.yaml. 1.1.0 raised Sonoff-Setup-CDEF; builds before
     # that sonoff-s60- and the MAC's last three bytes.
     esphome_name="Sonoff S60",
     esphome_legacy_setup_prefix="Sonoff-Setup-",

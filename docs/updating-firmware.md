@@ -128,7 +128,7 @@ python3 tools/repo/update_firmware.py esphome            # the latest release
 python3 tools/repo/update_firmware.py esphome 2026.10.0 --image-version 1.3.0
 ```
 
-A change to `ESPHome/sonoff_s60.yaml` is published the same way, naming the
+A change to `devices/sonoff-s60/esphome.yaml` is published the same way, naming the
 release already pinned, so that only the config changes.
 
 It needs Docker: the image is built in ESPHome's own image for that release
@@ -136,9 +136,9 @@ It needs Docker: the image is built in ESPHome's own image for that release
 not depend on what is installed on the computer building it. It checks, then
 builds:
 
-- the parts of ESPHome that `ESPHome/sonoff_s60.yaml` reaches into beyond its
+- the parts of ESPHome that `devices/sonoff-s60/esphome.yaml` reaches into beyond its
   options - the fixed key its last `on_boot` lambda saves the Wi-Fi under, and
-  the layout of what it saves ([ESPHome/README.md](../ESPHome/README.md) says
+  the layout of what it saves ([devices/sonoff-s60/esphome.md](../devices/sonoff-s60/esphome.md) says
   why) - are as they were; if not, the lambda must be checked first;
 - the config's `project` version is raised (the next minor version, or
   `--image-version`), and it is built;
@@ -169,7 +169,7 @@ while any of it is missing:
   release that builds it, and a paragraph on the new build;
 - `NOTICES.md`: the image's name, ESPHome release and ESP-IDF
   version;
-- `ESPHome/README.md`: the ESPHome release that built the current image;
+- `devices/sonoff-s60/esphome.md`: the ESPHome release that built the current image;
 - `CHANGELOG.md`: a line for each firmware, with a link to its release notes,
   under the release to come - a new section, a minor version on, once the one
   above has been released, with `tools/autoflash/__init__.py` raised to it.

@@ -12,7 +12,7 @@ on:
     paths:
       - artifacts/firmware.json
       - artifacts/**
-      - ESPHome/**
+      - devices/**
       - tools/**
       - tests/**
       - .github/workflows/emulator-check.yml

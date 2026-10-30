@@ -122,8 +122,8 @@ eWeLink accounts and plugs' identities.
   tools.autoflash` runs it) and `tools/repo/` the repository's own plumbing; `tools/espressif/` and `tools/beken/`
   hold each chip family's tooling, its emulator in `emulator/`; `tools/ewelink/`
   what talks to eWeLink whatever the chip; `devices/<plug>/` what is one plug's
-  alone (its sheet, configs, modules); `ESPHome/` the ESPHome configs, at the
-  paths converted plugs name for Home Assistant; `tests/` mirrors `tools/`
+  alone (its sheet, its ESPHome configs - at the paths converted plugs give
+  Home Assistant, so a move means a new image - and modules); `tests/` mirrors `tools/`
   (`tests/autoflash/`, `tests/repo/`, `tests/ewelink/`, `tests/espressif/`,
   `tests/beken/`; `tests/run.py <directory>` runs one of them); `docs/` prose only;
   and `archive/` the work that got the project here and is no longer used,

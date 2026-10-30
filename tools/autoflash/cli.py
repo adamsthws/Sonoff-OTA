@@ -139,7 +139,7 @@ ISSUES_URL = "https://github.com/adamsthws/Sonoff-OTA/issues/new"
 KOFI_URL = "https://ko-fi.com/adamsthws"
 DONATE_URL = "https://www.paypal.me/adamsthws"
 TASMOTA_AP_PREFIX = "tasmota-"
-# The final ESPHome's own name, and its network's (ESPHome/sonoff_s60.yaml).
+# The final ESPHome's own name, and its network's (devices/sonoff-s60/esphome.yaml).
 ESPHOME_PREFIX = "esphome-"
 
 

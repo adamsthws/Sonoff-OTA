@@ -88,7 +88,7 @@ class DocumentedTests(unittest.TestCase):
             self.assertIn(f"ESP-IDF {pin['esp_idf']}", notices)
 
     def test_the_esphome_readme_names_the_release_that_built_the_image(self):
-        readme = (ROOT / "ESPHome/README.md").read_text(encoding="utf-8")
+        readme = (ROOT / "devices/sonoff-s60/esphome.md").read_text(encoding="utf-8")
         self.assertIn(f"ESPHome {PINS['esphome']['image']['esphome']} built the current", readme)
 
 
@@ -275,7 +275,7 @@ class UpdateCommandTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = root = Path(directory.name)
-        (root / "ESPHome").mkdir()
+        (root / "devices" / "sonoff-s60").mkdir(parents=True)
         (root / "artifacts").mkdir()
         for key, version in (("image", "1.4.0"), ("mover", "1.1.0")):
             (root / uf.ESPHOME_BUILDS[key][0]).write_text(self.CONFIG.format(name=key, version=version),
@@ -405,7 +405,7 @@ class UpdateCommandTests(unittest.TestCase):
     def test_esphome_publishes_the_image_at_the_next_minor_in_place_of_the_old(self):
         code, _, built = self.esphome("--no-docs")
         self.assertEqual(code, 0)
-        self.assertEqual(built, [("sonoff_s60.yaml", "1.5.0")])
+        self.assertEqual(built, [("esphome.yaml", "1.5.0")])
         new = "artifacts/esphome-sonoff-s60-imprintable-1.5.0.bin"
         pin = self.pins()["esphome"]["image"]
         self.assertEqual((pin["file"], pin["version"], pin["esphome"], pin["builder"]),
@@ -416,7 +416,7 @@ class UpdateCommandTests(unittest.TestCase):
         self.assertIn(f"{pin['sha256']}  {Path(new).name}", sums)
         self.assertNotIn("imprintable-1.4.0", sums)
         self.assertIn(f"!{new}\n", (self.root / ".gitignore").read_text(encoding="utf-8"))
-        self.assertIn('version: "1.5.0"', (self.root / "ESPHome/sonoff_s60.yaml").read_text(encoding="utf-8"))
+        self.assertIn('version: "1.5.0"', (self.root / "devices/sonoff-s60/esphome.yaml").read_text(encoding="utf-8"))
         # Neither the mover nor the bootloader, byte for byte the same, is touched.
         self.assertEqual(self.pins()["esphome"]["mover"], self.before_pins()["mover"])
         self.assertEqual(self.pins()["esphome"]["bootloader"]["version"], "1.2.0")
@@ -424,7 +424,7 @@ class UpdateCommandTests(unittest.TestCase):
     def test_esphome_builds_the_mover_and_the_version_asked_for(self):
         code, _, built = self.esphome("--no-docs", "--mover", "--image-version", "2.0.0")
         self.assertEqual(code, 0)
-        self.assertEqual(built, [("sonoff_s60.yaml", "2.0.0"), ("autoflash_mover.yaml", "1.2.0")])
+        self.assertEqual(built, [("esphome.yaml", "2.0.0"), ("mover.yaml", "1.2.0")])
         self.assertEqual(self.pins()["esphome"]["mover"]["file"], "artifacts/autoflash-mover-1.2.0.bin")
 
     def test_esphome_keeps_the_published_bootloader_unless_told(self):

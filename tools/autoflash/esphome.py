@@ -1,7 +1,7 @@
 """ESPHome instead of the final Tasmota: the image, and the plug once it runs it.
 
 The run installs a pre-built ESPHome (artifacts/esphome-sonoff-s60-imprintable-*.bin,
-from ESPHome/sonoff_s60.yaml) rather than asking anyone to build one: building it
+from devices/sonoff-s60/esphome.yaml) rather than asking anyone to build one: building it
 takes gigabytes of tools and minutes of compiling. Like the recovery Safeboot,
 it holds placeholders instead of a Wi-Fi name and password, and the plug's own
 Wi-Fi is written into them in memory (imprint.py) - so the image on disk never
@@ -107,7 +107,7 @@ def published_bootloader() -> bytes:
     return bootloader
 
 
-# The mover (ESPHome/autoflash_mover.yaml): a small ESPHome, run only while a
+# The mover (devices/sonoff-s60/mover.yaml): a small ESPHome, run only while a
 # plug leaves Tasmota, that takes the next firmware as an ESPHome update.
 MOVER = ROOT / PINS["mover"]["file"]
 MOVER_SHA256 = PINS["mover"]["sha256"]
@@ -148,7 +148,7 @@ def image_for(ssid: str, password: str, own: Path | None = None) -> bytes:
 
 # ------------------------------------------------------------ the plug, running it
 # Its web page (web_server version 3) and REST paths, named after each entity's
-# name in ESPHome/sonoff_s60.yaml: /switch/Relay, /sensor/Voltage, /sensor/Power.
+# name in devices/sonoff-s60/esphome.yaml: /switch/Relay, /sensor/Voltage, /sensor/Power.
 
 # Web logins (web_server's auth:), each for the plug it was given for
 # (use_login), answering only that plug's own request for one: Basic, or
@@ -257,7 +257,7 @@ def switch_relay(host: str, on: bool) -> bool:
     return relay(host) is on
 
 
-# The Wi-Fi signal sensor, by its name in ESPHome/sonoff_s60.yaml (from 1.1.0).
+# The Wi-Fi signal sensor, by its name in devices/sonoff-s60/esphome.yaml (from 1.1.0).
 SIGNAL_SENSOR = "WiFi Signal"
 
 
@@ -523,7 +523,7 @@ def api_wifi(host: str, port: int = API_PORT, timeout: float = 8.0,
     return None
 
 
-# Our ESPHome's action that gives the Wi-Fi it is on (ESPHome/sonoff_s60.yaml):
+# Our ESPHome's action that gives the Wi-Fi it is on (devices/sonoff-s60/esphome.yaml):
 # its name from 1.2.0, and 1.1.0's; and the API messages that list and call it.
 WIFI_ACTIONS = ("autoflash_wifi", "s60_wifi")
 _LIST, _LISTED, _ACTION, _CALL, _ANSWER = 11, 19, 41, 42, 131

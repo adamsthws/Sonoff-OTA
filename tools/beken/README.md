@@ -189,7 +189,7 @@ signed-char `Tiny_CRC8`, the `0x1e1000` config offset).
   applies the S61's wiring. Reads the stock store only (reversible). Build recipe
   and the `S61RevertToStock` command in [`devices/sonoff-s61/openbeken/README.md`](../../devices/sonoff-s61/openbeken/README.md).
 - **`devices/sonoff-s61/esphome.md`** — the **ESPHome route**: how
-  [`ESPHome/sonoff_s61.yaml`](../../ESPHome/sonoff_s61.yaml) (LibreTiny) reads
+  [`devices/sonoff-s61/esphome.yaml`](../../devices/sonoff-s61/esphome.yaml) (LibreTiny) reads
   the stock Wi-Fi and meter calibration from the EF40 store at boot, its 4 MB
   flash layout, the build, the reversion through ESPHome's own OTA, and what
   the emulator validated.

@@ -100,14 +100,14 @@ The earlier bridge v3, wrapped as `1.2.1`, is no longer published here. It
 is in the Git history: `git log --all -- artifacts/s60-ota-bridge-v3-1.2.1.ota`
 finds the last commit that has it.
 
-The ESPHome image is built from [`../ESPHome/sonoff_s60.yaml`](../ESPHome/sonoff_s60.yaml)
+The ESPHome image is built from [`../devices/sonoff-s60/esphome.yaml`](../devices/sonoff-s60/esphome.yaml)
 (its `project` version is the one in the file name) with ESPHome 2026.10.0 and
 ESP-IDF 5.5.6, as `esphome compile sonoff_s60.yaml`, in ESPHome's own Docker
 image for that release (`firmware.json` pins it by digest);
 `firmware.ota.bin` is the file published. The bootloader is
 `bootloader/bootloader.bin` from the build of 1.2.0, with ESPHome 2026.9.1 and
 ESP-IDF 5.5.5. The mover is
-[`../ESPHome/autoflash_mover.yaml`](../ESPHome/autoflash_mover.yaml), built the same way, with ESPHome 2026.9.1: it drives no pins, so it
+[`../devices/sonoff-s60/mover.yaml`](../devices/sonoff-s60/mover.yaml), built the same way, with ESPHome 2026.9.1: it drives no pins, so it
 is the same for any plug with an ESP32-C3 and 4 MB of flash, and from 1.1.0 it
 goes by `autoflash-recovery-XXXX` as the bridge does (1.0.0 was
 `sonoff-s60-mover-xxxxxx` on the home network, and raised `Sonoff-Setup-XXXX`).

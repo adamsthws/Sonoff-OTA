@@ -1,8 +1,8 @@
 # ESPHome for the S60
 
-[`sonoff_s60.yaml`](sonoff_s60.yaml) is the ESPHome the conversion installs when ESPHome is
+[`esphome.yaml`](esphome.yaml) is the ESPHome the conversion installs when ESPHome is
 chosen at the start. Nobody converting a plug needs to build it: the tool
-installs the pre-built image in [`../artifacts/`](../artifacts/README.md) and
+installs the pre-built image in [`../../artifacts/`](../../artifacts/README.md) and
 writes the plug's Wi-Fi into it, in memory only.
 
 It is also the config Home Assistant takes when it adopts a converted plug
@@ -35,9 +35,9 @@ they carry on from where they were.
 
 ## Changing it
 
-Edit `sonoff_s60.yaml`, then build and publish it with
+Edit `esphome.yaml`, then build and publish it with
 `python3 tools/repo/update_firmware.py esphome`, as for a new ESPHome release
-([docs/updating-firmware.md](../docs/updating-firmware.md)): it raises the
+([docs/updating-firmware.md](../../docs/updating-firmware.md)): it raises the
 config's `project` `version`, builds it in ESPHome's own Docker image, checks
 the image can still be imprinted, and publishes it in `artifacts/`, with its
 lines in `SHA256SUMS` and `firmware.json`. ESPHome 2026.10.0 built the current
@@ -93,15 +93,5 @@ every ESPHome the conversion installs is, whatever the plug, and its own
 network has that name too; the friendly name says what plug it is. Up to 1.1.0
 it was `sonoff-s60-abcdef`, its network `Sonoff-Setup-CDEF`.
 
-[`archive/esphome-prototype/FINDINGS.md`](../archive/esphome-prototype/FINDINGS.md) records how this route was
+[`archive/esphome-prototype/FINDINGS.md`](../../archive/esphome-prototype/FINDINGS.md) records how this route was
 worked out and tested.
-
-## The S61
-
-[`sonoff_s61.yaml`](sonoff_s61.yaml) is the same config for the Sonoff S61
-(a Beken BK7238, on LibreTiny): the same entities, actions and energy totals,
-the S61's wiring, and its Wi-Fi and factory calibration read at boot from the
-stock firmware's own store, which stays on the plug through every conversion -
-so it has no placeholders to fill. The tool installs it as an rt_ota update
-the plug's stock bootloader applies. How it is built and what the emulator
-validated: [devices/sonoff-s61/esphome.md](../devices/sonoff-s61/esphome.md).

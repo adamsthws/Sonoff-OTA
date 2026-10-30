@@ -1,7 +1,10 @@
 # Private per-device material. Never commit this directory.
 captures/
 
-# Local Python and PlatformIO environments/downloads.
+# Local Python and PlatformIO environments/downloads, and what an ESPHome build
+# beside a config leaves (.esphome/, secrets.yaml).
+.esphome/
+secrets.yaml
 .pio-home/
 .platformio/
 .platformio-core/

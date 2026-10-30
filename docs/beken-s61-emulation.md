@@ -892,7 +892,7 @@ P24 for SEL (and `0x26` = `8<<2 | 6` looks like CF/CF1 packed). The template's
 fixed upstream in 1.18.235 (PR #1930); our 1.18.319 base has the fix. The import
 module applies this template on first boot, plus `SetStartValue 1 -1` so the
 relay restores its last state after a power cut (what the tool sets on the S60).
-The ESPHome config ([`ESPHome/sonoff_s61.yaml`](../ESPHome/sonoff_s61.yaml),
+The ESPHome config ([`devices/sonoff-s61/esphome.yaml`](../devices/sonoff-s61/esphome.yaml),
 on LibreTiny) uses the same pins (`hlw8012: model: BL0937, sel_pin: P24,
 cf_pin: P8, cf1_pin: P6`); see [the ESPHome route](#the-esphome-route-libretiny).
 
@@ -984,7 +984,7 @@ reversible.
 
 The second open firmware for the S61 is ESPHome on **LibreTiny**, whose 1.13.0
 (the version ESPHome 2026.10.0 pins) has the BK7238. The config,
-[`ESPHome/sonoff_s61.yaml`](../ESPHome/sonoff_s61.yaml), is the S60's with the
+[`devices/sonoff-s61/esphome.yaml`](../devices/sonoff-s61/esphome.yaml), is the S60's with the
 S61's wiring and storage, and needs no change to LibreTiny or ESPHome; the
 build, the reversion and the validation are in
 [devices/sonoff-s61/esphome.md](../devices/sonoff-s61/esphome.md). What the
