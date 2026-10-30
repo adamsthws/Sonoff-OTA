@@ -921,7 +921,7 @@ The build is a `FLASH_SIZE=4M` switch, in two patches kept in
 [`tools/beken/openbeken/`](../../tools/beken/openbeken/) and
 offered upstream — OpenBK7231T_App#2290 and beken_freertos_sdk#13, see
 [upstream-contributions.md](upstream-contributions.md#openbeken-on-a-4-mb-bk7238)
-(the recipe is in [its README](../devices/sonoff-s61/openbeken/README.md#building-bk7238-4-mb-table)).
+(the recipe is in [its README](../devices/sonoff-s61/openbeken.md#building-bk7238-4-mb-table)).
 Packing a whole 4 MB image needed a 4 MB bootloader, and that turned up a tidy
 fact: **the S61's factory bootloader is the SDK's shipped
 `bootloader_bk7238_uart1_v1.0.15.bin` with the 4 MB FAL table in its tail**,
@@ -968,7 +968,7 @@ emulator. With the generic stock app and this region, a plug can always be put
 back to stock.
 
 **The robust, update-proof mechanism (ship this): an OpenBeken import module**
-([`devices/sonoff-s61/openbeken/drv_sonoff_s61_import.c`](../devices/sonoff-s61/openbeken/drv_sonoff_s61_import.c)).
+([`devices/sonoff-s61/drv_sonoff_s61_import.c`](../devices/sonoff-s61/drv_sonoff_s61_import.c)).
 On first boot (only when no SSID is set) it reads the stock EF40 store with
 `beken_hal_flash_read`, finds the newest CRC-valid `wifi-ssid`/`wifi-pass`, and
 calls OpenBeken's own `CFG_SetWiFiSSID()`/`CFG_SetWiFiPass()`. Because it uses the

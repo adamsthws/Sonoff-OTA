@@ -18,10 +18,10 @@ worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-e
 | Stock stores | EasyFlash V4 at `0x3e2000` (Wi-Fi, `elecCalibCoef`) and `0x3f6000`; never written by a conversion |
 | Stock bootloader table | app `0x11000`, download slot `0x286000` (where it applies an rt_ota update), radio calibration `0x3e0000` |
 
-- **OpenBeken**: [`openbeken/drv_sonoff_s61_import.c`](openbeken/drv_sonoff_s61_import.c),
-  the module that reads the stock Wi-Fi and meter calibration on first boot and
+- **OpenBeken**: [`drv_sonoff_s61_import.c`](drv_sonoff_s61_import.c), the
+  module that reads the stock Wi-Fi and meter calibration on first boot and
   applies the wiring; the build recipe, the 4 MB table and reverting to stock:
-  [`openbeken/README.md`](openbeken/README.md). The 4 MB patches offered
+  [`openbeken.md`](openbeken.md). The 4 MB patches offered
   upstream are [`tools/beken/openbeken/`](../../tools/beken/openbeken/).
 - **ESPHome** (LibreTiny): [`esphome.yaml`](esphome.yaml), the path converted
   plugs will name as their `package_import_url`; how it differs from the S60's, the build, the reversion and what the
