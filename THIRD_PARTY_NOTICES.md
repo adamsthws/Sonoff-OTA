@@ -113,6 +113,8 @@ will provide the corresponding source for any binary it has published.
 
 ## Trademarks
 
-Sonoff and eWeLink are trademarks of their respective owners. This project is
+Sonoff and eWeLink are trademarks of their respective owners. The GitHub
+mark on the web page's GitHub button (the `mark-github` icon of GitHub's
+Octicons, MIT) links to the repository, as GitHub's logo guidelines allow. This project is
 independent and is not an official Sonoff, eWeLink, Tasmota or ESPHome
 installer.
