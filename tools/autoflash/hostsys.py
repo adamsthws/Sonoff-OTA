@@ -25,12 +25,13 @@ import socket
 import ssl
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 from . import output
 
@@ -257,6 +258,140 @@ def local_addresses() -> set[str]:
     return found
 
 
+def lan_networks() -> dict[str, int]:
+    """This computer's IPv4 addresses on its Ethernet and Wi-Fi networks, each
+    with its network's prefix length: where a plug can be, and be found by its
+    hardware address.  A TAP adapter is Ethernet - the emulator's link is one,
+    on Windows and in its container - so it counts.  A VPN's tunnel does not:
+    WireGuard, Tailscale, OpenVPN's tun mode and PPP carry IP alone, so nothing
+    on them answers ARP or shows in the neighbour table, and sweeping them sends
+    pings through the VPN for nothing.  Nor does a one-address network (/32).
+    Empty when it cannot be told."""
+    if IS_LINUX:
+        addresses = _run(["ip", "-o", "-4", "address"])
+        links = _run(["ip", "-o", "link"])
+        if addresses and links and addresses.returncode == 0 and links.returncode == 0:
+            return lan_networks_linux(addresses.stdout, links.stdout)
+    elif IS_MAC:
+        completed = _run(["ifconfig"])
+        if completed and completed.returncode == 0:
+            return lan_networks_mac(completed.stdout)
+    elif IS_WINDOWS:
+        try:
+            return lan_networks_windows(_windows_adapters())
+        except OSError:
+            pass
+    return {}
+
+
+# The bridges Docker and libvirt make for their containers and VMs, by the names
+# they give them: no plug is ever on one, and Docker's are /16s - 1022 addresses
+# a sweep each. A bridge of the person's own (br0, holding the LAN) is kept.
+CONTAINER_BRIDGE = re.compile(r"docker\d+|br-[0-9a-f]{12}|virbr\d+")
+
+
+def lan_networks_linux(addresses: str, links: str) -> dict[str, int]:
+    """From `ip -o -4 address` and `ip -o link`: those on a link/ether interface
+    (Ethernet, Wi-Fi, TAP, a bridge) - not link/none (WireGuard, a tun) or
+    link/ppp, nor a container bridge (CONTAINER_BRIDGE)."""
+    ether = {name.split("@")[0] for name, kind in
+             re.findall(r"^\d+:\s+(\S+?):\s.*?\blink/(\S+)", links, re.M)
+             if kind == "ether" and not CONTAINER_BRIDGE.fullmatch(name.split("@")[0])}
+    return {address: int(prefix) for name, address, prefix in
+            re.findall(r"^\d+:\s+(\S+)\s+inet\s+(\d+\.\d+\.\d+\.\d+)/(\d+)", addresses, re.M)
+            if name in ether and int(prefix) < 32}
+
+
+def lan_networks_mac(ifconfig: str) -> dict[str, int]:
+    """From `ifconfig`: those on an interface with a hardware address that is
+    not point-to-point (a utun, ppp or ipsec tunnel has none, or is)."""
+    found: dict[str, int] = {}
+    for block in re.split(r"\n(?=\S)", ifconfig):
+        flags = re.match(r"\S+:\s+flags=\S*<([^>]*)>", block)
+        if not flags or {"POINTOPOINT", "LOOPBACK"} & set(flags.group(1).split(",")):
+            continue
+        if not re.search(r"^\s+ether\s", block, re.M):
+            continue
+        for address, mask in re.findall(r"^\s+inet\s+(\d+\.\d+\.\d+\.\d+)\s+netmask\s+(0x[0-9a-fA-F]+)",
+                                        block, re.M):
+            prefix = bin(int(mask, 16)).count("1")
+            if prefix < 32:
+                found[address] = prefix
+    return found
+
+
+# Interface types (ipifcons.h) that are never a plug's network, whatever else
+# they report: the loopback, PPP and a tunnel.
+IF_TYPE_PPP, IF_TYPE_SOFTWARE_LOOPBACK, IF_TYPE_TUNNEL = 23, 24, 131
+IF_OPER_STATUS_UP = 1
+
+
+def lan_networks_windows(adapters: list[tuple[str, int, int, int, int]]) -> dict[str, int]:
+    """From (address, prefix length, interface type, operational status, length
+    of the hardware address) rows: those on an adapter that is up and carries
+    Ethernet frames - it has a 6-byte MAC - on more than one address. The
+    interface type cannot tell: a TAP-Windows adapter, the emulator's link,
+    says "virtual" (53) as Wintun's does, behind WireGuard and Tailscale; but
+    TAP has a MAC and Wintun, carrying IP alone, none."""
+    return {address: prefix for address, prefix, kind, status, mac_length in adapters
+            if mac_length == 6 and status == IF_OPER_STATUS_UP and prefix < 32
+            and kind not in (IF_TYPE_PPP, IF_TYPE_SOFTWARE_LOOPBACK, IF_TYPE_TUNNEL)}
+
+
+def _windows_adapters() -> list[tuple[str, int, int, int, int]]:
+    """Each IPv4 address of each adapter, from GetAdaptersAddresses: one call in
+    this process, where PowerShell's Get-NetAdapter starts .NET and asks WMI
+    (8 s on the emulator's Windows). Raises OSError if Windows refuses."""
+    import ctypes
+    import ctypes.wintypes as wt
+
+    class SocketAddress(ctypes.Structure):
+        _fields_ = [("lpSockaddr", ctypes.c_void_p), ("iSockaddrLength", ctypes.c_int)]
+
+    class UnicastAddress(ctypes.Structure):
+        pass
+    UnicastAddress._fields_ = [
+        ("Length", wt.ULONG), ("Flags", wt.DWORD), ("Next", ctypes.POINTER(UnicastAddress)),
+        ("Address", SocketAddress), ("PrefixOrigin", ctypes.c_int), ("SuffixOrigin", ctypes.c_int),
+        ("DadState", ctypes.c_int), ("ValidLifetime", wt.ULONG), ("PreferredLifetime", wt.ULONG),
+        ("LeaseLifetime", wt.ULONG), ("OnLinkPrefixLength", ctypes.c_uint8)]
+
+    class Adapter(ctypes.Structure):   # IP_ADAPTER_ADDRESSES, as far as needed
+        pass
+    Adapter._fields_ = [
+        ("Length", wt.ULONG), ("IfIndex", wt.DWORD), ("Next", ctypes.POINTER(Adapter)),
+        ("AdapterName", ctypes.c_char_p), ("FirstUnicastAddress", ctypes.POINTER(UnicastAddress)),
+        ("FirstAnycastAddress", ctypes.c_void_p), ("FirstMulticastAddress", ctypes.c_void_p),
+        ("FirstDnsServerAddress", ctypes.c_void_p), ("DnsSuffix", ctypes.c_wchar_p),
+        ("Description", ctypes.c_wchar_p), ("FriendlyName", ctypes.c_wchar_p),
+        ("PhysicalAddress", ctypes.c_ubyte * 8), ("PhysicalAddressLength", wt.ULONG),
+        ("Flags", wt.ULONG), ("Mtu", wt.ULONG), ("IfType", wt.DWORD), ("OperStatus", ctypes.c_int)]
+
+    af_inet, error_buffer_overflow = 2, 111
+    skip = 0x0002 | 0x0004 | 0x0008   # GAA_FLAG_SKIP_ANYCAST, _MULTICAST, _DNS_SERVER
+    get = ctypes.WinDLL("iphlpapi").GetAdaptersAddresses
+    size = wt.ULONG(16384)
+    for _ in range(3):   # the list can grow between asking its size and reading it
+        buffer = ctypes.create_string_buffer(size.value)
+        error = get(af_inet, skip, None, buffer, ctypes.byref(size))
+        if error != error_buffer_overflow:
+            break
+    if error:
+        raise OSError(error, "GetAdaptersAddresses failed")
+    rows = []
+    adapter = ctypes.cast(buffer, ctypes.POINTER(Adapter))
+    while adapter:
+        unicast = adapter.contents.FirstUnicastAddress
+        while unicast:
+            sockaddr = ctypes.string_at(unicast.contents.Address.lpSockaddr, 8)   # sockaddr_in
+            rows.append((socket.inet_ntoa(sockaddr[4:8]), unicast.contents.OnLinkPrefixLength,
+                         adapter.contents.IfType, adapter.contents.OperStatus,
+                         adapter.contents.PhysicalAddressLength))
+            unicast = unicast.contents.Next
+        adapter = adapter.contents.Next
+    return rows
+
+
 def interface_towards(target: str) -> str | None:
     """The name of the network connection that reaches `target`, if knowable."""
     if IS_LINUX:
@@ -295,7 +430,12 @@ def neighbour_table() -> dict[str, str]:
     table: dict[str, str] = {}
     if completed and completed.returncode == 0:
         for ip, mac in pattern.findall(completed.stdout):
-            table[ip] = normalise_mac(mac)
+            mac = normalise_mac(mac)
+            # Windows lists the broadcast address (ff-ff-ff-ff-ff-ff) and each
+            # multicast group (01-00-5e-...) too: no device's, and asking one
+            # what it is waits out a whole timeout. The multicast bit marks both.
+            if not int(mac[:2], 16) & 0x01:
+                table[ip] = mac
     return table
 
 
@@ -305,11 +445,86 @@ def mac_of(address: str) -> str | None:
     return neighbour_table().get(address)
 
 
-def sweep(subnet_of: str, timeout: int = 1) -> None:
-    """Ping every address in `subnet_of`'s /24 once, to fill the neighbour cache."""
-    network = ipaddress.ip_network(f"{subnet_of}/24", strict=False)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
-        list(pool.map(lambda host: ping_ok(str(host), timeout), network.hosts()))
+# Linux asks for an address's MAC (ARP) at 0, 1 and 2 s, then gives up, whether
+# or not the ping that set it asking has ended: a sweep read sooner misses a
+# device that did not hear the first ask - a plug's Wi-Fi asleep, or a broadcast
+# lost on the air.
+ARP_TRIES_END = 2.5
+# The widest a sweep goes: a /22, 1022 addresses, about 5 s. A wider network -
+# a /16 is 65,534 addresses - is swept across the /22 around the address; a
+# plug further off is found only once this computer knows it, or by its address.
+SWEEP_WIDEST = 22
+SWEEP_READ_EVERY = 1.0   # seconds between reads of the neighbour cache during a sweep
+
+
+def network_of(address: str, lan: dict[str, int]) -> ipaddress.IPv4Network:
+    """The network a sweep from `address` covers: the network of this
+    computer's (`lan`, from lan_networks) that holds it, at its real size - no
+    wider than SWEEP_WIDEST, around the address; the /24 around it otherwise."""
+    ip = ipaddress.ip_address(address)
+    for own, prefix in lan.items():
+        if ip in ipaddress.ip_network(f"{own}/{prefix}", strict=False):
+            return ipaddress.ip_network(f"{address}/{max(prefix, SWEEP_WIDEST)}", strict=False)
+    return ipaddress.ip_network(f"{address}/24", strict=False)
+
+
+def sweep(subnet_of: str | Iterable[str], timeout: int = 1) -> dict[str, str]:
+    """Ping every address on the network of `subnet_of` - an address, or
+    several, one for each network - once, to fill the neighbour cache, and
+    return what it held while the sweep ran ({ip: mac}). Each network is swept
+    at its real size (network_of). Several are swept side by side: a ping nobody
+    answers waits its whole timeout, so one after another would take that long
+    again for each network. The cache is read each second as well as at the
+    end: past its size - 1024 entries by default on Linux - the kernel drops
+    entries not renewed for 5 s, which a wide network's sweep can outlast."""
+    near = [subnet_of] if isinstance(subnet_of, str) else list(subnet_of)
+    lan = lan_networks()
+    networks = {network_of(address, lan) for address in near}
+    hosts = sorted({host for network in networks for host in network.hosts()})
+    seen: dict[str, str] = {}
+    done = threading.Event()
+
+    def watch() -> None:
+        while not done.wait(SWEEP_READ_EVERY):
+            seen.update(neighbour_table())
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    try:
+        if IS_LINUX:
+            # Every address at once - in rounds, for a network wider than the
+            # pings allowed at once - then until ARP's last ask has had its
+            # answer: each address gets all three asks.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=_sweep_workers()) as pool:
+                list(pool.map(lambda host: _ping_quietly(str(host), timeout), hosts))
+            time.sleep(ARP_TRIES_END - timeout)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(64 * len(networks), 256)) as pool:
+                list(pool.map(lambda host: ping_ok(str(host), timeout), hosts))
+    finally:
+        done.set()
+        watcher.join()
+    seen.update(neighbour_table())
+    return seen
+
+
+def _sweep_workers() -> int:
+    """How many pings a sweep runs at once: a whole network's, within what this
+    process may open - each starting ping holds a few files a moment, and one
+    that cannot start pings nothing, so its device would go unseen."""
+    import resource
+    soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+    if soft == resource.RLIM_INFINITY:
+        return 256
+    return max(16, min(256, (soft - 64) // 4))
+
+
+def _ping_quietly(address: str, timeout: int) -> None:
+    """One ping, its output thrown away: only the ARP ask it sets off matters."""
+    try:
+        subprocess.run(ping_command(address, timeout), stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=timeout + 3, env=COMMAND_ENV, check=False)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def find_by_mac(mac: str, subnet_of: str) -> str | None:
@@ -318,8 +533,7 @@ def find_by_mac(mac: str, subnet_of: str) -> str | None:
     for ip, seen in neighbour_table().items():
         if seen == wanted and ping_ok(ip):
             return ip
-    sweep(subnet_of)
-    for ip, seen in neighbour_table().items():
+    for ip, seen in sweep(subnet_of).items():
         if seen == wanted:
             return ip
     return None

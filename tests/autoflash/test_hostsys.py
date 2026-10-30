@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -548,3 +549,194 @@ class AdminPasswordTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LanAddressesTests(unittest.TestCase):
+    """The networks discovery may sweep: Ethernet and Wi-Fi, a TAP adapter among
+    them - the emulator's link is one - and never a VPN's tunnel."""
+
+    def test_linux_keeps_ether_links_and_drops_tunnels_and_container_bridges(self):
+        links = (
+            "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT\\    link/loopback\n"
+            "2: wlp1s0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP\\    link/ether 12:34:56:ab:cd:ef brd ff:ff:ff:ff:ff:ff\n"
+            "3: tap0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP\\    link/ether 12:34:56:ab:cd:01 brd ff:ff:ff:ff:ff:ff\n"
+            "4: tailscale0: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1280 qdisc fq_codel state UNKNOWN\\    link/none \n"
+            "5: wg0: <POINTOPOINT,NOARP,UP,LOWER_UP> mtu 1420 qdisc noqueue state UNKNOWN\\    link/none \n"
+            "6: ppp0: <POINTOPOINT,MULTICAST,NOARP,UP,LOWER_UP> mtu 1492 qdisc fq_codel state UNKNOWN\\    link/ppp \n"
+            "7: veth1a2b@if6: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP\\    link/ether 12:34:56:ab:cd:02 brd ff:ff:ff:ff:ff:ff\n"
+            "8: docker0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP\\    link/ether 12:34:56:ab:cd:03 brd ff:ff:ff:ff:ff:ff\n"
+            "9: br-26e078a930f7: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP\\    link/ether 12:34:56:ab:cd:04 brd ff:ff:ff:ff:ff:ff\n"
+            "10: virbr0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP\\    link/ether 12:34:56:ab:cd:05 brd ff:ff:ff:ff:ff:ff\n"
+            "11: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP\\    link/ether 12:34:56:ab:cd:06 brd ff:ff:ff:ff:ff:ff\n")
+        addresses = (
+            "1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever preferred_lft forever\n"
+            "2: wlp1s0    inet 192.168.0.10/24 brd 192.168.0.255 scope global dynamic wlp1s0\\       valid_lft 80000sec\n"
+            "3: tap0    inet 192.168.60.10/24 brd 192.168.60.255 scope global tap0\\       valid_lft forever\n"
+            "4: tailscale0    inet 100.64.0.7/32 scope global tailscale0\\       valid_lft forever\n"
+            "5: wg0    inet 10.8.0.2/24 scope global wg0\\       valid_lft forever\n"
+            "6: ppp0    inet 10.64.64.1 peer 10.64.64.64/32 scope global ppp0\\       valid_lft forever\n"
+            "8: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0\\       valid_lft forever\n"
+            "9: br-26e078a930f7    inet 172.19.0.1/16 brd 172.19.255.255 scope global br-26e078a930f7\\       valid_lft forever\n"
+            "10: virbr0    inet 192.168.122.1/24 brd 192.168.122.255 scope global virbr0\\       valid_lft forever\n"
+            "11: br0    inet 10.20.5.9/22 brd 10.20.7.255 scope global br0\\       valid_lft forever\n")
+        # Docker's and libvirt's bridges are left out; a bridge of the person's own, br0, is kept.
+        self.assertEqual(hostsys.lan_networks_linux(addresses, links),
+                         {"192.168.0.10": 24, "192.168.60.10": 24, "10.20.5.9": 22})
+
+    def test_mac_keeps_interfaces_with_a_hardware_address_not_point_to_point(self):
+        ifconfig = (
+            "lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384\n"
+            "\tinet 127.0.0.1 netmask 0xff000000\n"
+            "en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n"
+            "\tether 12:34:56:ab:cd:ef\n"
+            "\tinet 192.168.0.10 netmask 0xffffff00 broadcast 192.168.0.255\n"
+            "bridge100: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n"
+            "\tether 12:34:56:ab:cd:01\n"
+            "\tinet 192.168.2.1 netmask 0xffffff00 broadcast 192.168.2.255\n"
+            "utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280\n"
+            "\tinet 100.64.0.7 --> 100.64.0.7 netmask 0xffffffff\n"
+            "en5: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n"
+            "\tether 12:34:56:ab:cd:02\n"
+            "\tinet 10.0.0.5 netmask 0xffffffff broadcast 10.0.0.5\n"
+            "en6: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n"
+            "\tether 12:34:56:ab:cd:03\n"
+            "\tinet 10.20.5.9 netmask 0xfffffc00 broadcast 10.20.7.255\n")
+        self.assertEqual(hostsys.lan_networks_mac(ifconfig), {"192.168.0.10": 24, "192.168.2.1": 24, "10.20.5.9": 22})
+
+    def test_windows_keeps_adapters_carrying_ethernet_the_tap_adapter_among_them(self):
+        up, down = hostsys.IF_OPER_STATUS_UP, 2
+        # As GetAdaptersAddresses gave them on the emulator's Windows, and the tunnels it may meet.
+        rows = [("192.168.60.10", 24, 53, up, 6),    # the emulator's TAP-Windows: "virtual", with a MAC
+                ("192.168.0.10", 24, 71, up, 6),     # Wi-Fi
+                ("10.0.2.15", 24, 6, up, 6),         # Ethernet
+                ("10.8.0.2", 24, 53, up, 0),         # Wintun (WireGuard): "virtual", no MAC
+                ("100.64.0.7", 32, 6, up, 6),        # one address: a tunnel, whatever it says
+                ("10.9.0.2", 24, 23, up, 6),         # PPP
+                ("10.10.0.2", 24, 131, up, 6),       # a tunnel
+                ("169.254.148.5", 16, 53, down, 6),  # an unused TAP adapter
+                ("127.0.0.1", 8, 24, up, 0)]         # the loopback
+        self.assertEqual(hostsys.lan_networks_windows(rows),
+                         {"192.168.60.10": 24, "192.168.0.10": 24, "10.0.2.15": 24})
+
+    def test_it_reads_this_systems_own_tool(self):
+        for flag, expected in (("IS_LINUX", ["ip", "-o", "-4", "address"]), ("IS_MAC", ["ifconfig"])):
+            with self.subTest(system=flag), \
+                    mock.patch.object(hostsys, "IS_LINUX", flag == "IS_LINUX"), \
+                    mock.patch.object(hostsys, "IS_MAC", flag == "IS_MAC"), \
+                    mock.patch.object(hostsys, "IS_WINDOWS", False), \
+                    mock.patch.object(hostsys, "_run", return_value=mock.Mock(returncode=1, stdout="")) as run:
+                self.assertEqual(hostsys.lan_networks(), {})   # a tool that fails: nothing beyond the default
+            self.assertEqual(run.call_args_list[0].args[0], expected)
+
+
+class NetworkOfTests(unittest.TestCase):
+    """A sweep covers the network as this computer has it, no wider than a /22."""
+
+    def width(self, address, lan):
+        network = hostsys.network_of(address, lan)
+        return str(network), network.num_addresses - 2
+
+    def test_a_network_is_swept_at_its_real_size(self):
+        self.assertEqual(self.width("10.20.5.9", {"10.20.5.9": 22}), ("10.20.4.0/22", 1022))
+        self.assertEqual(self.width("10.20.5.9", {"10.20.5.9": 23}), ("10.20.4.0/23", 510))
+        self.assertEqual(self.width("192.168.1.70", {"192.168.1.70": 26}), ("192.168.1.64/26", 62))
+
+    def test_a_wider_one_only_across_the_widest_around_the_address(self):
+        self.assertEqual(self.width("10.20.5.9", {"10.20.5.9": 16}), ("10.20.4.0/22", 1022))
+
+    def test_an_address_on_another_of_its_networks_takes_that_ones_size(self):
+        # The plug's address, on the computer's /23: the plug's half of it, not a /24.
+        self.assertEqual(self.width("10.20.4.200", {"10.20.5.9": 23, "192.168.0.10": 24}), ("10.20.4.0/23", 510))
+
+    def test_a_network_this_computer_does_not_know_is_a_24(self):
+        self.assertEqual(self.width("10.0.0.2", {}), ("10.0.0.0/24", 254))
+        self.assertEqual(self.width("10.0.0.2", {"192.168.0.10": 24}), ("10.0.0.0/24", 254))
+
+
+class SweepTests(unittest.TestCase):
+    def sweep(self, subnet_of, linux, lan=None):
+        pinged, slept = [], []
+        record = lambda host, _timeout: pinged.append(host)
+        with mock.patch.object(hostsys, "IS_LINUX", linux), \
+                mock.patch.object(hostsys, "lan_networks", return_value=dict(lan or {})), \
+                mock.patch.object(hostsys, "neighbour_table", return_value={}), \
+                mock.patch.object(hostsys, "_ping_quietly", side_effect=record), \
+                mock.patch.object(hostsys, "ping_ok", side_effect=record), \
+                mock.patch.object(hostsys.time, "sleep", side_effect=slept.append):
+            seen = hostsys.sweep(subnet_of)
+        return pinged, slept, seen
+
+    def test_several_networks_are_pinged_once_each_address(self):
+        for linux in (True, False):
+            pinged, _, _ = self.sweep(["10.0.0.2", "10.0.0.9", "192.168.60.10"], linux)
+            self.assertEqual(len(pinged), 2 * 254)
+            self.assertEqual(len(set(pinged)), len(pinged))
+            self.assertIn("192.168.60.50", pinged)
+
+    def test_one_address_sweeps_its_network(self):
+        pinged, _, _ = self.sweep("10.0.0.2", linux=True)
+        self.assertEqual(len(pinged), 254)
+
+    def test_a_wider_network_is_swept_at_its_size(self):
+        pinged, _, _ = self.sweep("10.20.5.9", linux=True, lan={"10.20.5.9": 22})
+        self.assertEqual(len(set(pinged)), 1022)
+        self.assertIn("10.20.4.1", pinged)
+        self.assertIn("10.20.7.254", pinged)
+
+    def test_on_linux_it_waits_out_arps_three_asks(self):
+        # Asks at 0, 1 and 2 s: the pings end at 1 s, the wait takes it past 2.
+        _, slept, _ = self.sweep("10.0.0.2", linux=True)
+        self.assertEqual(slept, [hostsys.ARP_TRIES_END - 1])
+        self.assertGreater(hostsys.ARP_TRIES_END, 2)
+
+    def test_what_was_seen_counts_though_the_table_dropped_it_since(self):
+        # The kernel drops entries not renewed for 5 s once its table is full:
+        # a plug seen early in a wide sweep is kept from the reads along the way.
+        tables = [{"10.20.4.37": "12:34:56:ab:cd:ef"}, {"10.20.6.8": "12:34:56:ab:cd:01"}]
+        reads = threading.Event()
+        calls = []
+
+        def table():
+            calls.append(1)
+            if len(calls) >= 2:
+                reads.set()
+            return dict(tables[min(len(calls), len(tables)) - 1])
+
+        def ping(_host, _timeout):
+            reads.wait(10)   # the sweep lasts until the watcher has read twice
+        with mock.patch.object(hostsys, "IS_LINUX", True), \
+                mock.patch.object(hostsys, "SWEEP_READ_EVERY", 0.001), \
+                mock.patch.object(hostsys, "lan_networks", return_value={}), \
+                mock.patch.object(hostsys, "neighbour_table", side_effect=table), \
+                mock.patch.object(hostsys, "_ping_quietly", side_effect=ping), \
+                mock.patch.object(hostsys.time, "sleep"):
+            seen = hostsys.sweep("10.20.5.9")
+        self.assertEqual(seen, {"10.20.4.37": "12:34:56:ab:cd:ef", "10.20.6.8": "12:34:56:ab:cd:01"})
+
+    def test_no_more_pings_at_once_than_files_allow(self):
+        resource = __import__("resource")
+        for soft, workers in ((1024, 240), (1048576, 256), (256, 48), (80, 16), (resource.RLIM_INFINITY, 256)):
+            with self.subTest(soft=soft), \
+                    mock.patch.object(resource, "getrlimit", return_value=(soft, resource.RLIM_INFINITY)):
+                self.assertEqual(hostsys._sweep_workers(), workers)
+
+
+class FindByMacTests(unittest.TestCase):
+    def test_a_plug_the_sweep_saw_is_found_though_the_table_dropped_it(self):
+        with mock.patch.object(hostsys, "neighbour_table", return_value={}), \
+                mock.patch.object(hostsys, "sweep", return_value={"10.20.4.37": "12:34:56:ab:cd:ef"}):
+            self.assertEqual(hostsys.find_by_mac("12:34:56:ab:cd:ef", "10.20.5.9"), "10.20.4.37")
+
+class NeighbourTableTests(unittest.TestCase):
+    def test_windows_broadcast_and_multicast_entries_are_not_neighbours(self):
+        arp = ("\r\nInterface: 192.168.60.10 --- 0x3\r\n"
+               "  Internet Address      Physical Address      Type\r\n"
+               "  192.168.60.50         12-34-56-ab-cd-ef     dynamic   \r\n"
+               "  192.168.60.255        ff-ff-ff-ff-ff-ff     static    \r\n"
+               "  224.0.0.22            01-00-5e-00-00-16     static    \r\n"
+               "  239.255.255.250       01-00-5e-7f-ff-fa     static    \r\n"
+               "  255.255.255.255       ff-ff-ff-ff-ff-ff     static    \r\n")
+        with mock.patch.object(hostsys, "IS_LINUX", False), mock.patch.object(hostsys, "IS_WINDOWS", True), \
+                mock.patch.object(hostsys, "_run", return_value=mock.Mock(returncode=0, stdout=arp)):
+            self.assertEqual(hostsys.neighbour_table(), {"192.168.60.50": "12:34:56:ab:cd:ef"})
+

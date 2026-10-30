@@ -5145,10 +5145,8 @@ class ComputerDescriptionTests(unittest.TestCase):
                          "Windows 10 (build 10.0.26100)")
 
 
-class TasmotaWebPasswordTests(unittest.TestCase):
-    """A plug on Tasmota with a web password: asked for it, before anything
-    needs it, where someone can type it; stopped, saying what to give, where
-    nobody can.  Each try is checked on the plug."""
+class FirmwareSearchCase(unittest.TestCase):
+    """find_current_firmware with the plug and the network stood in for."""
 
     def setUp(self):
         import tools.autoflash.cli as autoflash
@@ -5187,6 +5185,12 @@ class TasmotaWebPasswordTests(unittest.TestCase):
         done = inputs.pop("done", ())
         state = SimpleNamespace(input=inputs.get, set_input=inputs.__setitem__, is_done=lambda step: step in done)
         return SimpleNamespace(state=state, web_password=None, esphome_login=None)
+
+
+class TasmotaWebPasswordTests(FirmwareSearchCase):
+    """A plug on Tasmota with a web password: asked for it, before anything
+    needs it, where someone can type it; stopped, saying what to give, where
+    nobody can.  Each try is checked on the plug."""
 
     def test_a_plug_given_by_address_is_asked_for_it_then_found(self):
         ctx = self.ctx(plug_ip="192.168.0.137")
@@ -5294,6 +5298,44 @@ class TasmotaWebPasswordTests(unittest.TestCase):
             self.af.unlock_tasmota(ctx)
             ctx.device.wants_password.assert_not_called()
 
+
+
+class DiscoverySearchTests(FirmwareSearchCase):
+    """The run searches the network its internet goes through first, and reads
+    this computer's other networks only if no plug is there - once, however
+    often it looks again while a plug it converted restarts."""
+
+    def found(self):
+        return [self.af.detect.Found("192.168.0.137", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF")]
+
+    def test_the_default_network_first_its_others_not_read_when_the_plug_is_there(self):
+        searched = []
+
+        def search(near, *, others=None, **_):
+            searched.append(near)
+            return self.found()
+        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
+                mock.patch.object(self.af.detect, "converted_plugs", side_effect=search), \
+                mock.patch.object(self.af.hostsys, "lan_networks", return_value={"10.0.5.9": 24}) as lan:
+            self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
+        self.assertEqual(searched, ["192.168.0.110"])   # local_ip_towards: the default network
+        lan.assert_not_called()
+
+    def test_the_other_networks_are_read_once_however_often_it_looks(self):
+        looks = []
+
+        def search(near, *, others=None, **_):
+            looks.append(dict(others()))
+            others()
+            return self.found() if len(looks) == 3 else []
+        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
+                mock.patch.object(self.af, "converted_here", return_value=True), \
+                mock.patch.object(self.af.time, "sleep"), \
+                mock.patch.object(self.af.detect, "converted_plugs", side_effect=search), \
+                mock.patch.object(self.af.hostsys, "lan_networks", return_value={"10.0.5.9": 24}) as lan:
+            self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
+        self.assertEqual(looks, [{"10.0.5.9": 24}] * 3)
+        lan.assert_called_once()
 
 class EsphomeWebLoginTests(unittest.TestCase):
     """A plug on ESPHome with a web login (web_server's auth:): asked for it,

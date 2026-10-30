@@ -370,3 +370,56 @@ class InstallerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OtherNetworksTests(unittest.TestCase):
+    """The network this computer's internet goes through is searched first; the
+    others only if no plug is there, then side by side with it again."""
+
+    def search(self, plugs_after_sweeps, others=(("192.168.60.10", 24), ("10.0.0.5", 24), ("10.0.0.7", 24),
+                                                 ("127.0.0.1", 8))):
+        sweeps = []
+        found = detect.Found("192.168.60.50", "tasmota", "12:34:56:ab:cd:ef")
+
+        def sweep(subnet_of):
+            sweeps.append(subnet_of)
+            return {}
+
+        def ask(*_args):
+            return [found] if len(sweeps) >= plugs_after_sweeps else []
+
+        lan = mock.Mock(return_value=dict(others))
+        with mock.patch.object(detect.hostsys, "sweep", side_effect=sweep), \
+                mock.patch.object(detect, "_ask_neighbours", side_effect=ask):
+            result = detect.converted_plugs("10.0.0.2", others=lan)
+        return result, sweeps, lan
+
+    def test_a_plug_on_the_default_network_needs_no_other(self):
+        result, sweeps, lan = self.search(plugs_after_sweeps=1)
+        self.assertEqual([plug.host for plug in result], ["192.168.60.50"])
+        self.assertEqual(sweeps, ["10.0.0.2"])
+        lan.assert_not_called()
+
+    def test_otherwise_every_network_is_swept_at_once_the_default_again(self):
+        result, sweeps, lan = self.search(plugs_after_sweeps=2)
+        self.assertEqual([plug.host for plug in result], ["192.168.60.50"])
+        # One sweep of every network side by side, each network once; not loopback.
+        self.assertEqual(sweeps, ["10.0.0.2", ["10.0.0.2", "192.168.60.10"]])
+
+    def test_with_no_other_network_there_is_no_second_sweep(self):
+        result, sweeps, _ = self.search(plugs_after_sweeps=9, others=(("10.0.0.9", 24), ("169.254.1.2", 16)))
+        self.assertEqual((result, sweeps), ([], ["10.0.0.2"]))
+
+    def test_a_wider_network_holding_the_default_one_is_no_other(self):
+        # The default address on the computer's /22: one network, swept already.
+        result, sweeps, _ = self.search(plugs_after_sweeps=9, others=(("10.0.1.7", 22),))
+        self.assertEqual((result, sweeps), ([], ["10.0.0.2"]))
+
+    def test_a_plug_the_sweep_saw_is_asked_though_the_table_dropped_it(self):
+        asked = []
+        with mock.patch.object(detect.hostsys, "sweep", return_value={"10.0.0.37": "12:34:56:ab:cd:ef"}), \
+                mock.patch.object(detect.hostsys, "neighbour_table", return_value={}), \
+                mock.patch.object(detect, "_port_open", side_effect=lambda host, *_: asked.append(host) and False):
+            detect.converted_plugs("10.0.0.2")
+        self.assertEqual(asked, ["10.0.0.37"])
+

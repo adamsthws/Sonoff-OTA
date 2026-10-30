@@ -12,7 +12,9 @@ Tasmota safeboot), which a run carrying on recognises.
 from __future__ import annotations
 
 import concurrent.futures
+import ipaddress
 import socket
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from . import esphome, esphome_ota, hostsys, kinds, setup_network
@@ -212,18 +214,55 @@ def identify(host: str, *, timeout: float = 3.0, password: str | None = None,
     return None
 
 
-def converted_plugs(near: str, *, known_macs: set[str] = frozenset(), timeout: float = 2.0,
+def _subnets_to_search(addresses: Iterable[str], lan: dict[str, int]) -> set[str]:
+    """One address for each network worth sweeping, at its size (hostsys.network_of):
+    not this computer's own loopback, nor a link-local address it gave itself
+    for want of a network."""
+    subnets: dict[str, str] = {}
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            continue
+        if ip.is_loopback or ip.is_link_local or ip.is_unspecified:
+            continue
+        subnets.setdefault(str(hostsys.network_of(address, lan)), address)
+    return set(subnets.values())
+
+
+def converted_plugs(near: str, *, others: Callable[[], dict[str, int]] | None = None,
+                    known_macs: set[str] = frozenset(), timeout: float = 2.0,
                     password: str | None = None,
                     esphome_login: tuple[str, str] | None = None) -> list[Found]:
     """The plugs on the network running Tasmota or ESPHome, found by asking every
-    device on the subnet of `near` (an address on it) what it is.  A Tasmota
+    device on the network of `near` (an address on it) what it is.  If none is
+    there, this computer's other networks - `others`, as hostsys.lan_networks
+    gives them, asked for only then - are swept too, side by side with `near`'s
+    again: the plug need not be on the network this computer's internet goes
+    through (a laptop on Ethernet with the plug on its Wi-Fi; the emulator's
+    link on Windows).  A Tasmota
     safeboot counts only with one of `known_macs`: a plug this computer was
     converting, left on the startup firmware - any Tasmota mid-update looks
     the same; and the mover likewise, as any ESPHome without a web page.  A Tasmota whose web password `password` is not is "locked",
     and an ESPHome whose web login `esphome_login` is not "esphome-login":
     whether it is a plug this tool converts each says only once given its own."""
-    hostsys.sweep(near)
-    neighbours = hostsys.neighbour_table()
+    seen = hostsys.sweep(near)
+    found = _ask_neighbours(seen, known_macs, timeout, password, esphome_login)
+    if found or others is None:
+        return found
+    lan = others()
+    networks = _subnets_to_search([near, *lan], lan)
+    if networks <= _subnets_to_search([near], lan):
+        return found   # no network but near's, swept already
+    seen = hostsys.sweep(sorted(networks))
+    return _ask_neighbours(seen, known_macs, timeout, password, esphome_login)
+
+
+def _ask_neighbours(seen: dict[str, str], known_macs: set[str], timeout: float, password: str | None,
+                    esphome_login: tuple[str, str] | None) -> list[Found]:
+    """Every device the sweep saw, or the neighbour table holds, asked what it
+    is: the plugs, sorted by address."""
+    neighbours = {**seen, **hostsys.neighbour_table()}
 
     def ask(item: tuple[str, str]) -> Found | None:
         host, mac = item

@@ -14,6 +14,7 @@ interrupted run resumes where it stopped.
 from __future__ import annotations
 
 import argparse
+import functools
 import http.client
 import ipaddress
 import json
@@ -4813,11 +4814,15 @@ def find_current_firmware(ctx: Context) -> str:
     output.transient_begin()
     tell("Looking for plugs already running Tasmota or ESPHome on your network...")
     known = known_macs()
+    # The network this computer's internet goes through first; its other
+    # Ethernet and Wi-Fi networks, read once, only if no plug is there.
+    lan = functools.cache(hostsys.lan_networks)
 
     def search() -> list[detect.Found]:
         try:
-            return detect.converted_plugs(hostsys.local_ip_towards("192.0.2.1"), known_macs=known,
-                                          password=ctx.web_password, esphome_login=ctx.esphome_login)
+            return detect.converted_plugs(hostsys.local_ip_towards("192.0.2.1"), others=lan,
+                                          known_macs=known, password=ctx.web_password,
+                                          esphome_login=ctx.esphome_login)
         except OSError:
             return []
 
