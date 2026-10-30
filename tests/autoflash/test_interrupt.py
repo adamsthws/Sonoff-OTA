@@ -3,7 +3,7 @@ import signal
 import unittest
 from unittest import mock
 
-from tools.autoflash import interrupt
+from tools.autoflash import interrupt, output, prompts, runner
 
 
 class CtrlCTests(unittest.TestCase):
@@ -80,13 +80,12 @@ class StageEndTests(unittest.TestCase):
     countdown that carries on by itself."""
 
     def ask(self, pending, answer):
-        import tools.autoflash.cli as autoflash
         interrupt.clear()
         if pending:
             interrupt._state["first"] = 1.0
-        with mock.patch.object(autoflash.prompts, "countdown_choice", return_value=answer) as asked, \
-             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
-            stop = autoflash.stop_here_after_ctrl_c("D1")
+        with mock.patch.object(prompts, "countdown_choice", return_value=answer) as asked, \
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "say"):
+            stop = runner.stop_here_after_ctrl_c("D1")
         return stop, asked.called
 
     def test_nothing_pressed_nothing_asked(self):

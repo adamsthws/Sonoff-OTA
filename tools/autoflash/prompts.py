@@ -45,6 +45,8 @@ class NoOneToAnswer(QuitRun):
 # wherever there is one - and any other question stops the run, naming it,
 # rather than waiting for ever.
 UNATTENDED = False
+# Typed once, before the first write that cannot be undone, for the whole conversion.
+CONSENT_WORD = "proceed"
 
 BULLET = "    "
 # A password field on a row of its own, below a prompt too long to share one.
@@ -798,3 +800,25 @@ def resolve_host(name: str) -> str | None:
         if parsed.version == 4 and parsed.is_private:
             return address
     return None
+
+
+def ask(prompt: str) -> str:
+    return ask_text(prompt)
+
+
+def confirm(prompt: str) -> bool:
+    return ask_yes_no(prompt, default=False)
+
+
+def require_word(word: str) -> bool:
+    """True only if the operator types `word` - any capitalisation - and Enter."""
+    output.tell("")
+    # Read directly: an empty answer must stop here, not be asked again.
+    question = f"Type {word.upper()} to go ahead - anything else stops, changing nothing: "
+    if UNATTENDED:
+        # Given in advance by starting the run with --unattended.
+        answered_unattended(question.rstrip(": "), word.upper())
+        return True
+    answer = input(output.question(question))
+    output.answered(answer)
+    return answer.strip().lower() == word.lower()

@@ -4,7 +4,9 @@ ESPHome (tools/autoflash/calibration.py)."""
 import unittest
 from unittest import mock
 
-from tools.autoflash import calibration
+from tools.autoflash import calibration, device, errors, esphome, output, runner, unlock, wifi
+from tools.autoflash.routes.espressif import mover, tasmota
+from tools.espressif import inspect_stock_nvs
 
 # Made up, in calib_coefficient0's form: set 1 scaling current, voltage and
 # power by 1.01, 0.99 and 1.02; set 2 the identity.
@@ -85,18 +87,18 @@ class TasmotaValueTests(unittest.TestCase):
 
 class CalibrateTasmotaTests(unittest.TestCase):
     def test_the_chips_numbers_are_scaled_and_kept(self):
-        tasmota = FakeTasmota()
-        outcome = calibration.calibrate_tasmota(tasmota, sleep=lambda _: None)
-        self.assertEqual(tasmota.settings, {"VoltageCal": 1885, "CurrentCal": 15435, "PowerCal": 5148})
+        plug = FakeTasmota()
+        outcome = calibration.calibrate_tasmota(plug, sleep=lambda _: None)
+        self.assertEqual(plug.settings, {"VoltageCal": 1885, "CurrentCal": 15435, "PowerCal": 5148})
         self.assertEqual((outcome["factor"], outcome["factory"], outcome["chip"]), (1.02, False, CHIP))
 
     def test_done_again_it_comes_out_the_same(self):
         # The chip's own numbers taken afresh: the factor is never applied twice.
-        tasmota = FakeTasmota()
-        calibration.calibrate_tasmota(tasmota, calibration.parse(FACTORY), sleep=lambda _: None)
-        first = dict(tasmota.settings)
-        calibration.calibrate_tasmota(tasmota, calibration.parse(FACTORY), sleep=lambda _: None)
-        self.assertEqual(tasmota.settings, first)
+        plug = FakeTasmota()
+        calibration.calibrate_tasmota(plug, calibration.parse(FACTORY), sleep=lambda _: None)
+        first = dict(plug.settings)
+        calibration.calibrate_tasmota(plug, calibration.parse(FACTORY), sleep=lambda _: None)
+        self.assertEqual(plug.settings, first)
 
     def test_the_pins_are_read_with_pull_ups_and_left_without(self):
         tasmota = FakeTasmota(pins=(1, 1, 1))
@@ -142,12 +144,11 @@ class BackupCalibrationTests(unittest.TestCase):
     """The factory calibration, as a plug's Sonoff backup holds it."""
 
     def read(self, content):
-        import tools.autoflash.cli as autoflash
         from tools.espressif.inspect_stock_nvs import Value
         value = Value(namespace=5, key="content", kind=0x42, chunks={0: content})
-        with mock.patch.object(autoflash.inspect_stock_nvs, "parse",
+        with mock.patch.object(inspect_stock_nvs, "parse",
                                return_value=({5: "user_unusual"}, {(5, "content"): value})):
-            return autoflash.sonoff_backup_calibration(b"")
+            return wifi.sonoff_backup_calibration(b"")
 
     def test_it_is_calib_coefficient0_in_user_unusual(self):
         content = ('{"volChgFlg":false,"calib_coefficient0":"' + FACTORY + '"}').encode() + b"\x00\xff"
@@ -167,69 +168,62 @@ class StepTests(unittest.TestCase):
                                state=SimpleNamespace(input=inputs.get))
 
     def test_tasmota_is_calibrated_at_f4_with_the_backups_numbers(self):
-        import tools.autoflash.cli as autoflash
-        tasmota = FakeTasmota()
-        with mock.patch.object(autoflash, "backup_calibration", return_value=calibration.parse(FACTORY)), \
-             mock.patch.object(autoflash, "say") as said, mock.patch.object(calibration.time, "sleep"):
-            outcome = autoflash.calibrate_tasmota_meter(self.ctx(lambda text, timeout=None: tasmota(text)))
-        self.assertEqual(tasmota.settings, {"VoltageCal": 1866, "CurrentCal": 15589, "PowerCal": 5251})
+        plug = FakeTasmota()
+        with mock.patch.object(wifi, "backup_calibration", return_value=calibration.parse(FACTORY)), \
+             mock.patch.object(output, "say") as said, mock.patch.object(calibration.time, "sleep"):
+            outcome = tasmota.calibrate_tasmota_meter(self.ctx(lambda text, timeout=None: plug(text)))
+        self.assertEqual(plug.settings, {"VoltageCal": 1866, "CurrentCal": 15589, "PowerCal": 5251})
         self.assertTrue(outcome["factory"])
         self.assertIn("factory calibration from its backup", said.call_args.args[0])
 
     def test_a_plug_that_does_not_answer_is_left_as_tasmota_calibrates_it(self):
-        import tools.autoflash.cli as autoflash
 
         def command(text, timeout=None):
-            raise autoflash.DeviceError("no answer")
-        with mock.patch.object(autoflash, "backup_calibration", return_value=None), \
-             mock.patch.object(autoflash, "tell") as told:
-            outcome = autoflash.calibrate_tasmota_meter(self.ctx(command))
+            raise device.DeviceError("no answer")
+        with mock.patch.object(wifi, "backup_calibration", return_value=None), \
+             mock.patch.object(output, "tell") as told:
+            outcome = tasmota.calibrate_tasmota_meter(self.ctx(command))
         self.assertEqual(outcome, {"skipped": "no answer"})
         self.assertIn("left as it is", told.call_args.args[0])
 
     def test_a_rerun_on_tasmota_checks_its_meter(self):
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash, "unlock_tasmota") as unlocked, \
-             mock.patch.object(autoflash, "calibrate_tasmota_meter") as calibrated, \
-             mock.patch.object(autoflash, "say"):
-            self.assertEqual(autoflash.rerun_on_tasmota(self.ctx()), 0)
+        with mock.patch.object(unlock, "unlock_tasmota") as unlocked, \
+             mock.patch.object(tasmota, "calibrate_tasmota_meter") as calibrated, \
+             mock.patch.object(output, "say"):
+            self.assertEqual(runner.rerun_on_tasmota(self.ctx()), 0)
         unlocked.assert_called_once()
         calibrated.assert_called_once()
 
     def test_a_rerun_needing_a_password_not_given_stops_untouched(self):
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash, "unlock_tasmota", side_effect=autoflash.Abort("no password")), \
-             mock.patch.object(autoflash, "calibrate_tasmota_meter") as calibrated, \
-             mock.patch.object(autoflash, "tell"):
-            self.assertEqual(autoflash.rerun_on_tasmota(self.ctx()), 2)
+        with mock.patch.object(unlock, "unlock_tasmota", side_effect=errors.Abort("no password")), \
+             mock.patch.object(tasmota, "calibrate_tasmota_meter") as calibrated, \
+             mock.patch.object(output, "tell"):
+            self.assertEqual(runner.rerun_on_tasmota(self.ctx()), 2)
         calibrated.assert_not_called()
 
     def test_esphome_is_given_the_backups_numbers(self):
-        import tools.autoflash.cli as autoflash
         numbers = calibration.parse(FACTORY)
-        with mock.patch.object(autoflash, "backup_calibration", return_value=numbers), \
-             mock.patch.object(autoflash.esphome, "api_give_calibration", return_value=True) as give, \
-             mock.patch.object(autoflash.esphome, "calibration_state", return_value="from backup, factor 1.02"), \
-             mock.patch.object(autoflash, "say") as said:
-            outcome = autoflash.calibrate_esphome_meter(self.ctx())
+        with mock.patch.object(wifi, "backup_calibration", return_value=numbers), \
+             mock.patch.object(esphome, "api_give_calibration", return_value=True) as give, \
+             mock.patch.object(esphome, "calibration_state", return_value="from backup, factor 1.02"), \
+             mock.patch.object(output, "say") as said:
+            outcome = mover.calibrate_esphome_meter(self.ctx())
         give.assert_called_once_with("192.168.1.51", numbers, key=None)
         self.assertEqual(outcome, {"calibration": "from backup, factor 1.02"})
         self.assertIn("from its Sonoff backup", said.call_args.args[0])
 
     def test_without_a_backup_esphome_is_not_asked(self):
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash, "backup_calibration", return_value=None), \
-             mock.patch.object(autoflash.esphome, "api_give_calibration") as give:
-            outcome = autoflash.calibrate_esphome_meter(self.ctx())
+        with mock.patch.object(wifi, "backup_calibration", return_value=None), \
+             mock.patch.object(esphome, "api_give_calibration") as give:
+            outcome = mover.calibrate_esphome_meter(self.ctx())
         give.assert_not_called()
         self.assertIn("skipped", outcome)
 
     def test_an_esphome_without_the_action_is_told_of_not_failed(self):
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash, "backup_calibration", return_value=calibration.parse(FACTORY)), \
-             mock.patch.object(autoflash.esphome, "api_give_calibration", return_value=False), \
-             mock.patch.object(autoflash, "tell"):
-            outcome = autoflash.calibrate_esphome_meter(self.ctx())
+        with mock.patch.object(wifi, "backup_calibration", return_value=calibration.parse(FACTORY)), \
+             mock.patch.object(esphome, "api_give_calibration", return_value=False), \
+             mock.patch.object(output, "tell"):
+            outcome = mover.calibrate_esphome_meter(self.ctx())
         self.assertEqual(outcome, {"skipped": "ESPHome did not take it"})
 
 

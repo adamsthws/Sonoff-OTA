@@ -44,15 +44,15 @@ from tools.autoflash.prompts import (  # noqa: E402
 )
 from tools.ewelink.discover_ewelink import discover  # noqa: E402
 from tools.espressif.dump_stock_flash import fetch, is_readout_bridge, save_dump  # noqa: E402
-from tools.autoflash.cli import (  # noqa: E402
-    DELIVERY_PORTS,
+from tools.autoflash.account import find_ewelink_plugs  # noqa: E402
+from tools.autoflash.firewall import DELIVERY_PORTS  # noqa: E402
+from tools.autoflash.names import (  # noqa: E402
     LEGACY_BRIDGE_PASSWORD,
     LEGACY_BRIDGE_PREFIX,
     LEGACY_SETUP_PREFIX,
-    SETTINGS_PATH,
     SETUP_SSID_PREFIX,
-    find_ewelink_plugs,
 )
+from tools.autoflash.runs import SETTINGS_PATH  # noqa: E402
 
 # The readout build of the conversion bridge, at the same version.
 READOUT_OTA = Path("captures/flash-readout/autoflash-bridge-sonoff-s60-flash-readout-4.4.4.ota")

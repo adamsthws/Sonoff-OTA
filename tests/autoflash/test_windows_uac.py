@@ -12,9 +12,7 @@ import types
 import unittest
 from pathlib import Path
 from unittest import mock
-
-import tools.autoflash.cli as af
-from tools.autoflash import hostsys
+from tools.autoflash import firewall, hostsys, output, prompts
 
 PYTHON = r"C:\Users\O'Brien\Autoflash\.python\python.exe"  # an apostrophe, as some names have
 CANCELLED = "This operation was canceled by the user."
@@ -182,11 +180,11 @@ class ToolTests(unittest.TestCase):
                 mock.patch.object(hostsys, "active_firewall", return_value="windows"),
                 mock.patch.object(hostsys, "firewall_advice", return_value=[]),
                 mock.patch.object(hostsys, "local_rules_ignored", return_value=False),
-                mock.patch.object(af.output, "transient_begin"),
-                mock.patch.object(af.output, "transient_end"),
-                mock.patch.object(af, "section", side_effect=lambda title, lines: self.screen.extend([title, *lines])),
-                mock.patch.object(af, "say", side_effect=self.screen.append),
-                mock.patch.object(af, "tell", side_effect=self.screen.append)):
+                mock.patch.object(output, "transient_begin"),
+                mock.patch.object(output, "transient_end"),
+                mock.patch.object(prompts, "section", side_effect=lambda title, lines: self.screen.extend([title, *lines])),
+                mock.patch.object(output, "say", side_effect=self.screen.append),
+                mock.patch.object(output, "tell", side_effect=self.screen.append)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -201,35 +199,35 @@ class ToolTests(unittest.TestCase):
             return self.RULE
 
         with mock.patch.object(hostsys, "open_firewall", side_effect=prompt):
-            af.ensure_firewall(self.ctx())
+            firewall.ensure_firewall(self.ctx())
         self.assertIn("Firewall rule added.", self.screen)
 
     def test_no_says_how_to_add_it_and_carries_on(self):
         ctx = self.ctx()
         with mock.patch.object(hostsys, "open_firewall", side_effect=OSError("could not add")):
-            af.ensure_firewall(ctx)  # does not raise
+            firewall.ensure_firewall(ctx)  # does not raise
         screen = "\n".join(self.screen)
         self.assertIn("The firewall rule could not be added", screen)
         self.assertIn('netsh advfirewall firewall add rule "name=Autoflash 192.168.1.50"', screen)
         self.assertIn("Adding it needs administrator rights", screen)
-        self.assertEqual(af.recorded_rules(ctx), [])
+        self.assertEqual(firewall.recorded_rules(ctx), [])
 
     def test_no_on_the_way_out_says_how_to_remove_it(self):
         ctx = self.ctx([self.RULE])
         with mock.patch.object(hostsys, "close_firewall", return_value=False):
-            af.close_firewall_rules(ctx)
+            firewall.close_firewall_rules(ctx)
         screen = "\n".join(self.screen)
         self.assertIn("Windows will ask for permission again", screen)
         self.assertIn("Remove the temporary firewall rules yourself", screen)
         self.assertIn('netsh advfirewall firewall delete rule "name=Autoflash 192.168.1.50"', screen)
-        self.assertEqual(af.recorded_rules(ctx), [self.RULE])  # kept, to try again next time
+        self.assertEqual(firewall.recorded_rules(ctx), [self.RULE])  # kept, to try again next time
 
     def test_yes_on_the_way_out_forgets_the_rule(self):
         ctx = self.ctx([self.RULE])
         with mock.patch.object(hostsys, "close_firewall", return_value=True):
-            af.close_firewall_rules(ctx)
+            firewall.close_firewall_rules(ctx)
         self.assertIn("The temporary firewall rules have been removed.", self.screen)
-        self.assertEqual(af.recorded_rules(ctx), [])
+        self.assertEqual(firewall.recorded_rules(ctx), [])
 
 
 if __name__ == "__main__":

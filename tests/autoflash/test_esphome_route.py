@@ -2,13 +2,26 @@ import contextlib
 import io
 import tempfile
 import unittest
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-import tools.autoflash.cli as af
-from tools.autoflash import prompts
+from tools.autoflash import (
+    cli,
+    detect,
+    errors,
+    esphome,
+    esphome_ota,
+    join,
+    prompts,
+    report,
+    routes,
+    runner,
+)
 from tools.autoflash.state import DONE, RunState
+from tools.autoflash.routes import espressif
+from tools.autoflash.routes.espressif import evidence, mover, source, tasmota
 
 
 class RouteTestCase(unittest.TestCase):
@@ -20,8 +33,8 @@ class RouteTestCase(unittest.TestCase):
         self.addCleanup(self.quiet.__exit__, None, None, None)
         # No plug's own network to be seen, nor joined, and an ESPHome that
         # wants nothing for an update: nothing goes on the network.
-        for owner, name, value in ((af, "on_a_plug_network", False), (af, "find_ssid", None),
-                                   (af.esphome_ota, "wants", af.esphome_ota.NOTHING)):
+        for owner, name, value in ((join, "on_a_plug_network", False), (prompts, "find_ssid", None),
+                                   (esphome_ota, "wants", esphome_ota.NOTHING)):
             patch = mock.patch.object(owner, name, return_value=value)
             patch.start()
             self.addCleanup(patch.stop)
@@ -38,7 +51,7 @@ class RouteTestCase(unittest.TestCase):
 
     def setUp_found(self, running="sonoff"):
         # What the plug runs now, as the network would show it.
-        patch = mock.patch.object(af, "find_current_firmware", return_value=running)
+        patch = mock.patch.object(source, "find_current_firmware", return_value=running)
         patch.start()
         self.addCleanup(patch.stop)
 
@@ -50,58 +63,58 @@ class FirmwareChoiceTests(RouteTestCase):
 
     def test_it_is_asked_once_then_kept(self):
         ctx = self.ctx()
-        with mock.patch.object(af, "ask_choice", return_value=1) as asked:
-            self.assertEqual(af.settle_firmware(ctx), "esphome")
+        with mock.patch.object(prompts, "ask_choice", return_value=1) as asked:
+            self.assertEqual(routes.settle_firmware(ctx), "esphome")
         self.assertEqual(asked.call_args.args[1], ["Tasmota", "ESPHome"])
         self.assertEqual(ctx.state.input("firmware"), "esphome")
-        with mock.patch.object(af, "ask_choice", side_effect=AssertionError("asked again")):
-            self.assertEqual(af.settle_firmware(ctx), "esphome")
+        with mock.patch.object(prompts, "ask_choice", side_effect=AssertionError("asked again")):
+            self.assertEqual(routes.settle_firmware(ctx), "esphome")
 
     def test_given_on_the_command_line_it_is_not_asked(self):
         ctx = self.ctx(given="esphome")
-        with mock.patch.object(af, "ask_choice", side_effect=AssertionError("asked")):
-            self.assertEqual(af.settle_firmware(ctx), "esphome")
+        with mock.patch.object(prompts, "ask_choice", side_effect=AssertionError("asked")):
+            self.assertEqual(routes.settle_firmware(ctx), "esphome")
 
     def test_a_conversion_cannot_switch_part_way(self):
         ctx = self.ctx(given="tasmota", firmware="esphome")
-        with self.assertRaisesRegex(af.Abort, "cannot switch"):
-            af.settle_firmware(ctx)
+        with self.assertRaisesRegex(errors.Abort, "cannot switch"):
+            routes.settle_firmware(ctx)
 
     def test_a_run_begun_before_there_was_a_choice_installs_tasmota(self):
         ctx = self.ctx()
         ctx.state.mark("A1", DONE)
-        with mock.patch.object(af, "ask_choice", side_effect=AssertionError("asked")):
-            self.assertEqual(af.settle_firmware(ctx), "tasmota")
+        with mock.patch.object(prompts, "ask_choice", side_effect=AssertionError("asked")):
+            self.assertEqual(routes.settle_firmware(ctx), "tasmota")
 
     def test_an_unattended_run_must_be_told(self):
         ctx = self.ctx()
         with mock.patch.object(prompts, "UNATTENDED", True):
-            with self.assertRaisesRegex(af.Abort, "--firmware esphome"):
-                af.settle_firmware(ctx)
+            with self.assertRaisesRegex(errors.Abort, "--firmware esphome"):
+                routes.settle_firmware(ctx)
         self.assertIsNone(ctx.state.input("firmware"))
 
 
 class RouteTests(RouteTestCase):
     def test_each_firmware_has_its_own_steps(self):
-        esphome = [step for step, _, _ in af.steps_for("esphome")]
-        tasmota = [step for step, _, _ in af.steps_for("tasmota")]
+        esphome = [step for step, _, _ in espressif.steps_for("esphome")]
+        tasmota = [step for step, _, _ in espressif.steps_for("tasmota")]
         self.assertEqual(esphome[-4:], ["D4", "D5", "I1", "I2"])
         self.assertNotIn("E3", esphome)  # the partition table is left as Sonoff made it
         self.assertEqual(tasmota[-1], "H1")
-        self.assertEqual(esphome[:len(af.COMMON_STEPS)], tasmota[:len(af.COMMON_STEPS)])
+        self.assertEqual(esphome[:len(espressif.COMMON_STEPS)], tasmota[:len(espressif.COMMON_STEPS)])
 
     def test_d4_is_named_for_what_it_does_on_each_route(self):
-        self.addCleanup(af.apply_target, "tasmota")
-        af.apply_target("esphome")
-        self.assertEqual(af.stage_name("D4"), "Making room for ESPHome")
-        af.apply_target("tasmota")
-        self.assertEqual(af.stage_name("D4"), "Preparing memory layout")
+        self.addCleanup(routes.apply_target, "tasmota")
+        routes.apply_target("esphome")
+        self.assertEqual(routes.stage_name("D4"), "Making room for ESPHome")
+        routes.apply_target("tasmota")
+        self.assertEqual(routes.stage_name("D4"), "Preparing memory layout")
 
     def test_an_install_cut_short_by_the_network_is_tried_again(self):
-        self.assertIn("I1", af.RETRY_STEPS)
+        self.assertIn("I1", espressif.RETRY_STEPS)
         said = ("esphome did not pass: the plug says: migration_refused: "
                 "POST /capture/written/21 returned HTTP -11 after 6 attempts")
-        self.assertRegex(said, af.TRANSIENT_RE)
+        self.assertRegex(said, errors.TRANSIENT_RE)
 
     def test_a_phase_left_to_be_asked_about_is_still_tried_again(self):
         # I1 stays "attempted", with no error kept, when its phase ends with no
@@ -115,31 +128,31 @@ class RouteTests(RouteTestCase):
             tries.append(step)
             return 1 if len(tries) == 1 else 0
 
-        with mock.patch.object(af, "execute", side_effect=execute), \
-                mock.patch.object(af, "wait_for_plug_back"), mock.patch.object(af.time, "sleep"):
-            self.assertEqual(af.execute_with_retries(ctx, "I1"), 0)
+        with mock.patch.object(runner, "execute", side_effect=execute), \
+                mock.patch.object(runner, "wait_for_plug_back"), mock.patch.object(time, "sleep"):
+            self.assertEqual(runner.execute_with_retries(ctx, "I1"), 0)
         self.assertEqual(tries, ["I1", "I1"])
 
     def test_a_run_is_complete_by_its_own_firmware(self):
         ctx = self.ctx(firmware="esphome")
         ctx.state.mark("I2", DONE)
-        self.assertTrue(af.run_is_complete(Path(self.tmp.name) / "run"))
+        self.assertTrue(cli.run_is_complete(Path(self.tmp.name) / "run"))
 
     def test_d4_is_not_rechecked_once_esphome_runs(self):
         ctx = self.ctx(firmware="esphome")
         ctx.state.mark("I1", DONE)
         ctx.device = SimpleNamespace(current_ota=lambda: self.fail("asked the plug"))
-        with mock.patch.object(af, "commit_report", return_value=None):
-            self.assertEqual(af.verify_high_slot(ctx), (True, ""))
+        with mock.patch.object(evidence, "commit_report", return_value=None):
+            self.assertEqual(tasmota.verify_high_slot(ctx), (True, ""))
 
 
 class EndingTests(RouteTestCase):
     def test_the_report_says_esphome(self):
-        fields = dict(af.report_fields(self.ctx(firmware="esphome"), 300, False))
+        fields = dict(report.report_fields(self.ctx(firmware="esphome"), 300, False))
         self.assertEqual(fields["Firmware"], "ESPHome")
         self.assertEqual(fields["Name in ESPHome"], "Sonoff S60")
         self.assertNotIn("Name in Tasmota", fields)
-        tasmota = dict(af.report_fields(self.ctx(run="tasmota-run"), 300, False))
+        tasmota = dict(report.report_fields(self.ctx(run="tasmota-run"), 300, False))
         self.assertEqual(tasmota["Firmware"], "Tasmota")
 
     def test_the_hardware_check_switches_through_esphome(self):
@@ -152,52 +165,52 @@ class EndingTests(RouteTestCase):
         def meter(host):
             return {"Voltage": 236.0, "Power": 0.0} if relay["on"] else {"Voltage": 0.0, "Power": 0.0}
 
-        with mock.patch.object(af, "METER_SETTLE", 0), \
-                mock.patch.object(af.esphome, "relay", side_effect=lambda host: relay["on"]), \
-                mock.patch.object(af.esphome, "switch_relay", side_effect=switch), \
-                mock.patch.object(af.esphome, "meter", side_effect=meter):
-            result = af.check_esphome_hardware(self.ctx(firmware="esphome"))
+        with mock.patch.object(report, "METER_SETTLE", 0), \
+                mock.patch.object(esphome, "relay", side_effect=lambda host: relay["on"]), \
+                mock.patch.object(esphome, "switch_relay", side_effect=switch), \
+                mock.patch.object(esphome, "meter", side_effect=meter):
+            result = report.check_esphome_hardware(self.ctx(firmware="esphome"))
         self.assertTrue(relay["on"], "left as it was found")
         self.assertIn("236 V", result["Power meter"])
 
     def test_a_plug_that_does_not_answer_is_reported_not_raised(self):
-        with mock.patch.object(af.esphome, "relay", return_value=None):
-            result = af.check_esphome_hardware(self.ctx(firmware="esphome"))
+        with mock.patch.object(esphome, "relay", return_value=None):
+            result = report.check_esphome_hardware(self.ctx(firmware="esphome"))
         self.assertEqual(result["Relay"], "could not be checked")
 
 
 class CheckStepTests(RouteTestCase):
     def test_it_recognises_esphome_itself(self):
-        with mock.patch.object(af.esphome, "is_esphome", return_value=True):
-            self.assertIn("seconds", af.step_esphome_check(self.ctx(firmware="esphome")))
+        with mock.patch.object(esphome, "is_esphome", return_value=True):
+            self.assertIn("seconds", mover.step_esphome_check(self.ctx(firmware="esphome")))
 
     def test_waiting_in_vain_points_at_the_wifi(self):
-        with mock.patch.object(af.esphome, "is_esphome", return_value=False), \
-                mock.patch.object(af.time, "sleep"):
-            with self.assertRaisesRegex(af.Abort, "esphome-xxxxxx"):
-                af.step_esphome_check(self.ctx(firmware="esphome"), wait=0.05)
+        with mock.patch.object(esphome, "is_esphome", return_value=False), \
+                mock.patch.object(time, "sleep"):
+            with self.assertRaisesRegex(errors.Abort, "esphome-xxxxxx"):
+                mover.step_esphome_check(self.ctx(firmware="esphome"), wait=0.05)
 
     def test_on_its_own_network_it_is_set_up_through_that(self):
-        with mock.patch.object(af.esphome, "is_esphome", return_value=False), \
-                mock.patch.object(af.time, "sleep"), \
-                mock.patch.object(af, "set_up_through_own_network", return_value=("Home", "pw")) as own:
-            result = af.step_esphome_check(self.ctx(firmware="esphome"), wait=0.05)
+        with mock.patch.object(esphome, "is_esphome", return_value=False), \
+                mock.patch.object(time, "sleep"), \
+                mock.patch.object(join, "set_up_through_own_network", return_value=("Home", "pw")) as own:
+            result = mover.step_esphome_check(self.ctx(firmware="esphome"), wait=0.05)
         self.assertEqual(result["set_up_through"], "its own network")
         self.assertEqual(own.call_args.args[1], "ESPHome")
 
     def test_joined_already_it_stops_waiting_on_the_home_wifi(self):
-        with mock.patch.object(af.esphome, "is_esphome", return_value=False), \
-                mock.patch.object(af, "on_a_plug_network", return_value=True), \
-                mock.patch.object(af.time, "sleep") as slept, \
-                mock.patch.object(af, "set_up_through_own_network", return_value=("Home", "pw")):
-            af.step_esphome_check(self.ctx(firmware="esphome"), wait=600)
+        with mock.patch.object(esphome, "is_esphome", return_value=False), \
+                mock.patch.object(join, "on_a_plug_network", return_value=True), \
+                mock.patch.object(time, "sleep") as slept, \
+                mock.patch.object(join, "set_up_through_own_network", return_value=("Home", "pw")):
+            mover.step_esphome_check(self.ctx(firmware="esphome"), wait=600)
         slept.assert_not_called()  # straight on, not three minutes first
 
     def test_a_dry_run_does_not_wait(self):
         ctx = self.ctx(firmware="esphome")
         ctx.dry_run = True
-        with mock.patch.object(af.esphome, "is_esphome", side_effect=AssertionError("waited")):
-            self.assertEqual(af.step_esphome_check(ctx), {"dry_run": True})
+        with mock.patch.object(esphome, "is_esphome", side_effect=AssertionError("waited")):
+            self.assertEqual(mover.step_esphome_check(ctx), {"dry_run": True})
 
 
 class ESPHomePageTests(unittest.TestCase):
@@ -229,7 +242,7 @@ class ESPHomePageTests(unittest.TestCase):
         import gzip
         page = b"<!doctype html><html><body><esp-app></esp-app></body></html>"
         host = self.serve(gzip.compress(page), {"Content-Type": "text/html", "Content-Encoding": "gzip"})
-        self.assertTrue(af.esphome.is_esphome(host))
+        self.assertTrue(esphome.is_esphome(host))
 
     def test_a_page_damaged_on_its_way_is_no_answer_not_a_crash(self):
         # Seen in the fault suite: one byte changed in the gzipped page, and
@@ -240,11 +253,11 @@ class ESPHomePageTests(unittest.TestCase):
         damaged = bytearray(gzip.compress(page))
         damaged[len(damaged) // 2] ^= 0x5A
         host = self.serve(bytes(damaged), {"Content-Type": "text/html", "Content-Encoding": "gzip"})
-        self.assertFalse(af.esphome.is_esphome(host))
+        self.assertFalse(esphome.is_esphome(host))
 
     def test_a_tasmota_page_is_not(self):
         host = self.serve(b"<html><body>Tasmota</body></html>", {"Content-Type": "text/html"})
-        self.assertFalse(af.esphome.is_esphome(host))
+        self.assertFalse(esphome.is_esphome(host))
 
 
 class SignalSensorTests(unittest.TestCase):
@@ -277,23 +290,23 @@ class SignalSensorTests(unittest.TestCase):
     def test_the_sensor_gives_the_signal_in_whole_dbm(self):
         host, asked = self.serve({"/sensor/WiFi%20Signal":
                                   b'{"id":"sensor-wifi_signal","value":-58.4,"state":"-58 dBm"}'})
-        self.assertEqual(af.esphome.sensor_signal(host), -58)
+        self.assertEqual(esphome.sensor_signal(host), -58)
         self.assertEqual(asked, ["/sensor/WiFi%20Signal"])
 
     def test_no_sensor_or_no_reading_yet_gives_nothing(self):
         for pages in ({}, {"/sensor/WiFi%20Signal": b'{"value":NaN,"state":"NA"}'},
                       {"/sensor/WiFi%20Signal": b'{"state":"NA"}'}):
             host, _ = self.serve(pages)
-            self.assertIsNone(af.esphome.sensor_signal(host), pages)
+            self.assertIsNone(esphome.sensor_signal(host), pages)
 
     def test_without_the_sensor_the_api_is_asked(self):
-        with mock.patch.object(af.esphome, "sensor_signal", return_value=None), \
-                mock.patch.object(af.esphome, "api_signal", return_value=-66) as api:
-            self.assertEqual(af.esphome.signal("192.168.0.50"), -66)
+        with mock.patch.object(esphome, "sensor_signal", return_value=None), \
+                mock.patch.object(esphome, "api_signal", return_value=-66) as api:
+            self.assertEqual(esphome.signal("192.168.0.50"), -66)
         api.assert_called_once_with("192.168.0.50", key=None)
-        with mock.patch.object(af.esphome, "sensor_signal", return_value=-58), \
-                mock.patch.object(af.esphome, "api_signal") as api:
-            self.assertEqual(af.esphome.signal("192.168.0.50"), -58)
+        with mock.patch.object(esphome, "sensor_signal", return_value=-58), \
+                mock.patch.object(esphome, "api_signal") as api:
+            self.assertEqual(esphome.signal("192.168.0.50"), -58)
         api.assert_not_called()
 
 
@@ -331,21 +344,21 @@ class ApiSignalTests(unittest.TestCase):
         dump = (self.log(b"\x1b[0;35m[C][logger:250]: Logger:\x1b[0m")
                 + self.log("[C][wifi:1297]:   SSID: 'Home'\n  Signal strength: -61 dB ▂▄▆_".encode()))
         port = self.serve(hello + _frame(7) + dump)
-        self.assertEqual(af.esphome.api_signal("127.0.0.1", port), -61)
+        self.assertEqual(esphome.api_signal("127.0.0.1", port), -61)
 
     def test_the_dump_names_the_network_with_the_signal(self):
         dump = self.log("[C][wifi:1297]:   SSID: 'Home-2G'\n  BSSID: 02:00:00:C4:0A:56\n"
                         "  Signal strength: -61 dB ▂▄▆_".encode())
         port = self.serve(dump)
-        self.assertEqual(af.esphome.api_wifi("127.0.0.1", port), {"signal": -61, "ssid": "Home-2G"})
+        self.assertEqual(esphome.api_wifi("127.0.0.1", port), {"signal": -61, "ssid": "Home-2G"})
 
     def test_an_encrypted_api_gives_nothing(self):
         port = self.serve(b"\x01\x00\x08Bad indicator")
-        self.assertIsNone(af.esphome.api_signal("127.0.0.1", port))
+        self.assertIsNone(esphome.api_signal("127.0.0.1", port))
 
     def test_an_api_that_never_says_gives_nothing_in_time(self):
         port = self.serve(self.log(b"[C][logger:250]: Logger:"))
-        self.assertIsNone(af.esphome.api_signal("127.0.0.1", port, timeout=1.0))
+        self.assertIsNone(esphome.api_signal("127.0.0.1", port, timeout=1.0))
 
     def test_no_api_at_all_gives_nothing(self):
         import socket
@@ -353,7 +366,7 @@ class ApiSignalTests(unittest.TestCase):
             unused.bind(("127.0.0.1", 0))
             port = unused.getsockname()[1]
             # Held, not listening, while asked: refused, and no other test can take it.
-            self.assertIsNone(af.esphome.api_signal("127.0.0.1", port, timeout=2.0))
+            self.assertIsNone(esphome.api_signal("127.0.0.1", port, timeout=2.0))
 
 
 class WifiActionTests(unittest.TestCase):
@@ -414,29 +427,29 @@ class WifiActionTests(unittest.TestCase):
         for name in (b"autoflash_wifi", b"s60_wifi"):
             port = self.serve((self.LIST, self.listed((b"other", 7), (name, 0xCAFEF00D))),
                               (self.call(0xCAFEF00D), self.answer(True, b'{"ssid":"Home-2G","password":"pw"}')))
-            self.assertEqual(af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0), ("Home-2G", "pw"), name)
+            self.assertEqual(esphome.api_wifi_details("127.0.0.1", port, timeout=3.0), ("Home-2G", "pw"), name)
 
     def test_an_esphome_without_the_action_gives_nothing(self):
         port = self.serve((self.LIST, self.listed((b"other", 7))))
-        self.assertIsNone(af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
+        self.assertIsNone(esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
 
     def test_a_failed_call_gives_nothing(self):
         port = self.serve((self.LIST, self.listed((b"s60_wifi", 1))), (self.call(1), self.answer(False)))
-        self.assertIsNone(af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
+        self.assertIsNone(esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
 
     def test_an_answer_not_of_json_gives_nothing(self):
         from tools.autoflash.esphome import _frame
         for data in (b"not json", b'["Home-2G"]', b'{"ssid": 7}'):
             port = self.serve((self.LIST, self.listed((b"s60_wifi", 1))), (self.call(1), self.answer(True, data)))
-            self.assertIsNone(af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0), data)
+            self.assertIsNone(esphome.api_wifi_details("127.0.0.1", port, timeout=2.0), data)
         port = self.serve((self.LIST, self.listed((b"s60_wifi", 1))),
                           (self.call(1), _frame(131, b"\x08\x01\x10\x01\x20\x07")))  # its data a number
-        self.assertIsNone(af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
+        self.assertIsNone(esphome.api_wifi_details("127.0.0.1", port, timeout=2.0))
 
     def test_an_encrypted_api_says_so(self):
         port = self.serve((b"", b"\x01\x00\x08Bad indicator"))
-        with self.assertRaises(af.esphome.ApiLocked) as locked:
-            af.esphome.api_wifi_details("127.0.0.1", port, timeout=2.0)
+        with self.assertRaises(esphome.ApiLocked) as locked:
+            esphome.api_wifi_details("127.0.0.1", port, timeout=2.0)
         self.assertFalse(locked.exception.wrong)  # no key given: none to be wrong
 
 
@@ -471,7 +484,7 @@ class CalibrationActionTests(unittest.TestCase):
 
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
-        self.assertTrue(af.esphome.api_give_calibration("127.0.0.1", self.NUMBERS, server.getsockname()[1],
+        self.assertTrue(esphome.api_give_calibration("127.0.0.1", self.NUMBERS, server.getsockname()[1],
                                                         timeout=3.0))
         thread.join(3)
         argument = b"".join(b"\x45" + struct.pack("<f", n) for n in self.NUMBERS)
@@ -480,7 +493,7 @@ class CalibrationActionTests(unittest.TestCase):
     def test_an_esphome_without_the_action_gives_nothing(self):
         # 1.3.0 and before.
         port = self.serve((self.LIST, self.listed((b"autoflash_wifi", 1))))
-        self.assertFalse(af.esphome.api_give_calibration("127.0.0.1", self.NUMBERS, port, timeout=2.0))
+        self.assertFalse(esphome.api_give_calibration("127.0.0.1", self.NUMBERS, port, timeout=2.0))
 
 
 class EncryptedApiTests(unittest.TestCase):
@@ -579,51 +592,51 @@ class EncryptedApiTests(unittest.TestCase):
 
     def test_with_its_key_the_action_gives_the_details(self):
         port = self.serve()
-        self.assertEqual(af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0, key=self.KEY),
+        self.assertEqual(esphome.api_wifi_details("127.0.0.1", port, timeout=3.0, key=self.KEY),
                          ("Home-2G", "pw"))
 
     def test_with_its_key_the_dump_gives_the_signal_and_network(self):
         port = self.serve()
-        self.assertEqual(af.esphome.api_wifi("127.0.0.1", port, timeout=3.0, key=self.KEY),
+        self.assertEqual(esphome.api_wifi("127.0.0.1", port, timeout=3.0, key=self.KEY),
                          {"signal": -61, "ssid": "Home-2G"})
 
     def test_without_its_key_or_with_another_it_says_so(self):
         port = self.serve()
-        with self.assertRaises(af.esphome.ApiLocked) as locked:
-            af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0)
+        with self.assertRaises(esphome.ApiLocked) as locked:
+            esphome.api_wifi_details("127.0.0.1", port, timeout=3.0)
         self.assertFalse(locked.exception.wrong)
         port = self.serve()
-        with self.assertRaises(af.esphome.ApiLocked) as locked:
-            af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0, key=bytes(32))
+        with self.assertRaises(esphome.ApiLocked) as locked:
+            esphome.api_wifi_details("127.0.0.1", port, timeout=3.0, key=bytes(32))
         self.assertTrue(locked.exception.wrong)
-        self.assertIsNone(af.esphome.api_signal("127.0.0.1", self.serve(), timeout=3.0))  # just none
+        self.assertIsNone(esphome.api_signal("127.0.0.1", self.serve(), timeout=3.0))  # just none
 
     def test_locked_even_when_it_hangs_up_before_the_question(self):
         # A plug quicker than the tool: it answers the plain hello and hangs up
         # before the next write, which is refused - its answer is still read.
         import time
-        send = af.esphome._Api.send
+        send = esphome._Api.send
 
         def later(api, *messages):
-            if messages[0][0] != af.esphome._HELLO:
+            if messages[0][0] != esphome._HELLO:
                 time.sleep(0.3)
             send(api, *messages)
 
-        with mock.patch.object(af.esphome._Api, "send", later), \
-             self.assertRaises(af.esphome.ApiLocked):
-            af.esphome.api_wifi_details("127.0.0.1", self.serve(), timeout=3.0)
+        with mock.patch.object(esphome._Api, "send", later), \
+             self.assertRaises(esphome.ApiLocked):
+            esphome.api_wifi_details("127.0.0.1", self.serve(), timeout=3.0)
 
     def test_a_key_given_for_a_plain_api_is_not_used(self):
         port = self.serve(plain_first=True)
-        self.assertEqual(af.esphome.api_wifi_details("127.0.0.1", port, timeout=3.0, key=self.KEY),
+        self.assertEqual(esphome.api_wifi_details("127.0.0.1", port, timeout=3.0, key=self.KEY),
                          ("Home-2G", "pw"))
 
     def test_access_says_what_it_takes(self):
-        self.assertEqual(af.esphome.api_access("127.0.0.1", self.KEY, self.serve()), af.esphome.API_OPEN)
-        self.assertEqual(af.esphome.api_access("127.0.0.1", None, self.serve()), af.esphome.API_KEY)
-        self.assertEqual(af.esphome.api_access("127.0.0.1", bytes(32), self.serve()), af.esphome.API_KEY)
-        self.assertEqual(af.esphome.api_access("127.0.0.1", self.KEY, self.serve(plain_first=True)),
-                         af.esphome.API_PLAIN)
+        self.assertEqual(esphome.api_access("127.0.0.1", self.KEY, self.serve()), esphome.API_OPEN)
+        self.assertEqual(esphome.api_access("127.0.0.1", None, self.serve()), esphome.API_KEY)
+        self.assertEqual(esphome.api_access("127.0.0.1", bytes(32), self.serve()), esphome.API_KEY)
+        self.assertEqual(esphome.api_access("127.0.0.1", self.KEY, self.serve(plain_first=True)),
+                         esphome.API_PLAIN)
 
 
 class SignalBeforeLeavingESPHomeTests(RouteTestCase):
@@ -631,14 +644,14 @@ class SignalBeforeLeavingESPHomeTests(RouteTestCase):
 
     def x1(self, signal, carry_on=True):
         ctx = self.ctx(source="esphome")
-        with mock.patch.object(af.esphome, "signal", return_value=signal), \
-                mock.patch.object(af, "consent_to_leave") as consent, \
-                mock.patch.object(af.detect, "identify", return_value="startup"), \
-                mock.patch.object(af, "ask_yes_no", return_value=carry_on) as asked, \
-                mock.patch.object(af, "section"):
+        with mock.patch.object(esphome, "signal", return_value=signal), \
+                mock.patch.object(mover, "consent_to_leave") as consent, \
+                mock.patch.object(detect, "identify", return_value="startup"), \
+                mock.patch.object(prompts, "ask_yes_no", return_value=carry_on) as asked, \
+                mock.patch.object(prompts, "section"):
             try:
-                af.step_startup_from_esphome(ctx)
-            except af.Abort as exc:
+                mover.step_startup_from_esphome(ctx)
+            except errors.Abort as exc:
                 return ctx, consent, asked, exc
         return ctx, consent, asked, None
 
@@ -668,10 +681,10 @@ class FromAConvertedPlugTests(RouteTestCase):
 
     def settle(self, running, *, backup=True, given=None, answer=0):
         ctx = self.ctx(given=given, run=f"{running}-{given}-{backup}")
-        with mock.patch.object(af, "find_current_firmware", return_value=running), \
-                mock.patch.object(af, "sonoff_backup_exists", return_value=backup), \
-                mock.patch.object(af, "ask_choice", return_value=answer) as asked:
-            route = af.settle_route(ctx)
+        with mock.patch.object(source, "find_current_firmware", return_value=running), \
+                mock.patch.object(source, "sonoff_backup_exists", return_value=backup), \
+                mock.patch.object(prompts, "ask_choice", return_value=answer) as asked:
+            route = routes.settle_route(ctx)
         return route, (asked.call_args.args[1] if asked.called else None)
 
     def test_from_tasmota_the_other_two_are_offered_and_staying(self):
@@ -682,9 +695,9 @@ class FromAConvertedPlugTests(RouteTestCase):
 
     def test_staying_on_tasmota_converts_nothing(self):
         # Its meter is checked instead (rerun_on_tasmota), asked or given.
-        with self.assertRaisesRegex(af.NothingToDo, "already runs Tasmota"):
+        with self.assertRaisesRegex(routes.NothingToDo, "already runs Tasmota"):
             self.settle("tasmota", answer=0)
-        with self.assertRaisesRegex(af.NothingToDo, "already runs Tasmota"):
+        with self.assertRaisesRegex(routes.NothingToDo, "already runs Tasmota"):
             self.settle("tasmota", given="tasmota")
 
     def test_without_its_backup_sonoff_is_not_offered(self):
@@ -693,9 +706,9 @@ class FromAConvertedPlugTests(RouteTestCase):
         self.assertEqual(firmware, "tasmota")
 
     def test_the_firmware_it_already_runs_cannot_be_asked_for(self):
-        with self.assertRaisesRegex(af.NothingToDo, "already runs ESPHome"):
+        with self.assertRaisesRegex(routes.NothingToDo, "already runs ESPHome"):
             self.settle("esphome", given="esphome")
-        with self.assertRaisesRegex(af.Abort, "no backup"):
+        with self.assertRaisesRegex(errors.Abort, "no backup"):
             self.settle("tasmota", backup=False, given="sonoff")
 
     def test_a_plug_left_part_way_can_go_on_to_any_of_the_three(self):
@@ -704,33 +717,33 @@ class FromAConvertedPlugTests(RouteTestCase):
 
     def test_every_route_ends_by_checking_its_firmware(self):
         last = {"tasmota": "H1", "esphome": "I2", "sonoff": "R2"}
-        for source in af.SOURCES:
-            for firmware in af.FIRMWARES:
-                if firmware == source or (source == "sonoff" and firmware == "sonoff"):
+        for running in espressif.SOURCES:
+            for firmware in routes.FIRMWARES:
+                if firmware == running or (running == "sonoff" and firmware == "sonoff"):
                     continue
-                steps = [step for step, _, _ in af.steps_for(firmware, source)]
-                if (source, firmware) == ("safeboot", "tasmota"):
+                steps = [step for step, _, _ in espressif.steps_for(firmware, running)]
+                if (running, firmware) == ("safeboot", "tasmota"):
                     # Its own Tasmota put back, not converted: T1 sees it running,
                     # set up as before; H1 would hold its safeboot and bootloader,
                     # whatever made them, to this version's.
                     self.assertEqual(steps, ["A0", "A5", "T1"])
                     continue
-                if (source, firmware) == ("untemplated", "tasmota"):
+                if (running, firmware) == ("untemplated", "tasmota"):
                     # Given its template alone, likewise.
                     self.assertEqual(steps, ["A0", "A5", "F4"])
                     continue
-                self.assertEqual(steps[-1], last[firmware], (source, firmware))
-                self.assertEqual(len(steps), len(set(steps)), (source, firmware))
+                self.assertEqual(steps[-1], last[firmware], (running, firmware))
+                self.assertEqual(len(steps), len(set(steps)), (running, firmware))
                 # The bootloader is written on every route, before any firmware goes
                 # in - past the commit, by the run that got there (D5 comes before E3).
-                self.assertTrue("D5" in steps or "L1" in steps or source == "committed",
-                                (source, firmware))
+                self.assertTrue("D5" in steps or "L1" in steps or running == "committed",
+                                (running, firmware))
 
     def test_past_the_commit_official_tasmota_goes_on_first(self):
         # Never the hub's steps: they need Sonoff's two slots, and Tasmota's
         # layout has one - the slot swap waits for a restart that never comes.
-        for firmware in af.FIRMWARES:
-            steps = [step for step, _, _ in af.steps_for(firmware, "committed")]
+        for firmware in routes.FIRMWARES:
+            steps = [step for step, _, _ in espressif.steps_for(firmware, "committed")]
             self.assertEqual(steps[:4], ["A0", "A5", "F2", "F4"], firmware)
             if firmware != "tasmota":
                 self.assertIn("H1", steps)
@@ -742,24 +755,24 @@ class FromTheInstallerTests(RouteTestCase):
     def test_on_from_the_installer_it_needs_no_ewelink(self):
         # Left part way from Sonoff's firmware: the backup and D1 need only the
         # installer; the eWeLink steps, which a plug on it cannot answer, are not run.
-        for firmware in af.FIRMWARES:
-            steps = [step for step, _, _ in af.steps_for(firmware, "installer")]
+        for firmware in routes.FIRMWARES:
+            steps = [step for step, _, _ in espressif.steps_for(firmware, "installer")]
             self.assertEqual(steps[:4], ["A0", "A5", "C3", "D1"], firmware)
             self.assertFalse({"A1", "A2", "C2"} & set(steps), firmware)
 
     def test_an_upload_to_the_installer_is_tried_again(self):
         # The installer selects itself before an upload writes its peer slot.
-        self.assertIn("D1", af.RETRY_STEPS)
+        self.assertIn("D1", espressif.RETRY_STEPS)
 
 
 class AlreadyThereTests(RouteTestCase):
     def test_asking_for_what_it_runs_ends_the_run_done(self):
         ctx = self.ctx(given="esphome")
-        with mock.patch.object(af, "find_current_firmware", return_value="esphome"):
-            with self.assertRaisesRegex(af.NothingToDo, "already runs ESPHome"):
-                af.settle_route(ctx)
+        with mock.patch.object(source, "find_current_firmware", return_value="esphome"):
+            with self.assertRaisesRegex(routes.NothingToDo, "already runs ESPHome"):
+                routes.settle_route(ctx)
         # Never offered back as an unfinished run.
-        self.assertTrue(af.run_is_complete(Path(self.tmp.name) / "run"))
+        self.assertTrue(cli.run_is_complete(Path(self.tmp.name) / "run"))
 
 
 class ConfirmedOnlyAfterAMinuteTests(RouteTestCase):
@@ -768,12 +781,12 @@ class ConfirmedOnlyAfterAMinuteTests(RouteTestCase):
     def check(self, source, answers, probes=()):
         ctx = self.ctx(source=source, firmware="esphome")
         clock = iter(range(0, 100_000, 3))
-        with mock.patch.object(af.time, "monotonic", side_effect=lambda: next(clock)), \
-                mock.patch.object(af.time, "sleep"), \
-                mock.patch.object(af.esphome, "is_esphome", side_effect=list(answers)), \
-                mock.patch.object(af.esphome_ota, "probe", side_effect=list(probes) or None), \
-                mock.patch.object(af, "step_esphome_from_mover") as resent:
-            return af.step_esphome_check(ctx), resent
+        with mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+                mock.patch.object(time, "sleep"), \
+                mock.patch.object(esphome, "is_esphome", side_effect=list(answers)), \
+                mock.patch.object(esphome_ota, "probe", side_effect=list(probes) or None), \
+                mock.patch.object(mover, "step_esphome_from_mover") as resent:
+            return mover.step_esphome_check(ctx), resent
 
     def test_from_tasmota_it_is_only_done_once_esphome_has_confirmed_itself(self):
         result, _ = self.check("tasmota", [True] * 40)
@@ -787,7 +800,7 @@ class ConfirmedOnlyAfterAMinuteTests(RouteTestCase):
         self.assertEqual(result["resent"], 1)
 
     def test_from_stock_nothing_is_waited_for(self):
-        with mock.patch.object(af.esphome, "is_esphome", return_value=True) as asked:
+        with mock.patch.object(esphome, "is_esphome", return_value=True) as asked:
             ctx = self.ctx(firmware="esphome")
-            af.step_esphome_check(ctx)
+            mover.step_esphome_check(ctx)
         self.assertEqual(asked.call_count, 1)

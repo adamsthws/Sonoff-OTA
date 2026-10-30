@@ -5,10 +5,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import time
 from pathlib import Path
 from unittest import mock
 
-from tools.autoflash import output, prompts
+from tools.autoflash import context, hostsys, join, output, phases, plugs, prompts, report, routes
 
 
 class FakeTerminal(io.StringIO):
@@ -479,7 +480,6 @@ class FallbackScreenTests(OutputTestCase):
     """The Wi-Fi fallbacks still say everything the person has to read or do."""
 
     def test_typing_the_wifi_shows_why_and_every_question(self):
-        import tools.autoflash.cli as af
         from tools.autoflash.device import DeviceError
 
         class Ctx:
@@ -499,10 +499,10 @@ class FallbackScreenTests(OutputTestCase):
         secrets = iter(["password-one", "password-oops", "password-one", "password-one"])
 
         def body():
-            with mock.patch.object(af, "bundle_ssid", return_value=None), \
+            with mock.patch.object(context, "bundle_ssid", return_value=None), \
                  mock.patch("builtins.input", return_value="Home-2G"), \
                  mock.patch.object(prompts, "_read_secret", side_effect=lambda q, r: next(secrets)):
-                self.assertEqual(af.Context.wifi(Ctx()), ("Home-2G", "password-one"))
+                self.assertEqual(context.Context.wifi(Ctx()), ("Home-2G", "password-one"))
         screen, log = self.run_with(io.StringIO(), False, body)
         self.assertIn("could not be read off the plug: it did not answer as Tasmota", screen)
         self.assertIn("Your Wi-Fi details are needed", screen)
@@ -510,19 +510,18 @@ class FallbackScreenTests(OutputTestCase):
         self.assertNotIn("password-one", log)
 
     def test_the_setup_network_steps_are_all_on_screen(self):
-        import tools.autoflash.cli as af
         from tools.autoflash import setup_network
         polls = iter([None, "192.168.0.77"])
         ctx = mock.Mock(wifi=lambda why=None: ("Home-2G", "password-one"))
         ctx.finder.poll = lambda: next(polls)
 
         def body():
-            with mock.patch.object(af.hostsys, "wifi_menu_hint", return_value="the Wi-Fi menu"), \
+            with mock.patch.object(hostsys, "wifi_menu_hint", return_value="the Wi-Fi menu"), \
                  mock.patch.object(setup_network, "wait_for_port", return_value=True), \
                  mock.patch.object(setup_network, "send_wifi", return_value=("saved", "192.168.0.77")), \
-                 mock.patch.object(af, "name_with_the_wifi"), \
-                 mock.patch.object(af.time, "sleep"):
-                af.configure_plug_wifi(ctx, "tasmota-5A3C1F-7340")
+                 mock.patch.object(join, "name_with_the_wifi"), \
+                 mock.patch.object(time, "sleep"):
+                join.configure_plug_wifi(ctx, "tasmota-5A3C1F-7340")
         screen, _ = self.run_with(io.StringIO(), False, body)
         for words in ("Join the plug's setup network", "tasmota-5A3C1F-7340", "(open - no password)",
                       "stay on its network for about 20 seconds",
@@ -533,7 +532,6 @@ class FallbackScreenTests(OutputTestCase):
 
 
     def send(self, outcomes, unattended=False, gone=False):
-        import tools.autoflash.cli as af
         from tools.autoflash import prompts, setup_network
         polls = iter([None, "192.168.0.77"])
         ctx = mock.Mock(wifi=lambda why=None: ("Home-2G", "password-one"))
@@ -549,15 +547,15 @@ class FallbackScreenTests(OutputTestCase):
             return result
 
         def body():
-            with mock.patch.object(af.hostsys, "wifi_menu_hint", return_value="the Wi-Fi menu"), \
+            with mock.patch.object(hostsys, "wifi_menu_hint", return_value="the Wi-Fi menu"), \
                  mock.patch.object(setup_network, "wait_for_port", return_value=True), \
                  mock.patch.object(setup_network, "send_wifi", side_effect=send_wifi), \
-                 mock.patch.object(af, "ask_credentials", return_value=("Home-New", "pw")) as asked, \
+                 mock.patch.object(join, "ask_credentials", return_value=("Home-New", "pw")) as asked, \
                  mock.patch.object(prompts, "UNATTENDED", unattended), \
-                 mock.patch.object(af, "name_with_the_wifi"), \
-                 mock.patch.object(af, "setup_network_gone", return_value=gone), \
-                 mock.patch.object(af.time, "sleep"):
-                af.configure_plug_wifi(ctx, "tasmota-5A3C1F-7340")
+                 mock.patch.object(join, "name_with_the_wifi"), \
+                 mock.patch.object(join, "setup_network_gone", return_value=gone), \
+                 mock.patch.object(time, "sleep"):
+                join.configure_plug_wifi(ctx, "tasmota-5A3C1F-7340")
                 self.asked = asked.called
         screen, _ = self.run_with(io.StringIO(), False, body)
         return sent, screen
@@ -610,12 +608,11 @@ class FailureReasonTests(OutputTestCase):
         self.assertEqual(output.tool_problems(), ["one", "two"])
 
     def test_a_phase_refusal_is_shown_and_its_progress_is_not(self):
-        import tools.autoflash.cli as af
 
         def body():
-            af.phase_log("    The plug fetched its instructions.")
-            af.phase_log("    REFUSED: preflight evidence has the wrong source table")
-            af.phase_log("    The server's full output is in captures/run/preflight-server.log")
+            phases.phase_log("    The plug fetched its instructions.")
+            phases.phase_log("    REFUSED: preflight evidence has the wrong source table")
+            phases.phase_log("    The server's full output is in captures/run/preflight-server.log")
         screen, log = self.run_with(io.StringIO(), False, body)
         self.assertNotIn("fetched its instructions", screen)
         self.assertIn("fetched its instructions", log)
@@ -654,8 +651,7 @@ class ReportTests(OutputTestCase):
         return SimpleNamespace(state=state)
 
     def test_the_report_is_filled_in_from_the_run(self):
-        import tools.autoflash.cli as af
-        fields = dict(af.report_fields(self.ctx(), 441, False))
+        fields = dict(report.report_fields(self.ctx(), 441, False))
         self.assertEqual(fields["Result"], "Converted")
         self.assertEqual(fields["Plug model"], "S60TPG")
         self.assertEqual(fields["Plug type / region"], "UK (Type G)")
@@ -668,130 +664,119 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60TPG")
 
     def test_the_report_has_each_stages_time_and_how_long_the_plug_was_busy(self):
-        import tools.autoflash.cli as af
         ctx = self.ctx()
         for key, value in {"E2.seconds": 36, "E2.plug_busy_seconds": 34.2, "E2.attempts": 2,
                            "G1.seconds": 43, "G1.plug_busy_seconds": 61, "G1.attempts": 1,
                            "E1.signal_dbm": -61}.items():
             ctx.state.capture(key, value)
-        fields = dict(af.report_fields(ctx, 441, False))
-        number = {step: n for n, (step, _, _) in enumerate(af.STEPS, 1)}
+        fields = dict(report.report_fields(ctx, 441, False))
+        number = {step: n for n, (step, _, _) in enumerate(routes.STEPS, 1)}
         self.assertEqual(fields["Stage times"], f"{number['E2']}=36s, {number['G1']}=43s")
         self.assertEqual(fields["Plug busy"], f"{number['E2']}=34s, {number['G1']}=1m01s")
         self.assertEqual(fields["Retries"], f"{number['E2']} (1 retry)")
         self.assertEqual(fields["Plug Wi-Fi signal"], "-61 dBm")
 
     def test_on_the_way_to_esphome_the_signal_is_from_its_install(self):
-        import tools.autoflash.cli as af
         ctx = self.ctx(firmware="esphome")
         ctx.state.capture("I1.signal_dbm", -58)
-        self.assertEqual(dict(af.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-58 dBm")
+        self.assertEqual(dict(report.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-58 dBm")
 
     def test_from_tasmota_to_esphome_the_signal_is_from_leaving_tasmota(self):
-        import tools.autoflash.cli as af
         ctx = self.ctx(firmware="esphome", source="tasmota")
         ctx.state.capture("L1.signal_dbm", -63)
-        self.assertEqual(dict(af.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-63 dBm")
+        self.assertEqual(dict(report.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-63 dBm")
 
     def test_with_several_readings_the_report_gives_the_lowest(self):
-        import tools.autoflash.cli as af
         ctx = self.ctx()
         for key, value in {"A2.signal_dbm": -48, "D4.signal_dbm": -71, "E1.signal_dbm": -55,
                            "I1.signal_dbm": None}.items():
             ctx.state.capture(key, value)
-        self.assertEqual(dict(af.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-71 dBm")
+        self.assertEqual(dict(report.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-71 dBm")
 
     def test_a_run_from_before_the_timings_says_so(self):
-        import tools.autoflash.cli as af
-        fields = dict(af.report_fields(self.ctx(), 441, False))
+        fields = dict(report.report_fields(self.ctx(), 441, False))
         self.assertEqual(fields["Stage times"], "Not recorded")
         self.assertEqual(fields["Retries"], "None")
 
     def test_the_result_says_where_and_why_a_run_stopped(self):
-        import tools.autoflash.cli as af
         from tools.autoflash.state import DONE
         # Values other tests made private ("wrong", as a password) are not this run's.
-        patcher = mock.patch.dict(af.output._private, {}, clear=True)
+        patcher = mock.patch.dict(output._private, {}, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
         ctx = self.ctx()
         ctx.last_failure = ""
-        for step, _, _ in af.STEPS[:9]:
+        for step, _, _ in routes.STEPS[:9]:
             ctx.state.mark(step, DONE)
-        step = af.STEPS[9][0]
-        where = f"stage 10 of {len(af.STEPS)} ({af.stage_name(step)})"
+        step = routes.STEPS[9][0]
+        where = f"stage 10 of {len(routes.STEPS)} ({routes.stage_name(step)})"
         ctx.state.mark(step, "failed", error="GET /chunk/safeboot/20 from 192.168.0.50 "
                                              "(58:cf:79:01:02:03) returned HTTP -1 after 8 attempts")
-        self.assertEqual(af.run_result(ctx, "failed"),
+        self.assertEqual(report.run_result(ctx, "failed"),
                          f"stopped at {where}: GET /chunk/safeboot/20 from <address> (<mac>) "
                          "returned HTTP -1 after 8 attempts")
         ctx.last_failure = "something unexpected went wrong: KeyError: 'x'"
-        self.assertEqual(af.run_result(ctx, "crashed"),
+        self.assertEqual(report.run_result(ctx, "crashed"),
                          f"crashed at {where}: something unexpected went wrong: KeyError: 'x'")
-        self.assertEqual(af.run_result(ctx, "converted"), "converted")
+        self.assertEqual(report.run_result(ctx, "converted"), "converted")
 
     def test_the_result_names_the_stage_that_failed_not_one_it_sent_back(self):
         # A refused commit sends E1 and E2 back to be done again: the run still
         # stopped at the commit.
-        import tools.autoflash.cli as af
         from tools.autoflash.state import DONE
-        patcher = mock.patch.dict(af.output._private, {}, clear=True)
+        patcher = mock.patch.dict(output._private, {}, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
         ctx = self.ctx()
-        for step, _, _ in af.STEPS:
+        for step, _, _ in routes.STEPS:
             if step == "E3":
                 break
             ctx.state.mark(step, DONE)
         for step in ("E1", "E2", "E3"):
             ctx.state.mark(step, "failed")
         ctx.last_failure, ctx.last_failed_step = "commit refused", "E3"
-        number = [step for step, _, _ in af.STEPS].index("E3") + 1
-        self.assertEqual(af.run_result(ctx, "failed"),
-                         f"stopped at stage {number} of {len(af.STEPS)} "
-                         f"({af.stage_name('E3')}): commit refused")
+        number = [step for step, _, _ in routes.STEPS].index("E3") + 1
+        self.assertEqual(report.run_result(ctx, "failed"),
+                         f"stopped at stage {number} of {len(routes.STEPS)} "
+                         f"({routes.stage_name('E3')}): commit refused")
 
     def test_only_a_run_that_failed_offers_its_report_not_one_the_operator_stopped(self):
-        import tools.autoflash.cli as af
-        self.assertEqual(af.report_ending(1, None), "failed")       # a stage failed
-        self.assertEqual(af.report_ending(1, "crashed"), "crashed")  # something unexpected
-        self.assertIsNone(af.report_ending(130, None))               # quit at a question
-        self.assertIsNone(af.report_ending(None, "cancelled"))       # Ctrl-C
-        self.assertIsNone(af.report_ending(0, None))                 # converted: offered already
-        self.assertIsNone(af.report_ending(None, None))              # the terminal was closed
+        self.assertEqual(report.report_ending(1, None), "failed")       # a stage failed
+        self.assertEqual(report.report_ending(1, "crashed"), "crashed")  # something unexpected
+        self.assertIsNone(report.report_ending(130, None))               # quit at a question
+        self.assertIsNone(report.report_ending(None, "cancelled"))       # Ctrl-C
+        self.assertIsNone(report.report_ending(0, None))                 # converted: offered already
+        self.assertIsNone(report.report_ending(None, None))              # the terminal was closed
 
     def test_a_long_reason_is_cut_short_on_one_line(self):
-        import tools.autoflash.cli as af
-        text = af.public_text("first line\n" + "x" * 500)
+        text = report.public_text("first line\n" + "x" * 500)
         self.assertNotIn("\n", text)
         self.assertLessEqual(len(text), 240)
         self.assertTrue(text.endswith("..."))
 
     def test_python_says_where_it_came_from(self):
-        import tools.autoflash.cli as af
         portable = Path(self.tmp.name) / ".python"
         with mock.patch.dict(os.environ, {"AUTOFLASH_PYTHON_HOME": str(portable)}):
-            with mock.patch.object(af.sys, "executable", str(portable / "linux-x86_64/python/bin/python3")):
-                self.assertIn("(portable)", af.python_description())
-            with mock.patch.object(af.sys, "executable", "/usr/bin/python3"), \
-                 mock.patch.object(af.sys, "prefix", "/usr"), mock.patch.object(af.sys, "base_prefix", "/usr"):
-                self.assertIn("(existing installation)", af.python_description())
-            with mock.patch.object(af.sys, "executable", "/home/me/venv/bin/python3"), \
-                 mock.patch.object(af.sys, "prefix", "/home/me/venv"), \
-                 mock.patch.object(af.sys, "base_prefix", "/usr"):
-                self.assertIn("(in a virtual environment)", af.python_description())
+            with mock.patch.object(sys, "executable", str(portable / "linux-x86_64/python/bin/python3")):
+                self.assertIn("(portable)", report.python_description())
+            with mock.patch.object(sys, "executable", "/usr/bin/python3"), \
+                 mock.patch.object(sys, "prefix", "/usr"), mock.patch.object(sys, "base_prefix", "/usr"):
+                self.assertIn("(existing installation)", report.python_description())
+            with mock.patch.object(sys, "executable", "/home/me/venv/bin/python3"), \
+                 mock.patch.object(sys, "prefix", "/home/me/venv"), \
+                 mock.patch.object(sys, "base_prefix", "/usr"):
+                self.assertIn("(in a virtual environment)", report.python_description())
 
     def test_a_run_that_stopped_offers_its_report_without_the_hat(self):
-        import tools.autoflash.cli as af
         ctx = self.ctx()
         ctx.last_failure, ctx.run_resumed, ctx.reported = "timed out", False, False
-        ctx.run_started = af.time.monotonic() - 60
+        ctx.run_started = time.monotonic() - 60
         copied = []
-        with mock.patch.object(af.hostsys, "copy_to_clipboard",
+        with mock.patch.object(hostsys, "copy_to_clipboard",
                                side_effect=lambda text: copied.append(text) or True), \
-             mock.patch.object(af, "tell") as told, mock.patch.object(af.output, "show") as shown, \
-             mock.patch.object(af.output, "show_link"), mock.patch.object(af.output, "show_links") as links:
-            af.invite_stopped_report(ctx, "failed")
+             mock.patch.object(output, "tell") as told, mock.patch.object(output, "show") as shown, \
+             mock.patch.object(output, "show_link"), mock.patch.object(output, "show_links") as links:
+            report.invite_stopped_report(ctx, "failed")
         self.assertTrue(ctx.reported)
         self.assertIn("**Result:** Stopped at stage 1 of", copied[0])
         self.assertIn("timed out", copied[0])
@@ -800,36 +785,33 @@ class ReportTests(OutputTestCase):
         self.assertFalse(any("hold out my hat" in str(call) for call in told.call_args_list + shown.call_args_list))
 
     def test_the_report_says_how_the_backup_went_but_not_where_it_is(self):
-        import tools.autoflash.cli as af
         mac_path = "captures/plugs/58-cf-79-01-02-03/sonoff-backup"
         for outcome, said in (("saved", "Completed"), ("failed", "Failed"),
                               ("existing", "Taken by an earlier run")):
             with self.subTest(outcome=outcome):
                 ctx = self.ctx(backup_outcome=outcome, stock_backup=mac_path,
                                plug_mac="58:cf:79:01:02:03")
-                fields = dict(af.report_fields(ctx, 441, False))
+                fields = dict(report.report_fields(ctx, 441, False))
                 self.assertEqual(fields["Sonoff backup"], said)
-                report = af.report_markdown(list(fields.items()))
-                self.assertNotIn("58", report.split("Sonoff backup")[1].splitlines()[0])
-                self.assertNotIn("sonoff-backup", report)
+                markdown = report.report_markdown(list(fields.items()))
+                self.assertNotIn("58", markdown.split("Sonoff backup")[1].splitlines()[0])
+                self.assertNotIn("sonoff-backup", markdown)
         # A run from before the backup existed.
-        self.assertEqual(dict(af.report_fields(self.ctx(backup_outcome=""), 441, False))["Sonoff backup"],
+        self.assertEqual(dict(report.report_fields(self.ctx(backup_outcome=""), 441, False))["Sonoff backup"],
                          "Not taken")
 
     def test_a_run_from_a_converted_plug_reports_its_backup_from_before(self):
         # Seen: "Not taken" in the report of a run whose log said the plug
         # was backed up already - a run from Tasmota never reaches C3.
         from unittest import mock
-        import tools.autoflash.cli as af
         ctx = self.ctx(source="tasmota", plug_mac="12:34:56:ab:cd:ef")
-        with mock.patch.object(af.plugs, "find_backup", return_value=object()):
-            self.assertEqual(dict(af.report_fields(ctx, 441, False))["Sonoff backup"], "Taken by an earlier run")
-        with mock.patch.object(af.plugs, "find_backup", return_value=None):
-            self.assertEqual(dict(af.report_fields(ctx, 441, False))["Sonoff backup"], "Not taken")
+        with mock.patch.object(plugs, "find_backup", return_value=object()):
+            self.assertEqual(dict(report.report_fields(ctx, 441, False))["Sonoff backup"], "Taken by an earlier run")
+        with mock.patch.object(plugs, "find_backup", return_value=None):
+            self.assertEqual(dict(report.report_fields(ctx, 441, False))["Sonoff backup"], "Not taken")
 
     def test_hardware_that_was_not_checked_says_so(self):
-        import tools.autoflash.cli as af
-        fields = dict(af.report_fields(self.ctx(), 441, False))
+        fields = dict(report.report_fields(self.ctx(), 441, False))
         self.assertEqual(fields["Relay"], "Not checked")
         self.assertNotIn("Mains voltage", fields)
         self.assertEqual(fields["Power meter"], "Not checked")
@@ -837,8 +819,7 @@ class ReportTests(OutputTestCase):
         self.assertNotIn("__", fields.values())
 
     def test_every_answer_starts_with_a_capital_and_only_that_changes(self):
-        import tools.autoflash.cli as af
-        fields = dict(af.report_fields(self.ctx(), 441, False,
+        fields = dict(report.report_fields(self.ctx(), 441, False,
                                        {"Relay": "switches (meter confirms)",
                                         "Power meter": "on: 239 V, 0 W; off: 0 V, 0 W"}))
         self.assertEqual(fields["Relay"], "Switches (meter confirms)")
@@ -846,25 +827,22 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Plug model"], "S60TPG")
 
     def test_the_plug_page_is_the_plug_or_the_emulators_forward(self):
-        import tools.autoflash.cli as af
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AUTOFLASH_EMULATOR_URL", None)
-            self.assertEqual(af.plug_page_url("192.168.0.50"), "http://192.168.0.50/")
-            self.assertIsNone(af.plug_page_url(None))
+            self.assertEqual(report.plug_page_url("192.168.0.50"), "http://192.168.0.50/")
+            self.assertIsNone(report.plug_page_url(None))
         with mock.patch.dict(os.environ, {"AUTOFLASH_EMULATOR_URL": "http://localhost:8080"}):
-            self.assertEqual(af.plug_page_url("192.168.60.50"), "http://localhost:8080")
+            self.assertEqual(report.plug_page_url("192.168.60.50"), "http://localhost:8080")
 
     def test_the_report_holds_nothing_private(self):
-        import tools.autoflash.cli as af
-        report = af.report_markdown(af.report_fields(self.ctx(), 441, False))
+        markdown = report.report_markdown(report.report_fields(self.ctx(), 441, False))
         for private in ("me@example.com", "192.168.0.50", "tasmota-1A2B3C-4567", "1001234abc"):
-            self.assertNotIn(private, report)
+            self.assertNotIn(private, markdown)
 
     def test_fallbacks_and_unknown_models_are_reported_as_such(self):
-        import tools.autoflash.cli as af
         ctx = self.ctx(product_model="", wifi_typed=True)
         ctx.state.capture("F4.wifi_route", "setup network")
-        fields = dict(af.report_fields(ctx, 60, True))
+        fields = dict(report.report_fields(ctx, 60, True))
         self.assertEqual(fields["Plug model"], "__")
         self.assertEqual(fields["Typed the Wi-Fi"], "Yes")
         self.assertEqual(fields["Joined setup network"], "Yes")
@@ -872,22 +850,21 @@ class ReportTests(OutputTestCase):
         self.assertIn("(since resuming)", fields["Time taken"])
 
     def test_the_invitation_links_the_thread_and_copies_the_report(self):
-        import tools.autoflash.cli as af
         copied = []
 
         def body():
-            with mock.patch.object(af.hostsys, "copy_to_clipboard", side_effect=lambda text: copied.append(text) or True), \
-                 mock.patch.object(af, "check_hardware", return_value={"Relay": "switches (meter confirms)"}):
-                af.invite_report(self.ctx(), 441, False)
+            with mock.patch.object(hostsys, "copy_to_clipboard", side_effect=lambda text: copied.append(text) or True), \
+                 mock.patch.object(report, "check_hardware", return_value={"Relay": "switches (meter confirms)"}):
+                report.invite_report(self.ctx(), 441, False)
         screen, _ = self.run_with(io.StringIO(), False, body)
-        self.assertIn(af.REPORTS_URL, screen)
-        self.assertIn("adamsthws/Sonoff-OTA/discussions", af.REPORTS_URL)
+        self.assertIn(report.REPORTS_URL, screen)
+        self.assertIn("adamsthws/Sonoff-OTA/discussions", report.REPORTS_URL)
         self.assertIn("Please share how it went", screen)
         self.assertIn("already on your clipboard", screen)
-        self.assertIn(f"Test reports: {af.REPORTS_URL}", screen)
+        self.assertIn(f"Test reports: {report.REPORTS_URL}", screen)
         self.assertIn("Throw your friendly neighbourhood dev a biscuit:", screen)
-        self.assertGreater(screen.index(af.DONATE_URL), screen.index("Plug model"))  # after the report
-        self.assertGreater(screen.index(f"PayPal: {af.DONATE_URL}"), screen.index(f"Ko-fi: {af.KOFI_URL}"))
+        self.assertGreater(screen.index(report.DONATE_URL), screen.index("Plug model"))  # after the report
+        self.assertGreater(screen.index(f"PayPal: {report.DONATE_URL}"), screen.index(f"Ko-fi: {report.KOFI_URL}"))
         self.assertNotIn("**", screen)                       # the terminal shows no Markdown
         self.assertRegex(screen, r"Plug model: +S60TPG")
         self.assertIn("**Plug model:** S60TPG", copied[0])   # the thread gets bold labels

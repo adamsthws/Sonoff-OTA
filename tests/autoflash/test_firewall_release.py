@@ -3,9 +3,7 @@
 import types
 import unittest
 from unittest import mock
-
-import tools.autoflash.cli as af
-from tools.autoflash import hostsys
+from tools.autoflash import firewall, hostsys, output, prompts
 
 
 class FakeState:
@@ -28,14 +26,14 @@ class ReleaseFirewallTests(unittest.TestCase):
     def test_a_recorded_rule_is_removed(self):
         ctx = self.ctx()
         with mock.patch.object(hostsys, "close_firewall", return_value=True) as close, \
-             mock.patch.object(af, "tell"), mock.patch.object(af, "say"):
-            af.release_firewall(ctx)
+             mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
+            firewall.release_firewall(ctx)
         close.assert_called_once_with(self.RULE)
-        self.assertEqual(af.recorded_rules(ctx), [])
+        self.assertEqual(firewall.recorded_rules(ctx), [])
 
     def test_nothing_is_asked_when_no_rule_was_added(self):
-        with mock.patch.object(hostsys, "close_firewall") as close, mock.patch.object(af, "tell") as told:
-            af.release_firewall(self.ctx(rules=()))
+        with mock.patch.object(hostsys, "close_firewall") as close, mock.patch.object(output, "tell") as told:
+            firewall.release_firewall(self.ctx(rules=()))
         close.assert_not_called()
         told.assert_not_called()
 
@@ -43,12 +41,12 @@ class ReleaseFirewallTests(unittest.TestCase):
         ctx = self.ctx()
         lines = []
         with mock.patch.object(hostsys, "close_firewall", side_effect=KeyboardInterrupt), \
-             mock.patch.object(af, "tell", side_effect=lines.append):
-            af.release_firewall(ctx)  # does not raise
+             mock.patch.object(output, "tell", side_effect=lines.append):
+            firewall.release_firewall(ctx)  # does not raise
         screen = "\n".join(lines)
         self.assertIn("was not removed (stopped with Ctrl-C)", screen)
         self.assertIn("192.168.1.50", screen)
-        self.assertEqual(af.recorded_rules(ctx), [self.RULE])  # still recorded for cleanup
+        self.assertEqual(firewall.recorded_rules(ctx), [self.RULE])  # still recorded for cleanup
 
 
 class QuitTests(unittest.TestCase):
@@ -58,9 +56,9 @@ class QuitTests(unittest.TestCase):
         ctx = types.SimpleNamespace(state=FakeState(rules))
         lines = []
         with mock.patch.object(hostsys, "close_firewall", return_value=removed), \
-             mock.patch.object(af, "tell", side_effect=lines.append), mock.patch.object(af, "say"), \
-             mock.patch.object(af, "section"):
-            af.say_quit(ctx)
+             mock.patch.object(output, "tell", side_effect=lines.append), mock.patch.object(output, "say"), \
+             mock.patch.object(prompts, "section"):
+            firewall.say_quit(ctx)
         return lines
 
     def test_quitting_ends_with_the_cleaned_up_line(self):
@@ -77,11 +75,11 @@ class EmulatorPasswordTests(unittest.TestCase):
         import os
         with mock.patch.dict(os.environ, {"AUTOFLASH_EMULATOR_SUDO_PASSWORD": "autoflash"}), \
              mock.patch.object(hostsys, "IS_WINDOWS", False):
-            self.assertEqual(af.emulator_password_hint(),
+            self.assertEqual(firewall.emulator_password_hint(),
                              ["In the emulator, the password is: autoflash"])
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AUTOFLASH_EMULATOR_SUDO_PASSWORD", None)
-            self.assertEqual(af.emulator_password_hint(), [])
+            self.assertEqual(firewall.emulator_password_hint(), [])
 
     def test_the_removal_note_gives_it_too(self):
         import os
@@ -90,8 +88,8 @@ class EmulatorPasswordTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"AUTOFLASH_EMULATOR_SUDO_PASSWORD": "autoflash"}), \
              mock.patch.object(hostsys, "IS_WINDOWS", False), \
              mock.patch.object(hostsys, "close_firewall", return_value=True), \
-             mock.patch.object(af, "tell", side_effect=lines.append), mock.patch.object(af, "say"):
-            af.close_firewall_rules(ctx)
+             mock.patch.object(output, "tell", side_effect=lines.append), mock.patch.object(output, "say"):
+            firewall.close_firewall_rules(ctx)
         self.assertIn("In the emulator, the password is: autoflash", lines)
 
 

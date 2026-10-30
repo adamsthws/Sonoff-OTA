@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Callable
 
 from . import hostsys, interrupt, output
 from .device import Device
+from .errors import Abort
 
 if TYPE_CHECKING:
     from .plans import Plan
@@ -58,6 +59,24 @@ PLUG_SAYS_RE = re.compile(r"THE PLUG SAYS: (?P<reason>.+)")
 #   RSL: RESULT = {"Br":"[migration_refused] POST /capture/staged/22 returned HTTP -1 ..."}
 BERRY_ERROR_RE = re.compile(r'"Br":"\[(?P<kind>[^\]]+)\] (?P<message>.*)"\}')
 TIMEOUT_RE = re.compile(r"TIMEOUT: (?P<reason>.+)")
+
+
+# A server line worth the screen, not only the log (phase_log).
+PHASE_PROBLEM_RE = re.compile(
+    r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in|PLUG SAYS|plug's console|"
+    r"not answering at all|switch it off|and on \(at this stage",
+    re.IGNORECASE,
+)
+
+
+def phase_log(text: str) -> None:
+    output.say(text, show=bool(PHASE_PROBLEM_RE.search(text)))
+
+
+def phase_failed(phase: str, code: int, captured: str) -> Abort:
+    """The Abort for a phase that did not pass, with its reason when known."""
+    reason = failure_reason(captured)
+    return Abort(f"{phase} did not pass: {reason}" if reason else f"{phase} did not pass (exit {code})")
 
 
 def failure_reason(captured: str) -> str | None:

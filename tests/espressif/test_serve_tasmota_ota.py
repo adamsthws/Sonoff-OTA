@@ -4,6 +4,7 @@ import time
 import unittest
 
 from tools.espressif.serve_tasmota_ota import FirmwareServer, parse_single_range
+from tools.autoflash.routes.espressif import installer
 
 
 class FirmwareServerTests(unittest.TestCase):
@@ -138,9 +139,8 @@ class FailureTests(unittest.TestCase):
         self.assertNotIn(sender.NOT_SENT, self.said(sent=True))
 
     def test_the_run_looks_for_what_it_says(self):
-        import tools.autoflash.cli as autoflash
         import tools.espressif.serve_tasmota_ota as sender
-        self.assertTrue(sender.NOT_SENT.startswith(autoflash.BRIDGE_NOT_SENT))
+        self.assertTrue(sender.NOT_SENT.startswith(installer.BRIDGE_NOT_SENT))
 
 
 class DescribeCloudTests(unittest.TestCase):

@@ -102,7 +102,8 @@ eWeLink accounts and plugs' identities.
 - **Tests run side by side and in any order**: one leaves nothing behind,
   keeps a port it picked, and touches nothing of the whole computer's.
   [docs/testing.md](docs/testing.md#side-by-side-in-any-order)
-- **Where things go**: `tools/autoflash/` is the tool, `tools/repo/` the
+- **Where things go**: `tools/autoflash/` is the tool (its modules:
+  [docs/technical-details.md](docs/technical-details.md#for-developers)), `tools/repo/` the
   repository's own plumbing, `tools/<family>/` (espressif, beken) a chip
   family's tooling, `tools/ewelink/` eWeLink whatever the chip,
   `devices/<plug>/` for what is one plug's alone, `tests/` mirroring `tools/`

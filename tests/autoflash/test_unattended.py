@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from tools.repo import unattended_run
-from tools.autoflash import credentials, output, prompts
+from tools.autoflash import cli, context, credentials, hostsys, output, prompts
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -122,9 +122,8 @@ class UnattendedPromptTests(unittest.TestCase):
         self.assertIn("eWeLink account email", self.screen.getvalue())
 
     def test_proceed_is_taken_as_typed(self):
-        import tools.autoflash.cli as autoflash
         with mock.patch("builtins.input", side_effect=AssertionError("read the keyboard")):
-            self.assertTrue(autoflash.require_word("proceed"))
+            self.assertTrue(prompts.require_word("proceed"))
         self.assertIn("PROCEED   (unattended)", self.screen.getvalue())
 
 
@@ -133,24 +132,24 @@ class GivenPasswordTests(unittest.TestCase):
         import tools.autoflash.cli as autoflash
         ctx = SimpleNamespace(_ewelink_password=None, _given_ewelink_password=given,
                               _given_email=given_email, email=lambda: email)
-        quiet = mock.patch.object(autoflash, "say")
+        quiet = mock.patch.object(output, "say")
         quiet.start()
         self.addCleanup(quiet.stop)
         return autoflash, ctx
 
     def test_it_is_used_once_then_asked_for(self):
         autoflash, ctx = self.context("from-env")
-        with mock.patch.object(autoflash, "ask_secret", return_value="typed") as asked:
-            self.assertEqual(autoflash.Context.ewelink_env(ctx)["EWELINK_PASSWORD"], "from-env")
+        with mock.patch.object(prompts, "ask_secret", return_value="typed") as asked:
+            self.assertEqual(context.Context.ewelink_env(ctx)["EWELINK_PASSWORD"], "from-env")
             asked.assert_not_called()
             ctx._ewelink_password = None  # eWeLink refused it
-            self.assertEqual(autoflash.Context.ewelink_env(ctx)["EWELINK_PASSWORD"], "typed")
+            self.assertEqual(context.Context.ewelink_env(ctx)["EWELINK_PASSWORD"], "typed")
 
     def test_not_for_another_account_than_the_one_given(self):
         autoflash, ctx = self.context("from-env", email="other@example.com",
                                       given_email="me@example.com")
-        with mock.patch.object(autoflash, "ask_secret", return_value="typed"):
-            self.assertEqual(autoflash.Context.ewelink_env(ctx)["EWELINK_PASSWORD"], "typed")
+        with mock.patch.object(prompts, "ask_secret", return_value="typed"):
+            self.assertEqual(context.Context.ewelink_env(ctx)["EWELINK_PASSWORD"], "typed")
 
 
 class SudoPasswordTests(unittest.TestCase):
@@ -165,15 +164,15 @@ class SudoPasswordTests(unittest.TestCase):
 
     def test_a_given_one_sudo_accepts_is_used(self):
         os.environ["AUTOFLASH_SUDO_PASSWORD"] = "right"
-        with mock.patch.object(self.autoflash.hostsys, "check_sudo_password", return_value=None), \
-                mock.patch.object(self.autoflash, "ask_admin_password") as asked:
-            self.assertEqual(self.autoflash.admin_password(), "right")
+        with mock.patch.object(hostsys, "check_sudo_password", return_value=None), \
+                mock.patch.object(prompts, "ask_admin_password") as asked:
+            self.assertEqual(cli.admin_password(), "right")
         asked.assert_not_called()
 
     def test_unattended_without_one_says_what_to_give(self):
         with mock.patch.object(prompts, "UNATTENDED", True), \
                 self.assertRaisesRegex(OSError, "AUTOFLASH_SUDO_PASSWORD"):
-            self.autoflash.admin_password()
+            cli.admin_password()
 
 
 class ScreenTests(unittest.TestCase):

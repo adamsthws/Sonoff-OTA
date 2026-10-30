@@ -330,7 +330,24 @@ layout allowed, plus a filesystem the plug never had.
 ## For developers
 
 The user-facing tool sits on top of a set of smaller, single-purpose scripts in
-`tools/`, each of which can be run on its own. `archive/` holds the research
+`tools/`, each of which can be run on its own. The tool itself,
+`tools/autoflash/`, is a package: `cli.py` takes the command line and chooses
+the run; `context.py` holds a run's context; `runner.py` runs its steps, with
+their retries and the evidence of one cut off; `report.py` writes the report.
+Under them, `runs.py` is a run's record on disk, `account.py` the plug in its
+eWeLink account (the one part of a run that reaches eWeLink), `join.py` the
+plug onto the Wi-Fi and found there, `names.py` what its networks are called,
+`wifi.py` where its Wi-Fi details come from, `unlock.py` a converted plug's own
+passwords and keys, `firewall.py` this computer's ports and firewall rules,
+and `errors.py` what stops a run. The steps are the routes, a package per
+chip family: `routes/espressif/` holds the S60's - `installer.py`, `hub.py`,
+`tasmota.py`, `mover.py` and `sonoff.py` by where the plug is on its way,
+`source.py` for what it runs when a run starts, `evidence.py` for what a
+step cut off left behind, `bundle.py` for the firmware bundle - and
+`routes/__init__.py` settles which route a run takes. The modules call each
+other's functions by module name (`installer.reach_bridge`), never imported
+bare, so a test patches a function on the one module that defines it.
+`archive/` holds the research
 tools, the bridge firmware source and the custom Tasmota build that got the
 early plugs converted. None of it is needed now, and none of it has been
 deleted. The research behind all of it - how the update mechanism was worked

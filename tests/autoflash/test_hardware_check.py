@@ -1,28 +1,28 @@
 """The end-of-run relay and power meter check, as it reads in the report."""
 
 import unittest
+import time
 from unittest import mock
-
-import tools.autoflash.cli as af
+from tools.autoflash import output, prompts, report
 
 
 class DescribeHardwareTests(unittest.TestCase):
     def test_voltage_dropping_with_the_relay_off_proves_it_switches(self):
-        result = af.describe_hardware(True, True, {"Voltage": 239, "Power": 0}, {"Voltage": 0, "Power": 0})
+        result = report.describe_hardware(True, True, {"Voltage": 239, "Power": 0}, {"Voltage": 0, "Power": 0})
         self.assertEqual(result["Relay"], "switches (meter confirms)")
         self.assertEqual(result["Power meter"], "on: 239 V, 0 W; off: 0 V, 0 W")
         self.assertNotIn("Mains voltage", result)  # the power meter line shows it
 
     def test_a_load_losing_power_proves_it_switches(self):
-        result = af.describe_hardware(True, True, {"Voltage": 238, "Power": 41.5}, {"Voltage": 238, "Power": 0})
+        result = report.describe_hardware(True, True, {"Voltage": 238, "Power": 41.5}, {"Voltage": 238, "Power": 0})
         self.assertEqual(result["Relay"], "switches (meter confirms)")
 
     def test_no_change_on_the_meter_is_not_claimed_as_proof(self):
-        result = af.describe_hardware(True, True, {"Voltage": 238, "Power": 0}, {"Voltage": 238, "Power": 0})
+        result = report.describe_hardware(True, True, {"Voltage": 238, "Power": 0}, {"Voltage": 238, "Power": 0})
         self.assertEqual(result["Relay"], "switches (meter unchanged)")
 
     def test_a_relay_that_does_not_follow_the_command_is_reported(self):
-        result = af.describe_hardware(True, False, None, None)
+        result = report.describe_hardware(True, False, None, None)
         self.assertEqual(result["Relay"], "did not switch")
         self.assertEqual(result["Power meter"], "no readings")
         self.assertNotIn("Mains voltage", result)  # the power meter line shows it
@@ -48,8 +48,8 @@ class CheckHardwareTests(unittest.TestCase):
         return SimpleNamespace(device=SimpleNamespace(command=command)), sent, state
 
     def run_check(self, ctx):
-        with mock.patch.object(af.time, "sleep"), mock.patch.object(af, "say"):
-            return af.check_hardware(ctx)
+        with mock.patch.object(time, "sleep"), mock.patch.object(output, "say"):
+            return report.check_hardware(ctx)
 
     def test_a_plug_that_was_off_goes_on_then_back_off(self):
         ctx, sent, state = self.ctx({"ON": {"Voltage": 240, "Power": 3}, "OFF": {"Voltage": 0, "Power": 0}},
@@ -70,15 +70,15 @@ class CheckHardwareTests(unittest.TestCase):
 
     def test_the_screen_starts_each_answer_with_a_capital_as_the_report_does(self):
         ctx, _, _ = self.ctx({"ON": {"Voltage": 240, "Power": 3}, "OFF": {"Voltage": 0, "Power": 0}})
-        with mock.patch.object(af.time, "sleep"), mock.patch.object(af, "say") as said:
-            af.check_hardware(ctx)
+        with mock.patch.object(time, "sleep"), mock.patch.object(output, "say") as said:
+            report.check_hardware(ctx)
         lines = [c.args[0] for c in said.call_args_list]
         self.assertIn("    Relay: Switches (meter confirms)", lines)
         self.assertIn("    Power meter: On: 240 V, 3 W; off: 0 V, 0 W", lines)
 
     def test_nothing_is_asked(self):
         ctx, _, _ = self.ctx({"ON": {}, "OFF": {}})
-        with mock.patch.object(af, "ask_yes_no", side_effect=AssertionError("asked")):
+        with mock.patch.object(prompts, "ask_yes_no", side_effect=AssertionError("asked")):
             self.run_check(ctx)
 
     def test_a_plug_that_stops_answering_is_reported_not_raised(self):

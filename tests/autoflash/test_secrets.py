@@ -13,6 +13,7 @@ from unittest import mock
 from tools.espressif.safeboot import prepare_imprinted_bundle as bundle
 from tools.espressif.safeboot import safeboot_migration
 from tools.espressif.safeboot.safeboot_migration import RECOVERY_ARTIFACT
+from tools.autoflash import runs
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL = ROOT / "captures" / "safeboot-recovery-migration"
@@ -190,18 +191,17 @@ class BundleWithoutWifiTests(unittest.TestCase):
 
 class RunSecretsTests(unittest.TestCase):
     def test_only_the_secret_files_are_removed(self):
-        import tools.autoflash.cli as autoflash
         with tempfile.TemporaryDirectory(dir=ROOT / "tests") as directory:
             run = Path(directory)
             (run / "live").mkdir()
-            for name in autoflash.SECRET_FILES:
+            for name in runs.SECRET_FILES:
                 (run / name).write_bytes(b"secret")
             kept = [run / "autoflash-state.json", run / "live" / "stage-report.json"]
             for path in kept:
                 path.write_text("{}")
-            removed = autoflash.forget_run_secrets(run)
-            self.assertEqual(len(removed), len(autoflash.SECRET_FILES))
-            for name in autoflash.SECRET_FILES:
+            removed = runs.forget_run_secrets(run)
+            self.assertEqual(len(removed), len(runs.SECRET_FILES))
+            for name in runs.SECRET_FILES:
                 self.assertFalse((run / name).exists(), name)
             for path in kept:
                 self.assertTrue(path.exists(), path.name)

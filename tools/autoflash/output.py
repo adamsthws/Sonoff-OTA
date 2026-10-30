@@ -296,6 +296,16 @@ def styled(text: str, *codes: str) -> str:
 # ------------------------------------------------------------------ messages
 
 
+def say(message: str = "", *, show: bool = False) -> None:
+    """A message for the run's log; on screen too in verbose mode, or with show."""
+    (on_screen if show else detail)(message)
+
+
+def tell(message: str = "") -> None:
+    """A message the person running the tool needs to see, in every mode."""
+    say(message, show=True)
+
+
 def detail(text: str = "") -> None:
     """Logged always; on screen only in verbose mode, or outside a run."""
     with _lock:
@@ -309,6 +319,9 @@ def show(text: str = "", *codes: str) -> None:
     with _lock:
         _write_log(text)
         _print(styled(text, *codes))
+
+
+on_screen = show  # for say(), whose `show` is its flag
 
 
 def log_only(text: str) -> None:

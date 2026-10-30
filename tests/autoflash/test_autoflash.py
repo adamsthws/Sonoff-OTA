@@ -3,11 +3,58 @@ import contextlib
 import sys
 import tempfile
 import unittest
+import platform
+import time
 from pathlib import Path
 from unittest import mock
 
 from tools.autoflash.phases import ARM_RE, LOADER_RE, PhaseRunner, PhaseError, short_loader
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED, RunState
+from tools.autoflash import (
+    account,
+    cli,
+    context,
+    credentials,
+    detect,
+    device,
+    errors,
+    esphome,
+    esphome_ota,
+    firewall,
+    hostsys,
+    join,
+    kinds,
+    names,
+    output,
+    phases,
+    plans,
+    plugs,
+    prompts,
+    report,
+    routes,
+    runner,
+    runs,
+    safety_locks,
+    setup_network,
+    state,
+    unlock,
+    wifi,
+)
+from tools.autoflash.routes import espressif
+from tools.autoflash.routes.espressif import (
+    bundle,
+    evidence,
+    hub,
+    installer,
+    mover,
+    source,
+    tasmota,
+)
+from tools.espressif import dump_stock_flash
+from tools.espressif import inspect_stock_nvs
+from tools.espressif.safeboot import prepare_imprinted_bundle
+from tools.espressif.safeboot import safeboot_migration
+from tools.ewelink import discover_ewelink
 
 
 def no_lock_records(root, name):
@@ -167,9 +214,8 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(reopened.data["steps"]["E2"]["error"], "stage refused")
 
     def test_migration_phases_resume_independently(self):
-        import tools.autoflash.cli as autoflash
 
-        ids = [step for step, _, _ in autoflash.STEPS]
+        ids = [step for step, _, _ in routes.STEPS]
         self.assertEqual(ids[ids.index("E1"):ids.index("E1") + 3], ["E1", "E2", "E3"])
         state = RunState.open(self.root)
         state.mark("E1", DONE)
@@ -179,15 +225,14 @@ class ResumeTests(unittest.TestCase):
         self.assertFalse(reopened.is_done("E3"))
 
     def test_every_destructive_step_records_an_attempt_first(self):
-        import tools.autoflash.cli as autoflash
 
         # Every route's steps: STEPS holds only the route chosen for the run.
-        known = {step for firmware in autoflash.FIRMWARES for source in autoflash.SOURCES
+        known = {step for firmware in routes.FIRMWARES for source in espressif.SOURCES
                  if firmware != source
-                 for step, _, _ in autoflash.steps_for(firmware, source)}
-        self.assertTrue(autoflash.DESTRUCTIVE_STEPS <= known)
-        self.assertIn("E3", autoflash.DESTRUCTIVE_STEPS)
-        self.assertIn("C2", autoflash.DESTRUCTIVE_STEPS)
+                 for step, _, _ in espressif.steps_for(firmware, source)}
+        self.assertTrue(evidence.DESTRUCTIVE_STEPS <= known)
+        self.assertIn("E3", evidence.DESTRUCTIVE_STEPS)
+        self.assertIn("C2", evidence.DESTRUCTIVE_STEPS)
 
     def test_state_file_is_replaced_atomically(self):
         state = RunState.open(self.root)
@@ -201,13 +246,12 @@ class ConfirmSkipTests(unittest.TestCase):
 
     def skip(self, verifier, rerun=False):
         from types import SimpleNamespace
-        import tools.autoflash.cli as autoflash
         verifiers = {} if verifier is None else {"D1": verifier}
-        with mock.patch.dict(autoflash.STEP_VERIFIERS, verifiers, clear=True), \
-             mock.patch.object(autoflash, "ask_yes_no", return_value=rerun) as asked, \
-             mock.patch.object(autoflash, "say") as said, mock.patch.object(autoflash, "tell"), \
-             mock.patch.object(autoflash, "output"):
-            skipped = autoflash.confirm_skip(SimpleNamespace(), "D1", "Install Tasmota")
+        with mock.patch.dict(tasmota.STEP_VERIFIERS, verifiers, clear=True), \
+             mock.patch.object(prompts, "ask_yes_no", return_value=rerun) as asked, \
+             mock.patch.object(output, "say") as said, mock.patch.object(output, "transient_begin"), \
+             mock.patch.object(output, "transient_end"):
+            skipped = runner.confirm_skip(SimpleNamespace(), "D1", "Install Tasmota")
         return skipped, asked, said.call_args.args[0] if said.called else ""
 
     def test_a_step_with_no_check_is_taken_at_its_record(self):
@@ -223,8 +267,7 @@ class ConfirmSkipTests(unittest.TestCase):
         self.assertIn("the plug still agrees", said)
 
     def test_a_check_that_cannot_run_leaves_the_record_standing(self):
-        import tools.autoflash.cli as autoflash
-        for error in (autoflash.DeviceError("refused"), OSError("unreachable"), ValueError("bad reply")):
+        for error in (device.DeviceError("refused"), OSError("unreachable"), ValueError("bad reply")):
             def check(ctx, error=error):
                 raise error
             skipped, asked, said = self.skip(check)
@@ -253,13 +296,12 @@ class RunStepsTests(unittest.TestCase):
         self.root = Path(directory.name)
         self.state = RunState.open(self.root)
 
-    def run_steps(self, *, codes=None, evidence=None, answer=0, unattended=False, skip=True, **overrides):
+    def run_steps(self, *, codes=None, check=None, answer=0, unattended=False, skip=True, **overrides):
         """run_steps over STEPS, each step's code from `codes` (0 if not
         given), S2's evidence if interrupted, and the operator's answer:
         what it returned, the steps it ran, and the stand-ins, each of which
         `overrides` can replace."""
         from types import SimpleNamespace
-        import tools.autoflash.cli as autoflash
         codes = codes or {}
         ran = []
         stand_ins = {
@@ -275,15 +317,21 @@ class RunStepsTests(unittest.TestCase):
             "say": mock.Mock(), "tell": mock.Mock(), "section": mock.Mock(),
             "output": mock.Mock(waited=mock.Mock(return_value=0.0)),
         } | overrides
+        owners = {"restore_left_locks": safety_locks, "hold_plug": runs, "unlock_tasmota": unlock,
+                  "settle_route": routes, "apply_target": routes, "begin_stage": routes,
+                  "bundle_of_this_version": bundle, "wait_while_plug_busy": join,
+                  "close_firewall_rules": firewall, "invite_report": report, "plug_page_url": report,
+                  "ask_choice": prompts, "section": prompts, "say": output, "tell": output,
+                  "run_source": runs}
         with contextlib.ExitStack() as patches:
             for name, stand_in in stand_ins.items():
-                patches.enter_context(mock.patch.object(autoflash, name, stand_in))
-            patches.enter_context(mock.patch.object(autoflash, "STEPS", self.STEPS))
-            patches.enter_context(mock.patch.dict(autoflash.ATTEMPTED_EVIDENCE,
-                                                  {} if evidence is None else {"S2": evidence}, clear=True))
-            patches.enter_context(mock.patch.object(autoflash.prompts, "UNATTENDED", unattended))
-            patches.enter_context(mock.patch.object(autoflash.prompts, "answered_unattended"))
-            code = autoflash.run_steps(SimpleNamespace(state=self.state, research_bridge=False))
+                patches.enter_context(mock.patch.object(owners.get(name, runner), name, stand_in))
+            patches.enter_context(mock.patch.object(routes, "STEPS", self.STEPS))
+            patches.enter_context(mock.patch.dict(evidence.ATTEMPTED_EVIDENCE,
+                                                  {} if check is None else {"S2": check}, clear=True))
+            patches.enter_context(mock.patch.object(prompts, "UNATTENDED", unattended))
+            patches.enter_context(mock.patch.object(prompts, "answered_unattended"))
+            code = runner.run_steps(SimpleNamespace(state=self.state, research_bridge=False))
         return code, ran, stand_ins
 
     def test_every_step_runs_in_turn_and_the_rules_are_closed(self):
@@ -294,14 +342,12 @@ class RunStepsTests(unittest.TestCase):
         stand_ins["bundle_of_this_version"].assert_not_called()  # a new run's bundle is the one built
 
     def test_a_route_refused_stops_before_anything_is_done(self):
-        import tools.autoflash.cli as autoflash
-        code, ran, stand_ins = self.run_steps(settle_route=mock.Mock(side_effect=autoflash.Abort("no plug")))
+        code, ran, stand_ins = self.run_steps(settle_route=mock.Mock(side_effect=errors.Abort("no plug")))
         self.assertEqual((code, ran), (2, []))
         stand_ins["apply_target"].assert_not_called()
 
     def test_nothing_to_do_on_tasmota_checks_its_meter(self):
-        import tools.autoflash.cli as autoflash
-        code, ran, stand_ins = self.run_steps(settle_route=mock.Mock(side_effect=autoflash.NothingToDo("on Tasmota")),
+        code, ran, stand_ins = self.run_steps(settle_route=mock.Mock(side_effect=routes.NothingToDo("on Tasmota")),
                                               run_source=mock.Mock(return_value="tasmota"))
         self.assertEqual((code, ran), (0, []))
         stand_ins["rerun_on_tasmota"].assert_called_once()
@@ -319,21 +365,20 @@ class RunStepsTests(unittest.TestCase):
         self.assertEqual(ran, ["S1", "S2", "S3"])
 
     def test_a_resumed_run_whose_bundle_is_refused_stops_there(self):
-        import tools.autoflash.cli as autoflash
         self.state.mark("S1", DONE)
-        code, ran, _ = self.run_steps(bundle_of_this_version=mock.Mock(side_effect=autoflash.Abort("changed")))
+        code, ran, _ = self.run_steps(bundle_of_this_version=mock.Mock(side_effect=errors.Abort("changed")))
         self.assertEqual((code, ran), (2, []))
 
     def test_an_interrupted_step_the_plug_shows_finished_is_not_run_again(self):
         self.state.mark("S2", ATTEMPTED)
-        code, ran, stand_ins = self.run_steps(evidence=lambda ctx: (True, "it answers as Tasmota"))
+        code, ran, stand_ins = self.run_steps(check=lambda ctx: (True, "it answers as Tasmota"))
         self.assertEqual((code, ran), (0, ["S1", "S3"]))
         self.assertTrue(RunState.open(self.root).is_done("S2"))
         stand_ins["ask_choice"].assert_not_called()
 
     def test_an_interrupted_step_shown_unfinished_is_recommended_again(self):
         self.state.mark("S2", ATTEMPTED)
-        _, ran, stand_ins = self.run_steps(evidence=lambda ctx: (False, "it still runs Sonoff"))
+        _, ran, stand_ins = self.run_steps(check=lambda ctx: (False, "it still runs Sonoff"))
         self.assertEqual(ran, ["S1", "S2", "S3"])
         self.assertIn("recommended", stand_ins["ask_choice"].call_args.args[1][0])
 
@@ -345,12 +390,11 @@ class RunStepsTests(unittest.TestCase):
         self.assertNotIn("recommended", stand_ins["ask_choice"].call_args.args[1][0])
 
     def test_an_interrupted_step_whose_check_fails_is_asked_about(self):
-        import tools.autoflash.cli as autoflash
         self.state.mark("S2", ATTEMPTED)
 
         def check(ctx):
-            raise autoflash.DeviceError("no answer")
-        _, ran, stand_ins = self.run_steps(evidence=check)
+            raise device.DeviceError("no answer")
+        _, ran, stand_ins = self.run_steps(check=check)
         self.assertEqual(ran, ["S1", "S2", "S3"])
         stand_ins["ask_choice"].assert_called_once()
 
@@ -383,13 +427,10 @@ class NetworkCheckTests(unittest.TestCase):
 
     def setUp(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-
-        self.autoflash = autoflash
         self.patches = [
-            mock.patch.object(autoflash, "bundle_ssid", return_value="Home-2G"),
-            mock.patch.object(autoflash, "say"),
-            mock.patch.object(autoflash, "section"),
+            mock.patch.object(join, "bundle_ssid", return_value="Home-2G"),
+            mock.patch.object(output, "say"),
+            mock.patch.object(prompts, "section"),
         ]
         for patch in self.patches:
             patch.start()
@@ -403,45 +444,45 @@ class NetworkCheckTests(unittest.TestCase):
         return SimpleNamespace(device=device, manifest_path=Path("unused"), state=state)
 
     def test_a_matching_network_passes(self):
-        result = self.autoflash.check_plug_network(self.ctx("Home-2G"))
+        result = join.check_plug_network(self.ctx("Home-2G"))
         self.assertEqual(result, {"network": "Home-2G", "signal_dbm": -50})
 
     def test_a_different_network_stops_when_not_rebuilt(self):
         from unittest import mock
-        with mock.patch.object(self.autoflash, "ask_yes_no", return_value=False):
-            with self.assertRaisesRegex(self.autoflash.Abort, "'Guest' but the bundle is set up for 'Home-2G'"):
-                self.autoflash.check_plug_network(self.ctx("Guest"))
+        with mock.patch.object(prompts, "ask_yes_no", return_value=False):
+            with self.assertRaisesRegex(errors.Abort, "'Guest' but the bundle is set up for 'Home-2G'"):
+                join.check_plug_network(self.ctx("Guest"))
 
     def test_a_different_network_can_be_fixed_with_its_password(self):
         from unittest import mock
         ctx = self.ctx("Guest")
         ctx.adopt_wifi = mock.Mock()
-        with mock.patch.object(self.autoflash, "ask_yes_no", return_value=True), \
-             mock.patch.object(self.autoflash, "ask_password", return_value="guest pass") as asked, \
-             mock.patch.object(self.autoflash, "bundle_ssid", side_effect=["Home-2G", "Guest"]):
-            result = self.autoflash.check_plug_network(ctx)
+        with mock.patch.object(prompts, "ask_yes_no", return_value=True), \
+             mock.patch.object(join, "ask_password", return_value="guest pass") as asked, \
+             mock.patch.object(join, "bundle_ssid", side_effect=["Home-2G", "Guest"]):
+            result = join.check_plug_network(ctx)
         asked.assert_called_once_with("Guest")  # the name is known: only the password is asked
         ctx.adopt_wifi.assert_called_once_with("Guest", "guest pass")
         self.assertEqual(result["network"], "Guest")
 
     def test_names_differing_only_in_case_do_not_match(self):
         from unittest import mock
-        with mock.patch.object(self.autoflash, "ask_yes_no", return_value=False):
-            with self.assertRaises(self.autoflash.Abort):
-                self.autoflash.check_plug_network(self.ctx("home-2g"))
+        with mock.patch.object(prompts, "ask_yes_no", return_value=False):
+            with self.assertRaises(errors.Abort):
+                join.check_plug_network(self.ctx("home-2g"))
 
     def test_no_reported_network_stops_rather_than_guessing(self):
-        with self.assertRaisesRegex(self.autoflash.Abort, "did not say which Wi-Fi network"):
-            self.autoflash.check_plug_network(self.ctx(None))
+        with self.assertRaisesRegex(errors.Abort, "did not say which Wi-Fi network"):
+            join.check_plug_network(self.ctx(None))
 
     def test_a_weak_signal_needs_a_deliberate_yes(self):
         from unittest import mock
-        with mock.patch.object(self.autoflash, "ask_yes_no", return_value=False):
-            with self.assertRaisesRegex(self.autoflash.Abort, "weak Wi-Fi signal"):
-                self.autoflash.check_plug_network(self.ctx("Home-2G", signal=-82))
-        with mock.patch.object(self.autoflash, "ask_yes_no", return_value=True):
+        with mock.patch.object(prompts, "ask_yes_no", return_value=False):
+            with self.assertRaisesRegex(errors.Abort, "weak Wi-Fi signal"):
+                join.check_plug_network(self.ctx("Home-2G", signal=-82))
+        with mock.patch.object(prompts, "ask_yes_no", return_value=True):
             self.assertEqual(
-                self.autoflash.check_plug_network(self.ctx("Home-2G", signal=-82))["signal_dbm"], -82
+                join.check_plug_network(self.ctx("Home-2G", signal=-82))["signal_dbm"], -82
             )
 
 
@@ -451,24 +492,21 @@ class EsphomeSignalTests(unittest.TestCase):
 
     def setUp(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-
-        self.autoflash = autoflash
         self.run_plan = mock.Mock(return_value={"plan": "written"})
         self.consent = mock.Mock()
-        for patch in (mock.patch.object(autoflash, "say"),
-                      mock.patch.object(autoflash, "section"),
-                      mock.patch.object(autoflash, "run_plan", self.run_plan),
-                      mock.patch.object(autoflash, "consent_to_leave", self.consent),
-                      mock.patch.object(autoflash, "wait_for_mover"),
-                      mock.patch.object(autoflash.esphome, "is_esphome", return_value=False),
-                      mock.patch.object(autoflash.esphome, "image_for", return_value=b"\0" * 64),
-                      mock.patch.object(autoflash.esphome, "mover_for", return_value=b"\0" * 64),
-                      mock.patch.object(autoflash.esphome, "sonoff_table", return_value=b""),
-                      mock.patch.object(autoflash.esphome, "published_bootloader", return_value=b""),
-                      mock.patch.object(autoflash.esphome_ota, "probe", return_value=None),
-                      mock.patch.object(autoflash.plans, "esphome", return_value="plan"),
-                      mock.patch.object(autoflash.plans, "leave_tasmota", return_value="plan")):
+        for patch in (mock.patch.object(output, "say"),
+                      mock.patch.object(prompts, "section"),
+                      mock.patch.object(hub, "run_plan", self.run_plan),
+                      mock.patch.object(mover, "consent_to_leave", self.consent),
+                      mock.patch.object(mover, "wait_for_mover"),
+                      mock.patch.object(esphome, "is_esphome", return_value=False),
+                      mock.patch.object(esphome, "image_for", return_value=b"\0" * 64),
+                      mock.patch.object(esphome, "mover_for", return_value=b"\0" * 64),
+                      mock.patch.object(esphome, "sonoff_table", return_value=b""),
+                      mock.patch.object(esphome, "published_bootloader", return_value=b""),
+                      mock.patch.object(esphome_ota, "probe", return_value=None),
+                      mock.patch.object(plans, "esphome", return_value="plan"),
+                      mock.patch.object(plans, "leave_tasmota", return_value="plan")):
             patch.start()
             self.addCleanup(patch.stop)
 
@@ -489,16 +527,16 @@ class EsphomeSignalTests(unittest.TestCase):
         return {"StatusSTS": {"Wifi": {"SSId": "Home-2G", "Signal": dbm}}}
 
     def test_the_signal_is_recorded_with_the_install(self):
-        for step in (self.autoflash.step_esphome_install, self.autoflash.step_leave_tasmota):
+        for step in (mover.step_esphome_install, mover.step_leave_tasmota):
             self.run_plan.reset_mock()
             self.assertEqual(step(self.ctx(self.signal(-58)))["signal_dbm"], -58, step.__name__)
             self.run_plan.assert_called_once()
 
     def test_a_weak_signal_stops_before_anything_is_written(self):
         from unittest import mock
-        for step in (self.autoflash.step_esphome_install, self.autoflash.step_leave_tasmota):
-            with mock.patch.object(self.autoflash, "ask_yes_no", return_value=False):
-                with self.assertRaisesRegex(self.autoflash.Abort, "weak Wi-Fi signal"):
+        for step in (mover.step_esphome_install, mover.step_leave_tasmota):
+            with mock.patch.object(prompts, "ask_yes_no", return_value=False):
+                with self.assertRaisesRegex(errors.Abort, "weak Wi-Fi signal"):
                     step(self.ctx(self.signal(-82)))
         self.run_plan.assert_not_called()
         self.consent.assert_not_called()  # asked first, before the go-ahead to leave Tasmota
@@ -507,15 +545,15 @@ class EsphomeSignalTests(unittest.TestCase):
         from tools.autoflash.device import DeviceError
         for status in ({"StatusSTS": {}}, DeviceError("no answer")):
             self.run_plan.reset_mock()
-            self.assertIsNone(self.autoflash.step_esphome_install(self.ctx(status))["signal_dbm"])
+            self.assertIsNone(mover.step_esphome_install(self.ctx(status))["signal_dbm"])
             self.run_plan.assert_called_once()
 
     def test_a_weak_signal_agreed_to_is_not_asked_about_again(self):
         from unittest import mock
         ctx = self.ctx(self.signal(-82))
-        with mock.patch.object(self.autoflash, "ask_yes_no", return_value=True) as asked:
-            self.autoflash.step_leave_tasmota(ctx)        # the earliest reading: asked
-            self.autoflash.step_esphome_install(ctx)      # a later one: told, not asked
+        with mock.patch.object(prompts, "ask_yes_no", return_value=True) as asked:
+            mover.step_leave_tasmota(ctx)        # the earliest reading: asked
+            mover.step_esphome_install(ctx)      # a later one: told, not asked
         asked.assert_called_once()
         self.assertEqual(self.run_plan.call_count, 2)
 
@@ -534,19 +572,17 @@ class AdvertSignalTests(unittest.TestCase):
         return SimpleNamespace(account_devices=lambda: devices)
 
     def test_the_plugs_own_advert_gives_its_signal(self):
-        import tools.autoflash.cli as af
         from tests.autoflash.test_ewelink_lan import ADVERT, KEY
         ctx = self.ctx([{"deviceid": "1000ffffff", "devicekey": "other"},
                         {"deviceid": ADVERT["id"], "devicekey": KEY}])
-        self.assertEqual(af.advert_signal(ctx, self.report(), "192.168.0.50"), -61)
+        self.assertEqual(join.advert_signal(ctx, self.report(), "192.168.0.50"), -61)
 
     def test_another_devices_advert_or_no_key_gives_nothing(self):
-        import tools.autoflash.cli as af
         from tests.autoflash.test_ewelink_lan import ADVERT, KEY
         key = [{"deviceid": ADVERT["id"], "devicekey": KEY}]
-        self.assertIsNone(af.advert_signal(self.ctx(key), self.report("192.168.0.7"), "192.168.0.50"))
-        self.assertIsNone(af.advert_signal(self.ctx([]), self.report(), "192.168.0.50"))
-        self.assertIsNone(af.advert_signal(self.ctx(None), self.report(), "192.168.0.50"))
+        self.assertIsNone(join.advert_signal(self.ctx(key), self.report("192.168.0.7"), "192.168.0.50"))
+        self.assertIsNone(join.advert_signal(self.ctx([]), self.report(), "192.168.0.50"))
+        self.assertIsNone(join.advert_signal(self.ctx(None), self.report(), "192.168.0.50"))
 
 
 class TypedAheadTests(unittest.TestCase):
@@ -672,12 +708,11 @@ class PlugFinderTests(unittest.TestCase):
 
     def finder(self, inputs):
         from types import SimpleNamespace
-        import tools.autoflash.cli as autoflash
 
         moved = []
         state = SimpleNamespace(input=lambda key: inputs.get(key))
         ctx = SimpleNamespace(state=state, set_plug_ip=moved.append)
-        return autoflash.PlugFinder(ctx), moved
+        return join.PlugFinder(ctx), moved
 
     def test_the_plug_at_its_usual_address_is_found_without_a_sweep(self):
         from unittest import mock
@@ -753,7 +788,6 @@ class ModelGuardTests(unittest.TestCase):
         import json
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -772,18 +806,17 @@ class ModelGuardTests(unittest.TestCase):
             return 0
 
         answered = {"packets": [{"source": "10.0.0.63", "records": []}]}
-        with mock.patch.object(autoflash, "run_tool", side_effect=fake_tool), \
-             mock.patch.object(autoflash, "discover", return_value=answered), \
-             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
-            return autoflash.step_discover(ctx)
+        with mock.patch.object(hostsys, "run_tool", side_effect=fake_tool), \
+             mock.patch.object(discover_ewelink, "discover", return_value=answered), \
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "say"):
+            return account.step_discover(ctx)
 
     def test_an_s60_continues(self):
         self.assertEqual(self.discover_with_model("SN-ESP32C3-S60-01")["model"], "SN-ESP32C3-S60-01")
         self.assertEqual(self.state.input("plug_kind"), "sonoff-s60")  # kept for the run
 
     def test_any_other_model_is_refused_before_anything_is_sent(self):
-        import tools.autoflash.cli as autoflash
-        with self.assertRaisesRegex(autoflash.Abort, "which this tool does not convert - it converts "
+        with self.assertRaisesRegex(errors.Abort, "which this tool does not convert - it converts "
                                                      "the Sonoff S60: SN-ESP32C3-S60-01"):
             self.discover_with_model("SN-ESP32-MINIR4")
 
@@ -794,7 +827,6 @@ class AlreadyConvertingTests(unittest.TestCase):
     def silent_discover(self, page):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         from tools.autoflash import setup_network
 
         directory = tempfile.TemporaryDirectory()
@@ -802,25 +834,22 @@ class AlreadyConvertingTests(unittest.TestCase):
         state = RunState.open(Path(directory.name))
         state.set_input("plug_ip", "10.0.0.63")
         ctx = SimpleNamespace(dir=Path(directory.name), state=state)
-        with mock.patch.object(autoflash, "discover", return_value={"packets": []}), \
+        with mock.patch.object(discover_ewelink, "discover", return_value={"packets": []}), \
              mock.patch.object(setup_network, "page", return_value=page), \
-             mock.patch.object(autoflash.hostsys, "security_software_note", return_value=None), \
-             mock.patch.object(autoflash, "section"):
-            return autoflash.step_discover(ctx)
+             mock.patch.object(hostsys, "security_software_note", return_value=None), \
+             mock.patch.object(prompts, "section"):
+            return account.step_discover(ctx)
 
     def test_the_bridge_is_named(self):
-        import tools.autoflash.cli as autoflash
-        with self.assertRaisesRegex(autoflash.Abort, "already running our installer firmware"):
+        with self.assertRaisesRegex(errors.Abort, "already running our installer firmware"):
             self.silent_discover("<title>Autoflash bridge</title>")
 
     def test_tasmota_is_named(self):
-        import tools.autoflash.cli as autoflash
-        with self.assertRaisesRegex(autoflash.Abort, "running Tasmota, not Sonoff's firmware"):
+        with self.assertRaisesRegex(errors.Abort, "running Tasmota, not Sonoff's firmware"):
             self.silent_discover("<title>Tasmota</title>")
 
     def test_no_page_keeps_the_lan_control_advice(self):
-        import tools.autoflash.cli as autoflash
-        with self.assertRaisesRegex(autoflash.Abort, "LAN Control"):
+        with self.assertRaisesRegex(errors.Abort, "LAN Control"):
             self.silent_discover(None)
 
 
@@ -833,9 +862,6 @@ class ConversionWifiTests(unittest.TestCase):
         import json
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-
-        self.autoflash = autoflash
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         evidence = Path(directory.name)
@@ -852,16 +878,16 @@ class ConversionWifiTests(unittest.TestCase):
 
         def recovery(_, ssid, password):
             if (ssid, password) != self.pinned:
-                raise autoflash.BundleError("not the pinned one")
+                raise prepare_imprinted_bundle.BundleError("not the pinned one")
             return image(ssid, password)
 
         for patch in (
-            mock.patch.object(autoflash, "startup_image", side_effect=image),
-            mock.patch.object(autoflash, "recovery_image", side_effect=recovery),
-            mock.patch.object(autoflash, "pin_wifi", self.pin),
-            mock.patch.object(autoflash, "section"),
-            mock.patch.object(autoflash, "say"),
-            mock.patch.object(autoflash, "tell"),
+            mock.patch.object(tasmota, "startup_image", side_effect=image),
+            mock.patch.object(tasmota, "recovery_image", side_effect=recovery),
+            mock.patch.object(tasmota, "pin_wifi", self.pin),
+            mock.patch.object(prompts, "section"),
+            mock.patch.object(output, "say"),
+            mock.patch.object(output, "tell"),
         ):
             patch.start()
             self.addCleanup(patch.stop)
@@ -869,10 +895,10 @@ class ConversionWifiTests(unittest.TestCase):
     def run_with(self, on_plug, typed=()):
         from unittest import mock
         answers = iter(typed)
-        with mock.patch.object(self.autoflash, "read_wifi_from_plug", return_value=on_plug), \
-             mock.patch.object(self.autoflash, "ask_text", side_effect=lambda *_, **__: next(answers)), \
-             mock.patch.object(self.autoflash, "ask_secret", side_effect=lambda *_: next(answers)) as asked:
-            self.autoflash.conversion_wifi(self.ctx)
+        with mock.patch.object(wifi, "read_wifi_from_plug", return_value=on_plug), \
+             mock.patch.object(prompts, "ask_text", side_effect=lambda *_, **__: next(answers)), \
+             mock.patch.object(prompts, "ask_secret", side_effect=lambda *_: next(answers)) as asked:
+            tasmota.conversion_wifi(self.ctx)
         return asked
 
     def test_the_plugs_own_details_are_used_when_they_match(self):
@@ -909,7 +935,7 @@ class ConversionWifiTests(unittest.TestCase):
 
     def test_no_commit_record_stops_before_asking(self):
         (self.ctx.evidence / "commit-report.json").unlink()
-        with self.assertRaisesRegex(self.autoflash.Abort, "no record of the startup firmware"):
+        with self.assertRaisesRegex(errors.Abort, "no record of the startup firmware"):
             self.run_with(("Home", "right"))
 
 
@@ -932,10 +958,9 @@ class PhaseFailureTests(unittest.TestCase):
         self.assertIsNone(failure_reason("  [10.0.0.63] \"GET /berry/stage.be HTTP/1.1\" 200 -"))
 
     def test_the_step_abort_carries_the_reason(self):
-        import tools.autoflash.cli as autoflash
-        error = autoflash.phase_failed("stage", 4, "THE PLUG SAYS: flash is not exactly 4 MiB")
+        error = phases.phase_failed("stage", 4, "THE PLUG SAYS: flash is not exactly 4 MiB")
         self.assertEqual(str(error), "stage did not pass: the plug says: flash is not exactly 4 MiB")
-        self.assertEqual(str(autoflash.phase_failed("stage", 3, "")), "stage did not pass (exit 3)")
+        self.assertEqual(str(phases.phase_failed("stage", 3, "")), "stage did not pass (exit 3)")
 
     def console(self, lines):
         from unittest import mock
@@ -1089,7 +1114,6 @@ class RetryTests(unittest.TestCase):
     def run_with(self, step, errors):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -1104,9 +1128,9 @@ class RetryTests(unittest.TestCase):
                 return 0
             state.mark(name, FAILED, error=error)
             return 1
-        with mock.patch.object(autoflash, "execute", side_effect=fake_execute) as ran, \
-             mock.patch.object(autoflash.time, "sleep"), mock.patch.object(autoflash, "tell"):
-            code = autoflash.execute_with_retries(ctx, step)
+        with mock.patch.object(runner, "execute", side_effect=fake_execute) as ran, \
+             mock.patch.object(time, "sleep"), mock.patch.object(output, "tell"):
+            code = runner.execute_with_retries(ctx, step)
         return code, ran.call_count
 
     def test_a_network_failure_is_tried_again(self):
@@ -1137,20 +1161,19 @@ class RetryTests(unittest.TestCase):
     def test_a_phase_with_no_result_keeps_the_commit_attempted(self):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         from tools.autoflash.phases import PhaseError
 
         for step, expected in (("E3", "attempted"), ("E2", FAILED)):
             directory = tempfile.TemporaryDirectory()
             self.addCleanup(directory.cleanup)
             state = RunState.open(Path(directory.name))
-            title, _ = autoflash.STEP_INDEX[step]
+            title, _ = routes.STEP_INDEX[step]
             failing = mock.Mock(side_effect=PhaseError("the plug stopped the commit without reaching this computer"))
-            with mock.patch.dict(autoflash.STEP_INDEX, {step: (title, failing)}), \
-                 mock.patch.object(autoflash, "begin_stage"), \
-                 mock.patch.object(autoflash.output, "stage_end"), \
-                 mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
-                autoflash.execute(SimpleNamespace(state=state), step)
+            with mock.patch.dict(routes.STEP_INDEX, {step: (title, failing)}), \
+                 mock.patch.object(routes, "begin_stage"), \
+                 mock.patch.object(output, "stage_end"), \
+                 mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
+                runner.execute(SimpleNamespace(state=state), step)
             self.assertEqual(state.status(step), expected, step)
 
 
@@ -1160,7 +1183,6 @@ class StageTimingTests(unittest.TestCase):
     def test_a_stage_that_fails_has_its_time_and_the_plugs_busy_time_kept(self):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         from tools.autoflash.phases import PhaseError
 
         directory = tempfile.TemporaryDirectory()
@@ -1171,12 +1193,12 @@ class StageTimingTests(unittest.TestCase):
         def stage(context):
             context.last_runner = SimpleNamespace(busy_seconds=41.5)
             raise PhaseError("the plug stopped the stage without reaching this computer")
-        title, _ = autoflash.STEP_INDEX["E2"]
-        with mock.patch.dict(autoflash.STEP_INDEX, {"E2": (title, stage)}), \
-             mock.patch.object(autoflash, "begin_stage"), \
-             mock.patch.object(autoflash.output, "stage_end"), \
-             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
-            self.assertEqual(autoflash.execute(ctx, "E2"), 1)
+        title, _ = routes.STEP_INDEX["E2"]
+        with mock.patch.dict(routes.STEP_INDEX, {"E2": (title, stage)}), \
+             mock.patch.object(routes, "begin_stage"), \
+             mock.patch.object(output, "stage_end"), \
+             mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
+            self.assertEqual(runner.execute(ctx, "E2"), 1)
         captures = state.data["captures"]
         self.assertIsInstance(captures["E2.seconds"], int)
         self.assertEqual(captures["E2.plug_busy_seconds"], 41.5)
@@ -1186,11 +1208,11 @@ class StageTimingTests(unittest.TestCase):
         def quicker(context):
             context.last_runner = SimpleNamespace(busy_seconds=3.0)
             raise PhaseError("the plug did not fetch the stage instructions")
-        with mock.patch.dict(autoflash.STEP_INDEX, {"E2": (title, quicker)}), \
-             mock.patch.object(autoflash, "begin_stage"), \
-             mock.patch.object(autoflash.output, "stage_end"), \
-             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
-            autoflash.execute(ctx, "E2")
+        with mock.patch.dict(routes.STEP_INDEX, {"E2": (title, quicker)}), \
+             mock.patch.object(routes, "begin_stage"), \
+             mock.patch.object(output, "stage_end"), \
+             mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
+            runner.execute(ctx, "E2")
         self.assertEqual(state.data["captures"]["E2.plug_busy_seconds"], 41.5)
 
 
@@ -1200,7 +1222,6 @@ class PlugBackTests(unittest.TestCase):
     def wait(self, answers, d1_done=True, step=None):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         state = RunState.open(Path(directory.name))
@@ -1209,12 +1230,12 @@ class PlugBackTests(unittest.TestCase):
             state.mark("D1", DONE)
         device = mock.Mock(answers=mock.Mock(side_effect=list(answers)))
         clock = iter(range(0, 100_000, 3))
-        with mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
-             mock.patch.object(autoflash.time, "sleep"), \
-             mock.patch.object(autoflash, "tell") as told, \
-             mock.patch.object(autoflash.output, "progress"), \
-             mock.patch.object(autoflash.output, "progress_clear"):
-            autoflash.wait_for_plug_back(SimpleNamespace(state=state, device=device), step)
+        with mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(output, "tell") as told, \
+             mock.patch.object(output, "progress"), \
+             mock.patch.object(output, "progress_clear"):
+            runner.wait_for_plug_back(SimpleNamespace(state=state, device=device), step)
         return device, told
 
     def test_an_answering_plug_is_tried_again_at_once(self):
@@ -1259,19 +1280,18 @@ class BusyPlugTests(unittest.TestCase):
         if d1_done:
             state.mark("D1", DONE)
         device = mock.Mock(answers=mock.Mock(side_effect=list(answers)))
-        return SimpleNamespace(state=state, device=device), pings
+        return SimpleNamespace(state=state, device=device, steps=routes.STEPS), pings
 
     def wait(self, ctx, pings):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         clock = iter(range(0, 100_000, 3))
-        with mock.patch.object(autoflash.hostsys, "ping_ok", return_value=pings), \
-             mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
-             mock.patch.object(autoflash.time, "sleep"), \
-             mock.patch.object(autoflash, "tell") as told, \
-             mock.patch.object(autoflash.output, "progress"), \
-             mock.patch.object(autoflash.output, "progress_clear"):
-            autoflash.wait_while_plug_busy(ctx)
+        with mock.patch.object(hostsys, "ping_ok", return_value=pings), \
+             mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(output, "tell") as told, \
+             mock.patch.object(output, "progress"), \
+             mock.patch.object(output, "progress_clear"):
+            join.wait_while_plug_busy(ctx)
         return told
 
     def test_a_plug_that_answers_is_not_waited_for(self):
@@ -1299,11 +1319,10 @@ class UserActionWaitTests(unittest.TestCase):
 
     def test_a_person_is_waited_for_as_long_as_it_takes(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash.prompts, "UNATTENDED", False):
-            self.assertEqual(autoflash.user_action_limit(), float("inf"))
-        with mock.patch.object(autoflash.prompts, "UNATTENDED", True):
-            self.assertEqual(autoflash.user_action_limit(), 900.0)
+        with mock.patch.object(prompts, "UNATTENDED", False):
+            self.assertEqual(join.user_action_limit(), float("inf"))
+        with mock.patch.object(prompts, "UNATTENDED", True):
+            self.assertEqual(join.user_action_limit(), 900.0)
 
 
 class UnexpectedErrorTests(unittest.TestCase):
@@ -1312,21 +1331,20 @@ class UnexpectedErrorTests(unittest.TestCase):
     def run_step(self, step, error):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         state = RunState.open(Path(directory.name))
         ctx = SimpleNamespace(state=state)
-        title, _ = autoflash.STEP_INDEX[step]
+        title, _ = routes.STEP_INDEX[step]
         failing = mock.Mock(side_effect=error)
-        with mock.patch.dict(autoflash.STEP_INDEX, {step: (title, failing)}), \
-             mock.patch.object(autoflash, "begin_stage"), \
-             mock.patch.object(autoflash.output, "stage_end") as ended, \
-             mock.patch.object(autoflash.output, "log_only") as logged, \
-             mock.patch.object(autoflash, "tell") as told, \
-             mock.patch.object(autoflash, "say"):
-            code = autoflash.execute(ctx, step)
+        with mock.patch.dict(routes.STEP_INDEX, {step: (title, failing)}), \
+             mock.patch.object(routes, "begin_stage"), \
+             mock.patch.object(output, "stage_end") as ended, \
+             mock.patch.object(output, "log_only") as logged, \
+             mock.patch.object(output, "tell") as told, \
+             mock.patch.object(output, "say"):
+            code = runner.execute(ctx, step)
         return code, state, ended, logged, told
 
     def test_it_stops_the_step_with_a_message_and_the_traceback_in_the_log(self):
@@ -1341,9 +1359,8 @@ class UnexpectedErrorTests(unittest.TestCase):
         # Seen in the fault suite: not joined to the plug's network in time,
         # its Abort crashed the run, put as "something unexpected went wrong".
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        gave_up = autoflash.Abort("this computer did not join tasmota-ABCDEF-1234 within 15 minutes")
-        with mock.patch.object(autoflash, "set_up_if_erased", side_effect=gave_up):
+        gave_up = errors.Abort("this computer did not join tasmota-ABCDEF-1234 within 15 minutes")
+        with mock.patch.object(runner, "set_up_if_erased", side_effect=gave_up):
             code, state, ended, _, told = self.run_step("D4", gave_up)
         self.assertEqual(code, 1)
         ended.assert_called_once_with("stopped")
@@ -1354,7 +1371,6 @@ class UnexpectedErrorTests(unittest.TestCase):
         # way, and the run said "something unexpected went wrong" - then
         # converted the plug on the next try.
         import http.client
-        import tools.autoflash.cli as autoflash
         for error in (ConnectionResetError(104, "Connection reset by peer"), http.client.IncompleteRead(b""),
                       http.client.RemoteDisconnected("Remote end closed connection without response"),
                       TimeoutError("timed out")):
@@ -1365,7 +1381,7 @@ class UnexpectedErrorTests(unittest.TestCase):
             message = told.call_args.args[0]
             self.assertIn("the connection to the plug was lost", message)
             self.assertNotIn("unexpected", message)
-            self.assertRegex(message, autoflash.TRANSIENT_RE)
+            self.assertRegex(message, errors.TRANSIENT_RE)
 
     def test_a_step_that_writes_stays_attempted(self):
         # Whether the commit got as far as writing is for the next run to find
@@ -1418,14 +1434,12 @@ class CommitEvidenceTests(unittest.TestCase):
         return SimpleNamespace(evidence=evidence)
 
     def test_a_pass_report_means_finished(self):
-        import tools.autoflash.cli as autoflash
-        finished, _ = autoflash.evidence_commit_finished(
+        finished, _ = evidence.evidence_commit_finished(
             self.ctx({"phase": "commit", "status": "PASS"}))
         self.assertTrue(finished)
 
     def test_a_fail_report_means_not_finished(self):
-        import tools.autoflash.cli as autoflash
-        finished, _ = autoflash.evidence_commit_finished(
+        finished, _ = evidence.evidence_commit_finished(
             self.ctx({"phase": "commit", "status": "FAIL"}))
         self.assertIs(finished, False)
 
@@ -1440,8 +1454,7 @@ class CommitEvidenceTests(unittest.TestCase):
                 '  [10.0.0.63] "GET /target-table HTTP/1.1" 200 -\n')
         ctx.device = mock.Mock(is_safeboot=mock.Mock(return_value=safeboot),
                                current_ota=mock.Mock(return_value=slot))
-        import tools.autoflash.cli as autoflash
-        return autoflash.evidence_commit_finished(ctx)
+        return evidence.evidence_commit_finished(ctx)
 
     def test_no_report_and_no_table_fetched_means_nothing_written(self):
         finished, _ = self.no_report(fetched=False)
@@ -1461,8 +1474,7 @@ class CommitEvidenceTests(unittest.TestCase):
         self.assertIsNone(finished)
 
     def test_another_phase_report_is_not_taken(self):
-        import tools.autoflash.cli as autoflash
-        finished, _ = autoflash.evidence_commit_finished(
+        finished, _ = evidence.evidence_commit_finished(
             self.ctx({"phase": "stage", "status": "PASS"}))
         self.assertIsNot(finished, True)  # never taken as the commit's
 
@@ -1471,23 +1483,21 @@ class CommitEvidenceTests(unittest.TestCase):
         # to redo D4 then would put the interim Tasmota back over it.
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         ctx = self.ctx({"phase": "commit", "status": "PASS"})
         ctx.state = SimpleNamespace(is_done=lambda step: False)
         ctx.device = mock.Mock()
-        self.assertEqual(autoflash.verify_high_slot(ctx), (True, ""))
+        self.assertEqual(tasmota.verify_high_slot(ctx), (True, ""))
         ctx.device.current_ota.assert_not_called()
 
     def test_without_a_report_the_high_slot_is_still_checked(self):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         ctx = self.ctx(None)
         ctx.state = SimpleNamespace(is_done=lambda step: False)
         ctx.device = mock.Mock(current_ota=mock.Mock(return_value=0))
-        ok, message = autoflash.verify_high_slot(ctx)
+        ok, message = tasmota.verify_high_slot(ctx)
         self.assertFalse(ok)
         self.assertIn("high slot", message)
 
@@ -1495,12 +1505,11 @@ class CommitEvidenceTests(unittest.TestCase):
         # The startup firmware cannot answer the network check: running it
         # would fail and send the run back to E1 with no way forward.
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         ctx = self.ctx({"phase": "commit", "status": "PASS"})
-        with mock.patch.object(autoflash, "check_plug_network") as network, \
-             mock.patch.object(autoflash, "say"):
-            result = autoflash.step_commit(ctx)
+        with mock.patch.object(join, "check_plug_network") as network, \
+             mock.patch.object(output, "say"):
+            result = tasmota.step_commit(ctx)
         network.assert_not_called()
         self.assertTrue(result["already_written"])
 
@@ -1509,27 +1518,26 @@ class CommitEvidenceTests(unittest.TestCase):
         # changed: the commit, run again as it was, is refused every time.
         import json
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         ctx = self.ctx(None)
         manifest = ctx.evidence / "manifest.json"
         manifest.write_text("{}")
         (ctx.evidence / "stage-report.json").write_text(json.dumps(
-            {"manifest_sha256": autoflash.sha256_bytes(manifest.read_bytes())}))
+            {"manifest_sha256": safeboot_migration.sha256_bytes(manifest.read_bytes())}))
         ctx.manifest_path = manifest
         ctx.state = RunState.open(ctx.evidence)
         for step in ("E1", "E2"):
             ctx.state.mark(step, "done")
         refused = 'THE PLUG SAYS: migration_refused: NVS changed since preflight'
         ctx.phase_runner = lambda: mock.Mock(run=mock.Mock(return_value=(1, refused)))
-        with mock.patch.object(autoflash, "check_plug_network"), \
-             mock.patch.object(autoflash, "plug_back_on_wifi"), \
-             mock.patch.object(autoflash, "sonoff_layout_back"), \
-             mock.patch.object(autoflash.hostsys, "replace_file"), \
-             mock.patch.object(autoflash.safety_locks, "lifted", no_lock_records), \
-             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
-            with self.assertRaises(autoflash.Abort) as caught:
-                autoflash.commit_once(ctx)
+        with mock.patch.object(join, "check_plug_network"), \
+             mock.patch.object(hub, "plug_back_on_wifi"), \
+             mock.patch.object(hub, "sonoff_layout_back"), \
+             mock.patch.object(hostsys, "replace_file"), \
+             mock.patch.object(safety_locks, "lifted", no_lock_records), \
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "say"):
+            with self.assertRaises(errors.Abort) as caught:
+                tasmota.commit_once(ctx)
         self.assertIn("run the same command", str(caught.exception))
         self.assertEqual([ctx.state.status(s) for s in ("E1", "E2")], [FAILED, FAILED])
 
@@ -1538,21 +1546,20 @@ class CommitEvidenceTests(unittest.TestCase):
         ran, the run's bundle being {}."""
         import json
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         ctx = self.ctx(None)
         manifest = ctx.evidence / "manifest.json"
         manifest.write_text("{}")
         (ctx.evidence / "preflight-report.json").write_text(json.dumps(
-            {"manifest_sha256": autoflash.sha256_bytes(preflight_manifest)}))
+            {"manifest_sha256": safeboot_migration.sha256_bytes(preflight_manifest)}))
         ctx.manifest_path = manifest
         ctx.state = RunState.open(ctx.evidence)
         ctx.state.mark("E1", "done")
         ran = []
         ctx.phase_runner = lambda: mock.Mock(run=lambda phase: ran.append(phase) or (0, ""))
-        with mock.patch.object(autoflash, "step_preflight", side_effect=lambda c: ran.append("E1") or {}), \
-             mock.patch.object(autoflash, "say"):
-            autoflash.step_stage(ctx)
+        with mock.patch.object(tasmota, "step_preflight", side_effect=lambda c: ran.append("E1") or {}), \
+             mock.patch.object(output, "say"):
+            tasmota.step_stage(ctx)
         return ran
 
     def test_staging_after_checks_with_this_bundle(self):
@@ -1567,7 +1574,6 @@ class CommitEvidenceTests(unittest.TestCase):
         """step_commit with each try's outcome given: an exception, or a result."""
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -1580,31 +1586,29 @@ class CommitEvidenceTests(unittest.TestCase):
                 raise outcome
             return outcome
 
-        with mock.patch.object(autoflash, "commit_once", side_effect=once) as commit, \
-             mock.patch.object(autoflash, "commit_recovered", return_value=recovered) as recover, \
-             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
+        with mock.patch.object(tasmota, "commit_once", side_effect=once) as commit, \
+             mock.patch.object(tasmota, "commit_recovered", return_value=recovered) as recover, \
+             mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
             try:
-                result = autoflash.step_commit(ctx)
+                result = tasmota.step_commit(ctx)
             except Exception as exc:  # noqa: BLE001 - what the test looks at
                 result = exc
         return result, commit.call_count, recover.call_count, ctx.state
 
     def test_a_power_cut_in_the_commit_is_recovered_from_and_tried_again(self):
-        import tools.autoflash.cli as autoflash
         from tools.autoflash.phases import PhaseError
         result, tries, recoveries, state = self.commit_tries(
             [PhaseError("the plug stopped the commit without reaching this computer"), {"exit": 0}])
         self.assertEqual((result, tries, recoveries), ({"exit": 0}, 2, 1))
         self.assertEqual(state.data["captures"]["E3.attempts"], 2)
-        self.assertEqual(autoflash.COMMIT_ATTEMPTS, 3)
+        self.assertEqual(tasmota.COMMIT_ATTEMPTS, 3)
 
     def test_a_read_back_that_differed_is_tried_again_and_so_is_a_refusal_as_changed(self):
-        import tools.autoflash.cli as autoflash
         result, tries, _, _ = self.commit_tries([
-            autoflash.CommitFailed("commit did not pass: the plug says: migration_refused: "
+            tasmota.CommitFailed("commit did not pass: the plug says: migration_refused: "
                                    "canonical Safeboot read-back differs at 0x31000",
                                    "AUTOFLASH ROLLBACK PASS: interim layout kept"),
-            autoflash.CommitFailed("commit refused before writing anything - the plug says: "
+            tasmota.CommitFailed("commit refused before writing anything - the plug says: "
                                    "migration_refused: staged Safeboot SHA-256 differs", ""),
             {"exit": 0}])
         self.assertEqual((result, tries), ({"exit": 0}, 3))
@@ -1622,12 +1626,11 @@ class CommitEvidenceTests(unittest.TestCase):
         self.assertEqual((tries, recoveries, state.data["captures"]["E3.attempts"]), (3, 2, 3))
 
     def test_a_rollback_that_failed_or_another_refusal_is_never_tried_again(self):
-        import tools.autoflash.cli as autoflash
         for failure in (
-                autoflash.CommitFailed("commit did not pass: the plug says: migration_refused: "
+                tasmota.CommitFailed("commit did not pass: the plug says: migration_refused: "
                                        "canonical Safeboot read-back differs at 0x31000",
                                        "AUTOFLASH ROLLBACK FAILED; DO NOT REBOOT OR REMOVE POWER"),
-                autoflash.CommitFailed("commit did not pass: the plug says: migration_refused: "
+                tasmota.CommitFailed("commit did not pass: the plug says: migration_refused: "
                                        "commit requires old ota_1 to be running", "")):
             result, tries, recoveries, _ = self.commit_tries([failure, {"exit": 0}])
             self.assertIs(result, failure)
@@ -1640,7 +1643,6 @@ class CommitEvidenceTests(unittest.TestCase):
         # to E1 with no way forward.
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -1648,19 +1650,19 @@ class CommitEvidenceTests(unittest.TestCase):
         (evidence / "commit-server.log").write_text('[192.168.1.51] "GET /target-table HTTP/1.1" 200 -\n')
         ctx = SimpleNamespace(evidence=evidence, state=RunState.open(evidence),
                               device=mock.Mock(is_safeboot=mock.Mock(return_value=True)))
-        with mock.patch.object(autoflash, "commit_once") as commit, \
-             mock.patch.object(autoflash, "plug_back_on_wifi"), \
-             mock.patch.object(autoflash, "say"):
-            result = autoflash.step_commit(ctx)
+        with mock.patch.object(tasmota, "commit_once") as commit, \
+             mock.patch.object(hub, "plug_back_on_wifi"), \
+             mock.patch.object(output, "say"):
+            result = tasmota.step_commit(ctx)
         commit.assert_not_called()
         self.assertEqual(result, {"exit": 0, "finished_unseen": True})
         # Still on Tasmota, the table fetched but the commit not finished:
         # tried as ever.
         ctx.device.is_safeboot.return_value = False
-        with mock.patch.object(autoflash, "commit_once", return_value={"exit": 0}) as commit, \
-             mock.patch.object(autoflash, "plug_back_on_wifi"), \
-             mock.patch.object(autoflash, "say"):
-            self.assertEqual(autoflash.step_commit(ctx), {"exit": 0})
+        with mock.patch.object(tasmota, "commit_once", return_value={"exit": 0}) as commit, \
+             mock.patch.object(hub, "plug_back_on_wifi"), \
+             mock.patch.object(output, "say"):
+            self.assertEqual(tasmota.step_commit(ctx), {"exit": 0})
         commit.assert_called_once()
 
     def test_a_commit_that_finished_unseen_is_not_done_again(self):
@@ -1674,21 +1676,20 @@ class CommitEvidenceTests(unittest.TestCase):
         # every check and plan after it does not expect.
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         from tools.autoflash import plans as plan_module
         from tools.autoflash.device import DeviceError
 
-        for table, runs in ((plan_module.INTERIM_TABLE_SHA256, True),
+        for table, planned in ((plan_module.INTERIM_TABLE_SHA256, True),
                             (plan_module.SONOFF_TABLE_SHA256, False),
                             (DeviceError("no Berry"), False)):
             device = mock.Mock(sha_region=mock.Mock(side_effect=[table]))
             ctx = SimpleNamespace(dry_run=False, device=device)
-            with mock.patch.object(autoflash, "run_plan") as run_plan, \
-                 mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
-                autoflash.sonoff_layout_back(ctx)
-            self.assertEqual(run_plan.called, runs, table)
-            self.assertEqual(device.wait_for_reboot.called, runs, table)
-            if runs:
+            with mock.patch.object(hub, "run_plan") as run_plan, \
+                 mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
+                hub.sonoff_layout_back(ctx)
+            self.assertEqual(run_plan.called, planned, table)
+            self.assertEqual(device.wait_for_reboot.called, planned, table)
+            if planned:
                 self.assertEqual(run_plan.call_args.args[1].name, "sonoff_layout")
 
     def test_a_plug_asking_to_be_set_up_is_set_up_before_the_commit(self):
@@ -1696,18 +1697,17 @@ class CommitEvidenceTests(unittest.TestCase):
         # waiting on its own network: the run used to stop on "No route to host".
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         for on_wifi, setup, expected in ((True, None, None), (False, "tasmota-ABCDEF-1234", "configure"),
                                          (False, None, "locate")):
             ctx = SimpleNamespace(finder=mock.Mock(poll=mock.Mock(return_value="192.0.2.5" if on_wifi else None)),
                                   device=mock.Mock())
-            with mock.patch.object(autoflash, "find_ssid", return_value=setup), \
-                 mock.patch.object(autoflash, "setup_networks", return_value=("tasmota-ABCDEF-",)), \
-                 mock.patch.object(autoflash, "configure_plug_wifi") as configure, \
-                 mock.patch.object(autoflash, "locate_plug") as locate, \
-                 mock.patch.object(autoflash, "tell"):
-                autoflash.plug_back_on_wifi(ctx)
+            with mock.patch.object(prompts, "find_ssid", return_value=setup), \
+                 mock.patch.object(names, "setup_networks", return_value=("tasmota-ABCDEF-",)), \
+                 mock.patch.object(join, "configure_plug_wifi") as configure, \
+                 mock.patch.object(join, "locate_plug") as locate, \
+                 mock.patch.object(output, "tell"):
+                hub.plug_back_on_wifi(ctx)
             self.assertEqual(configure.called, expected == "configure", (on_wifi, setup))
             self.assertEqual(locate.called, expected == "locate", (on_wifi, setup))
             if expected == "configure":
@@ -1994,19 +1994,16 @@ class RunChoiceTests(unittest.TestCase):
 
     def setUp(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-
-        self.autoflash = autoflash
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
         self.remembered = []
         for patch in (
-            mock.patch.object(autoflash, "run_directories",
+            mock.patch.object(runs, "run_directories",
                               lambda: sorted(p for p in self.root.iterdir() if p.is_dir())),
-            mock.patch.object(autoflash, "read_current", lambda: None),
-            mock.patch.object(autoflash, "remember_current", self.remembered.append),
-            mock.patch.object(autoflash, "say"),
+            mock.patch.object(runs, "read_current", lambda: None),
+            mock.patch.object(runs, "remember_current", self.remembered.append),
+            mock.patch.object(output, "say"),
         ):
             patch.start()
             self.addCleanup(patch.stop)
@@ -2020,12 +2017,12 @@ class RunChoiceTests(unittest.TestCase):
 
     def choose(self, answer):
         from unittest import mock
-        with mock.patch.object(self.autoflash, "ask_choice", return_value=answer) as menu:
-            name = self.autoflash.resolve_run_name(None, False, None, ask=True)
+        with mock.patch.object(prompts, "ask_choice", return_value=answer) as menu:
+            name = cli.resolve_run_name(None, False, None, ask=True)
         return name, menu
 
     def test_with_nothing_unfinished_a_new_run_starts_without_asking(self):
-        self.run_dir("done", [step for step, _, _ in self.autoflash.STEPS])
+        self.run_dir("done", [step for step, _, _ in routes.STEPS])
         name, menu = self.choose(0)
         menu.assert_not_called()
         self.assertNotEqual(name, "done")
@@ -2050,21 +2047,21 @@ class RunChoiceTests(unittest.TestCase):
         # log opens: a part-converted plug left behind must still show in it.
         from unittest import mock
         self.run_dir("past", ["A0", "A5", "A1", "A2", "C2"])
-        self.autoflash.RUN_CHOICE.clear()
+        cli.RUN_CHOICE.clear()
         self.choose(1)
-        with mock.patch.object(self.autoflash, "say") as say:
-            self.autoflash.log_run_choice()
+        with mock.patch.object(output, "say") as say:
+            cli.log_run_choice()
         logged = "\n".join(call.args[0] for call in say.call_args_list)
         self.assertIn("a new plug", logged)
         self.assertIn("stopped at step C3", logged)
         self.assertIn("past the point of no return", logged)
-        self.assertEqual(self.autoflash.RUN_CHOICE, [])
+        self.assertEqual(cli.RUN_CHOICE, [])
 
     def test_other_commands_continue_without_asking(self):
         from unittest import mock
         self.run_dir("half", ["A0"])
-        with mock.patch.object(self.autoflash, "ask_choice") as menu:
-            self.assertEqual(self.autoflash.resolve_run_name(None, False, None), "half")
+        with mock.patch.object(prompts, "ask_choice") as menu:
+            self.assertEqual(cli.resolve_run_name(None, False, None), "half")
         menu.assert_not_called()
 
 
@@ -2119,16 +2116,15 @@ class UntemplatedByAddressTests(unittest.TestCase):
 
     def found(self, known):
         from types import SimpleNamespace
-        import tools.autoflash.cli as autoflash
         inputs = {"plug_ip": "192.168.0.137"}
         ctx = SimpleNamespace(state=SimpleNamespace(input=inputs.get), web_password=None, esphome_login=None)
-        with mock.patch.object(autoflash.detect, "identify", return_value=None), \
-                mock.patch.object(autoflash.detect, "answers_as_tasmota", return_value=True), \
-                mock.patch.object(autoflash.hostsys, "mac_of", return_value="12:34:56:AB:CD:EF"), \
-                mock.patch.object(autoflash, "known_macs", return_value=known), \
-                mock.patch.object(autoflash, "adopt_plug"), \
-                mock.patch.object(autoflash, "past_the_commit", side_effect=lambda ctx, running: running):
-            return autoflash.find_current_firmware(ctx)
+        with mock.patch.object(detect, "identify", return_value=None), \
+                mock.patch.object(detect, "answers_as_tasmota", return_value=True), \
+                mock.patch.object(hostsys, "mac_of", return_value="12:34:56:AB:CD:EF"), \
+                mock.patch.object(source, "known_macs", return_value=known), \
+                mock.patch.object(source, "adopt_plug"), \
+                mock.patch.object(source, "past_the_commit", side_effect=lambda ctx, running: running):
+            return source.find_current_firmware(ctx)
 
     def test_a_known_plug_is_untemplated(self):
         self.assertEqual(self.found({"12:34:56:ab:cd:ef"}), "untemplated")
@@ -2143,12 +2139,11 @@ class EsphomeSafeModeTests(unittest.TestCase):
 
     def running(self, earlier, answers=("mover", "esphome"), by_address=False):
         from types import SimpleNamespace
-        import tools.autoflash.cli as autoflash
 
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
-        runs = []
+        records = []
         for index, (firmware, done) in enumerate(earlier):
             run = root / f"run{index}"
             run.mkdir()
@@ -2156,7 +2151,7 @@ class EsphomeSafeModeTests(unittest.TestCase):
             state.set_input("firmware", firmware)
             for step in done:
                 state.mark(step, "done")
-            runs.append(run)
+            records.append(run)
         now = root / "now"
         now.mkdir()
         inputs = {"plug_ip": "192.168.0.137", "plug_mac": "12:34:56:ab:cd:ef"}
@@ -2164,18 +2159,18 @@ class EsphomeSafeModeTests(unittest.TestCase):
                               web_password=None, esphome_login=None)
         answers = iter(answers)
         clock = iter(range(0, 10000, 5))
-        with mock.patch.object(autoflash, "run_directories", return_value=runs), \
-                mock.patch.object(autoflash.plugs, "mac_of_run", return_value="12:34:56:ab:cd:ef"), \
-                mock.patch.object(autoflash.detect, "identify", side_effect=lambda *a, **k: next(answers)), \
-                mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
-                mock.patch.object(autoflash.time, "sleep"), \
-                mock.patch.object(autoflash, "say"):
+        with mock.patch.object(runs, "run_directories", return_value=records), \
+                mock.patch.object(plugs, "mac_of_run", return_value="12:34:56:ab:cd:ef"), \
+                mock.patch.object(detect, "identify", side_effect=lambda *a, **k: next(answers)), \
+                mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+                mock.patch.object(time, "sleep"), \
+                mock.patch.object(output, "say"):
             if by_address:
-                with mock.patch.object(autoflash.hostsys, "mac_of", return_value="12:34:56:AB:CD:EF"), \
-                        mock.patch.object(autoflash, "adopt_plug"), \
-                        mock.patch.object(autoflash, "past_the_commit", side_effect=lambda ctx, running: running):
-                    return autoflash.find_current_firmware(ctx)
-            return autoflash.esphome_safe_mode(ctx, "midway")
+                with mock.patch.object(hostsys, "mac_of", return_value="12:34:56:AB:CD:EF"), \
+                        mock.patch.object(source, "adopt_plug"), \
+                        mock.patch.object(source, "past_the_commit", side_effect=lambda ctx, running: running):
+                    return source.find_current_firmware(ctx)
+            return source.esphome_safe_mode(ctx, "midway")
 
     def test_left_on_esphome_it_is_waited_out(self):
         converted = [("esphome", ["D5", "I1", "I2"])]
@@ -2194,8 +2189,7 @@ class EsphomeSafeModeTests(unittest.TestCase):
         self.assertEqual(self.running([("esphome", ["D5", "I1", "I2"]), ("tasmota", [])]), "esphome")
 
     def test_one_that_never_comes_back_stops_the_run(self):
-        import tools.autoflash.cli as autoflash
-        with self.assertRaises(autoflash.Abort):
+        with self.assertRaises(errors.Abort):
             self.running([("esphome", ["D5", "I1", "I2"])], answers=["mover"] * 1000)
 
 
@@ -2204,31 +2198,28 @@ class ConsentTests(unittest.TestCase):
 
     def consent(self, reply):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         import tools.autoflash.prompts as prompts
         with mock.patch("builtins.input", return_value=reply), \
-             mock.patch.object(prompts, "_emit"), mock.patch.object(autoflash, "say"):
-            return autoflash.require_word(autoflash.CONSENT_WORD)
+             mock.patch.object(prompts, "_emit"), mock.patch.object(output, "say"):
+            return prompts.require_word(prompts.CONSENT_WORD)
 
     def test_the_go_ahead_is_asked_once_in_a_run(self):
         # Seen: X1 tried again by itself asked for it again, and Enter stopped the run.
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = SimpleNamespace()
-        with mock.patch.object(autoflash, "require_word", return_value=True) as asked, \
-             mock.patch.object(autoflash, "warning_box"):
-            autoflash.consent_to_leave(ctx, "Tasmota")
-            autoflash.consent_to_leave(ctx, "Tasmota")
+        with mock.patch.object(prompts, "require_word", return_value=True) as asked, \
+             mock.patch.object(prompts, "warning_box"):
+            mover.consent_to_leave(ctx, "Tasmota")
+            mover.consent_to_leave(ctx, "Tasmota")
         self.assertEqual(asked.call_count, 1)
 
     def test_refused_it_says_nothing_was_written(self):
         # A run stopped there does not say what the plug is (past_the_commit).
         from types import SimpleNamespace
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash, "require_word", return_value=False), \
-             mock.patch.object(autoflash, "warning_box"), self.assertRaises(autoflash.NothingWritten):
-            autoflash.consent_to_leave(SimpleNamespace(), "Tasmota")
+        with mock.patch.object(prompts, "require_word", return_value=False), \
+             mock.patch.object(prompts, "warning_box"), self.assertRaises(errors.NothingWritten):
+            mover.consent_to_leave(SimpleNamespace(), "Tasmota")
 
     def test_proceed_in_any_case_goes_ahead(self):
         for reply in ("PROCEED", "proceed", " Proceed "):
@@ -2249,32 +2240,29 @@ class StartChoiceTests(unittest.TestCase):
         """A5 finding both safety locks in place, as this checkout's are - without
         looking in its captures, where the runs that lift them say so."""
         import contextlib
-        import tools.autoflash.cli as autoflash
         stack = contextlib.ExitStack()
-        stack.enter_context(mock.patch.object(autoflash.safety_locks, "restore_left", return_value=[]))
-        stack.enter_context(mock.patch.object(autoflash.safety_locks, "in_place", return_value=True))
+        stack.enter_context(mock.patch.object(safety_locks, "restore_left", return_value=[]))
+        stack.enter_context(mock.patch.object(safety_locks, "in_place", return_value=True))
         return stack
 
     def ctx(self):
         from types import SimpleNamespace
-        import tools.autoflash.cli as autoflash
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
         return SimpleNamespace(state=RunState.open(root), evidence=root / "live",
-                               manifest_path=(autoflash.ROOT / autoflash.DEFAULT_MANIFEST).resolve(),
+                               manifest_path=(runs.ROOT / bundle.DEFAULT_MANIFEST).resolve(),
                                wifi=lambda: ("Home-2G", "password"))
 
     def test_a5_asks_nothing_about_wifi(self):
         # The details are read off the plug at E1, so A5 has nothing to ask.
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash, "validate_bundle", return_value={}), \
-             mock.patch.object(autoflash.hostsys, "check_sha256sums", return_value=[]), \
-             mock.patch.object(autoflash, "ask_choice") as menu, \
-             mock.patch.object(autoflash, "make_bundle") as rebuild, \
-             self.locks_in_place(), mock.patch.object(autoflash, "say"):
-            autoflash.step_check(self.ctx())
+        with mock.patch.object(bundle, "validate_bundle", return_value={}), \
+             mock.patch.object(hostsys, "check_sha256sums", return_value=[]), \
+             mock.patch.object(prompts, "ask_choice") as menu, \
+             mock.patch.object(bundle, "make_bundle") as rebuild, \
+             self.locks_in_place(), mock.patch.object(output, "say"):
+            bundle.step_check(self.ctx())
         menu.assert_not_called()
         rebuild.assert_not_called()
 
@@ -2283,13 +2271,12 @@ class StartChoiceTests(unittest.TestCase):
         # installs changed: its bundle names the old release, which every
         # phase server refuses (the fault suite's legacy-v2.0.2, at D5 and G1).
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx()
-        ctx.state.mark("A5", autoflash.DONE, result={})
+        ctx.state.mark("A5", state.DONE, result={})
         stale = ValueError("manifest official-release identity differs from the reviewed frozen set")
-        with mock.patch.object(autoflash, "validate_bundle", side_effect=stale) as validate, \
-             mock.patch.object(autoflash, "make_bundle") as rebuild:
-            autoflash.bundle_of_this_version(ctx)
+        with mock.patch.object(bundle, "validate_bundle", side_effect=stale) as validate, \
+             mock.patch.object(bundle, "make_bundle") as rebuild:
+            bundle.bundle_of_this_version(ctx)
         rebuild.assert_called_once_with(ctx, problem=str(stale))
         self.assertTrue(validate.call_args.kwargs["current_only"])
 
@@ -2297,13 +2284,12 @@ class StartChoiceTests(unittest.TestCase):
         # The plug runs the app that bundle holds: G1's Safeboot and H1's
         # check must be that release's too.
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx()
         for step in ("A5", "F2"):
-            ctx.state.mark(step, autoflash.DONE, result={})
-        with mock.patch.object(autoflash, "validate_bundle", return_value={}) as validate, \
-             mock.patch.object(autoflash, "make_bundle") as rebuild:
-            autoflash.bundle_of_this_version(ctx)
+            ctx.state.mark(step, state.DONE, result={})
+        with mock.patch.object(bundle, "validate_bundle", return_value={}) as validate, \
+             mock.patch.object(bundle, "make_bundle") as rebuild:
+            bundle.bundle_of_this_version(ctx)
         self.assertFalse(validate.call_args.kwargs["current_only"])
         rebuild.assert_not_called()
 
@@ -2315,7 +2301,6 @@ class StartChoiceTests(unittest.TestCase):
         import json
         import tempfile
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         from tools.espressif.safeboot.safeboot_migration import FIRMWARE
         earlier = FIRMWARE["tasmota"]["earlier"][0]
         with tempfile.TemporaryDirectory() as directory:
@@ -2325,42 +2310,40 @@ class StartChoiceTests(unittest.TestCase):
                 for name, file in earlier["files"].items()}}))
             ctx = self.ctx()
             ctx.manifest_path = manifest
-            ctx.state.mark("A5", autoflash.DONE, result={})
-            self.assertIsNone(autoflash.release_on_the_plug(ctx))
-            ctx.state.mark("F2", autoflash.DONE, result={})
-            self.assertEqual(autoflash.release_on_the_plug(ctx), earlier)
-            with mock.patch.object(autoflash, "build_bundle") as build, \
-                 mock.patch.object(autoflash, "validate_bundle"), mock.patch.object(autoflash, "say"):
-                autoflash.make_bundle(ctx, problem="built from a different startup firmware")
+            ctx.state.mark("A5", state.DONE, result={})
+            self.assertIsNone(bundle.release_on_the_plug(ctx))
+            ctx.state.mark("F2", state.DONE, result={})
+            self.assertEqual(bundle.release_on_the_plug(ctx), earlier)
+            with mock.patch.object(bundle, "build_bundle") as build, \
+                 mock.patch.object(bundle, "validate_bundle"), mock.patch.object(output, "say"):
+                bundle.make_bundle(ctx, problem="built from a different startup firmware")
             self.assertEqual(build.call_args.kwargs["release"], earlier)
             manifest.write_text(json.dumps({"schema": 1, "artifacts": {
                 name: {"size": file["size"], "sha256": file["sha256"]}
                 for name, file in FIRMWARE["tasmota"]["files"].items()}}))
-            self.assertIsNone(autoflash.release_on_the_plug(ctx))
+            self.assertIsNone(bundle.release_on_the_plug(ctx))
 
     def test_a_run_carried_on_keeps_a_bundle_this_version_can_use(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx()
-        ctx.state.mark("A5", autoflash.DONE, result={})
-        with mock.patch.object(autoflash, "validate_bundle", return_value={}), \
-             mock.patch.object(autoflash, "make_bundle") as rebuild:
-            autoflash.bundle_of_this_version(ctx)
+        ctx.state.mark("A5", state.DONE, result={})
+        with mock.patch.object(bundle, "validate_bundle", return_value={}), \
+             mock.patch.object(bundle, "make_bundle") as rebuild:
+            bundle.bundle_of_this_version(ctx)
         rebuild.assert_not_called()
 
     def test_a5_builds_a_missing_bundle_without_asking_for_wifi(self):
         # A first run: the bundle is built with no Wi-Fi; E1 adds it, read off the plug.
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash, "validate_bundle",
+        with mock.patch.object(bundle, "validate_bundle",
                                side_effect=[ValueError("no manifest"), {}]), \
-             mock.patch.object(autoflash, "build_bundle") as build, \
-             mock.patch.object(autoflash.hostsys, "check_sha256sums", return_value=[]), \
-             mock.patch.object(autoflash, "ask_credentials") as credentials, \
-             mock.patch.object(autoflash, "ask_secret") as secret, \
+             mock.patch.object(bundle, "build_bundle") as build, \
+             mock.patch.object(hostsys, "check_sha256sums", return_value=[]), \
+             mock.patch.object(prepare_imprinted_bundle, "ask_credentials") as credentials, \
+             mock.patch.object(prompts, "ask_secret") as secret, \
              self.locks_in_place(), \
-             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
-            autoflash.step_check(self.ctx())
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "say"):
+            bundle.step_check(self.ctx())
         build.assert_called_once()
         self.assertNotIn("ssid", build.call_args.kwargs)
         self.assertEqual(build.call_args.args, ())
@@ -2369,54 +2352,51 @@ class StartChoiceTests(unittest.TestCase):
 
     def test_without_ewelink_no_plug_found_offers_to_look_again(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx()
         ctx.account_devices = lambda: None  # eWeLink could not be reached
         # Filed under its MAC in a scratch folder, not this checkout's captures.
-        with mock.patch.object(autoflash.plugs, "PLUGS", ctx.evidence.parent / "plugs"), \
-             mock.patch.object(autoflash.plugs, "hold"), \
-             mock.patch.object(autoflash, "find_ewelink_plugs",
+        with mock.patch.object(plugs, "PLUGS", ctx.evidence.parent / "plugs"), \
+             mock.patch.object(plugs, "hold"), \
+             mock.patch.object(account, "find_ewelink_plugs",
                                side_effect=[[], [("10.0.0.5", "eWeLink device abc")]]), \
-             mock.patch.object(autoflash, "ask_choice", return_value=0), \
-             mock.patch.object(autoflash.hostsys, "mac_of", return_value="aa:bb:cc:dd:ee:ff"), \
-             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
-            result = autoflash.step_pair(ctx)
+             mock.patch.object(prompts, "ask_choice", return_value=0), \
+             mock.patch.object(hostsys, "mac_of", return_value="aa:bb:cc:dd:ee:ff"), \
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "say"):
+            result = account.step_pair(ctx)
         self.assertEqual(result["plug_ip"], "10.0.0.5")
 
     def test_the_account_plugs_kind_is_kept_for_the_run(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx()
         ctx.account_devices = lambda: [{"deviceid": "1000000001", "productModel": "S60TPG",
                                         "name": "Sonoff S60", "online": True, "params": {}}]
-        with mock.patch.object(autoflash, "sight_plugs",
-                               side_effect=lambda plugs: [autoflash.Sighting(p, "192.168.60.50", True)
+        with mock.patch.object(account, "sight_plugs",
+                               side_effect=lambda plugs: [account.Sighting(p, "192.168.60.50", True)
                                                           for p in plugs]), \
-             mock.patch.object(autoflash.hostsys, "mac_of", return_value=None), \
-             mock.patch.object(autoflash, "say"):
-            self.assertEqual(autoflash.step_pair(ctx)["plug_ip"], "192.168.60.50")
+             mock.patch.object(hostsys, "mac_of", return_value=None), \
+             mock.patch.object(output, "say"):
+            self.assertEqual(account.step_pair(ctx)["plug_ip"], "192.168.60.50")
         self.assertEqual(ctx.state.input("plug_kind"), "sonoff-s60")
 
     def test_a_typed_address_leaves_the_screen_with_its_question(self):
         # Asked after the "did not answer" menu, it is a block of its own, taken
         # off once answered - not left under the stage line.
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx()
         ctx.account_devices = lambda: [{"deviceid": "1000000001", "productModel": "S60TPG",
                                         "name": "Sonoff S60", "online": True, "params": {}}]
         screen = mock.Mock()
-        with mock.patch.object(autoflash, "sight_plugs",
-                               side_effect=lambda plugs: [autoflash.Sighting(p, None, False) for p in plugs]), \
-             mock.patch.object(autoflash, "ask_choice", return_value=2), \
-             mock.patch.object(autoflash, "ask_ipv4", screen.ask_ipv4), \
-             mock.patch.object(autoflash.output, "transient_begin", screen.begin), \
-             mock.patch.object(autoflash.output, "transient_end", screen.end), \
-             mock.patch.object(autoflash.hostsys, "security_software_note", return_value=[]), \
-             mock.patch.object(autoflash.hostsys, "mac_of", return_value=None), \
-             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
+        with mock.patch.object(account, "sight_plugs",
+                               side_effect=lambda plugs: [account.Sighting(p, None, False) for p in plugs]), \
+             mock.patch.object(prompts, "ask_choice", return_value=2), \
+             mock.patch.object(prompts, "ask_ipv4", screen.ask_ipv4), \
+             mock.patch.object(output, "transient_begin", screen.begin), \
+             mock.patch.object(output, "transient_end", screen.end), \
+             mock.patch.object(hostsys, "security_software_note", return_value=[]), \
+             mock.patch.object(hostsys, "mac_of", return_value=None), \
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "say"):
             screen.ask_ipv4.return_value = "192.168.60.50"
-            result = autoflash.step_pair(ctx)
+            result = account.step_pair(ctx)
         self.assertEqual(result["plug_ip"], "192.168.60.50")
         calls = [name for name, _, _ in screen.mock_calls]
         self.assertEqual(calls[-3:], ["begin", "ask_ipv4", "end"])
@@ -2427,10 +2407,10 @@ class RemoveRunTests(RunChoiceTests):
 
     def menu(self, answers, confirm=True):
         from unittest import mock
-        with mock.patch.object(self.autoflash, "ask_choice", side_effect=answers) as menu, \
-             mock.patch.object(self.autoflash, "ask_yes_no", return_value=confirm), \
-             mock.patch.object(self.autoflash, "section") as section:
-            name = self.autoflash.resolve_run_name(None, False, None, ask=True)
+        with mock.patch.object(prompts, "ask_choice", side_effect=answers) as menu, \
+             mock.patch.object(prompts, "ask_yes_no", return_value=confirm), \
+             mock.patch.object(prompts, "section") as section:
+            name = cli.resolve_run_name(None, False, None, ask=True)
         return name, menu, section
 
     def test_removing_the_only_unfinished_run_then_starts_a_new_one(self):
@@ -2466,19 +2446,19 @@ class RemoveRunTests(RunChoiceTests):
         """remove_run on a run that left two firewall rules, `closes` saying
         whether each could be removed: whether it was, what was told."""
         from unittest import mock
-        rules = [self.autoflash.FirewallRule("ufw", "10.0.0.54", [8088]),
-                 self.autoflash.FirewallRule("ufw", "10.0.0.54", [8089])]
+        rules = [hostsys.FirewallRule("ufw", "10.0.0.54", [8088]),
+                 hostsys.FirewallRule("ufw", "10.0.0.54", [8089])]
         state = RunState.open(self.root / "half")
         state.set_input("firewall_rules", [rule.to_json() for rule in rules])
         pointer = self.root / ".autoflash-current"
         pointer.write_text("half\n", encoding="utf-8")
-        with mock.patch.object(self.autoflash, "ask_yes_no", return_value=True), \
-             mock.patch.object(self.autoflash, "read_current", return_value="half" if current else "other"), \
-             mock.patch.object(self.autoflash, "run_name", return_value="half"), \
-             mock.patch.object(self.autoflash, "CURRENT_POINTER", pointer), \
-             mock.patch.object(self.autoflash.hostsys, "close_firewall", side_effect=closes) as close, \
-             mock.patch.object(self.autoflash, "tell") as told:
-            self.assertTrue(self.autoflash.remove_run(self.root / "half"))
+        with mock.patch.object(prompts, "ask_yes_no", return_value=True), \
+             mock.patch.object(runs, "read_current", return_value="half" if current else "other"), \
+             mock.patch.object(runs, "run_name", return_value="half"), \
+             mock.patch.object(runs, "CURRENT_POINTER", pointer), \
+             mock.patch.object(hostsys, "close_firewall", side_effect=closes) as close, \
+             mock.patch.object(output, "tell") as told:
+            self.assertTrue(cli.remove_run(self.root / "half"))
         self.assertFalse((self.root / "half").exists())
         self.assertEqual(close.call_args_list, [mock.call(rule) for rule in rules])
         return "\n".join(call.args[0] for call in told.call_args_list), pointer.exists()
@@ -2504,16 +2484,15 @@ class BridgeOnHomeNetworkTests(unittest.TestCase):
     def find(self, addresses, pages, timeout=10.0):
         from types import SimpleNamespace
         from unittest import mock
-        from tools.autoflash import cli
         from tools.autoflash import setup_network
 
         polls = iter(addresses)
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: next(polls, None)))
         clock = iter(range(0, 10_000, 2))
         with mock.patch.object(setup_network, "page", side_effect=lambda host, **_: pages.get(host)), \
-             mock.patch.object(cli.time, "monotonic", side_effect=lambda: next(clock)), \
-             mock.patch.object(cli.time, "sleep"):
-            return cli.bridge_on_home_network(ctx, timeout=timeout)
+             mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(time, "sleep"):
+            return installer.bridge_on_home_network(ctx, timeout=timeout)
 
     def test_the_bridge_is_found_where_the_plug_was(self):
         bridge = "<title>Autoflash bridge</title>"
@@ -2534,7 +2513,6 @@ class BackOnSonoffTests(unittest.TestCase):
     def reach(self, running, sends=(None,), found=(None, "192.168.1.51"), waits=(None,)):
         from types import SimpleNamespace
         from unittest import mock
-        from tools.autoflash import cli
         from tools.autoflash import setup_network
 
         directory = tempfile.TemporaryDirectory()
@@ -2553,18 +2531,18 @@ class BackOnSonoffTests(unittest.TestCase):
             return {"seconds": 20}
 
         with mock.patch.object(setup_network, "page", return_value=None), \
-             mock.patch.object(cli, "bridge_on_home_network", side_effect=lambda *a, **k: next(found, None)), \
-             mock.patch.object(cli.detect, "identify",
+             mock.patch.object(installer, "bridge_on_home_network", side_effect=lambda *a, **k: next(found, None)), \
+             mock.patch.object(detect, "identify",
                                **({"side_effect": running} if isinstance(running, list) else {"return_value": running})), \
-             mock.patch.object(cli, "step_bridge", side_effect=send) as bridge, \
-             mock.patch.object(cli, "wait_for_bridge", side_effect=list(waits)) as wait, \
-             mock.patch.object(cli, "find_ssid", return_value=None), \
-             mock.patch.object(cli.hostsys, "copy_to_clipboard", return_value=False), \
-             mock.patch.object(cli, "section"), mock.patch.object(cli, "tell"), \
-             mock.patch.object(cli, "say"):
+             mock.patch.object(installer, "step_bridge", side_effect=send) as bridge, \
+             mock.patch.object(installer, "wait_for_bridge", side_effect=list(waits)) as wait, \
+             mock.patch.object(prompts, "find_ssid", return_value=None), \
+             mock.patch.object(hostsys, "copy_to_clipboard", return_value=False), \
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "tell"), \
+             mock.patch.object(output, "say"):
             try:
-                address = cli.reach_bridge(ctx)
-            except cli.Abort as exc:
+                address = installer.reach_bridge(ctx)
+            except errors.Abort as exc:
                 address = exc
         return address, bridge.call_count, wait.call_count, state
 
@@ -2574,8 +2552,7 @@ class BackOnSonoffTests(unittest.TestCase):
         self.assertEqual(state.status("C2"), "done")
 
     def test_a_send_cut_off_is_tried_again_three_times_in_all(self):
-        from tools.autoflash import cli
-        failed = cli.Abort("bridge delivery stopped part way")
+        failed = errors.Abort("bridge delivery stopped part way")
         # Two cut off, the third gets there.
         address, sent, _, _ = self.reach("sonoff", sends=(failed, failed, None),
                                          found=(None, "192.168.1.51"))
@@ -2583,15 +2560,14 @@ class BackOnSonoffTests(unittest.TestCase):
         # Three cut off: it stops, with the reason, rather than go on for ever.
         address, sent, _, _ = self.reach("sonoff", sends=(failed,) * 5)
         self.assertIs(address, failed)
-        self.assertEqual(sent, cli.BRIDGE_SENDS)
+        self.assertEqual(sent, installer.BRIDGE_SENDS)
 
     def advice(self, said, reported=(), started=False):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash.output, "tool_said", side_effect=lambda text: any(text in s for s in said)), \
-             mock.patch.object(autoflash, "firewall_hint", return_value=["FIREWALL"]):
-            return " ".join(autoflash.bridge_failure_advice(SimpleNamespace(), list(reported), started))
+        with mock.patch.object(output, "tool_said", side_effect=lambda text: any(text in s for s in said)), \
+             mock.patch.object(firewall, "firewall_hint", return_value=["FIREWALL"]):
+            return " ".join(installer.bridge_failure_advice(SimpleNamespace(), list(reported), started))
 
     def test_a_send_that_never_reached_ewelink_does_not_blame_the_firewall(self):
         # Seen against the real cloud: eWeLink's servers dropping connections
@@ -2621,8 +2597,7 @@ class BackOnSonoffTests(unittest.TestCase):
         # Seen in the fault suite: a send refused (the plug offline in eWeLink),
         # then the plug not answering here for a moment - and the run asked the
         # person to join an installer network that was never raised.
-        from tools.autoflash import cli
-        failed = cli.Abort("eWeLink does not see the plug")
+        failed = errors.Abort("eWeLink does not see the plug")
         address, sent, waited, _ = self.reach(["sonoff"] + [None] * 10, sends=(failed, None),
                                               found=(None, "192.168.1.51"))
         self.assertEqual((address, sent, waited), ("192.168.1.51", 2, 0))
@@ -2636,8 +2611,7 @@ class BackOnSonoffTests(unittest.TestCase):
     def test_back_on_sonoff_while_waiting_sends_it_again(self):
         # A power cut during the backup, once the run was waiting for the
         # installer's own network: the installer is gone, so it is sent again.
-        from tools.autoflash import cli
-        address, sent, waited, state = self.reach([None, "sonoff"], waits=(cli.BACK_ON_SONOFF,),
+        address, sent, waited, state = self.reach([None, "sonoff"], waits=(installer.BACK_ON_SONOFF,),
                                                   found=(None, "192.168.1.51"))
         self.assertEqual((address, sent, waited), ("192.168.1.51", 1, 1))
         self.assertEqual(state.status("C2"), "done")
@@ -2645,12 +2619,11 @@ class BackOnSonoffTests(unittest.TestCase):
     def test_a_run_started_on_the_installer_says_to_start_again(self):
         # It has none of eWeLink's details, so cannot send the installer again.
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash.RunState, "input",
+        with mock.patch.object(state.RunState, "input",
                                side_effect=lambda self, key: {"plug_ip": "192.168.1.51"}.get(key),
                                autospec=True):
             address, sent, _, _ = self.reach("sonoff")
-        self.assertIsInstance(address, autoflash.Abort)
+        self.assertIsInstance(address, errors.Abort)
         self.assertIn("--new", str(address))
         self.assertEqual(sent, 0)
 
@@ -2673,14 +2646,12 @@ class FromTasmotasSafebootTests(unittest.TestCase):
         return state
 
     def test_every_starting_point_is_named_in_the_report(self):
-        import tools.autoflash.cli as autoflash
-        self.assertEqual(set(autoflash.CONVERTED_FROM), set(autoflash.SOURCES))
+        self.assertEqual(set(report.CONVERTED_FROM), set(espressif.SOURCES))
 
     def test_tasmota_runs_from_t1_until_it_is_left(self):
-        import tools.autoflash.cli as autoflash
-        self.assertFalse(autoflash.plug_runs_tasmota(self.state()))           # its safeboot
-        self.assertTrue(autoflash.plug_runs_tasmota(self.state(["T1"])))      # Tasmota back
-        self.assertFalse(autoflash.plug_runs_tasmota(self.state(["T1", "L1"])))  # on the mover
+        self.assertFalse(runs.plug_runs_tasmota(self.state()))           # its safeboot
+        self.assertTrue(runs.plug_runs_tasmota(self.state(["T1"])))      # Tasmota back
+        self.assertFalse(runs.plug_runs_tasmota(self.state(["T1", "L1"])))  # on the mover
 
 
 class TasmotaBackTests(unittest.TestCase):
@@ -2691,17 +2662,16 @@ class TasmotaBackTests(unittest.TestCase):
              found=("tasmota", "tasmota-abcdef", "s60")):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         ctx = SimpleNamespace(state=RunState.open(Path(directory.name)), dry_run=False, web_password=None,
                               finder=mock.Mock(poll=mock.Mock(return_value=True)),
                               device=mock.Mock(host="192.0.2.50", is_safeboot=mock.Mock(return_value=safeboot)))
-        with mock.patch.object(autoflash, "install_official", return_value=("http:9s", outcome)) as install, \
-             mock.patch.object(autoflash, "tasmota_started_again", return_value=starts), \
-             mock.patch.object(autoflash.detect, "tasmota", return_value=found), \
-             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
-            result = autoflash.step_tasmota_back(ctx)
+        with mock.patch.object(tasmota, "install_official", return_value=("http:9s", outcome)) as install, \
+             mock.patch.object(tasmota, "tasmota_started_again", return_value=starts), \
+             mock.patch.object(detect, "tasmota", return_value=found), \
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "say"):
+            result = tasmota.step_tasmota_back(ctx)
         return result, install.called, ctx.state
 
     def test_put_back_and_found_as_before(self):
@@ -2714,16 +2684,15 @@ class TasmotaBackTests(unittest.TestCase):
         """tasmota_started_again, the plug's version each look in turn, 3 s apart."""
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         clock = [0.0]
         answers = iter(versions)
         device = mock.Mock(firmware_version=lambda: next(answers, versions[-1]))
         if refused:
-            device.start_app.side_effect = autoflash.DeviceError("refused")
-        with mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: clock[0]), \
-             mock.patch.object(autoflash.time, "sleep", side_effect=lambda s: clock.__setitem__(0, clock[0] + s)), \
-             mock.patch.object(autoflash, "say"):
-            return autoflash.tasmota_started_again(SimpleNamespace(device=device))
+            device.start_app.side_effect = device.DeviceError("refused")
+        with mock.patch.object(time, "monotonic", side_effect=lambda: clock[0]), \
+             mock.patch.object(time, "sleep", side_effect=lambda s: clock.__setitem__(0, clock[0] + s)), \
+             mock.patch.object(output, "say"):
+            return tasmota.tasmota_started_again(SimpleNamespace(device=device))
 
     def test_its_own_starts(self):
         self.assertTrue(self.started(["15.6.0(release-safeboot)", "", "16.0.0(release-tasmota32)"]))
@@ -2746,13 +2715,11 @@ class TasmotaBackTests(unittest.TestCase):
         self.assertFalse(installed)
 
     def test_back_but_not_a_plug_this_tool_converts(self):
-        import tools.autoflash.cli as autoflash
-        with self.assertRaisesRegex(autoflash.Abort, "not set up as a plug this tool converts"):
+        with self.assertRaisesRegex(errors.Abort, "not set up as a plug this tool converts"):
             self.back(found=None)
 
     def test_back_but_its_settings_gone(self):
-        import tools.autoflash.cli as autoflash
-        with self.assertRaisesRegex(autoflash.Abort, "lost its settings"):
+        with self.assertRaisesRegex(errors.Abort, "lost its settings"):
             self.back(outcome="raised its setup network tasmota-ABCDEF-1234")
 
 
@@ -2773,10 +2740,9 @@ class BegunByAnEarlierVersionTests(unittest.TestCase):
 
     def bootloader(self, ctx):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash, "run_plan", return_value={"plan": "ran"}) as plan, \
-             mock.patch.object(autoflash, "sonoff_layout_back"), mock.patch.object(autoflash, "say"):
-            result = autoflash.step_bootloader(ctx)
+        with mock.patch.object(hub, "run_plan", return_value={"plan": "ran"}) as plan, \
+             mock.patch.object(hub, "sonoff_layout_back"), mock.patch.object(output, "say"):
+            result = hub.step_bootloader(ctx)
         return result, plan.called
 
     def test_d5_before_the_commit_writes_it(self):
@@ -2795,15 +2761,14 @@ class BegunByAnEarlierVersionTests(unittest.TestCase):
         """step_restore: whether the Wi-Fi was proven, the runner given the
         startup firmware, and the flags the restore server was started with."""
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx()
         if unproven:
             ctx.state.set_input("startup_unproven", True)
         runner = mock.Mock(run=mock.Mock(return_value=(0, "")))
         given = []
         ctx.phase_runner = lambda with_recovery=True: given.append(with_recovery) or runner
-        with mock.patch.object(autoflash, "conversion_wifi") as wifi, mock.patch.object(autoflash, "say"):
-            autoflash.step_restore(ctx)
+        with mock.patch.object(tasmota, "conversion_wifi") as wifi, mock.patch.object(output, "say"):
+            tasmota.step_restore(ctx)
         return wifi.called, given[0], runner.run.call_args.kwargs["extra_flags"]
 
     def test_g1_proves_the_startup_firmware_it_writes_over(self):
@@ -2819,16 +2784,15 @@ class BegunByAnEarlierVersionTests(unittest.TestCase):
         """G1's check that the plug runs official Tasmota, given what each ask of
         the plug gives: (whether it passed, and how many times it was asked)."""
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx()
         ctx.device = mock.Mock()
         runner = mock.Mock(run=mock.Mock(return_value=(0, "")))
         ctx.phase_runner = lambda with_recovery=True: runner
-        with mock.patch.object(autoflash, "conversion_wifi"), mock.patch.object(autoflash, "say"):
-            autoflash.step_restore(ctx)
+        with mock.patch.object(tasmota, "conversion_wifi"), mock.patch.object(output, "say"):
+            tasmota.step_restore(ctx)
         gate = runner.run.call_args.kwargs["confirm"]
-        with mock.patch.object(autoflash, "verify_app", side_effect=checks) as asked, \
-             mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"):
+        with mock.patch.object(tasmota, "verify_app", side_effect=checks) as asked, \
+             mock.patch.object(output, "say"), mock.patch.object(output, "tell"):
             return gate("restore"), asked.call_count
 
     def test_g1s_check_dropped_by_the_network_is_asked_again(self):
@@ -2839,29 +2803,27 @@ class BegunByAnEarlierVersionTests(unittest.TestCase):
         self.assertEqual(self.gate([reset] * 5), (False, 3))
 
     def test_g1s_check_refused_stops_at_once(self):
-        import tools.autoflash.cli as autoflash
         self.assertEqual(self.gate([(False, "app0 on the plug no longer matches the pinned image")]), (False, 1))
-        self.assertEqual(self.gate([autoflash.DeviceError("no Berry console")]), (False, 1))
+        self.assertEqual(self.gate([device.DeviceError("no Berry console")]), (False, 1))
 
     def verified(self, kept, template=True):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx()
         if kept:
             ctx.state.set_input("bootloader_kept", "sonoff")
         artifacts = {"target_table": {"sha256": "aa"}, "safeboot": {"size": 1, "sha256": "bb"},
                      "app": {"size": 1, "sha256": "cc"}}
-        hashes = {autoflash.TABLE_OFFSET: "aa", autoflash.SAFEBOOT_OFFSET: "bb", autoflash.APP0_OFFSET: "cc",
+        hashes = {safeboot_migration.TABLE_OFFSET: "aa", safeboot_migration.SAFEBOOT_OFFSET: "bb", safeboot_migration.APP0_OFFSET: "cc",
                   0: "sonoffs-own"}
         ctx.manifest_path = Path("unused")
         ctx.device = mock.Mock(sha_region=lambda address, length: hashes[address])
-        with mock.patch.object(autoflash, "load_manifest", return_value={"artifacts": artifacts}), \
-             mock.patch.object(autoflash, "template_in_place",
+        with mock.patch.object(tasmota, "load_manifest", return_value={"artifacts": artifacts}), \
+             mock.patch.object(tasmota, "template_in_place",
                                side_effect=lambda *_, fallback=True: template is True
                                or (template == "fallback" and not fallback)), \
-             mock.patch.object(autoflash, "give_template") as given, \
-             mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"):
-            results = autoflash.step_verify(ctx)
+             mock.patch.object(tasmota, "give_template") as given, \
+             mock.patch.object(output, "say"), mock.patch.object(output, "tell"):
+            results = tasmota.step_verify(ctx)
         self.given = given.called
         self.sent = [c.args[0] for c in ctx.device.command.call_args_list]
         return results
@@ -2884,8 +2846,7 @@ class BegunByAnEarlierVersionTests(unittest.TestCase):
         self.assertTrue(self.given)
 
     def test_h1_otherwise_wants_esphomes(self):
-        import tools.autoflash.cli as autoflash
-        with self.assertRaises(autoflash.Abort):
+        with self.assertRaises(errors.Abort):
             self.verified(kept=False)
 
 
@@ -2897,13 +2858,12 @@ class PastTheCommitTests(unittest.TestCase):
         import json
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
-        runs = []
-        for index, (done, report, *stopped) in enumerate(earlier):
+        records = []
+        for index, (done, outcome, *stopped) in enumerate(earlier):
             run = root / f"run{index}"
             (run / "live").mkdir(parents=True)
             state = RunState.open(run)
@@ -2916,19 +2876,19 @@ class PastTheCommitTests(unittest.TestCase):
             if stopped:  # stopped as E3 ran: what its server saw of the plug
                 state.mark("E3", ATTEMPTED)
                 (run / "live" / "commit-server.log").write_text(stopped[0])
-            if report:
-                (run / "live" / "commit-report.json").write_text(json.dumps({"phase": "commit", "status": report}))
-            runs.append(run)
+            if outcome:
+                (run / "live" / "commit-report.json").write_text(json.dumps({"phase": "commit", "status": outcome}))
+            records.append(run)
         now = root / "now"
         now.mkdir()
         ctx = SimpleNamespace(dir=now, state=RunState.open(now), evidence=now / "live",
                               device=SimpleNamespace(is_safeboot=lambda: safeboot, firmware_version=lambda: version))
         self.evidence, self.state = ctx.evidence, ctx.state
         ctx.state.set_input("plug_mac", "12:34:56:ab:cd:ef")
-        with mock.patch.object(autoflash, "run_directories", return_value=runs), \
-             mock.patch.object(autoflash.plugs, "mac_of_run", return_value="12:34:56:ab:cd:ef"), \
-             mock.patch.object(autoflash, "say"):
-            return autoflash.past_the_commit(ctx, running)
+        with mock.patch.object(runs, "run_directories", return_value=records), \
+             mock.patch.object(plugs, "mac_of_run", return_value="12:34:56:ab:cd:ef"), \
+             mock.patch.object(output, "say"):
+            return source.past_the_commit(ctx, running)
 
     def test_a_run_that_committed_and_did_not_finish(self):
         self.assertEqual(self.source([(["E1", "E2", "E3"], None)]), "committed")
@@ -2981,34 +2941,32 @@ class PastTheCommitTests(unittest.TestCase):
 
     def test_x1_finding_no_update_service_says_nothing_was_written(self):
         from types import SimpleNamespace
-        import tools.autoflash.cli as autoflash
         inputs = {"plug_ip": "192.168.0.137", "source": "tasmota"}
         ctx = SimpleNamespace(state=SimpleNamespace(input=inputs.get), dry_run=False,
                               wifi=lambda why=None: ("wifi", "password"))
-        with mock.patch.object(autoflash, "identify", return_value="tasmota"), \
-                mock.patch.object(autoflash, "startup_image", return_value=b"image"), \
-                mock.patch.object(autoflash, "wait_for", side_effect=autoflash.Abort("did not answer")), \
-                mock.patch.object(autoflash, "send_as_esphome_update") as sent, \
-                self.assertRaises(autoflash.NothingWritten):
-            autoflash.step_startup_from_esphome(ctx)
+        with mock.patch.object(unlock, "identify", return_value="tasmota"), \
+                mock.patch.object(mover, "startup_image", return_value=b"image"), \
+                mock.patch.object(join, "wait_for", side_effect=errors.Abort("did not answer")), \
+                mock.patch.object(mover, "send_as_esphome_update") as sent, \
+                self.assertRaises(errors.NothingWritten):
+            mover.step_startup_from_esphome(ctx)
         sent.assert_not_called()
 
     def test_a_tasmota_without_its_template_is_never_sent_the_hubs_steps(self):
         # Seen: a converted plug that had lost its template, taken for part
         # way, was sent X1 - an ESPHome update - and waited 4 minutes for an
         # update service no Tasmota has (Sonoff-OTA discussion #8).
-        import tools.autoflash.cli as autoflash
         self.assertEqual(self.source([(["E3", "F2", "F4", "G1", "H1"], None)], running="untemplated"),
                          "untemplated")
         self.assertEqual(self.source([], running="untemplated"), "untemplated")
         # Left past the commit by a run: official Tasmota's steps, as before.
         self.assertEqual(self.source([(["E1", "E2", "E3"], None)], running="untemplated"), "committed")
         for firmware in ("tasmota", "esphome", "sonoff"):
-            steps = [step for step, _, _ in autoflash.steps_for(firmware, "untemplated")]
+            steps = [step for step, _, _ in espressif.steps_for(firmware, "untemplated")]
             self.assertIn(steps[2], ("L1", "F4"))  # leaving Tasmota, or given its template
-        self.assertEqual([step for step, _, _ in autoflash.steps_for("tasmota", "untemplated")],
+        self.assertEqual([step for step, _, _ in espressif.steps_for("tasmota", "untemplated")],
                          ["A0", "A5", "F4"])
-        self.assertEqual(autoflash.steps_for("sonoff", "untemplated"), autoflash.steps_for("sonoff", "tasmota"))
+        self.assertEqual(espressif.steps_for("sonoff", "untemplated"), espressif.steps_for("sonoff", "tasmota"))
 
 
     def test_a_commit_the_plug_finished_after_its_run_was_stopped(self):
@@ -3028,7 +2986,6 @@ class WaitForBridgeTests(unittest.TestCase):
     def wait(self, addresses, pages, timeout=60.0, gone_back=None, answering=True, told=None):
         from types import SimpleNamespace
         from unittest import mock
-        from tools.autoflash import cli
         from tools.autoflash import setup_network
 
         polls = iter(addresses)
@@ -3036,12 +2993,12 @@ class WaitForBridgeTests(unittest.TestCase):
                               state=SimpleNamespace(input=lambda key: "192.168.1.51"))
         clock = iter(range(0, 100_000, 2))
         with mock.patch.object(setup_network, "page", side_effect=lambda host, **_: pages.get(host)), \
-             mock.patch.object(cli.time, "monotonic", side_effect=lambda: next(clock)), \
-             mock.patch.object(cli.time, "sleep"), \
-             mock.patch.object(cli.hostsys, "ping_ok", return_value=answering), \
-             mock.patch.object(cli, "tell", side_effect=lambda line: (told if told is not None else []).append(line)), \
-             mock.patch.object(cli, "say"):
-            return cli.wait_for_bridge(ctx, "autoflash-recovery-CDEF", timeout=timeout,
+             mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(hostsys, "ping_ok", return_value=answering), \
+             mock.patch.object(output, "tell", side_effect=lambda line: (told if told is not None else []).append(line)), \
+             mock.patch.object(output, "say"):
+            return installer.wait_for_bridge(ctx, "autoflash-recovery-CDEF", timeout=timeout,
                                                  gone_back=gone_back)
 
     def test_a_late_join_of_the_home_network_is_taken(self):
@@ -3056,40 +3013,36 @@ class WaitForBridgeTests(unittest.TestCase):
         self.assertIsNone(self.wait([None] * 50, {setup_network.SETUP_HOST: bridge}))
 
     def test_a_plug_gone_back_to_sonoffs_firmware_ends_the_wait(self):
-        from tools.autoflash import cli
         self.assertEqual(self.wait([None] * 100, {}, timeout=600.0, gone_back=lambda: True),
-                         cli.BACK_ON_SONOFF)
+                         installer.BACK_ON_SONOFF)
 
     def test_nothing_at_the_plugs_address_is_told_to_switch_it_off_and_on(self):
         # Sonoff's firmware, its Wi-Fi gone while it started, stays off it.
-        from tools.autoflash import cli
         told = []
-        with self.assertRaises(cli.Abort):
+        with self.assertRaises(errors.Abort):
             self.wait([None] * 500, {}, timeout=400.0, answering=False, told=told)
         self.assertIn("switch it off and on", " ".join(told))
         told = []
-        with self.assertRaises(cli.Abort):
+        with self.assertRaises(errors.Abort):
             self.wait([None] * 500, {}, timeout=400.0, answering=True, told=told)
         self.assertNotIn("switch it off and on", " ".join(told))  # something is there
 
     def test_neither_in_time_stops_with_a_reason(self):
-        from tools.autoflash import cli
-        with self.assertRaisesRegex(cli.Abort, "did not appear on your network"):
+        with self.assertRaisesRegex(errors.Abort, "did not appear on your network"):
             self.wait([None] * 50, {}, timeout=20.0)
 
 
 class AdoptPlugTests(unittest.TestCase):
     def test_the_kind_a_found_plug_says_is_kept_for_the_run(self):
         from types import SimpleNamespace
-        from tools.autoflash import cli
         inputs = {}
         ctx = SimpleNamespace(state=SimpleNamespace(set_input=inputs.__setitem__, input=inputs.get),
                               set_plug_ip=lambda ip: inputs.__setitem__("plug_ip", ip))
-        found = cli.detect.Found("192.168.0.137", "tasmota", None, "tasmota-ABCDEF-1234",
+        found = detect.Found("192.168.0.137", "tasmota", None, "tasmota-ABCDEF-1234",
                                            "sonoff-s60")
-        with mock.patch.object(cli.hostsys, "mac_of", return_value=None), \
-             mock.patch.object(cli, "say"):
-            cli.adopt_plug(ctx, found)
+        with mock.patch.object(hostsys, "mac_of", return_value=None), \
+             mock.patch.object(output, "say"):
+            source.adopt_plug(ctx, found)
         self.assertEqual(inputs["plug_kind"], "sonoff-s60")
 
 
@@ -3099,18 +3052,17 @@ class TasmotaAtHomeTests(unittest.TestCase):
 
     def found(self, hostname):
         from types import SimpleNamespace
-        from tools.autoflash import cli
         from tools.autoflash import setup_network
         inputs = {}
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"),
                               state=SimpleNamespace(set_input=inputs.__setitem__, input=inputs.get),
                               set_plug_ip=lambda ip: inputs.__setitem__("plug_ip", ip))
-        device = mock.Mock()
-        device.command.return_value = {"StatusNET": {"Hostname": hostname}}
+        plug = mock.Mock()
+        plug.command.return_value = {"StatusNET": {"Hostname": hostname}}
         with mock.patch.object(setup_network, "page", return_value="<title>Tasmota</title>"), \
-             mock.patch.object(cli, "Device", return_value=device), \
-             mock.patch.object(cli, "say"):
-            self.assertEqual(cli.tasmota_at_home(ctx), "192.168.1.51")
+             mock.patch.object(device, "Device", return_value=plug), \
+             mock.patch.object(output, "say"):
+            self.assertEqual(installer.tasmota_at_home(ctx), "192.168.1.51")
         return inputs.get("device_name")
 
     def test_tasmotas_own_name_is_kept(self):
@@ -3140,7 +3092,6 @@ class TasmotaWifiPresetTests(unittest.TestCase):
 
     def run_preset(self, template, send_error=None, address="192.168.1.51", answer=JOINED):
         from unittest import mock
-        from tools.autoflash import cli
         from tools.autoflash import setup_network
         sent = []
 
@@ -3153,8 +3104,8 @@ class TasmotaWifiPresetTests(unittest.TestCase):
         with mock.patch.object(self.ts, "load_template",
                                return_value=(template, "" if template else "none captured")), \
              mock.patch.object(setup_network, "send_tasmota_settings", side_effect=send), \
-             mock.patch.object(cli, "say") as said:
-            given = cli.give_tasmota_the_wifi(self.ctx, address)
+             mock.patch.object(output, "say") as said:
+            given = installer.give_tasmota_the_wifi(self.ctx, address)
         self.said = " ".join(call.args[0] for call in said.call_args_list)
         return given, sent
 
@@ -3204,21 +3155,20 @@ class TasmotaWifiPresetTests(unittest.TestCase):
     def test_named_alone_tasmotas_network_is_looked_for_once_the_installer_has_gone(self):
         from types import SimpleNamespace
         from unittest import mock
-        from tools.autoflash import cli
         self.inputs.update(plug_mac="12:34:56:ab:cd:ef", tasmota_named_alone=True)
         ctx = SimpleNamespace(state=self.ctx.state)
         order = []
-        with mock.patch.object(cli, "installer_gone",
+        with mock.patch.object(installer, "installer_gone",
                                side_effect=lambda **k: order.append("gone")), \
-             mock.patch.object(cli, "tasmota_or_its_network",
+             mock.patch.object(installer, "tasmota_or_its_network",
                                side_effect=lambda ctx, **k: order.append(k["networks"])
                                or ("network", "autoflash-recovery-CDEF")), \
-             mock.patch.object(cli, "configure_plug_wifi", return_value="192.168.1.52") as by_hand, \
-             mock.patch.object(cli, "say"):
-            result = cli.finish_tasmota_setup(ctx, route="bridge network")
+             mock.patch.object(join, "configure_plug_wifi", return_value="192.168.1.52") as by_hand, \
+             mock.patch.object(output, "say"):
+            result = installer.finish_tasmota_setup(ctx, route="bridge network")
         self.assertEqual(order[0], "gone")
         self.assertEqual(order[1][0], "autoflash-recovery-CDEF")
-        self.assertEqual(order[1][1:], cli.setup_networks(ctx))  # and Tasmota's own, after a reset
+        self.assertEqual(order[1][1:], names.setup_networks(ctx))  # and Tasmota's own, after a reset
         by_hand.assert_called_once_with(ctx, "autoflash-recovery-CDEF")
         self.assertEqual(result["plug_ip"], "192.168.1.52")
         self.assertIsNone(result["device_name"])  # the run's name for it is not its own
@@ -3226,15 +3176,14 @@ class TasmotaWifiPresetTests(unittest.TestCase):
     def test_the_interim_name_is_not_looked_for_otherwise(self):
         from types import SimpleNamespace
         from unittest import mock
-        from tools.autoflash import cli
         self.inputs["plug_mac"] = "12:34:56:ab:cd:ef"
         ctx = SimpleNamespace(state=self.ctx.state)
-        with mock.patch.object(cli, "installer_gone") as waited, \
-             mock.patch.object(cli, "tasmota_or_its_network",
+        with mock.patch.object(installer, "installer_gone") as waited, \
+             mock.patch.object(installer, "tasmota_or_its_network",
                                return_value=("network", "tasmota-ABCDEF-1234")) as looked, \
-             mock.patch.object(cli, "configure_plug_wifi", return_value="192.168.1.52"), \
-             mock.patch.object(cli, "say"):
-            cli.finish_tasmota_setup(ctx, route="bridge network")
+             mock.patch.object(join, "configure_plug_wifi", return_value="192.168.1.52"), \
+             mock.patch.object(output, "say"):
+            installer.finish_tasmota_setup(ctx, route="bridge network")
         waited.assert_not_called()
         self.assertNotIn("autoflash-recovery-CDEF", looked.call_args.kwargs["networks"])
 
@@ -3243,7 +3192,6 @@ class TasmotaWifiPresetTests(unittest.TestCase):
         # now, by the same name - not waited on as the installer's for ever.
         from types import SimpleNamespace
         from unittest import mock
-        from tools.autoflash import cli
         from tools.autoflash import setup_network
         self.inputs.update(plug_mac="12:34:56:ab:cd:ef", tasmota_named_alone=True)
         ctx = SimpleNamespace(state=self.ctx.state)
@@ -3251,15 +3199,15 @@ class TasmotaWifiPresetTests(unittest.TestCase):
         # than the look allows: only its status answers at once.
         pages = {(setup_network.SETUP_HOST, "/cm?cmnd=Status%202"):
                  '{"StatusFWR":{"Version":"15.6.0.1(f5b34a2-bluetooth)"}}'}
-        with mock.patch.object(cli, "find_ssid",
+        with mock.patch.object(prompts, "find_ssid",
                                side_effect=lambda names, **k: "autoflash-recovery-CDEF"
                                if "autoflash-recovery-CDEF" in names else None), \
              mock.patch.object(setup_network, "page",
                                side_effect=lambda host, path="/", **k: pages.get((host, path))), \
-             mock.patch.object(cli, "upload_tasmota") as uploaded, \
-             mock.patch.object(cli, "configure_plug_wifi", return_value="192.168.1.52") as by_hand, \
-             mock.patch.object(cli, "say"):
-            result = cli.step_berry_tasmota(ctx)
+             mock.patch.object(installer, "upload_tasmota") as uploaded, \
+             mock.patch.object(join, "configure_plug_wifi", return_value="192.168.1.52") as by_hand, \
+             mock.patch.object(output, "say"):
+            result = installer.step_berry_tasmota(ctx)
         uploaded.assert_not_called()
         by_hand.assert_called_once_with(ctx, "autoflash-recovery-CDEF")
         self.assertEqual(result["plug_ip"], "192.168.1.52")
@@ -3270,58 +3218,55 @@ class TasmotaWifiPresetTests(unittest.TestCase):
         # try again waited a quarter of an hour for the installer, gone.
         from types import SimpleNamespace
         from unittest import mock
-        from tools.autoflash import cli
         from tools.autoflash import setup_network
         self.inputs.update(plug_mac="12:34:56:ab:cd:ef", tasmota_wifi_preset=True)
         ctx = SimpleNamespace(state=self.ctx.state, finder=SimpleNamespace(poll=lambda: "192.168.1.51"),
                               set_plug_ip=lambda ip: self.inputs.__setitem__("plug_ip", ip))
         pages = {"192.168.1.51": "<title>Tasmota</title> Tasmota 15.6.0 by Theo Arends"}
-        with mock.patch.object(cli, "find_ssid", return_value=None), \
+        with mock.patch.object(prompts, "find_ssid", return_value=None), \
              mock.patch.object(setup_network, "page", side_effect=lambda host, *a, **k: pages.get(host)), \
-             mock.patch.object(cli, "Device", side_effect=OSError), \
-             mock.patch.object(cli, "upload_tasmota") as uploaded, \
-             mock.patch.object(cli, "ask_to_join_bridge") as asked, \
-             mock.patch.object(cli, "say"):
-            result = cli.step_berry_tasmota(ctx)
+             mock.patch.object(device, "Device", side_effect=OSError), \
+             mock.patch.object(installer, "upload_tasmota") as uploaded, \
+             mock.patch.object(installer, "ask_to_join_bridge") as asked, \
+             mock.patch.object(output, "say"):
+            result = installer.step_berry_tasmota(ctx)
         uploaded.assert_not_called()
         asked.assert_not_called()
         self.assertEqual((result["plug_ip"], result["wifi"]), ("192.168.1.51", "preset"))
 
     def test_the_installer_is_waited_for_until_it_has_restarted(self):
         from unittest import mock
-        from tools.autoflash import cli
         answers = iter([True, True, False])
         clock = iter(range(0, 1000, 2))
-        with mock.patch.object(cli, "bridge_answers", side_effect=lambda host: next(answers)) as asked, \
-             mock.patch.object(cli.time, "monotonic", side_effect=lambda: next(clock)), \
-             mock.patch.object(cli.time, "sleep"), \
-             mock.patch.object(cli.output, "progress"):
-            cli.installer_gone(timeout=60.0)
+        with mock.patch.object(installer, "bridge_answers", side_effect=lambda host: next(answers)) as asked, \
+             mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(output, "progress"):
+            installer.installer_gone(timeout=60.0)
         self.assertEqual(asked.call_count, 3)
 
     def through_the_bridges_network(self, *, preset, at_home):
         """D1 sent through the bridge's own network: what follows."""
         from types import SimpleNamespace
         from unittest import mock
-        from tools.autoflash import cli
         from tools.autoflash import setup_network
         self.inputs.update(tasmota_wifi_preset=preset)
         ctx = SimpleNamespace(state=self.ctx.state)
         clock = iter(range(0, 10_000, 5))
-        with mock.patch.object(cli, "find_ssid", return_value=None), \
-             mock.patch.object(cli, "bridge_networks", return_value=("autoflash-recovery-",)), \
-             mock.patch.object(cli, "setup_networks", return_value=("tasmota-",)), \
-             mock.patch.object(cli, "reach_bridge", return_value=setup_network.SETUP_HOST), \
-             mock.patch.object(cli, "upload_tasmota"), \
-             mock.patch.object(cli, "tasmota_at_home",
+        with mock.patch.object(prompts, "find_ssid", return_value=None), \
+             mock.patch.object(names, "bridge_networks", return_value=("autoflash-recovery-",)), \
+             mock.patch.object(names, "setup_networks", return_value=("tasmota-",)), \
+             mock.patch.object(installer, "reach_bridge", return_value=setup_network.SETUP_HOST), \
+             mock.patch.object(installer, "upload_tasmota"), \
+             mock.patch.object(installer, "tasmota_at_home",
                                return_value="192.168.1.51" if at_home else None), \
-             mock.patch.object(cli, "configure_plug_wifi", return_value="192.168.1.52") as by_hand, \
-             mock.patch.object(cli, "section") as shown, \
-             mock.patch.object(cli.time, "monotonic", side_effect=lambda: next(clock)), \
-             mock.patch.object(cli.time, "sleep"), \
-             mock.patch.object(cli.output, "progress"), \
-             mock.patch.object(cli, "say"):
-            result = cli.step_berry_tasmota(ctx)
+             mock.patch.object(join, "configure_plug_wifi", return_value="192.168.1.52") as by_hand, \
+             mock.patch.object(prompts, "section") as shown, \
+             mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(output, "progress"), \
+             mock.patch.object(output, "say"):
+            result = installer.step_berry_tasmota(ctx)
         return result, by_hand.called, [call.args[0] for call in shown.call_args_list]
 
     def test_the_installers_network_still_listed_is_not_taken_for_tasmotas(self):
@@ -3331,17 +3276,16 @@ class TasmotaWifiPresetTests(unittest.TestCase):
         # as the run names Tasmota - was still listed for a moment.
         from types import SimpleNamespace
         from unittest import mock
-        from tools.autoflash import cli
         self.inputs["plug_mac"] = "12:34:56:ab:cd:ef"
         ctx = SimpleNamespace(state=self.ctx.state)
         clock = iter(range(0, 10_000, 5))
-        with mock.patch.object(cli.prompts, "scan_wifi_ssids",
+        with mock.patch.object(prompts, "scan_wifi_ssids",
                                return_value=["Home", "autoflash-recovery-CDEF"]), \
-             mock.patch.object(cli, "tasmota_at_home", side_effect=[None, "192.168.1.51"]), \
-             mock.patch.object(cli.time, "monotonic", side_effect=lambda: next(clock)), \
-             mock.patch.object(cli.time, "sleep"), \
-             mock.patch.object(cli.output, "progress"):
-            self.assertEqual(cli.tasmota_or_its_network(ctx, timeout=60.0), ("home", "192.168.1.51"))
+             mock.patch.object(installer, "tasmota_at_home", side_effect=[None, "192.168.1.51"]), \
+             mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(output, "progress"):
+            self.assertEqual(installer.tasmota_or_its_network(ctx, timeout=60.0), ("home", "192.168.1.51"))
 
     def test_tasmota_given_the_wifi_before_a_cut_off_joins_by_itself(self):
         # Seen in the fault suite: the bridge saved Tasmota's settings, the
@@ -3378,7 +3322,6 @@ class TasmotaWifiPresetTests(unittest.TestCase):
     def test_the_bridge_page_is_not_mistaken_for_tasmota(self):
         from types import SimpleNamespace
         from unittest import mock
-        from tools.autoflash import cli
         from tools.autoflash import setup_network
         pages = iter(["<title>Autoflash bridge</title>", None, "<title>Tasmota</title> tasmota"])
         state = SimpleNamespace(set_input=lambda *a: None, input=lambda *a: None)
@@ -3386,11 +3329,11 @@ class TasmotaWifiPresetTests(unittest.TestCase):
                               set_plug_ip=lambda ip: None, state=state)
         clock = iter(range(0, 10_000, 3))
         with mock.patch.object(setup_network, "page", side_effect=lambda *a, **k: next(pages)), \
-             mock.patch.object(cli.time, "monotonic", side_effect=lambda: next(clock)), \
-             mock.patch.object(cli.time, "sleep"), \
-             mock.patch.object(cli, "Device", side_effect=OSError), \
-             mock.patch.object(cli, "say"):
-            self.assertEqual(cli.tasmota_on_home_network(ctx), "192.168.1.51")
+             mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(device, "Device", side_effect=OSError), \
+             mock.patch.object(output, "say"):
+            self.assertEqual(installer.tasmota_on_home_network(ctx), "192.168.1.51")
 
 
 def efuse_with_mac(mac):
@@ -3454,24 +3397,23 @@ class RunFilingTests(unittest.TestCase):
 
     def setUp(self):
         from tools.autoflash import plugs
-        import tools.autoflash.cli as autoflash
-        self.plugs, self.autoflash = plugs, autoflash
+        self.plugs = plugs
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.captures = Path(directory.name)
         for patch in (mock.patch.object(plugs, "CAPTURES", self.captures),
                       mock.patch.object(plugs, "PLUGS", self.captures / "plugs"),
-                      mock.patch.object(autoflash, "CURRENT_POINTER", self.captures / ".current"),
-                      mock.patch.object(autoflash, "say")):
+                      mock.patch.object(runs, "CURRENT_POINTER", self.captures / ".current"),
+                      mock.patch.object(output, "say")):
             patch.start()
             self.addCleanup(patch.stop)
 
     def test_a_new_run_waits_unidentified_then_moves_under_the_mac(self):
         from types import SimpleNamespace
-        name = self.autoflash.new_run_name(None)
+        name = runs.new_run_name(None)
         self.assertTrue(name.startswith("plugs/unidentified/runs/"))
-        ctx = self.autoflash.Context(SimpleNamespace(
-            run=name, manifest=self.autoflash.DEFAULT_MANIFEST, dry_run=False, plug_ip=None,
+        ctx = context.Context(SimpleNamespace(
+            run=name, manifest=bundle.DEFAULT_MANIFEST, dry_run=False, plug_ip=None,
             email=None, web_user=None, web_password=None, esphome_ota_password=None,
             esphome_web_user=None, esphome_web_password=None, esphome_api_key=None))
         ctx.state.set_input("plug_ip", "10.0.0.5")
@@ -3481,14 +3423,14 @@ class RunFilingTests(unittest.TestCase):
         ctx.state.set_input("plug_mac", "58:cf:79:01:02:03")  # saved where it now is
         self.assertTrue((ctx.dir / "autoflash-state.json").is_file())
         self.assertFalse((self.captures / name).exists())
-        self.assertEqual(self.autoflash.read_current(), ctx.plug)
+        self.assertEqual(runs.read_current(), ctx.plug)
 
     def test_firmware_passwords_come_from_the_flags_then_the_environment(self):
         from types import SimpleNamespace
-        name = self.autoflash.new_run_name(None)
+        name = runs.new_run_name(None)
 
         def args(**over):
-            base = dict(run=name, manifest=self.autoflash.DEFAULT_MANIFEST, dry_run=False,
+            base = dict(run=name, manifest=bundle.DEFAULT_MANIFEST, dry_run=False,
                         plug_ip=None, email=None, web_user=None, web_password=None,
                         esphome_ota_password=None, esphome_web_user=None, esphome_web_password=None,
                         esphome_api_key=None)
@@ -3497,8 +3439,8 @@ class RunFilingTests(unittest.TestCase):
         key = base64.b64encode(bytes(range(32))).decode()
         # The flags win, each kept out of the log under its label.
         private = mock.Mock()
-        with mock.patch.object(self.autoflash.output, "private", private):
-            ctx = self.autoflash.Context(args(web_password="tas-pw", esphome_ota_password="esp-pw",
+        with mock.patch.object(output, "private", private):
+            ctx = context.Context(args(web_password="tas-pw", esphome_ota_password="esp-pw",
                                               esphome_web_user="admin", esphome_web_password="web-pw",
                                               esphome_api_key=key))
         self.assertEqual((ctx.web_password, ctx.esphome_password), ("tas-pw", "esp-pw"))
@@ -3508,31 +3450,31 @@ class RunFilingTests(unittest.TestCase):
         private.assert_any_call("web-pw", "esphome-web-password")
         private.assert_any_call(key, "esphome-api-key")
         # With no flag, the environment (credentials) is the fallback.
-        with mock.patch.object(self.autoflash.credentials, "get",
+        with mock.patch.object(credentials, "get",
                                side_effect={"AUTOFLASH_TASMOTA_PASSWORD": "env-tas",
                                             "AUTOFLASH_ESPHOME_OTA_PASSWORD": "env-esp",
                                             "AUTOFLASH_ESPHOME_WEB_USER": "env-admin",
                                             "AUTOFLASH_ESPHOME_WEB_PASSWORD": "env-web",
                                             "AUTOFLASH_ESPHOME_API_KEY": key}.get):
-            ctx = self.autoflash.Context(args())
+            ctx = context.Context(args())
         self.assertEqual((ctx.web_password, ctx.esphome_password), ("env-tas", "env-esp"))
         self.assertEqual((ctx.esphome_login, ctx.esphome_key), (("env-admin", "env-web"), bytes(range(32))))
         # A web login is both, or none; a key is one, or the run is refused at once.
-        self.assertIsNone(self.autoflash.Context(args(esphome_web_password="web-pw")).esphome_login)
-        with self.assertRaisesRegex(self.autoflash.Abort, "API encryption key given.*is not one.*base64"):
-            self.autoflash.Context(args(esphome_api_key="not-a-key"))
+        self.assertIsNone(context.Context(args(esphome_web_password="web-pw")).esphome_login)
+        with self.assertRaisesRegex(errors.Abort, "API encryption key given.*is not one.*base64"):
+            context.Context(args(esphome_api_key="not-a-key"))
 
     def test_older_runs_with_a_mac_are_adopted(self):
         old = RunState.open(self.captures / "conversion-20261011-1431")
         old.set_input("plug_mac", "58:cf:79:01:02:03")
         RunState.open(self.captures / "conversion-unknown").save()
-        self.autoflash.remember_current("conversion-20261011-1431")
-        self.autoflash.adopt_older_runs()
+        runs.remember_current("conversion-20261011-1431")
+        cli.adopt_older_runs()
         moved = self.captures / "plugs/58-cf-79-01-02-03/runs/conversion-20261011-1431"
         self.assertTrue((moved / "autoflash-state.json").is_file())
         self.assertTrue((self.captures / "conversion-unknown").is_dir())
-        self.assertEqual(self.autoflash.read_current(), self.autoflash.run_name(moved))
-        self.assertEqual(len(self.autoflash.run_directories()), 2)
+        self.assertEqual(runs.read_current(), runs.run_name(moved))
+        self.assertEqual(len(runs.run_directories()), 2)
 
 
 class StockBackupTests(unittest.TestCase):
@@ -3561,7 +3503,6 @@ class StockBackupTests(unittest.TestCase):
     def back_up(self, reads, answers=(1,)):
         """Run the backup with each read in turn returning or raising `reads`,
         and the failure menu answered with `answers` (0 again, 1 without)."""
-        from tools.autoflash import cli
         from tools.autoflash.prompts import QuitRun
         outcomes, replies = iter(reads), iter(answers)
         asked = []
@@ -3581,12 +3522,12 @@ class StockBackupTests(unittest.TestCase):
                 raise QuitRun(130)
             return reply
 
-        with mock.patch.object(cli, "read_dump", side_effect=read), \
-             mock.patch.object(cli, "reach_bridge", return_value=self.reached), \
-             mock.patch.object(cli, "ask_choice", side_effect=ask), \
-             mock.patch.object(cli, "section"), \
-             mock.patch.object(cli, "say"):
-            cli.back_up_stock(self.ctx, "192.168.1.51")
+        with mock.patch.object(dump_stock_flash, "read_dump", side_effect=read), \
+             mock.patch.object(installer, "reach_bridge", return_value=self.reached), \
+             mock.patch.object(prompts, "ask_choice", side_effect=ask), \
+             mock.patch.object(prompts, "section"), \
+             mock.patch.object(output, "say"):
+            installer.back_up_stock(self.ctx, "192.168.1.51")
         return asked
 
     def test_the_backup_is_kept_under_the_plugs_mac(self):
@@ -3647,20 +3588,18 @@ class StockBackupTests(unittest.TestCase):
         self.assertNotIn("stock_backup", self.inputs)
 
     def test_a_simulated_failure_fails_one_round_only(self):
-        from tools.autoflash import cli
-        with mock.patch.object(cli, "SIMULATED_BACKUP_FAILURES", 2):
+        with mock.patch.object(installer, "SIMULATED_BACKUP_FAILURES", 2):
             asked = self.back_up([self.dump], answers=(0,))
         self.assertEqual(len(asked), 1)
         self.assertIn("stock_backup", self.inputs)
 
     def stage(self, done=()):
         """Run the backup stage, C3, with the bridge reached at 192.168.1.51."""
-        from tools.autoflash import cli
         self.ctx.state.status = lambda step: DONE if step in done else "pending"
-        with mock.patch.object(cli, "reach_bridge", return_value="192.168.1.51") as reach, \
-             mock.patch.object(cli, "read_dump", return_value=self.dump) as read, \
-             mock.patch.object(cli, "say"):
-            result = cli.step_backup(self.ctx)
+        with mock.patch.object(installer, "reach_bridge", return_value="192.168.1.51") as reach, \
+             mock.patch.object(dump_stock_flash, "read_dump", return_value=self.dump) as read, \
+             mock.patch.object(output, "say"):
+            result = installer.step_backup(self.ctx)
         return result, reach, read
 
     def test_the_backup_stage_reads_through_the_bridge(self):
@@ -3670,13 +3609,12 @@ class StockBackupTests(unittest.TestCase):
         self.assertIn("sonoff-backup", self.inputs["stock_backup"])
 
     def test_carrying_on_without_a_backup_skips_the_stage(self):
-        from tools.autoflash import cli
         self.ctx.state.status = lambda step: "pending"
-        with mock.patch.object(cli, "reach_bridge", return_value="192.168.1.51"), \
-             mock.patch.object(cli, "read_dump", side_effect=OSError("timed out")), \
-             mock.patch.object(cli, "ask_choice", return_value=1), \
-             mock.patch.object(cli, "section"), mock.patch.object(cli, "say"):
-            result = cli.step_backup(self.ctx)
+        with mock.patch.object(installer, "reach_bridge", return_value="192.168.1.51"), \
+             mock.patch.object(dump_stock_flash, "read_dump", side_effect=OSError("timed out")), \
+             mock.patch.object(prompts, "ask_choice", return_value=1), \
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "say"):
+            result = installer.step_backup(self.ctx)
         self.assertEqual(result, {"outcome": "failed", "stage_outcome": "skipped"})
         self.assertEqual(self.inputs["backup_outcome"], "failed")
 
@@ -3729,9 +3667,8 @@ class WifiFromPlugTests(unittest.TestCase):
 
     def read(self, **kwargs):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash, "say"):
-            return autoflash.read_wifi_from_plug(self.ctx(**kwargs))
+        with mock.patch.object(output, "say"):
+            return wifi.read_wifi_from_plug(self.ctx(**kwargs))
 
     def test_the_connected_network_and_its_password_are_read(self):
         self.assertEqual(self.read(), ("Home-2G", "a good password"))
@@ -3757,13 +3694,12 @@ class WifiFromPlugTests(unittest.TestCase):
 
     def test_the_flag_forces_typing_them_instead(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx(forced=True)
         ctx._wifi = None
-        with mock.patch.object(autoflash, "read_wifi_from_plug") as read, \
-             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "say"):
+        with mock.patch.object(wifi, "read_wifi_from_plug") as read, \
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "say"):
             try:
-                autoflash.Context.wifi(ctx)
+                context.Context.wifi(ctx)
             except Exception:
                 pass  # it goes on to the asking path, which needs a real bundle
         read.assert_not_called()
@@ -3773,7 +3709,6 @@ class WifiFromPlugTests(unittest.TestCase):
         # asked the person to type the Wi-Fi details the plug holds.
         import urllib.error
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         for drops, expected in ((1, ("Home-2G", "a good password")), (5, None)):
             ctx = self.ctx()
             answers = ctx.device.command
@@ -3787,18 +3722,17 @@ class WifiFromPlugTests(unittest.TestCase):
 
             ctx.device.command = command
             ctx.device.wait_reachable = mock.Mock()
-            with mock.patch.object(autoflash, "say"):
-                self.assertEqual(autoflash.read_wifi_from_plug(ctx), expected, drops)
-            self.assertEqual(ctx.device.wait_reachable.call_count, min(drops, autoflash.WIFI_READ_TRIES - 1))
+            with mock.patch.object(output, "say"):
+                self.assertEqual(wifi.read_wifi_from_plug(ctx), expected, drops)
+            self.assertEqual(ctx.device.wait_reachable.call_count, min(drops, wifi.WIFI_READ_TRIES - 1))
 
     def test_each_reason_for_not_reading_them_is_said(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         for kwargs, words in (({"connected": None}, "did not say which network"),
                               ({"fail": "command"}, "did not answer as Tasmota"),
                               ({"connected": "Guest"}, "not the network in its first slot")):
-            with mock.patch.object(autoflash, "say") as said:
-                self.assertIsNone(autoflash.read_wifi_from_plug(self.ctx(**kwargs)))
+            with mock.patch.object(output, "say") as said:
+                self.assertIsNone(wifi.read_wifi_from_plug(self.ctx(**kwargs)))
             self.assertIn(words, " ".join(str(c.args[0]) for c in said.call_args_list), kwargs)
 
 
@@ -3809,15 +3743,13 @@ class BackupWifiTests(unittest.TestCase):
 
     def setUp(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        self.af = autoflash
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         (Path(self.tmp.name) / "flash.bin").write_bytes(b"\xff" * 0x20000)
         backup = mock.Mock(directory=Path(self.tmp.name))
-        for patch in (mock.patch.object(autoflash.plugs, "find_backup", return_value=backup),
-                      mock.patch.object(autoflash, "sonoff_backup_wifi", return_value=("Home-2G", "pw")),
-                      mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell")):
+        for patch in (mock.patch.object(plugs, "find_backup", return_value=backup),
+                      mock.patch.object(wifi, "sonoff_backup_wifi", return_value=("Home-2G", "pw")),
+                      mock.patch.object(output, "say"), mock.patch.object(output, "tell")):
             patch.start()
             self.addCleanup(patch.stop)
 
@@ -3831,12 +3763,12 @@ class BackupWifiTests(unittest.TestCase):
     def found(self, *, pinned=None, rebuilds=True, joined=None):
         from unittest import mock
         recovery = mock.Mock(return_value=b"image") if rebuilds else mock.Mock(
-            side_effect=self.af.BundleError("not the pinned password"))
-        with mock.patch.object(self.af, "bundle_ssid", return_value=pinned), \
-                mock.patch.object(self.af, "recovery_image", recovery), \
-                mock.patch.object(self.af.esphome, "api_wifi",
+            side_effect=prepare_imprinted_bundle.BundleError("not the pinned password"))
+        with mock.patch.object(wifi, "bundle_ssid", return_value=pinned), \
+                mock.patch.object(wifi, "recovery_image", recovery), \
+                mock.patch.object(esphome, "api_wifi",
                                   return_value={"signal": -50, "ssid": joined} if joined else None) as api:
-            return self.af.wifi_from_backup(self.ctx()), api
+            return wifi.wifi_from_backup(self.ctx()), api
 
     def test_the_bundle_set_up_for_them_proves_them(self):
         details, api = self.found(pinned="Home-2G")
@@ -3855,19 +3787,19 @@ class BackupWifiTests(unittest.TestCase):
 
     def test_no_backup_gives_nothing(self):
         from unittest import mock
-        with mock.patch.object(self.af.plugs, "find_backup", return_value=None):
-            self.assertIsNone(self.af.wifi_from_backup(self.ctx()))
+        with mock.patch.object(plugs, "find_backup", return_value=None):
+            self.assertIsNone(wifi.wifi_from_backup(self.ctx()))
 
     def test_a_plug_on_esphome_has_them_read_before_dotenv_or_asking(self):
         from unittest import mock
         ctx = self.ctx(source="esphome")
         ctx.adopt_wifi = mock.Mock(side_effect=lambda ssid, password: setattr(ctx, "_wifi", (ssid, password)))
         # .env names another network: taken first, it would be the answer.
-        with mock.patch.object(self.af, "wifi_from_esphome", return_value=None), \
-                mock.patch.object(self.af, "wifi_from_backup", return_value=("Home-2G", "pw")), \
-                mock.patch.object(self.af.credentials, "get", return_value="Elsewhere"), \
-                mock.patch.object(self.af, "read_wifi_from_plug") as off_tasmota:
-            self.assertEqual(self.af.Context.wifi(ctx), ("Home-2G", "pw"))
+        with mock.patch.object(wifi, "wifi_from_esphome", return_value=None), \
+                mock.patch.object(wifi, "wifi_from_backup", return_value=("Home-2G", "pw")), \
+                mock.patch.object(credentials, "get", return_value="Elsewhere"), \
+                mock.patch.object(wifi, "read_wifi_from_plug") as off_tasmota:
+            self.assertEqual(context.Context.wifi(ctx), ("Home-2G", "pw"))
         off_tasmota.assert_not_called()  # a Tasmota is not what runs
         ctx.adopt_wifi.assert_called_once_with("Home-2G", "pw")
         self.assertIs(ctx.state.input("wifi_typed"), False)
@@ -3876,9 +3808,9 @@ class BackupWifiTests(unittest.TestCase):
         from unittest import mock
         ctx = self.ctx(source="esphome")
         ctx.adopt_wifi = mock.Mock(side_effect=lambda ssid, password: setattr(ctx, "_wifi", (ssid, password)))
-        with mock.patch.object(self.af.esphome, "api_wifi_details", return_value=("Home-5", "pw5")), \
-                mock.patch.object(self.af, "wifi_from_backup") as backup:
-            self.assertEqual(self.af.Context.wifi(ctx), ("Home-5", "pw5"))
+        with mock.patch.object(esphome, "api_wifi_details", return_value=("Home-5", "pw5")), \
+                mock.patch.object(wifi, "wifi_from_backup") as backup:
+            self.assertEqual(context.Context.wifi(ctx), ("Home-5", "pw5"))
         backup.assert_not_called()
 
     def test_an_encrypted_api_is_offered_its_key_before_the_wifi_is_asked(self):
@@ -3887,31 +3819,31 @@ class BackupWifiTests(unittest.TestCase):
 
         def details(host, key=None, **_):
             if key is None:
-                raise self.af.esphome.ApiLocked()
+                raise esphome.ApiLocked()
             return ("Home-5", "pw5")
         for choice, typed in ((0, base64.b64encode(key).decode()), (1, None)):
             ctx = self.ctx(source="esphome")
             ctx.adopt_wifi = mock.Mock(side_effect=lambda ssid, password: setattr(ctx, "_wifi", (ssid, password)))
-            with mock.patch.object(self.af.esphome, "api_wifi_details", side_effect=details), \
-                    mock.patch.object(self.af, "wifi_from_backup", return_value=None), \
-                    mock.patch.object(self.af.esphome, "api_access",
+            with mock.patch.object(esphome, "api_wifi_details", side_effect=details), \
+                    mock.patch.object(wifi, "wifi_from_backup", return_value=None), \
+                    mock.patch.object(esphome, "api_access",
                                       side_effect=lambda host, given: "" if given == key else "key"), \
-                    mock.patch.object(self.af.prompts, "UNATTENDED", False), \
-                    mock.patch.object(self.af, "section"), mock.patch.object(self.af.output, "private"), \
-                    mock.patch.object(self.af.output, "transient_begin"), \
-                    mock.patch.object(self.af.output, "transient_end"), \
-                    mock.patch.object(self.af, "bundle_ssid", return_value=None), \
-                    mock.patch.object(self.af, "ask_credentials", return_value=("Typed", "pw")) as typed_wifi, \
-                    mock.patch.object(self.af, "ask_choice", return_value=choice) as menu, \
-                    mock.patch.object(self.af, "ask_secret", return_value=typed):
-                wifi = self.af.Context.wifi(ctx)
+                    mock.patch.object(prompts, "UNATTENDED", False), \
+                    mock.patch.object(prompts, "section"), mock.patch.object(output, "private"), \
+                    mock.patch.object(output, "transient_begin"), \
+                    mock.patch.object(output, "transient_end"), \
+                    mock.patch.object(context, "bundle_ssid", return_value=None), \
+                    mock.patch.object(context, "ask_credentials", return_value=("Typed", "pw")) as typed_wifi, \
+                    mock.patch.object(prompts, "ask_choice", return_value=choice) as menu, \
+                    mock.patch.object(prompts, "ask_secret", return_value=typed):
+                got = context.Context.wifi(ctx)
             self.assertEqual(menu.call_args_list[0].args[1],
                              ["Type its API encryption key", "Type the Wi-Fi details instead"])
             if typed:  # ESPHome gives them, its API unlocked
-                self.assertEqual((wifi, ctx.esphome_key), (("Home-5", "pw5"), key))
+                self.assertEqual((got, ctx.esphome_key), (("Home-5", "pw5"), key))
                 typed_wifi.assert_not_called()
             else:  # typed instead
-                self.assertEqual((wifi, ctx.esphome_key), (("Typed", "pw"), None))
+                self.assertEqual((got, ctx.esphome_key), (("Typed", "pw"), None))
 
 
 class SonoffBackupWifiTests(unittest.TestCase):
@@ -3919,12 +3851,11 @@ class SonoffBackupWifiTests(unittest.TestCase):
 
     def read(self, content):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         from tools.espressif.inspect_stock_nvs import Value
         value = Value(namespace=3, key="content", kind=0x21, chunks={0: content})
-        with mock.patch.object(autoflash.inspect_stock_nvs, "parse",
+        with mock.patch.object(inspect_stock_nvs, "parse",
                                return_value=({3: "frame_params"}, {(3, "content"): value})):
-            return autoflash.sonoff_backup_wifi(b"")
+            return wifi.sonoff_backup_wifi(b"")
 
     def test_the_name_and_password_come_from_frame_params(self):
         self.assertEqual(self.read(b'{"ssid":"Home-2G","passwd":"pw","model":"SN-ESP32C3-S60-01"}\x00'),
@@ -3943,18 +3874,17 @@ class WifiFallbackTests(unittest.TestCase):
     def ctx(self, *, found=None, bundle_for=None):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = SimpleNamespace(args=SimpleNamespace(wifi=False), manifest_path=Path("unused"),
                               state=SimpleNamespace(set_input=lambda *_: None, input=lambda *_: None,
                                                     is_done=lambda _: False),
                               _wifi=None, _recovery=None, esphome_api_locked=False)
-        ctx.remember_wifi = lambda ssid, password, image: autoflash.Context.remember_wifi(
+        ctx.remember_wifi = lambda ssid, password, image: context.Context.remember_wifi(
             ctx, ssid, password, image)
-        ctx.adopt_wifi = lambda ssid, password: autoflash.Context.adopt_wifi(ctx, ssid, password)
+        ctx.adopt_wifi = lambda ssid, password: context.Context.adopt_wifi(ctx, ssid, password)
         self.patches = [
-            mock.patch.object(autoflash, "read_wifi_from_plug", return_value=found),
-            mock.patch.object(autoflash, "bundle_ssid", return_value=bundle_for),
-            mock.patch.object(autoflash, "say"),
+            mock.patch.object(wifi, "read_wifi_from_plug", return_value=found),
+            mock.patch.object(context, "bundle_ssid", return_value=bundle_for),
+            mock.patch.object(output, "say"),
         ]
         for patch in self.patches:
             patch.start()
@@ -3963,15 +3893,14 @@ class WifiFallbackTests(unittest.TestCase):
 
     def test_details_read_off_the_plug_are_pinned_without_asking_or_downloading(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx(found=("Home-2G", "pw"))
-        with mock.patch.object(autoflash, "recovery_image",
-                               side_effect=autoflash.BundleError("no Wi-Fi details yet")), \
-             mock.patch.object(autoflash, "pin_wifi", return_value=b"image") as pin, \
-             mock.patch.object(autoflash, "build_bundle") as rebuild, \
-             mock.patch.object(autoflash, "section") as shown, \
-             mock.patch.object(autoflash, "ask_credentials") as asked:
-            self.assertEqual(autoflash.Context.wifi(ctx), ("Home-2G", "pw"))
+        with mock.patch.object(context, "recovery_image",
+                               side_effect=prepare_imprinted_bundle.BundleError("no Wi-Fi details yet")), \
+             mock.patch.object(context, "pin_wifi", return_value=b"image") as pin, \
+             mock.patch.object(context, "build_bundle") as rebuild, \
+             mock.patch.object(prompts, "section") as shown, \
+             mock.patch.object(context, "ask_credentials") as asked:
+            self.assertEqual(context.Context.wifi(ctx), ("Home-2G", "pw"))
         pin.assert_called_once_with(Path("unused"), "Home-2G", "pw")
         rebuild.assert_not_called()
         asked.assert_not_called()
@@ -3981,36 +3910,33 @@ class WifiFallbackTests(unittest.TestCase):
         # A run stopped at the question, then resumed and read off the plug,
         # must not keep the earlier "typed" mark.
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx(found=("Home-2G", ""))
         recorded = {}
         ctx.state.set_input = lambda key, value: recorded.__setitem__(key, value)
-        with mock.patch.object(autoflash, "recovery_image", return_value=b"image"):
-            self.assertEqual(autoflash.Context.wifi(ctx), ("Home-2G", ""))
+        with mock.patch.object(context, "recovery_image", return_value=b"image"):
+            self.assertEqual(context.Context.wifi(ctx), ("Home-2G", ""))
         self.assertIs(recorded.get("wifi_typed"), False)
 
     def test_when_they_cannot_be_read_the_reason_is_shown_then_both_are_asked(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx(found=None, bundle_for=None)
-        with mock.patch.object(autoflash, "recovery_image",
-                               side_effect=autoflash.BundleError("no Wi-Fi details yet")), \
-             mock.patch.object(autoflash, "pin_wifi", return_value=b"image"), \
-             mock.patch.object(autoflash, "section") as shown, \
-             mock.patch.object(autoflash, "ask_credentials", return_value=("Home-2G", "pw")) as asked:
-            details = autoflash.Context.wifi(ctx, why=["Tasmota is waiting on its setup network."])
+        with mock.patch.object(context, "recovery_image",
+                               side_effect=prepare_imprinted_bundle.BundleError("no Wi-Fi details yet")), \
+             mock.patch.object(context, "pin_wifi", return_value=b"image"), \
+             mock.patch.object(prompts, "section") as shown, \
+             mock.patch.object(context, "ask_credentials", return_value=("Home-2G", "pw")) as asked:
+            details = context.Context.wifi(ctx, why=["Tasmota is waiting on its setup network."])
         self.assertEqual(details, ("Home-2G", "pw"))
         asked.assert_called_once()
         self.assertIn("Tasmota is waiting on its setup network.", shown.call_args.args[1])
 
     def test_a_bundle_the_checkout_cannot_use_is_built_again(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = self.ctx(found=("Home-2G", "pw"))
-        with mock.patch.object(autoflash, "recovery_image", side_effect=autoflash.BundleError("x")), \
-             mock.patch.object(autoflash, "pin_wifi", side_effect=autoflash.BundleError("old")), \
-             mock.patch.object(autoflash, "build_bundle", return_value=(Path("m"), b"image")) as rebuild:
-            autoflash.Context.wifi(ctx)
+        with mock.patch.object(context, "recovery_image", side_effect=prepare_imprinted_bundle.BundleError("x")), \
+             mock.patch.object(context, "pin_wifi", side_effect=prepare_imprinted_bundle.BundleError("old")), \
+             mock.patch.object(context, "build_bundle", return_value=(Path("m"), b"image")) as rebuild:
+            context.Context.wifi(ctx)
         rebuild.assert_called_once()
 
 
@@ -4020,17 +3946,16 @@ class EwelinkAccountTests(unittest.TestCase):
     def email(self, *, remembered=None, chosen=None, choice=0, typed="new@example.com", given=None):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         inputs = {"email": chosen} if chosen else {}
         ctx = SimpleNamespace(state=SimpleNamespace(input=inputs.get,
                                                     set_input=inputs.__setitem__),
                               remember_email=lambda e: inputs.__setitem__("email", e),
                               _given_email=given)
-        with mock.patch.object(autoflash, "load_settings",
+        with mock.patch.object(runs, "load_settings",
                                return_value={"ewelink_email": remembered} if remembered else {}), \
-             mock.patch.object(autoflash, "ask_choice", return_value=choice) as menu, \
-             mock.patch.object(autoflash, "ask_text", return_value=typed) as asked:
-            return autoflash.Context.email(ctx), menu, asked
+             mock.patch.object(prompts, "ask_choice", return_value=choice) as menu, \
+             mock.patch.object(prompts, "ask_text", return_value=typed) as asked:
+            return context.Context.email(ctx), menu, asked
 
     def test_last_time_s_account_is_offered_and_can_be_kept(self):
         email, menu, asked = self.email(remembered="old@example.com", choice=0)
@@ -4069,8 +3994,7 @@ class ConfigureStepTests(unittest.TestCase):
         """A Tasmota's console, recording what it is `sent`: set up as F4 sets
         it once the commands after the reset are in (if it `takes` them)."""
         import json
-        import tools.autoflash.cli as autoflash
-        settled = {"Template": json.loads(autoflash.kinds.SONOFF_S60.tasmota_template("S60TPF")),
+        settled = {"Template": json.loads(kinds.SONOFF_S60.tasmota_template("S60TPF")),
                    "Module": {"Module": {"0": "Sonoff S60TPF"}}, "SaveData": {"SaveData": "ON"},
                    "Hostname": {"Hostname": hostname}, "Module2": {"Module2": {"0": "Sonoff S60TPF"}}}
 
@@ -4082,7 +4006,6 @@ class ConfigureStepTests(unittest.TestCase):
     def test_reset_4_comes_first_and_keeps_the_wifi(self):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         sent = []
         # A Tasmota that does not take the name and template at the reset's save.
         device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
@@ -4091,11 +4014,11 @@ class ConfigureStepTests(unittest.TestCase):
                                  at_next_save=lambda commands, timeout=None: False)
         state = SimpleNamespace(input=lambda key: {"product_model": "S60TPF"}.get(key))
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device, state=state)
-        with mock.patch.object(autoflash, "say") as said:
-            result = autoflash.step_configure(ctx)
+        with mock.patch.object(output, "say") as said:
+            result = tasmota.step_configure(ctx)
         writes = [command for command in sent if " " in command]  # not the questions first
         self.assertEqual(writes[0], "Reset 4")
-        self.assertEqual(writes[1:3], ["SaveData 1", f"Template {autoflash.kinds.SONOFF_S60.tasmota_template('S60TPF')}"])
+        self.assertEqual(writes[1:3], ["SaveData 1", f"Template {kinds.SONOFF_S60.tasmota_template('S60TPF')}"])
         self.assertIn("Sonoff S60TPF", " ".join(str(c.args[0]) for c in said.call_args_list))
         self.assertEqual(result["wifi_route"], "joined by itself")
         self.assertIn("joined your Wi-Fi by itself", " ".join(str(c.args[0]) for c in said.call_args_list))
@@ -4104,7 +4027,6 @@ class ConfigureStepTests(unittest.TestCase):
         # tasmota-abcdef, whatever the plug: its own network takes the name too.
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         sent = []
         device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
                                  uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
@@ -4113,8 +4035,8 @@ class ConfigureStepTests(unittest.TestCase):
         inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
                               state=SimpleNamespace(input=inputs.get))
-        with mock.patch.object(autoflash, "say"):
-            result = autoflash.step_configure(ctx)
+        with mock.patch.object(output, "say"):
+            result = tasmota.step_configure(ctx)
         self.assertIn("Backlog Hostname tasmota-abcdef; Module2 0; Module 0", sent)
         self.assertEqual(result["restarts"], 2)
 
@@ -4122,7 +4044,6 @@ class ConfigureStepTests(unittest.TestCase):
         # Its MQTT, say, set up since it was converted: Reset 4 would erase it.
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         sent = []
         device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
                                  uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
@@ -4131,8 +4052,8 @@ class ConfigureStepTests(unittest.TestCase):
         inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef", "source": "untemplated"}
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
                               state=SimpleNamespace(input=inputs.get))
-        with mock.patch.object(autoflash, "say"):
-            result = autoflash.step_configure(ctx)
+        with mock.patch.object(output, "say"):
+            result = tasmota.step_configure(ctx)
         self.assertNotIn("Reset 4", sent)
         self.assertIn("Backlog Hostname tasmota-abcdef; Module2 0; Module 0", sent)
         self.assertEqual(result["template"], "applied")
@@ -4141,22 +4062,20 @@ class ConfigureStepTests(unittest.TestCase):
         # Generic as the fallback: six quick restarts and the plug switches nothing.
         import json
         from types import SimpleNamespace
-        import tools.autoflash.cli as autoflash
-        template = autoflash.kinds.SONOFF_S60.tasmota_template("S60TPF")
+        template = kinds.SONOFF_S60.tasmota_template("S60TPF")
         answers = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
                    "SaveData": {"SaveData": "ON"}, "Module2": {"Module2": {"1": "ESP32C3"}}}
         device = SimpleNamespace(command=lambda c, timeout=None: answers.get(c))
-        self.assertFalse(autoflash.template_in_place(device, template))
-        self.assertTrue(autoflash.template_in_place(device, template, fallback=False))
+        self.assertFalse(tasmota.template_in_place(device, template))
+        self.assertTrue(tasmota.template_in_place(device, template, fallback=False))
         answers["Module2"] = {"Module2": {"0": "Sonoff S60TPF"}}
-        self.assertTrue(autoflash.template_in_place(device, template))
+        self.assertTrue(tasmota.template_in_place(device, template))
 
     def test_a_template_not_kept_stops_the_step(self):
         # Seen: a run completed on a plug left with no template, which
         # switched nothing - Home Assistant showed its restart button alone.
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
                                  uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
                                  command=self.console([], "tasmota-abcdef", takes=False),
@@ -4164,8 +4083,8 @@ class ConfigureStepTests(unittest.TestCase):
         inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
                               state=SimpleNamespace(input=inputs.get))
-        with mock.patch.object(autoflash, "say"), self.assertRaises(autoflash.Abort):
-            autoflash.step_configure(ctx)
+        with mock.patch.object(output, "say"), self.assertRaises(errors.Abort):
+            tasmota.step_configure(ctx)
 
     def test_named_and_templated_as_the_reset_saves_in_its_one_restart(self):
         # Reset 4 rebuilds Tasmota's defaults, named its own way; the name and
@@ -4175,8 +4094,7 @@ class ConfigureStepTests(unittest.TestCase):
         import json
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        template = autoflash.kinds.SONOFF_S60.tasmota_template("S60TPF")
+        template = kinds.SONOFF_S60.tasmota_template("S60TPF")
         hooked, sent, reset = [], [], []
         settled = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
                    "SaveData": {"SaveData": "ON"}, "Hostname": {"Hostname": "tasmota-abcdef"},
@@ -4195,9 +4113,9 @@ class ConfigureStepTests(unittest.TestCase):
         inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
                               state=SimpleNamespace(input=inputs.get))
-        with mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "back_after_reset") as back, \
-             mock.patch.object(autoflash, "calibrate_tasmota_meter", return_value={}):
-            result = autoflash.step_configure(ctx)
+        with mock.patch.object(output, "say"), mock.patch.object(tasmota, "back_after_reset") as back, \
+             mock.patch.object(tasmota, "calibrate_tasmota_meter", return_value={}):
+            result = tasmota.step_configure(ctx)
         self.assertEqual(hooked, [["Hostname tasmota-abcdef", f"Template {template}", "Module2 0", "Module 0"]])
         self.assertEqual([c for c in sent if " " in c], ["Reset 4"])  # nothing after it
         back.assert_called_once()
@@ -4210,8 +4128,7 @@ class ConfigureStepTests(unittest.TestCase):
         import json
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        template = autoflash.kinds.SONOFF_S60.tasmota_template("S60TPF")
+        template = kinds.SONOFF_S60.tasmota_template("S60TPF")
         answers = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
                    "SaveData": {"SaveData": "ON"}, "Hostname": {"Hostname": "tasmota-abcdef"},
                    "Module2": {"Module2": {"0": "Sonoff S60TPF"}}}
@@ -4229,15 +4146,15 @@ class ConfigureStepTests(unittest.TestCase):
         inputs = {"product_model": "S60TPF", "plug_mac": "12:34:56:ab:cd:ef"}
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device,
                               state=SimpleNamespace(input=inputs.get))
-        with mock.patch.object(autoflash, "say"):
-            result = autoflash.step_configure(ctx)
+        with mock.patch.object(output, "say"):
+            result = tasmota.step_configure(ctx)
         self.assertNotIn("Reset 4", sent)
         self.assertEqual(result["template"], "applied")
         # One set up before it was named so (an earlier version) is done again.
         answers["Hostname"] = {"Hostname": "tasmota-ABCDEF-1234"}
         sent.clear()
-        with mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "back_after_reset"):
-            autoflash.step_configure(ctx)
+        with mock.patch.object(output, "say"), mock.patch.object(tasmota, "back_after_reset"):
+            tasmota.step_configure(ctx)
         self.assertIn("Reset 4", sent)
 
 
@@ -4248,7 +4165,6 @@ class NamedWithTheWifiTests(unittest.TestCase):
     def run_it(self, current, done=()):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         hooked = []
 
         class Plug:
@@ -4266,8 +4182,8 @@ class NamedWithTheWifiTests(unittest.TestCase):
 
         inputs = {"plug_mac": "12:34:56:ab:cd:ef"}
         ctx = SimpleNamespace(state=SimpleNamespace(input=inputs.get, is_done=lambda step: step in done))
-        with mock.patch.object(autoflash, "Device", Plug), mock.patch.object(autoflash, "say"):
-            autoflash.name_with_the_wifi(ctx)
+        with mock.patch.object(device, "Device", Plug), mock.patch.object(output, "say"):
+            join.name_with_the_wifi(ctx)
         return hooked
 
     def test_part_way_through_it_is_the_runs_name_for_it_again(self):
@@ -4290,7 +4206,6 @@ class ErasedTasmotaTests(unittest.TestCase):
     def run_it(self, step="G1", answers=False, network="tasmota-ABCDEF-1234", f4_done=True, in_place=False):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         done = {"D1", "F4"} if f4_done else {"D1"}
         inputs = {"plug_mac": "12:34:56:ab:cd:ef", "plug_ip": "192.168.1.51", "product_model": "S60TPG"}
         # Answers in turn, the last for every ask after; a network in turn likewise.
@@ -4300,16 +4215,16 @@ class ErasedTasmotaTests(unittest.TestCase):
         ctx = SimpleNamespace(device=device, state=SimpleNamespace(
             input=inputs.get, is_done=lambda s: s in done, capture=lambda *a: None))
         clock = iter(range(0, 10_000, 5))
-        with mock.patch.object(autoflash, "find_ssid", side_effect=network if isinstance(network, list)
+        with mock.patch.object(prompts, "find_ssid", side_effect=network if isinstance(network, list)
                                else lambda *a, **k: network) as looked, \
-             mock.patch.object(autoflash, "configure_plug_wifi") as by_hand, \
-             mock.patch.object(autoflash, "template_in_place", return_value=in_place), \
-             mock.patch.object(autoflash, "step_configure") as configured, \
-             mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
-             mock.patch.object(autoflash.time, "sleep"), \
-             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash.output, "progress"), \
-             mock.patch.object(autoflash.output, "progress_clear"):
-            result = autoflash.set_up_if_erased(ctx, step)
+             mock.patch.object(join, "configure_plug_wifi") as by_hand, \
+             mock.patch.object(tasmota, "template_in_place", return_value=in_place), \
+             mock.patch.object(tasmota, "step_configure") as configured, \
+             mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(output, "tell"), mock.patch.object(output, "progress"), \
+             mock.patch.object(output, "progress_clear"):
+            result = runner.set_up_if_erased(ctx, step)
         return result, looked, by_hand, configured
 
     def test_one_just_starting_up_is_left_alone(self):
@@ -4363,18 +4278,17 @@ class ErasedTasmotaTests(unittest.TestCase):
         # seen in the fault suite, G1 there was never helped.
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         inputs = {"plug_mac": "12:34:56:ab:cd:ef", "plug_ip": "192.168.1.51", "product_model": "S60TPG"}
         ctx = SimpleNamespace(device=SimpleNamespace(answers=lambda timeout=None: False,
                                                      wait_reachable=lambda timeout=None: None),
                               state=SimpleNamespace(input=inputs.get, is_done=lambda s: s == "F4",
                                                     capture=lambda *a: None))
-        with mock.patch.object(autoflash, "find_ssid", return_value="tasmota-ABCDEF-1234"), \
-             mock.patch.object(autoflash, "configure_plug_wifi") as by_hand, \
-             mock.patch.object(autoflash, "template_in_place", return_value=True), \
-             mock.patch.object(autoflash, "ERASED_SETTLE", 0.0), \
-             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash.output, "progress_clear"):
-            self.assertTrue(autoflash.set_up_if_erased(ctx, "G1"))
+        with mock.patch.object(prompts, "find_ssid", return_value="tasmota-ABCDEF-1234"), \
+             mock.patch.object(join, "configure_plug_wifi") as by_hand, \
+             mock.patch.object(tasmota, "template_in_place", return_value=True), \
+             mock.patch.object(runner, "ERASED_SETTLE", 0.0), \
+             mock.patch.object(output, "tell"), mock.patch.object(output, "progress_clear"):
+            self.assertTrue(runner.set_up_if_erased(ctx, "G1"))
         by_hand.assert_called_once()
 
     def test_not_at_a_step_of_a_tasmota_with_the_wifi(self):
@@ -4390,14 +4304,13 @@ class SetupNetworkGoneTests(unittest.TestCase):
     def gone(self, answering, visible, network="tasmota-ABCDEF-1234"):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         clock = iter(range(0, 1000, 2))
         ctx = SimpleNamespace(state=SimpleNamespace(input={"plug_mac": "12:34:56:ab:cd:ef"}.get))
-        with mock.patch.object(autoflash.setup_network, "port_open", return_value=answering), \
-             mock.patch.object(autoflash.prompts, "scan_wifi_ssids", return_value=visible), \
-             mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: next(clock)), \
-             mock.patch.object(autoflash.time, "sleep"):
-            return autoflash.setup_network_gone(ctx, network)
+        with mock.patch.object(setup_network, "port_open", return_value=answering), \
+             mock.patch.object(prompts, "scan_wifi_ssids", return_value=visible), \
+             mock.patch.object(time, "monotonic", side_effect=lambda: next(clock)), \
+             mock.patch.object(time, "sleep"):
+            return join.setup_network_gone(ctx, network)
 
     def test_nothing_answering_and_not_listed_is_gone(self):
         self.assertTrue(self.gone(False, ["Home"]))
@@ -4467,7 +4380,6 @@ class PromoteTests(unittest.TestCase):
     def promote(self, failed_before, slots=(0, 1)):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -4482,9 +4394,9 @@ class PromoteTests(unittest.TestCase):
             # What the plug is told, in order; a status read changes nothing.
             command=lambda c, timeout=None: {} if c.startswith("Status") else events.append(c))
         ctx = SimpleNamespace(device=device, state=state, dry_run=False)
-        with mock.patch.object(autoflash, "upload_or_prompt", side_effect=lambda *a: events.append("upload")), \
-             mock.patch.object(autoflash.time, "sleep"), mock.patch.object(autoflash, "say"):
-            autoflash.step_promote(ctx)
+        with mock.patch.object(hub, "upload_or_prompt", side_effect=lambda *a: events.append("upload")), \
+             mock.patch.object(time, "sleep"), mock.patch.object(output, "say"):
+            hub.step_promote(ctx)
         return events
 
     def test_a_slot_not_known_yet_after_the_restart_is_waited_for(self):
@@ -4509,7 +4421,6 @@ class BerryFromStartupTests(unittest.TestCase):
     def x2(self, running, versions=("15.6.0.1(f5b34a2-bluetooth)",)):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         ctx = SimpleNamespace(dry_run=False, device=SimpleNamespace(host="192.168.60.50"),
                               web_password=None, esphome_login=None)
         answers = iter(versions)
@@ -4518,14 +4429,14 @@ class BerryFromStartupTests(unittest.TestCase):
         def wait_for(ctx_, check, what, timeout=240.0):
             seen.append(check("192.168.60.50"))
 
-        with mock.patch.object(autoflash.detect, "identify", return_value=running), \
-             mock.patch.object(autoflash, "step_startup_from_esphome") as x1, \
-             mock.patch.object(autoflash, "upload_or_prompt", return_value="http:12s") as upload, \
-             mock.patch.object(autoflash, "wait_for", side_effect=wait_for), \
-             mock.patch.object(autoflash, "Device", lambda address, timeout=None: SimpleNamespace(
+        with mock.patch.object(detect, "identify", return_value=running), \
+             mock.patch.object(mover, "step_startup_from_esphome") as x1, \
+             mock.patch.object(hub, "upload_or_prompt", return_value="http:12s") as upload, \
+             mock.patch.object(join, "wait_for", side_effect=wait_for), \
+             mock.patch.object(device, "Device", lambda address, timeout=None: SimpleNamespace(
                  firmware_version=lambda: next(answers))), \
-             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
-            result = autoflash.step_berry_from_startup(ctx)
+             mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
+            result = mover.step_berry_from_startup(ctx)
         return result, x1, upload.called, seen
 
     def test_already_on_tasmota_does_nothing(self):
@@ -4558,7 +4469,6 @@ class OfficialTasmotaSeenTests(unittest.TestCase):
     def wait(self, versions, setup=None):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         answers = iter(versions)
         clock = [0.0]
 
@@ -4567,11 +4477,11 @@ class OfficialTasmotaSeenTests(unittest.TestCase):
 
         device = SimpleNamespace(host="192.168.60.50", firmware_version=lambda: next(answers))
         ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.60.50"), device=device)
-        with mock.patch.object(autoflash.time, "sleep", side_effect=sleep), \
-             mock.patch.object(autoflash.time, "monotonic", side_effect=lambda: clock[0]), \
-             mock.patch.object(autoflash, "find_ssid", return_value=setup), \
-             mock.patch.object(autoflash, "say"):
-            return autoflash.wait_for_official(ctx)
+        with mock.patch.object(time, "sleep", side_effect=sleep), \
+             mock.patch.object(time, "monotonic", side_effect=lambda: clock[0]), \
+             mock.patch.object(prompts, "find_ssid", return_value=setup), \
+             mock.patch.object(output, "say"):
+            return tasmota.wait_for_official(ctx)
 
     def test_silence_is_not_tasmota(self):
         outcome = self.wait(["", "", "15.6.0(release-tasmota32)"])
@@ -4582,28 +4492,25 @@ class OfficialTasmotaSeenTests(unittest.TestCase):
 
     def test_one_that_did_not_take_is_sent_again(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash, "upload_to_startup_firmware", return_value="http:20s") as up, \
-             mock.patch.object(autoflash, "wait_for_official",
+        with mock.patch.object(tasmota, "upload_to_startup_firmware", return_value="http:20s") as up, \
+             mock.patch.object(tasmota, "wait_for_official",
                                side_effect=["startup firmware", "rejoined the network"]), \
-             mock.patch.object(autoflash, "tell") as told:
-            how, outcome = autoflash.install_official(object(), Path("tasmota32c3.bin"))
+             mock.patch.object(output, "tell") as told:
+            how, outcome = tasmota.install_official(object(), Path("tasmota32c3.bin"))
         self.assertEqual((up.call_count, outcome), (2, "rejoined the network"))
         self.assertIn("did not take", " ".join(str(c.args[0]) for c in told.call_args_list))
 
     def test_three_that_do_not_take_stop_with_the_reason(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
-        with mock.patch.object(autoflash, "upload_to_startup_firmware", return_value="http:20s"), \
-             mock.patch.object(autoflash, "wait_for_official", return_value="startup firmware"), \
-             mock.patch.object(autoflash, "tell"):
-            with self.assertRaisesRegex(autoflash.Abort, "did not take"):
-                autoflash.install_official(object(), Path("tasmota32c3.bin"))
+        with mock.patch.object(tasmota, "upload_to_startup_firmware", return_value="http:20s"), \
+             mock.patch.object(tasmota, "wait_for_official", return_value="startup firmware"), \
+             mock.patch.object(output, "tell"):
+            with self.assertRaisesRegex(errors.Abort, "did not take"):
+                tasmota.install_official(object(), Path("tasmota32c3.bin"))
 
     def test_f4_finding_the_startup_firmware_sends_official_tasmota_again(self):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         on_startup = [True]
         device = SimpleNamespace(wait_reachable=lambda **_: None, is_safeboot=lambda: on_startup[0],
                                  command=lambda c, timeout=None: None)
@@ -4614,10 +4521,10 @@ class OfficialTasmotaSeenTests(unittest.TestCase):
             on_startup[0] = False
             return "http:20s", "rejoined the network"
 
-        with mock.patch.object(autoflash, "install_official", side_effect=installed) as install, \
-             mock.patch.object(autoflash, "template_in_place", return_value=True), \
-             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
-            autoflash.step_configure(ctx)
+        with mock.patch.object(tasmota, "install_official", side_effect=installed) as install, \
+             mock.patch.object(tasmota, "template_in_place", return_value=True), \
+             mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
+            tasmota.step_configure(ctx)
         install.assert_called_once()
 
 
@@ -4629,7 +4536,6 @@ class BackAfterResetTests(unittest.TestCase):
     def back(self, reboot_ok, setup):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         from tools.autoflash.device import DeviceError
 
         def wait_for_reboot(**kwargs):
@@ -4639,14 +4545,14 @@ class BackAfterResetTests(unittest.TestCase):
 
         device = SimpleNamespace(wait_for_reboot=wait_for_reboot, wait_reachable=mock.Mock())
         ctx = SimpleNamespace(device=device, state=SimpleNamespace(input=lambda key: None))
-        with mock.patch.object(autoflash, "find_ssid", return_value=setup) as looked, \
-             mock.patch.object(autoflash, "setup_networks", return_value=("tasmota-ABCDEF-1234",)), \
-             mock.patch.object(autoflash, "configure_plug_wifi") as configured, \
-             mock.patch.object(autoflash, "tell"), mock.patch.object(autoflash, "say"):
+        with mock.patch.object(prompts, "find_ssid", return_value=setup) as looked, \
+             mock.patch.object(names, "setup_networks", return_value=("tasmota-ABCDEF-1234",)), \
+             mock.patch.object(join, "configure_plug_wifi") as configured, \
+             mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
             try:
-                autoflash.back_after_reset(ctx, "boot", 12)
+                tasmota.back_after_reset(ctx, "boot", 12)
                 outcome = "back"
-            except autoflash.Abort as exc:
+            except errors.Abort as exc:
                 outcome = str(exc)
         return outcome, looked.called, configured.call_args
 
@@ -4672,7 +4578,6 @@ class RefusedUploadTests(unittest.TestCase):
     def upload(self, outcomes):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         tries = iter(outcomes)
         sent = []
 
@@ -4683,10 +4588,10 @@ class RefusedUploadTests(unittest.TestCase):
                 raise outcome
 
         ctx = SimpleNamespace(device=SimpleNamespace(upload_firmware=upload_firmware))
-        with mock.patch.object(autoflash, "upload_or_prompt_by_hand", return_value="manual") as by_hand, \
-             mock.patch.object(autoflash.time, "sleep"), \
-             mock.patch.object(autoflash, "tell") as told, mock.patch.object(autoflash, "say"):
-            result = autoflash.upload_or_prompt(ctx, Path("berry.bin"), "Berry Tasmota")
+        with mock.patch.object(hub, "upload_or_prompt_by_hand", return_value="manual") as by_hand, \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(output, "tell") as told, mock.patch.object(output, "say"):
+            result = hub.upload_or_prompt(ctx, Path("berry.bin"), "Berry Tasmota")
         return result, len(sent), by_hand.called, " ".join(str(c.args[0]) for c in told.call_args_list)
 
     def test_one_refusal_is_sent_again(self):
@@ -4714,7 +4619,6 @@ class StalledUploadTests(unittest.TestCase):
     def upload(self, uploads, back=True, restart_answers=True):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         events = []
         tries = iter(uploads)
 
@@ -4737,13 +4641,13 @@ class StalledUploadTests(unittest.TestCase):
 
         ctx = SimpleNamespace(device=SimpleNamespace(upload_firmware=upload_firmware, command=command,
                                                      reachable=reachable))
-        with mock.patch.object(autoflash, "recovery_firmware_up", return_value=back), \
-             mock.patch.object(autoflash, "upload_or_prompt_by_hand", return_value="manual") as by_hand, \
-             mock.patch.object(autoflash.time, "sleep"), \
-             mock.patch.object(autoflash, "tell") as told, mock.patch.object(autoflash, "say"):
+        with mock.patch.object(tasmota, "recovery_firmware_up", return_value=back), \
+             mock.patch.object(hub, "upload_or_prompt_by_hand", return_value="manual") as by_hand, \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(output, "tell") as told, mock.patch.object(output, "say"):
             try:
-                result = autoflash.upload_to_startup_firmware(ctx, Path("tasmota32c3.bin"))
-            except autoflash.Abort as exc:
+                result = tasmota.upload_to_startup_firmware(ctx, Path("tasmota32c3.bin"))
+            except errors.Abort as exc:
                 result = exc
         return result, events, by_hand.called, " ".join(str(c.args[0]) for c in told.call_args_list)
 
@@ -4782,9 +4686,8 @@ class StalledUploadTests(unittest.TestCase):
         self.assertFalse(by_hand)
 
     def test_one_that_never_comes_back_stops_with_a_reason(self):
-        from tools.autoflash import cli
         result, _, by_hand, _ = self.upload([TimeoutError("stalled")], back=False)
-        self.assertIsInstance(result, cli.Abort)
+        self.assertIsInstance(result, errors.Abort)
         self.assertFalse(by_hand)
 
 
@@ -4796,36 +4699,35 @@ class MoverOwnNetworkTests(unittest.TestCase):
     def wait(self, answers, network=None, sends=(None,), joined_already=False, unattended=False):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         tries = iter(answers)
         outcomes = iter(sends)
 
         def wait_for(ctx, check, what, timeout=240.0):
             if not next(tries):
-                raise autoflash.Abort(f"{what} did not answer within 4 minutes")
+                raise errors.Abort(f"{what} did not answer within 4 minutes")
 
         def send(ssid, password):
             outcome = next(outcomes, None)
             if outcome:
-                raise autoflash.setup_network.SetupError(outcome)
+                raise setup_network.SetupError(outcome)
 
         adopted = []
         ctx = SimpleNamespace(state=SimpleNamespace(input=lambda key: "12:34:56:ab:cd:ef"),
                               _wifi=("Home", "pw0"), wifi=lambda why=None: ("Home", "pw0"),
                               adopt_wifi=lambda ssid, pw: adopted.append((ssid, pw)))
         self.home_waits = 0
-        with mock.patch.object(autoflash, "wait_for", side_effect=wait_for) as waited, \
-             mock.patch.object(autoflash, "find_ssid", return_value=network), \
-             mock.patch.object(autoflash, "on_a_plug_network", return_value=joined_already), \
-             mock.patch.object(autoflash, "ask_credentials", return_value=("NewHome", "pw")), \
-             mock.patch.object(autoflash.prompts, "UNATTENDED", unattended), \
-             mock.patch.object(autoflash, "wait_until_joined"), \
-             mock.patch.object(autoflash.time, "sleep"), \
-             mock.patch.object(autoflash.setup_network, "send_esphome_wifi", side_effect=send) as sent, \
-             mock.patch.object(autoflash, "section"), mock.patch.object(autoflash, "tell"):
+        with mock.patch.object(join, "wait_for", side_effect=wait_for) as waited, \
+             mock.patch.object(prompts, "find_ssid", return_value=network), \
+             mock.patch.object(join, "on_a_plug_network", return_value=joined_already), \
+             mock.patch.object(join, "ask_credentials", return_value=("NewHome", "pw")), \
+             mock.patch.object(prompts, "UNATTENDED", unattended), \
+             mock.patch.object(join, "wait_until_joined"), \
+             mock.patch.object(time, "sleep"), \
+             mock.patch.object(setup_network, "send_esphome_wifi", side_effect=send) as sent, \
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "tell"):
             try:
-                result = autoflash.wait_for_mover(ctx, "the mover")
-            except autoflash.Abort as exc:
+                result = mover.wait_for_mover(ctx, "the mover")
+            except errors.Abort as exc:
                 result = exc
             self.home_waits = waited.call_count
         return result, sent, adopted
@@ -4849,8 +4751,7 @@ class MoverOwnNetworkTests(unittest.TestCase):
 
     def test_unattended_it_stops_rather_than_asking(self):
         result, _, _ = self.wait([False, False], network="autoflash-recovery-CDEF", unattended=True)
-        from tools.autoflash import cli
-        self.assertIsInstance(result, cli.Abort)
+        self.assertIsInstance(result, errors.Abort)
         self.assertIn("did not join 'Home'", str(result))
 
     def test_a_send_that_gets_no_answer_is_tried_again(self):
@@ -4867,8 +4768,7 @@ class MoverOwnNetworkTests(unittest.TestCase):
 
     def test_neither_says_to_switch_it_off_and_on(self):
         result, sent, _ = self.wait([False], network=None)
-        from tools.autoflash import cli
-        self.assertIsInstance(result, cli.Abort)
+        self.assertIsInstance(result, errors.Abort)
         self.assertIn("switch the plug off and on", str(result))
         self.assertIn("autoflash-recovery-CDEF", str(result))
 
@@ -4886,14 +4786,13 @@ class StartupSettingsReportTests(unittest.TestCase):
     def report(self, lines=None, error=None):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
 
         def console_log(**_):
             if error:
                 raise error
             return lines
-        with mock.patch.object(autoflash, "say") as said:
-            note = autoflash.startup_settings_report(SimpleNamespace(console_log=console_log))
+        with mock.patch.object(output, "say") as said:
+            note = tasmota.startup_settings_report(SimpleNamespace(console_log=console_log))
         return note, " ".join(str(c.args[0]) for c in said.call_args_list)
 
     def test_a_saved_record_is_reported(self):
@@ -4926,11 +4825,10 @@ class DeliveryPortTests(unittest.TestCase):
     def run_bridge(self, busy):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / autoflash.safety_locks.DIR).mkdir(parents=True)
-            (root / autoflash.safety_locks.DIR / "RECOVERY_LOCK").write_text("locked")
+            (root / safety_locks.DIR).mkdir(parents=True)
+            (root / safety_locks.DIR / "RECOVERY_LOCK").write_text("locked")
             state = RunState.open(root)
             state.set_input("plug_ip", "192.168.1.96")
             state.set_input("stock_version", "1.2.0")
@@ -4938,18 +4836,18 @@ class DeliveryPortTests(unittest.TestCase):
                                   listen_ip=lambda: "192.168.1.141", email=lambda: "me@example.com",
                                   ewelink_env=lambda: {})
             opened = []
-            with mock.patch.object(autoflash, "ROOT", root), \
-                 mock.patch.object(autoflash.hostsys, "port_is_free", lambda ip, port: port not in busy), \
-                 mock.patch.object(autoflash, "ensure_firewall",
-                                   lambda c: opened.append(autoflash.firewall_ports(c))), \
-                 mock.patch.object(autoflash, "warning_box"), \
-                 mock.patch.object(autoflash, "require_word", return_value=True), \
-                 mock.patch.object(autoflash, "run_tool", return_value=0) as run_tool, \
-                 mock.patch.object(autoflash, "say"):
+            with mock.patch.object(runs, "ROOT", root), \
+                 mock.patch.object(hostsys, "port_is_free", lambda ip, port: port not in busy), \
+                 mock.patch.object(firewall, "ensure_firewall",
+                                   lambda c: opened.append(firewall.firewall_ports(c))), \
+                 mock.patch.object(prompts, "warning_box"), \
+                 mock.patch.object(prompts, "require_word", return_value=True), \
+                 mock.patch.object(hostsys, "run_tool", return_value=0) as run_tool, \
+                 mock.patch.object(output, "say"):
                 try:
-                    autoflash.step_bridge(ctx)
+                    installer.step_bridge(ctx)
                     error = None
-                except autoflash.Abort as exc:
+                except errors.Abort as exc:
                     error = str(exc)
             command = run_tool.call_args.args[0] if run_tool.called else None
             port = command[command.index("--listen-port") + 1] if command else None
@@ -4979,7 +4877,6 @@ class PhasePortTests(unittest.TestCase):
     def runner(self, busy, delivered="8088"):
         from types import SimpleNamespace
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         with tempfile.TemporaryDirectory() as directory:
             state = RunState.open(Path(directory))
             state.set_input("delivery_port", delivered)
@@ -4987,15 +4884,15 @@ class PhasePortTests(unittest.TestCase):
                                   listen_ip=lambda: "192.168.1.141", device=object(),
                                   recovery_bytes=lambda: None)
             opened = []
-            with mock.patch.object(autoflash.hostsys, "port_is_free", lambda ip, port: port not in busy), \
-                 mock.patch.object(autoflash, "ensure_firewall",
-                                   lambda c: opened.append(autoflash.firewall_ports(c))), \
-                 mock.patch.object(autoflash, "PhaseRunner") as runner, \
-                 mock.patch.object(autoflash, "say"):
+            with mock.patch.object(hostsys, "port_is_free", lambda ip, port: port not in busy), \
+                 mock.patch.object(firewall, "ensure_firewall",
+                                   lambda c: opened.append(firewall.firewall_ports(c))), \
+                 mock.patch.object(context, "PhaseRunner") as runner, \
+                 mock.patch.object(output, "say"):
                 try:
-                    autoflash.Context.phase_runner(ctx)
+                    context.Context.phase_runner(ctx)
                     error = None
-                except autoflash.Abort as exc:
+                except errors.Abort as exc:
                     error = str(exc)
             port = runner.call_args.kwargs["listen_port"] if runner.called else None
             return port, opened, state.input("phase_port"), error
@@ -5019,8 +4916,7 @@ class TemplateNameTests(unittest.TestCase):
 
     def template(self, product):
         import json
-        import tools.autoflash.cli as autoflash
-        return json.loads(autoflash.kinds.SONOFF_S60.tasmota_template(product))
+        return json.loads(kinds.SONOFF_S60.tasmota_template(product))
 
     def test_each_region_gets_its_own_name(self):
         self.assertEqual(self.template("S60TPG")["NAME"], "Sonoff S60TPG")
@@ -5033,9 +4929,8 @@ class TemplateNameTests(unittest.TestCase):
 
     def test_the_wiring_is_the_tested_s60tpg_template(self):
         # Byte for byte the template proven on the UK plugs, apart from the name.
-        import tools.autoflash.cli as autoflash
         self.assertEqual(
-            autoflash.kinds.SONOFF_S60.tasmota_template("S60TPG"),
+            kinds.SONOFF_S60.tasmota_template("S60TPG"),
             '{"NAME":"Sonoff S60TPG","GPIO":[1,1,1,1,224,544,1,3104,1,32,1,0,0,0,0,0,0,0,'
             '1,1,1,1],"FLAG":0,"BASE":1}',
         )
@@ -5046,27 +4941,24 @@ class BridgeEvidenceTests(unittest.TestCase):
 
     def test_bridge_on_the_home_network_counts(self):
         from unittest import mock
-        from tools.autoflash import cli
-        with mock.patch.object(cli, "bridge_on_home_network", return_value="192.168.0.50"), \
-             mock.patch.object(cli, "find_ssid", return_value=None):
-            installed, reason = cli.evidence_bridge_installed(mock.Mock())
+        with mock.patch.object(installer, "bridge_on_home_network", return_value="192.168.0.50"), \
+             mock.patch.object(prompts, "find_ssid", return_value=None):
+            installed, reason = installer.evidence_bridge_installed(mock.Mock())
         self.assertTrue(installed)
         self.assertIn("192.168.0.50", reason)
 
     def test_its_own_network_still_counts(self):
         from unittest import mock
-        from tools.autoflash import cli
-        with mock.patch.object(cli, "bridge_on_home_network", return_value=None), \
-             mock.patch.object(cli, "find_ssid", return_value="autoflash-recovery-CDEF"):
-            installed, _ = cli.evidence_bridge_installed(self.ctx())
+        with mock.patch.object(installer, "bridge_on_home_network", return_value=None), \
+             mock.patch.object(prompts, "find_ssid", return_value="autoflash-recovery-CDEF"):
+            installed, _ = installer.evidence_bridge_installed(self.ctx())
         self.assertTrue(installed)
 
     def test_neither_is_not_proof_of_failure(self):
         from unittest import mock
-        from tools.autoflash import cli
-        with mock.patch.object(cli, "bridge_on_home_network", return_value=None), \
-             mock.patch.object(cli, "find_ssid", return_value=None):
-            installed, _ = cli.evidence_bridge_installed(self.ctx())
+        with mock.patch.object(installer, "bridge_on_home_network", return_value=None), \
+             mock.patch.object(prompts, "find_ssid", return_value=None):
+            installed, _ = installer.evidence_bridge_installed(self.ctx())
         self.assertIsNone(installed)
 
     def ctx(self):
@@ -5080,10 +4972,9 @@ class JoinBridgeTests(unittest.TestCase):
 
     def shown(self, network):
         from unittest import mock
-        from tools.autoflash import cli
-        with mock.patch.object(cli, "section") as section, \
-             mock.patch.object(cli.hostsys, "copy_to_clipboard", return_value=False) as copied:
-            cli.ask_to_join_bridge(network)
+        with mock.patch.object(prompts, "section") as section, \
+             mock.patch.object(hostsys, "copy_to_clipboard", return_value=False) as copied:
+            installer.ask_to_join_bridge(network)
         return " ".join(section.call_args.args[1]), copied.called
 
     def test_open_no_password(self):
@@ -5103,17 +4994,16 @@ class JoinBridgeTests(unittest.TestCase):
 class LeftLockTests(unittest.TestCase):
     def test_a_lock_left_moved_aside_by_a_stopped_run_is_put_back(self):
         from unittest import mock
-        import tools.autoflash.cli as autoflash
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / autoflash.safety_locks.DIR).mkdir(parents=True)
-            (root / autoflash.safety_locks.DIR / "RECOVERY_LOCK.owner-authorized").write_text("locked\n")
-            (root / autoflash.safety_locks.DIR / "REPARTITION_LOCK").write_text("locked\n")
-            with mock.patch.object(autoflash, "ROOT", root), mock.patch.object(autoflash, "say"):
-                autoflash.restore_left_locks()
-            self.assertTrue((root / autoflash.safety_locks.DIR / "RECOVERY_LOCK").exists())
-            self.assertFalse((root / autoflash.safety_locks.DIR / "RECOVERY_LOCK.owner-authorized").exists())
-            self.assertTrue((root / autoflash.safety_locks.DIR / "REPARTITION_LOCK").exists())
+            (root / safety_locks.DIR).mkdir(parents=True)
+            (root / safety_locks.DIR / "RECOVERY_LOCK.owner-authorized").write_text("locked\n")
+            (root / safety_locks.DIR / "REPARTITION_LOCK").write_text("locked\n")
+            with mock.patch.object(runs, "ROOT", root), mock.patch.object(output, "say"):
+                safety_locks.restore_left_locks(runs.ROOT)
+            self.assertTrue((root / safety_locks.DIR / "RECOVERY_LOCK").exists())
+            self.assertFalse((root / safety_locks.DIR / "RECOVERY_LOCK.owner-authorized").exists())
+            self.assertTrue((root / safety_locks.DIR / "REPARTITION_LOCK").exists())
 
 
 class ComputerDescriptionTests(unittest.TestCase):
@@ -5121,15 +5011,14 @@ class ComputerDescriptionTests(unittest.TestCase):
 
     def describe(self, release, build, product_type=1):
         from types import SimpleNamespace
-        import tools.autoflash.cli as autoflash
         from tools.autoflash import hostsys
         winver = SimpleNamespace(product_type=product_type)
         with mock.patch.object(hostsys, "IS_WINDOWS", True), \
-                mock.patch.object(autoflash.platform, "release", return_value=release), \
-                mock.patch.object(autoflash.platform, "version", return_value=build), \
-                mock.patch.object(autoflash.sys, "getwindowsversion",
+                mock.patch.object(platform, "release", return_value=release), \
+                mock.patch.object(platform, "version", return_value=build), \
+                mock.patch.object(sys, "getwindowsversion",
                                   return_value=winver, create=True):
-            return autoflash.computer_description()
+            return report.computer_description()
 
     def test_windows_10_stays_10(self):
         self.assertEqual(self.describe("10", "10.0.19045"), "Windows 10 (build 10.0.19045)")
@@ -5149,24 +5038,22 @@ class FirmwareSearchCase(unittest.TestCase):
     """find_current_firmware with the plug and the network stood in for."""
 
     def setUp(self):
-        import tools.autoflash.cli as autoflash
-        self.af = autoflash
         self.private = mock.Mock()
-        for patch in (mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"),
-                      mock.patch.object(autoflash, "section"),
-                      mock.patch.object(autoflash.output, "transient_begin"),
-                      mock.patch.object(autoflash.output, "transient_end"),
-                      mock.patch.object(autoflash.output, "private", self.private),
-                      mock.patch.object(autoflash.prompts, "UNATTENDED", False),
-                      mock.patch.object(autoflash.prompts, "answered_unattended"),
-                      mock.patch.object(autoflash, "adopt_plug"),
-                      mock.patch.object(autoflash, "converted_here", return_value=False),
-                      mock.patch.object(autoflash.plugs, "PLUGS", Path("/nonexistent/plugs")),
-                      mock.patch.object(autoflash.hostsys, "local_ip_towards", return_value="192.168.0.110"),
-                      mock.patch.object(autoflash.hostsys, "mac_of", return_value="12:34:56:ab:cd:ef"),
+        for patch in (mock.patch.object(output, "say"), mock.patch.object(output, "tell"),
+                      mock.patch.object(prompts, "section"),
+                      mock.patch.object(output, "transient_begin"),
+                      mock.patch.object(output, "transient_end"),
+                      mock.patch.object(output, "private", self.private),
+                      mock.patch.object(prompts, "UNATTENDED", False),
+                      mock.patch.object(prompts, "answered_unattended"),
+                      mock.patch.object(source, "adopt_plug"),
+                      mock.patch.object(source, "converted_here", return_value=False),
+                      mock.patch.object(plugs, "PLUGS", Path("/nonexistent/plugs")),
+                      mock.patch.object(hostsys, "local_ip_towards", return_value="192.168.0.110"),
+                      mock.patch.object(hostsys, "mac_of", return_value="12:34:56:ab:cd:ef"),
                       # A question no test expects fails it, rather than waiting on a keyboard.
-                      mock.patch.object(autoflash, "ask_choice", side_effect=AssertionError("asked")),
-                      mock.patch.object(autoflash, "ask_secret", side_effect=AssertionError("asked"))):
+                      mock.patch.object(prompts, "ask_choice", side_effect=AssertionError("asked")),
+                      mock.patch.object(prompts, "ask_secret", side_effect=AssertionError("asked"))):
             patch.start()
             self.addCleanup(patch.stop)
         # The plug's Tasmota wants this password, and none other - until it is
@@ -5176,7 +5063,7 @@ class FirmwareSearchCase(unittest.TestCase):
         def plug(host, user=None, password=None, timeout=10.0):
             return mock.Mock(host=host, wants_password=mock.Mock(
                 side_effect=lambda *_: self.wanted is not None and password != self.wanted))
-        patch = mock.patch.object(autoflash, "Device", side_effect=plug)
+        patch = mock.patch.object(device, "Device", side_effect=plug)
         patch.start()
         self.addCleanup(patch.stop)
 
@@ -5195,11 +5082,11 @@ class TasmotaWebPasswordTests(FirmwareSearchCase):
     def test_a_plug_given_by_address_is_asked_for_it_then_found(self):
         ctx = self.ctx(plug_ip="192.168.0.137")
         answers = {None: "locked", "s3cret-71": "tasmota"}
-        with mock.patch.object(self.af.detect, "identify",
+        with mock.patch.object(detect, "identify",
                                side_effect=lambda host, password=None, **_: answers[password]), \
-                mock.patch.object(self.af, "ask_choice", return_value=0) as menu, \
-                mock.patch.object(self.af, "ask_secret", side_effect=["not-it-9", "s3cret-71"]) as asked:
-            self.assertEqual(self.af.find_current_firmware(ctx), "tasmota")
+                mock.patch.object(prompts, "ask_choice", return_value=0) as menu, \
+                mock.patch.object(prompts, "ask_secret", side_effect=["not-it-9", "s3cret-71"]) as asked:
+            self.assertEqual(source.find_current_firmware(ctx), "tasmota")
         self.assertEqual(asked.call_count, 2)  # the wrong one refused on the plug
         self.assertEqual(menu.call_args.args[1][0], "Type its web password")
         self.assertIn("once you have removed it yourself", menu.call_args.args[1][1])
@@ -5207,19 +5094,19 @@ class TasmotaWebPasswordTests(FirmwareSearchCase):
         self.private.assert_any_call("s3cret-71", "tasmota-password")  # kept out of the log
 
     def test_unattended_it_stops_saying_what_to_give(self):
-        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
-                mock.patch.object(self.af.detect, "identify", return_value="locked"), \
-                mock.patch.object(self.af, "ask_secret") as asked:
-            with self.assertRaisesRegex(self.af.Abort, "web password.*--web-password.*AUTOFLASH_TASMOTA_PASSWORD"):
-                self.af.find_current_firmware(self.ctx(plug_ip="192.168.0.137"))
+        with mock.patch.object(prompts, "UNATTENDED", True), \
+                mock.patch.object(detect, "identify", return_value="locked"), \
+                mock.patch.object(prompts, "ask_secret") as asked:
+            with self.assertRaisesRegex(errors.Abort, "web password.*--web-password.*AUTOFLASH_TASMOTA_PASSWORD"):
+                source.find_current_firmware(self.ctx(plug_ip="192.168.0.137"))
         asked.assert_not_called()
 
     def test_asked_again_until_it_takes_one_or_the_run_is_stopped(self):
-        with mock.patch.object(self.af.detect, "identify", return_value="locked"), \
-                mock.patch.object(self.af, "ask_choice", side_effect=[0, 0, self.af.QuitRun("quit")]), \
-                mock.patch.object(self.af, "ask_secret", return_value="not-it-9") as asked:
-            with self.assertRaises(self.af.QuitRun):
-                self.af.find_current_firmware(self.ctx(plug_ip="192.168.0.137"))
+        with mock.patch.object(detect, "identify", return_value="locked"), \
+                mock.patch.object(prompts, "ask_choice", side_effect=[0, 0, prompts.QuitRun("quit")]), \
+                mock.patch.object(prompts, "ask_secret", return_value="not-it-9") as asked:
+            with self.assertRaises(prompts.QuitRun):
+                source.find_current_firmware(self.ctx(plug_ip="192.168.0.137"))
         self.assertEqual(asked.call_count, 2)
 
     def test_trying_again_once_it_is_cleared_goes_on_without_one(self):
@@ -5233,69 +5120,69 @@ class TasmotaWebPasswordTests(FirmwareSearchCase):
                 self.wanted = None  # cleared on the plug before choosing again
             return 1
         answers = {None: "locked", "s3cret-71": "tasmota"}
-        with mock.patch.object(self.af.detect, "identify",
+        with mock.patch.object(detect, "identify",
                                side_effect=lambda host, password=None, **_: answers[password]
                                if self.wanted else "tasmota"), \
-                mock.patch.object(self.af, "ask_choice", side_effect=try_again), \
-                mock.patch.object(self.af, "ask_secret") as asked:
-            self.assertEqual(self.af.find_current_firmware(ctx), "tasmota")
+                mock.patch.object(prompts, "ask_choice", side_effect=try_again), \
+                mock.patch.object(prompts, "ask_secret") as asked:
+            self.assertEqual(source.find_current_firmware(ctx), "tasmota")
         asked.assert_not_called()
         self.assertIsNone(ctx.web_password)
-        self.af.tell.assert_any_call("    Tasmota there still has a web password.")  # tried too soon
+        output.tell.assert_any_call("    Tasmota there still has a web password.")  # tried too soon
 
     def test_found_on_the_network_it_is_offered_and_asked_for_once_chosen(self):
-        locked = self.af.detect.Found("192.168.0.42", "locked", "12:34:56:ab:cd:ef")
-        with mock.patch.object(self.af.detect, "converted_plugs", return_value=[locked]), \
-                mock.patch.object(self.af.detect, "identify", return_value="tasmota") as identify, \
-                mock.patch.object(self.af, "ask_choice", side_effect=[0, 0]) as menu, \
-                mock.patch.object(self.af, "ask_secret", return_value="s3cret-71"):
-            self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
+        locked = detect.Found("192.168.0.42", "locked", "12:34:56:ab:cd:ef")
+        with mock.patch.object(detect, "converted_plugs", return_value=[locked]), \
+                mock.patch.object(detect, "identify", return_value="tasmota") as identify, \
+                mock.patch.object(prompts, "ask_choice", side_effect=[0, 0]) as menu, \
+                mock.patch.object(prompts, "ask_secret", return_value="s3cret-71"):
+            self.assertEqual(source.find_current_firmware(self.ctx()), "tasmota")
         self.assertIn("web password", menu.call_args_list[0].args[1][0])  # the plug, then its password
         identify.assert_called_with("192.168.0.42", password="s3cret-71", esphome_login=None)
-        chosen = self.af.adopt_plug.call_args.args[1]
+        chosen = source.adopt_plug.call_args.args[1]
         self.assertEqual((chosen.host, chosen.firmware), ("192.168.0.42", "tasmota"))
 
     def test_unattended_one_found_locked_is_left_out_and_named(self):
-        found = [self.af.detect.Found("192.168.0.137", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF"),
-                 self.af.detect.Found("192.168.0.42", "locked", "aa:bb:cc:dd:ee:ff")]
-        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
-                mock.patch.object(self.af.detect, "converted_plugs", return_value=found), \
-                mock.patch.object(self.af, "ask_choice") as menu:
-            self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
+        found = [detect.Found("192.168.0.137", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF"),
+                 detect.Found("192.168.0.42", "locked", "aa:bb:cc:dd:ee:ff")]
+        with mock.patch.object(prompts, "UNATTENDED", True), \
+                mock.patch.object(detect, "converted_plugs", return_value=found), \
+                mock.patch.object(prompts, "ask_choice") as menu:
+            self.assertEqual(source.find_current_firmware(self.ctx()), "tasmota")
         menu.assert_not_called()  # the one S60 that answered is the plug, as before
-        self.assertEqual(self.af.adopt_plug.call_args.args[1].host, "192.168.0.137")
-        told = " ".join(str(call.args[0]) for call in self.af.tell.call_args_list)
+        self.assertEqual(source.adopt_plug.call_args.args[1].host, "192.168.0.137")
+        told = " ".join(str(call.args[0]) for call in output.tell.call_args_list)
         self.assertIn("192.168.0.42", told)
         self.assertIn("--web-password", told)
 
     def test_unattended_a_plug_this_computer_converted_found_locked_stops_the_run(self):
         # Gone on to Sonoff's route instead, the run would fail later, and less clearly.
-        locked = [self.af.detect.Found("192.168.0.42", "locked", "12:34:56:ab:cd:ef")]
+        locked = [detect.Found("192.168.0.42", "locked", "12:34:56:ab:cd:ef")]
         with tempfile.TemporaryDirectory() as directory:
             (Path(directory) / "12-34-56-ab-cd-ef").mkdir()
-            with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
-                    mock.patch.object(self.af.plugs, "PLUGS", Path(directory)), \
-                    mock.patch.object(self.af.detect, "converted_plugs", return_value=locked):
-                with self.assertRaisesRegex(self.af.Abort, "192.168.0.42 has a web password.*--web-password"):
-                    self.af.find_current_firmware(self.ctx())
+            with mock.patch.object(prompts, "UNATTENDED", True), \
+                    mock.patch.object(plugs, "PLUGS", Path(directory)), \
+                    mock.patch.object(detect, "converted_plugs", return_value=locked):
+                with self.assertRaisesRegex(errors.Abort, "192.168.0.42 has a web password.*--web-password"):
+                    source.find_current_firmware(self.ctx())
             # One it does not know is only named: the plug may be on Sonoff's firmware still.
-            with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
-                    mock.patch.object(self.af.plugs, "PLUGS", Path(directory) / "none"), \
-                    mock.patch.object(self.af.detect, "converted_plugs", return_value=locked):
-                self.assertEqual(self.af.find_current_firmware(self.ctx()), "sonoff")
+            with mock.patch.object(prompts, "UNATTENDED", True), \
+                    mock.patch.object(plugs, "PLUGS", Path(directory) / "none"), \
+                    mock.patch.object(detect, "converted_plugs", return_value=locked):
+                self.assertEqual(source.find_current_firmware(self.ctx()), "sonoff")
 
     def test_a_run_carried_on_from_tasmota_is_asked_before_any_step(self):
         ctx = self.ctx(plug_ip="192.168.0.137", source="tasmota")
         ctx.device = mock.Mock(wants_password=mock.Mock(return_value=True))
-        with mock.patch.object(self.af, "ask_choice", return_value=0), \
-                mock.patch.object(self.af, "ask_secret", return_value="s3cret-71"):
-            self.af.unlock_tasmota(ctx)
+        with mock.patch.object(prompts, "ask_choice", return_value=0), \
+                mock.patch.object(prompts, "ask_secret", return_value="s3cret-71"):
+            unlock.unlock_tasmota(ctx)
         self.assertEqual(ctx.web_password, "s3cret-71")
         # Past L1 the plug runs only firmware this tool put on; from ESPHome, none of the plug's Tasmota.
         for inputs in ({"source": "tasmota", "done": ("L1",)}, {"source": "esphome"}, {}):
             ctx = self.ctx(plug_ip="192.168.0.137", **inputs)
             ctx.device = mock.Mock()
-            self.af.unlock_tasmota(ctx)
+            unlock.unlock_tasmota(ctx)
             ctx.device.wants_password.assert_not_called()
 
 
@@ -5306,7 +5193,7 @@ class DiscoverySearchTests(FirmwareSearchCase):
     often it looks again while a plug it converted restarts."""
 
     def found(self):
-        return [self.af.detect.Found("192.168.0.137", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF")]
+        return [detect.Found("192.168.0.137", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF")]
 
     def test_the_default_network_first_its_others_not_read_when_the_plug_is_there(self):
         searched = []
@@ -5314,10 +5201,10 @@ class DiscoverySearchTests(FirmwareSearchCase):
         def search(near, *, others=None, **_):
             searched.append(near)
             return self.found()
-        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
-                mock.patch.object(self.af.detect, "converted_plugs", side_effect=search), \
-                mock.patch.object(self.af.hostsys, "lan_networks", return_value={"10.0.5.9": 24}) as lan:
-            self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
+        with mock.patch.object(prompts, "UNATTENDED", True), \
+                mock.patch.object(detect, "converted_plugs", side_effect=search), \
+                mock.patch.object(hostsys, "lan_networks", return_value={"10.0.5.9": 24}) as lan:
+            self.assertEqual(source.find_current_firmware(self.ctx()), "tasmota")
         self.assertEqual(searched, ["192.168.0.110"])   # local_ip_towards: the default network
         lan.assert_not_called()
 
@@ -5328,12 +5215,12 @@ class DiscoverySearchTests(FirmwareSearchCase):
             looks.append(dict(others()))
             others()
             return self.found() if len(looks) == 3 else []
-        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
-                mock.patch.object(self.af, "converted_here", return_value=True), \
-                mock.patch.object(self.af.time, "sleep"), \
-                mock.patch.object(self.af.detect, "converted_plugs", side_effect=search), \
-                mock.patch.object(self.af.hostsys, "lan_networks", return_value={"10.0.5.9": 24}) as lan:
-            self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
+        with mock.patch.object(prompts, "UNATTENDED", True), \
+                mock.patch.object(source, "converted_here", return_value=True), \
+                mock.patch.object(time, "sleep"), \
+                mock.patch.object(detect, "converted_plugs", side_effect=search), \
+                mock.patch.object(hostsys, "lan_networks", return_value={"10.0.5.9": 24}) as lan:
+            self.assertEqual(source.find_current_firmware(self.ctx()), "tasmota")
         self.assertEqual(looks, [{"10.0.5.9": 24}] * 3)
         lan.assert_called_once()
 
@@ -5346,32 +5233,30 @@ class EsphomeWebLoginTests(unittest.TestCase):
     LOGIN = ("admin", "w3b-pass")
 
     def setUp(self):
-        import tools.autoflash.cli as autoflash
-        self.af = autoflash
         self.private = mock.Mock()
-        for patch in (mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"),
-                      mock.patch.object(autoflash, "section"),
-                      mock.patch.object(autoflash.output, "transient_begin"),
-                      mock.patch.object(autoflash.output, "transient_end"),
-                      mock.patch.object(autoflash.output, "private", self.private),
-                      mock.patch.object(autoflash.prompts, "UNATTENDED", False),
-                      mock.patch.object(autoflash.prompts, "answered_unattended"),
-                      mock.patch.object(autoflash, "adopt_plug"),
-                      mock.patch.object(autoflash, "converted_here", return_value=False),
-                      mock.patch.object(autoflash.plugs, "PLUGS", Path("/nonexistent/plugs")),
-                      mock.patch.object(autoflash.hostsys, "local_ip_towards", return_value="192.168.0.110"),
-                      mock.patch.object(autoflash.hostsys, "mac_of", return_value="12:34:56:ab:cd:ef"),
+        for patch in (mock.patch.object(output, "say"), mock.patch.object(output, "tell"),
+                      mock.patch.object(prompts, "section"),
+                      mock.patch.object(output, "transient_begin"),
+                      mock.patch.object(output, "transient_end"),
+                      mock.patch.object(output, "private", self.private),
+                      mock.patch.object(prompts, "UNATTENDED", False),
+                      mock.patch.object(prompts, "answered_unattended"),
+                      mock.patch.object(source, "adopt_plug"),
+                      mock.patch.object(source, "converted_here", return_value=False),
+                      mock.patch.object(plugs, "PLUGS", Path("/nonexistent/plugs")),
+                      mock.patch.object(hostsys, "local_ip_towards", return_value="192.168.0.110"),
+                      mock.patch.object(hostsys, "mac_of", return_value="12:34:56:ab:cd:ef"),
                       # A question no test expects fails it, rather than waiting on a keyboard.
-                      mock.patch.object(autoflash, "ask_choice", side_effect=AssertionError("asked")),
-                      mock.patch.object(autoflash, "ask_text", side_effect=AssertionError("asked")),
-                      mock.patch.object(autoflash, "ask_secret", side_effect=AssertionError("asked"))):
+                      mock.patch.object(prompts, "ask_choice", side_effect=AssertionError("asked")),
+                      mock.patch.object(prompts, "ask_text", side_effect=AssertionError("asked")),
+                      mock.patch.object(prompts, "ask_secret", side_effect=AssertionError("asked"))):
             patch.start()
             self.addCleanup(patch.stop)
         # The plug's page wants this login, and none other - until removed (None).
         self.wanted, self.given = self.LOGIN, None
-        for patch in (mock.patch.object(autoflash.esphome, "use_login",
+        for patch in (mock.patch.object(esphome, "use_login",
                                         side_effect=lambda host, *login: setattr(self, "given", login)),
-                      mock.patch.object(autoflash.esphome, "page",
+                      mock.patch.object(esphome, "page",
                                         side_effect=lambda host, *_: "login" if self.wanted and
                                         self.given != self.wanted else "esphome")):
             patch.start()
@@ -5387,22 +5272,22 @@ class EsphomeWebLoginTests(unittest.TestCase):
 
     def test_a_plug_given_by_address_is_asked_for_it_then_found(self):
         ctx = self.ctx(plug_ip="192.168.0.50")
-        with mock.patch.object(self.af.detect, "identify", side_effect=self.identify), \
-                mock.patch.object(self.af, "ask_choice", return_value=0) as menu, \
-                mock.patch.object(self.af, "ask_text", return_value="admin"), \
-                mock.patch.object(self.af, "ask_secret", side_effect=["not-it-9", "w3b-pass"]) as asked:
-            self.assertEqual(self.af.find_current_firmware(ctx), "esphome")
+        with mock.patch.object(detect, "identify", side_effect=self.identify), \
+                mock.patch.object(prompts, "ask_choice", return_value=0) as menu, \
+                mock.patch.object(prompts, "ask_text", return_value="admin"), \
+                mock.patch.object(prompts, "ask_secret", side_effect=["not-it-9", "w3b-pass"]) as asked:
+            self.assertEqual(source.find_current_firmware(ctx), "esphome")
         self.assertEqual(asked.call_count, 2)  # the wrong one refused on the plug
         self.assertEqual(menu.call_args.args[1][0], "Type its web login")
         self.assertEqual(ctx.esphome_login, self.LOGIN)
         self.private.assert_any_call("w3b-pass", "esphome-web-password")  # kept out of the log
 
     def test_unattended_it_stops_saying_what_to_give(self):
-        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
-                mock.patch.object(self.af.detect, "identify", side_effect=self.identify):
-            with self.assertRaisesRegex(self.af.Abort, "web login: give it with --esphome-web-user.*"
+        with mock.patch.object(prompts, "UNATTENDED", True), \
+                mock.patch.object(detect, "identify", side_effect=self.identify):
+            with self.assertRaisesRegex(errors.Abort, "web login: give it with --esphome-web-user.*"
                                         "AUTOFLASH_ESPHOME_WEB_PASSWORD"):
-                self.af.find_current_firmware(self.ctx(plug_ip="192.168.0.50"))
+                source.find_current_firmware(self.ctx(plug_ip="192.168.0.50"))
 
     def test_trying_again_once_it_is_removed_goes_on_without_one(self):
         ctx = self.ctx(plug_ip="192.168.0.50")
@@ -5413,31 +5298,31 @@ class EsphomeWebLoginTests(unittest.TestCase):
             if len(choices) == 2:
                 self.wanted = None  # removed from its config, and that installed
             return 1
-        with mock.patch.object(self.af.detect, "identify", side_effect=self.identify), \
-                mock.patch.object(self.af, "ask_choice", side_effect=try_again):
-            self.assertEqual(self.af.find_current_firmware(ctx), "esphome")
+        with mock.patch.object(detect, "identify", side_effect=self.identify), \
+                mock.patch.object(prompts, "ask_choice", side_effect=try_again):
+            self.assertEqual(source.find_current_firmware(ctx), "esphome")
         self.assertIsNone(ctx.esphome_login)
-        self.af.tell.assert_any_call("    ESPHome there still has a web login.")  # tried too soon
+        output.tell.assert_any_call("    ESPHome there still has a web login.")  # tried too soon
 
     def test_found_on_the_network_it_is_offered_and_asked_for_once_chosen(self):
-        locked = self.af.detect.Found("192.168.0.42", "esphome-login", "12:34:56:ab:cd:ef")
-        with mock.patch.object(self.af.detect, "converted_plugs", return_value=[locked]), \
-                mock.patch.object(self.af.detect, "identify", side_effect=self.identify), \
-                mock.patch.object(self.af, "ask_choice", side_effect=[0, 0]) as menu, \
-                mock.patch.object(self.af, "ask_text", return_value="admin"), \
-                mock.patch.object(self.af, "ask_secret", return_value="w3b-pass"):
-            self.assertEqual(self.af.find_current_firmware(self.ctx()), "esphome")
+        locked = detect.Found("192.168.0.42", "esphome-login", "12:34:56:ab:cd:ef")
+        with mock.patch.object(detect, "converted_plugs", return_value=[locked]), \
+                mock.patch.object(detect, "identify", side_effect=self.identify), \
+                mock.patch.object(prompts, "ask_choice", side_effect=[0, 0]) as menu, \
+                mock.patch.object(prompts, "ask_text", return_value="admin"), \
+                mock.patch.object(prompts, "ask_secret", return_value="w3b-pass"):
+            self.assertEqual(source.find_current_firmware(self.ctx()), "esphome")
         self.assertIn("web login", menu.call_args_list[0].args[1][0])  # the plug, then its login
-        chosen = self.af.adopt_plug.call_args.args[1]
+        chosen = source.adopt_plug.call_args.args[1]
         self.assertEqual((chosen.host, chosen.firmware), ("192.168.0.42", "esphome"))
 
     def test_unattended_one_found_with_a_login_is_left_out_and_named(self):
-        found = [self.af.detect.Found("192.168.0.137", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF"),
-                 self.af.detect.Found("192.168.0.42", "esphome-login", "aa:bb:cc:dd:ee:ff")]
-        with mock.patch.object(self.af.prompts, "UNATTENDED", True), \
-                mock.patch.object(self.af.detect, "converted_plugs", return_value=found):
-            self.assertEqual(self.af.find_current_firmware(self.ctx()), "tasmota")
-        told = " ".join(str(call.args[0]) for call in self.af.tell.call_args_list)
+        found = [detect.Found("192.168.0.137", "tasmota", "12:34:56:ab:cd:ef", "tasmota-ABCDEF"),
+                 detect.Found("192.168.0.42", "esphome-login", "aa:bb:cc:dd:ee:ff")]
+        with mock.patch.object(prompts, "UNATTENDED", True), \
+                mock.patch.object(detect, "converted_plugs", return_value=found):
+            self.assertEqual(source.find_current_firmware(self.ctx()), "tasmota")
+        told = " ".join(str(call.args[0]) for call in output.tell.call_args_list)
         self.assertIn("the ESPHome at 192.168.0.42", told)
         self.assertIn("--esphome-web-user", told)
 
@@ -5454,27 +5339,25 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
     KEY_TEXT = base64.b64encode(KEY).decode()
 
     def setUp(self):
-        import tools.autoflash.cli as autoflash
-        self.af = autoflash
         self.private = mock.Mock()
-        for patch in (mock.patch.object(autoflash, "say"), mock.patch.object(autoflash, "tell"),
-                      mock.patch.object(autoflash, "section"),
-                      mock.patch.object(autoflash.output, "transient_begin"),
-                      mock.patch.object(autoflash.output, "transient_end"),
-                      mock.patch.object(autoflash.output, "progress"),
-                      mock.patch.object(autoflash.output, "progress_clear"),
-                      mock.patch.object(autoflash.output, "private", self.private),
-                      mock.patch.object(autoflash.prompts, "UNATTENDED", False),
+        for patch in (mock.patch.object(output, "say"), mock.patch.object(output, "tell"),
+                      mock.patch.object(prompts, "section"),
+                      mock.patch.object(output, "transient_begin"),
+                      mock.patch.object(output, "transient_end"),
+                      mock.patch.object(output, "progress"),
+                      mock.patch.object(output, "progress_clear"),
+                      mock.patch.object(output, "private", self.private),
+                      mock.patch.object(prompts, "UNATTENDED", False),
                       # A question no test expects fails it, rather than waiting on a keyboard.
-                      mock.patch.object(autoflash, "ask_choice", side_effect=AssertionError("asked")),
-                      mock.patch.object(autoflash, "ask_secret", side_effect=AssertionError("asked"))):
+                      mock.patch.object(prompts, "ask_choice", side_effect=AssertionError("asked")),
+                      mock.patch.object(prompts, "ask_secret", side_effect=AssertionError("asked"))):
             patch.start()
             self.addCleanup(patch.stop)
         # ESPHome on the plug wants this update password, until its owner
         # removes it (None); has an API key (`key`), so takes encrypted
         # updates too - only those, while `encrypted`.
         self.wanted, self.encrypted, self.key = "s3cret-71", False, None
-        ota, esphome = autoflash.esphome_ota, autoflash.esphome
+        ota = esphome_ota
 
         def wants(host, password=None, key=None, **_):
             if self.key is not None and key is not None:
@@ -5505,32 +5388,32 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
 
     def test_asked_for_before_the_go_ahead_and_sent_with_the_update(self):
         ctx = self.ctx()
-        with mock.patch.object(self.af, "ask_choice", return_value=0) as menu, \
-                mock.patch.object(self.af, "ask_secret", side_effect=["not-it-9", "s3cret-71"]) as asked:
-            self.af.unlock_esphome(ctx)
+        with mock.patch.object(prompts, "ask_choice", return_value=0) as menu, \
+                mock.patch.object(prompts, "ask_secret", side_effect=["not-it-9", "s3cret-71"]) as asked:
+            unlock.unlock_esphome(ctx)
         self.assertEqual(asked.call_count, 2)  # the wrong one refused on the plug
         self.assertEqual(ctx.esphome_password, "s3cret-71")
         self.assertEqual(menu.call_args.args[1], [  # no key to offer: it takes no encrypted updates
             "Type its update password", "Try again without one - once you have removed it yourself"])
         self.private.assert_any_call("s3cret-71", "esphome-password")  # kept out of the log
-        with mock.patch.object(self.af.esphome_ota, "upload") as upload:
-            self.af.send_as_esphome_update(ctx, b"image", "the startup firmware")
+        with mock.patch.object(esphome_ota, "upload") as upload:
+            mover.send_as_esphome_update(ctx, b"image", "the startup firmware")
         self.assertEqual(upload.call_args.kwargs["password"], "s3cret-71")
 
     def test_given_in_advance_it_is_not_asked(self):
         ctx = self.ctx("s3cret-71")  # AUTOFLASH_ESPHOME_OTA_PASSWORD, in .env or the environment
-        self.af.unlock_esphome(ctx)
+        unlock.unlock_esphome(ctx)
         self.assertEqual(ctx.esphome_password, "s3cret-71")
         self.wanted = None
-        self.af.unlock_esphome(self.ctx())  # and a plug with none asks nothing
+        unlock.unlock_esphome(self.ctx())  # and a plug with none asks nothing
 
     def test_unattended_without_it_the_run_stops_saying_what_to_give(self):
-        with mock.patch.object(self.af.prompts, "UNATTENDED", True):
-            with self.assertRaisesRegex(self.af.Abort,
+        with mock.patch.object(prompts, "UNATTENDED", True):
+            with self.assertRaisesRegex(errors.Abort,
                                         "update password: give it with --esphome-ota-password"):
-                self.af.unlock_esphome(self.ctx())
-            with self.assertRaisesRegex(self.af.Abort, "the one given is not it"):
-                self.af.unlock_esphome(self.ctx("not-it-9"))
+                unlock.unlock_esphome(self.ctx())
+            with self.assertRaisesRegex(errors.Abort, "the one given is not it"):
+                unlock.unlock_esphome(self.ctx("not-it-9"))
 
     def test_trying_again_once_it_is_removed_goes_on_without_one(self):
         ctx = self.ctx()
@@ -5541,56 +5424,56 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
             if len(choices) == 2:
                 self.wanted = None  # removed from its config, and that installed, before choosing again
             return 1
-        with mock.patch.object(self.af, "ask_choice", side_effect=try_again):
-            self.af.unlock_esphome(ctx)
+        with mock.patch.object(prompts, "ask_choice", side_effect=try_again):
+            unlock.unlock_esphome(ctx)
         self.assertIsNone(ctx.esphome_password)
-        self.af.tell.assert_any_call("    ESPHome there still has an update password.")  # tried too soon
+        output.tell.assert_any_call("    ESPHome there still has an update password.")  # tried too soon
 
     def test_an_update_refused_for_it_later_is_asked_for_and_sent_again(self):
         ctx = self.ctx()  # none at the go-ahead: an X2 sending the startup firmware once more, say
-        refused = self.af.esphome_ota.NeedsPassword(given=False)
-        with mock.patch.object(self.af.esphome_ota, "upload", side_effect=[refused, None]) as upload, \
-                mock.patch.object(self.af, "ask_choice", return_value=0), \
-                mock.patch.object(self.af, "ask_secret", return_value="s3cret-71"):
-            self.af.send_as_esphome_update(ctx, b"image", "the startup firmware")
+        refused = esphome_ota.NeedsPassword(given=False)
+        with mock.patch.object(esphome_ota, "upload", side_effect=[refused, None]) as upload, \
+                mock.patch.object(prompts, "ask_choice", return_value=0), \
+                mock.patch.object(prompts, "ask_secret", return_value="s3cret-71"):
+            mover.send_as_esphome_update(ctx, b"image", "the startup firmware")
         self.assertEqual([call.kwargs["password"] for call in upload.call_args_list], [None, "s3cret-71"])
 
     def test_with_its_key_given_no_password_is_asked_and_the_update_goes_encrypted(self):
         self.key = self.KEY
         ctx = self.ctx(key=self.KEY)  # AUTOFLASH_ESPHOME_API_KEY
-        self.af.unlock_esphome(ctx)  # nothing asked: its key unlocks the update too
+        unlock.unlock_esphome(ctx)  # nothing asked: its key unlocks the update too
         self.assertIsNone(ctx.esphome_password)
-        with mock.patch.object(self.af.esphome_ota, "upload") as upload:
-            self.af.send_as_esphome_update(ctx, b"image", "the startup firmware")
+        with mock.patch.object(esphome_ota, "upload") as upload:
+            mover.send_as_esphome_update(ctx, b"image", "the startup firmware")
         self.assertEqual(upload.call_args.kwargs["key"], self.KEY)
 
     def test_where_it_takes_encrypted_updates_its_key_is_offered_instead(self):
         self.key = self.KEY
         ctx = self.ctx()
-        with mock.patch.object(self.af, "ask_choice", return_value=1) as menu, \
-                mock.patch.object(self.af, "ask_secret", side_effect=["not base64!", self.KEY_TEXT]):
-            self.af.unlock_esphome(ctx)
+        with mock.patch.object(prompts, "ask_choice", return_value=1) as menu, \
+                mock.patch.object(prompts, "ask_secret", side_effect=["not base64!", self.KEY_TEXT]):
+            unlock.unlock_esphome(ctx)
         self.assertEqual(menu.call_args.args[1][:2], ["Type its update password", "Type its API encryption key"])
         self.assertEqual((ctx.esphome_key, ctx.esphome_password), (self.KEY, None))
-        told = " ".join(str(call.args[0]) for call in self.af.tell.call_args_list)
+        told = " ".join(str(call.args[0]) for call in output.tell.call_args_list)
         self.assertIn("That is not an API encryption key", told)  # said why, and asked again
         self.private.assert_any_call(self.KEY_TEXT, "esphome-api-key")
 
     def test_one_taking_only_encrypted_updates_is_asked_for_its_key(self):
         self.key, self.encrypted = self.KEY, True
         ctx = self.ctx()
-        with mock.patch.object(self.af, "ask_choice", return_value=0) as menu, \
-                mock.patch.object(self.af, "ask_secret", side_effect=[base64.b64encode(bytes(32)).decode(),
+        with mock.patch.object(prompts, "ask_choice", return_value=0) as menu, \
+                mock.patch.object(prompts, "ask_secret", side_effect=[base64.b64encode(bytes(32)).decode(),
                                                                        self.KEY_TEXT]):
-            self.af.unlock_esphome(ctx)
+            unlock.unlock_esphome(ctx)
         self.assertEqual(menu.call_args.args[1][0], "Type its API encryption key")
         self.assertEqual(ctx.esphome_key, self.KEY)  # the first, another key, refused on the plug
-        self.af.tell.assert_any_call("    That is not its API encryption key.")
-        with mock.patch.object(self.af.prompts, "UNATTENDED", True):
-            with self.assertRaisesRegex(self.af.Abort,
+        output.tell.assert_any_call("    That is not its API encryption key.")
+        with mock.patch.object(prompts, "UNATTENDED", True):
+            with self.assertRaisesRegex(errors.Abort,
                                         "only encrypted updates.*ESPHome YAML.*--esphome-api-key"
                                         ".*remove that encryption: line"):
-                self.af.unlock_esphome(self.ctx())
+                unlock.unlock_esphome(self.ctx())
 
     def test_one_taking_only_encrypted_updates_can_be_changed_instead(self):
         self.key, self.encrypted = self.KEY, True
@@ -5602,24 +5485,24 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
             if len(choices) == 2:
                 self.encrypted = False  # encryption: removed, an update password put instead
             return 1 if len(choices) <= 2 else 0
-        with mock.patch.object(self.af, "ask_choice", side_effect=choose), \
-                mock.patch.object(self.af, "ask_secret", return_value="s3cret-71"):
-            self.af.unlock_esphome(ctx)
-        self.af.tell.assert_any_call("    ESPHome there still takes only encrypted updates.")
+        with mock.patch.object(prompts, "ask_choice", side_effect=choose), \
+                mock.patch.object(prompts, "ask_secret", return_value="s3cret-71"):
+            unlock.unlock_esphome(ctx)
+        output.tell.assert_any_call("    ESPHome there still takes only encrypted updates.")
         self.assertEqual((ctx.esphome_key, ctx.esphome_password), (None, "s3cret-71"))  # then asked for that
 
     def test_a_key_given_that_is_not_its_own_is_asked_for_or_gone_on_without(self):
         self.key, self.wanted = self.KEY, None
-        with mock.patch.object(self.af.prompts, "UNATTENDED", True):
-            with self.assertRaisesRegex(self.af.Abort, "not the one ESPHome on the plug has.*--esphome-api-key"):
-                self.af.unlock_esphome(self.ctx(key=bytes(32)))
+        with mock.patch.object(prompts, "UNATTENDED", True):
+            with self.assertRaisesRegex(errors.Abort, "not the one ESPHome on the plug has.*--esphome-api-key"):
+                unlock.unlock_esphome(self.ctx(key=bytes(32)))
         ctx = self.ctx(key=bytes(32))
-        with mock.patch.object(self.af, "ask_choice", return_value=1) as menu:
-            self.af.unlock_esphome(ctx)  # gone on without it: the update needs no key
+        with mock.patch.object(prompts, "ask_choice", return_value=1) as menu:
+            unlock.unlock_esphome(ctx)  # gone on without it: the update needs no key
         self.assertEqual(menu.call_args.args[1], ["Type its API encryption key", "Go on without it"])
         self.assertIsNone(ctx.esphome_key)
         # One given for a plug whose API is not encrypted is not needed.
         self.key = None
         ctx = self.ctx(key=self.KEY)
-        self.af.unlock_esphome(ctx)
+        unlock.unlock_esphome(ctx)
         self.assertIsNone(ctx.esphome_key)

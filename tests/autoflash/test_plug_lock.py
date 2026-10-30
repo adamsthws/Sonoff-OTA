@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools.autoflash import plugs
+from tools.autoflash import cli, errors, output, plugs, runs
 
 MAC = "12:34:56:ab:cd:ef"
 
@@ -58,10 +58,9 @@ class PlugLockTests(unittest.TestCase):
 
     def test_the_run_refused_is_told_plainly(self):
         from types import SimpleNamespace
-        import tools.autoflash.cli as autoflash
         with mock.patch.object(plugs, "hold", side_effect=plugs.PlugBusy("run plugs/x, process 7")):
-            with self.assertRaisesRegex(autoflash.Abort, "another run is converting this plug"):
-                autoflash.hold_plug(SimpleNamespace(), MAC)
+            with self.assertRaisesRegex(errors.Abort, "another run is converting this plug"):
+                runs.hold_plug(SimpleNamespace(), MAC)
 
     def test_busy_names_the_plugs_others_hold(self):
         self.assertEqual(plugs.busy(), [])
@@ -85,35 +84,32 @@ class PlugLockTests(unittest.TestCase):
         # Its log, report, firewall rule and safety locks are the other run's
         # too: the run's main stops before any of them (seen in the fault
         # suite: a refused run took the other's firewall rule away).
-        import tools.autoflash.cli as autoflash
         other = self.other_run("time.sleep(30)")
         try:
-            with mock.patch.object(autoflash, "tell") as told:
-                self.assertTrue(autoflash.refused_for_another_run("run", self.ctx()))
+            with mock.patch.object(output, "tell") as told:
+                self.assertTrue(cli.refused_for_another_run("run", self.ctx()))
             self.assertIn("another run is converting this plug", told.call_args.args[0])
         finally:
             other.kill()
             other.wait()
-        self.assertFalse(autoflash.refused_for_another_run("run", self.ctx()))  # then it is this run's
+        self.assertFalse(cli.refused_for_another_run("run", self.ctx()))  # then it is this run's
 
     def test_cleanup_waits_for_every_run_to_finish(self):
-        import tools.autoflash.cli as autoflash
         other = self.other_run("time.sleep(30)")
         try:
-            with mock.patch.object(autoflash, "tell") as told:
-                self.assertTrue(autoflash.refused_for_another_run("cleanup", self.ctx(mac=None)))
+            with mock.patch.object(output, "tell") as told:
+                self.assertTrue(cli.refused_for_another_run("cleanup", self.ctx(mac=None)))
             self.assertIn("Not cleaning up", told.call_args.args[0])
         finally:
             other.kill()
             other.wait()
-        self.assertFalse(autoflash.refused_for_another_run("cleanup", self.ctx(mac=None)))
+        self.assertFalse(cli.refused_for_another_run("cleanup", self.ctx(mac=None)))
 
     def test_looking_is_never_refused(self):
-        import tools.autoflash.cli as autoflash
         other = self.other_run("time.sleep(30)")
         try:
             for command in ("status", "list"):
-                self.assertFalse(autoflash.refused_for_another_run(command, self.ctx()))
+                self.assertFalse(cli.refused_for_another_run(command, self.ctx()))
         finally:
             other.kill()
             other.wait()

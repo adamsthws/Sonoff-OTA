@@ -16,6 +16,11 @@ check.
 
 ## 2.3.0
 
+- The tool's code is a package of modules, each for one thing - the command
+  line, a run's context, its route, running it, its report, the plug in its
+  eWeLink account - with each chip family's steps under
+  `tools/autoflash/routes/<family>/`, where one file held it all before.
+  Nothing a run does changes.
 - The repository is laid out by what things are: `tools/espressif/` and
   `tools/beken/` for each chip family's tooling and emulator, `tools/ewelink/`,
   `tools/repo/`, `devices/<plug>/` for what is one plug's alone, `tests/`

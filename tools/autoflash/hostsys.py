@@ -33,7 +33,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
-from . import output
+from . import interrupt, output
+
+ROOT = Path(__file__).resolve().parents[2]
 
 SYSTEM = platform.system()  # "Linux", "Darwin" or "Windows"
 IS_WINDOWS = SYSTEM == "Windows"
@@ -90,6 +92,25 @@ def _ps_string(value: str) -> str:
 _RUN_SCRIPT = ("import os, runpy, sys; del sys.argv[0]; "
                "sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[0]))); "
                "runpy.run_path(sys.argv[0], run_name='__main__')")
+
+
+def run_tool(
+    args: list[str],
+    cwd: Path = ROOT,
+    interactive: bool = False,
+    env: dict[str, str] | None = None,
+) -> int:
+    """Run one of the reviewed tools.  Its output goes to the run's log, and to
+    the screen as well in verbose mode; it reads the keyboard as before, but
+    none of the tools run here asks anything (the password reaches them
+    through the environment), so `interactive` no longer changes anything.
+    """
+    output.say(f"$ {' '.join(str(a) for a in args)}")
+    # Its own process group: a first Ctrl-C asks, and must not stop it meanwhile.
+    process = subprocess.Popen(args, cwd=str(cwd), env=env,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               **interrupt.child_group())
+    return output.stream(process)
 
 
 def python_script(script: str | Path, *args: str, unbuffered: bool = False) -> list[str]:

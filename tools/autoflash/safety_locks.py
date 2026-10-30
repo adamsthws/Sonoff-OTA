@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from . import hostsys, oslock
+from . import hostsys, oslock, output
 
 NAMES = ("RECOVERY_LOCK", "REPARTITION_LOCK")
 # Where the lock files live, under the repository root: with the routes they guard.
@@ -107,3 +107,22 @@ def restore_left(root: Path) -> list[str]:
 def in_place(root: Path, name: str) -> bool:
     """In place, or lifted by a run that is working now (another plug's)."""
     return _paths(root, name)[0].exists() or bool(lifters(root, name))
+
+
+def say_lock_back(root: Path, name: str) -> None:
+    if (root / DIR / name).exists():
+        output.say(f"{name} restored")
+    else:
+        output.say(f"{name} left lifted: another run, on another plug, still needs it")
+
+
+def restore_left_locks(root: Path) -> None:
+    """Put back a safety lock a run left moved aside.
+
+    A step that needs one moves it aside while it runs and puts it back after,
+    however it ends - unless this computer itself stopped (a crash, a power cut)
+    while it ran.  Moved aside, the lock then fails every run: put back, the
+    step simply asks for it again.
+    """
+    for name in restore_left(root):
+        output.say(f"{name} put back: a run stopped while it was moved aside")

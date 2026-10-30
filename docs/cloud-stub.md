@@ -74,8 +74,10 @@ own cloud, served locally, so nothing is shared and runs go fully parallel.
 
 ## What the cloud is actually used for
 
-Tracing the conversion ([`tools/autoflash/cli.py`](../tools/autoflash/cli.py)
-`step_discover` / `step_bridge`) shows the cloud's role is smaller than it looks.
+Tracing the conversion (`step_discover` in
+[`tools/autoflash/account.py`](../tools/autoflash/account.py), `step_bridge` in
+[`tools/autoflash/routes/espressif/installer.py`](../tools/autoflash/routes/espressif/installer.py))
+shows the cloud's role is smaller than it looks.
 It is needed for two things:
 
 - **Touchpoint A — the tool → eWeLink account API** (`*-apia.coolkit.cc`, via

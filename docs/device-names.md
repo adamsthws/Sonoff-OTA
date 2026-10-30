@@ -58,7 +58,7 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 - It is Tasmota's own build (`artifacts/tasmota32c3-bluetooth.bin`), not
   changed. Its name comes from the settings record D1 sends:
   `give_tasmota_the_wifi()` in
-  [`tools/autoflash/cli.py`](../tools/autoflash/cli.py) calls
+  [`tools/autoflash/routes/espressif/installer.py`](../tools/autoflash/routes/espressif/installer.py) calls
   `tasmota_settings.named(template, our_setup_network(ctx))`
   ([`tools/autoflash/tasmota_settings.py`](../tools/autoflash/tasmota_settings.py):
   `SET_HOSTNAME`, at most `HOSTNAME_MAX` characters, with the record's
@@ -138,7 +138,7 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 
 ## What the tool looks for
 
-All in [`tools/autoflash/cli.py`](../tools/autoflash/cli.py) unless said:
+All in [`tools/autoflash/names.py`](../tools/autoflash/names.py) unless said:
 
 - `SETUP_SSID_PREFIX` (`autoflash-recovery-`), `named()` and
   `our_setup_network()`: the interim name.
@@ -151,14 +151,17 @@ All in [`tools/autoflash/cli.py`](../tools/autoflash/cli.py) unless said:
   one Tasmota that does raise a network under the interim name (sent through
   the installer's own network, so given no Wi-Fi: `tasmota_named_alone`) is
   looked for by it in `finish_tasmota_setup()`, once the installer has gone
-  (`installer_gone()`), and found when a run is tried again by asking it
+  (`installer_gone()`; both in
+  [`tools/autoflash/routes/espressif/installer.py`](../tools/autoflash/routes/espressif/installer.py)),
+  and found when a run is tried again by asking it
   (`setup_network.tasmota_answers()`: on its own network Tasmota's page waits
   on a Wi-Fi scan, its status does not).
 - `esphome_networks()`, `esphome_network_hint()`: ESPHome's.
-- `TASMOTA_DEFAULT_NAME_RE` and `name_with_the_wifi()`: a Tasmota under its
+- `TASMOTA_DEFAULT_NAME_RE` and `name_with_the_wifi()`
+  ([`tools/autoflash/join.py`](../tools/autoflash/join.py)): a Tasmota under its
   own default name, given the Wi-Fi on its setup network, is named again in
   that restart (the same Berry driver as F4's).
-- `tasmota_at_home()` and `note_setup_network()`: the interim name is never
+- `tasmota_at_home()` (`installer.py`) and `note_setup_network()`: the interim name is never
   kept as the plug's own.
 - [`tools/autoflash/setup_network.py`](../tools/autoflash/setup_network.py):
   `BRIDGE_PAGE_MARKERS`, the installer's page title, old and new.
