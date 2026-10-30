@@ -97,6 +97,24 @@ class OwnValueTests(unittest.TestCase):
         self.assertIn("10.9.8.7", values)
         self.assertNotIn("192.168.60.10", values)   # the emulator's own network
 
+    def test_a_test_copys_made_up_mac_is_not_taken_for_a_plugs(self):
+        # copy_plug.py names a test copy by a MAC made up for it, as the docs say,
+        # the one every test uses; the real plug it was copied from is still found.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, record in (("12-34-56-ab-cd-ef", {"mac": "12:34:56:ab:cd:ef", "test_copy_of": "58:cf:79:99:88:77"}),
+                                 ("58-cf-79-12-34-56", {"mac": "58:cf:79:12:34:56", "test_copy_of": "58:cf:79:99:88:77"})):
+                (root / "captures/plugs" / name).mkdir(parents=True)
+                (root / "captures/plugs" / name / "plug.json").write_text(json.dumps(record))
+            with mock.patch.object(ls, "CAPTURES", root / "captures"), \
+                 mock.patch.object(ls, "LOCAL_FILE", root / "none"), \
+                 mock.patch.object(ls, "ALLOW_FILE", root / "none"), \
+                 mock.patch("tools.autoflash.credentials.ENV_FILE", root / ".env"):
+                values = ls.own_values()
+        self.assertNotIn("12:34:56:ab:cd:ef", values)
+        self.assertEqual(values["58:cf:79:99:88:77"], "a plug's MAC")   # the plug it was copied from
+        self.assertEqual(values["58:cf:79:12:34:56"], "a plug's MAC")   # a copy's MAC a device could have
+
     def test_a_mac_in_a_file_as_six_bytes_either_way_round(self):
         s = scanner(own={"58cf79998877": "a plug's MAC"})
         s.raw("a.bin", b"x" + bytes.fromhex("58cf79998877") + b"y")

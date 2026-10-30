@@ -94,6 +94,16 @@ def allowed() -> set[str]:
             if line.strip() and not line.lstrip().startswith("#")}
 
 
+def made_up_mac(mac: str) -> bool:
+    """Whether `mac` cannot be a device's own: locally administered or multicast,
+    or one of the made-up examples tools/repo/leak-scan-allow lists."""
+    hexes = mac.lower().replace(":", "").replace("-", "")
+    if not re.fullmatch(r"[0-9a-f]{12}", hexes):
+        return False
+    pairs = [hexes[i:i + 2] for i in range(0, 12, 2)]
+    return bool(int(pairs[0], 16) & 0x03) or bool({":".join(pairs), "-".join(pairs)} & allowed())
+
+
 def mac_forms(mac: str) -> set[str]:
     hexes = mac.lower().replace(":", "").replace("-", "")
     pairs = [hexes[i:i + 2] for i in range(0, 12, 2)]
@@ -122,24 +132,34 @@ def own_values() -> dict[str, str]:
         pass
     dumps: dict[str, bytes] = {}
     for plug in sorted((CAPTURES / "plugs").glob("*")):
-        if re.fullmatch(r"([0-9a-f]{2}-){5}[0-9a-f]{2}", plug.name):  # each plug's folder is its MAC
-            for form in mac_forms(plug.name):
-                add(form, "a plug's MAC")
         try:
             record = json.loads((plug / "plug.json").read_text())
         except (OSError, ValueError):
             record = {}
+        # A test copy (copy_plug.py) goes by a MAC made up for it - the docs'
+        # 12:34:56:ab:cd:ef - which no device has, and which every test may
+        # use: the plug it was copied from (test_copy_of) is what to look for.
+        # Only a MAC that cannot be a device's is let off so.
+        copy = bool(record.get("test_copy_of"))
+
+        def add_mac(mac: str, copy: bool = copy) -> None:
+            if not (copy and made_up_mac(mac)):
+                for form in mac_forms(mac):
+                    add(form, "a plug's MAC")
+
+        if re.fullmatch(r"([0-9a-f]{2}-){5}[0-9a-f]{2}", plug.name):  # each plug's folder is its MAC
+            add_mac(plug.name)
         for field in ("ewelink_id", "ewelink_name"):
             add(record.get(field), f"a plug's eWeLink {field.split('_')[1]}")
-        for field in ("mac", "test_copy_of"):
-            if record.get(field):
-                for form in mac_forms(record[field]):
-                    add(form, "a plug's MAC")
+        if record.get("mac"):
+            add_mac(record["mac"])
+        if record.get("test_copy_of"):
+            for form in mac_forms(record["test_copy_of"]):
+                add(form, "a plug's MAC")
         backup = plug / "sonoff-backup"
         try:
             from tools.autoflash.plugs import mac_from_efuse
-            for form in mac_forms(mac_from_efuse((backup / "efuse.bin").read_bytes())):
-                add(form, "a plug's MAC")
+            add_mac(mac_from_efuse((backup / "efuse.bin").read_bytes()))
             flash = (backup / "flash.bin").read_bytes()
             dumps[hashlib.sha256(flash).hexdigest()] = flash
         except (OSError, ValueError, ImportError):
