@@ -9,6 +9,7 @@ import json
 import unittest
 from pathlib import Path
 
+from tools.beken import rbl, uf2
 from tools.repo import update_firmware as uf
 from tools.autoflash import tasmota_settings
 from tools.espressif.safeboot.safeboot_migration import OFFICIAL_URLS, PINNED_ARTIFACTS, sha256_bytes
@@ -90,6 +91,106 @@ class DocumentedTests(unittest.TestCase):
     def test_the_esphome_readme_names_the_release_that_built_the_image(self):
         readme = (ROOT / "devices/sonoff-s60/esphome.md").read_text(encoding="utf-8")
         self.assertIn(f"ESPHome {PINS['esphome']['image']['esphome']} built the current", readme)
+
+
+class BekenPinTests(unittest.TestCase):
+    """The Beken plugs' images: OpenBeken and ESPHome on LibreTiny, rt_ota images
+    pinned under "beken" by plug."""
+
+    def test_each_file_is_the_one_pinned_and_in_sha256sums(self):
+        sums = (ROOT / "artifacts" / "SHA256SUMS").read_text().splitlines()
+        for plug, section in PINS.get("beken", {}).items():
+            self.assertEqual(set(section), set(uf.BEKEN_BUILDS[plug]), plug)
+            for key, pin in section.items():
+                data = (ROOT / pin["file"]).read_bytes()
+                self.assertEqual((len(data), sha256_bytes(data)), (pin["size"], pin["sha256"]), (plug, key))
+                self.assertIn(f"{pin['sha256']}  {Path(pin['file']).name}", sums)
+                self.assertEqual(rbl.header(data).name, "app", (plug, key))
+                self.assertLessEqual(len(data), uf2.DOWNLOAD_SIZE, (plug, key))
+
+    def test_each_build_is_what_firmware_json_says(self):
+        for plug, section in PINS.get("beken", {}).items():
+            if "openbeken" in section:
+                pin = section["openbeken"]
+                self.assertEqual(rbl.header((ROOT / pin["file"]).read_bytes()).version, pin["version"])
+                module = (ROOT / pin["module"]).read_text(encoding="utf-8")
+                self.assertEqual(sha256_bytes(module.encode("utf-8")), pin["module_sha256"], plug)
+                for patch, digest in pin["patches"].items():
+                    self.assertEqual(sha256_bytes((uf.OPENBEKEN_DIR / patch).read_bytes()), digest, patch)
+            if "esphome" in section:
+                pin = section["esphome"]
+                config = (ROOT / pin["config"]).read_text(encoding="utf-8")
+                self.assertEqual(uf.config_version(config), pin["version"], plug)
+                firmware = rbl.unpack((ROOT / pin["file"]).read_bytes())
+                self.assertIn(pin["version"].encode("ascii"), firmware)
+                self.assertIn(pin["esphome"].encode("ascii"), firmware)
+
+    def test_no_older_build_is_left_in_artifacts(self):
+        published = {Path(pin["file"]).name for section in PINS.get("beken", {}).values() for pin in section.values()}
+        for path in (ROOT / "artifacts").glob("*.rbl"):
+            self.assertIn(path.name, published)
+
+    def test_the_docs_name_each_file(self):
+        readme = (ROOT / "artifacts/README.md").read_text(encoding="utf-8")
+        notices = (ROOT / "NOTICES.md").read_text(encoding="utf-8")
+        for plug, section in PINS.get("beken", {}).items():
+            for key, pin in section.items():
+                row = next((line for line in readme.splitlines()
+                            if line.startswith(f"| `{Path(pin['file']).name}` |")), "")
+                self.assertIn(f"`{pin['sha256']}`", row, pin["file"])
+                self.assertIn(f"`{pin['file']}`", notices)
+                if key == "openbeken":
+                    self.assertIn(pin["app_commit"], notices)
+                else:
+                    self.assertIn(f"ESPHome {pin['esphome']}", notices)
+                    self.assertIn(f"LibreTiny {pin['libretiny']}", notices)
+                    esphome_readme = (ROOT / f"devices/{plug}/esphome.md").read_text(encoding="utf-8")
+                    self.assertIn(f"ESPHome {pin['esphome']} built the current", esphome_readme)
+
+
+class OpenBekenModuleTests(unittest.TestCase):
+    MAKEFILE = "OBKM_SRC  += $(OBK_SRCS)driver/drv_main.c\nOBKM_SRC  += $(OBK_SRCS)driver/drv_sdcard.c\n"
+    MAIN = "\tbSafeMode = 1;\n\tCFG_InitAndLoad();\n\n#if ENABLE_LITTLEFS\n"
+    MODULE = ('void Sonoff_S61_Import_Init(void) {\n'
+              '\tCMD_RegisterCommand("S61ImportWiFi", Cmd_Import, NULL);\n'
+              '\tCMD_RegisterCommand("S61RevertToStock", Cmd_Revert, NULL);\n}\n')
+
+    def test_the_module_is_built_and_started_after_the_config_is_loaded(self):
+        makefile, main = uf.with_module(self.MAKEFILE, self.MAIN, "drv_sonoff_s61_import.c", "Sonoff_S61_Import_Init")
+        self.assertEqual(makefile, "OBKM_SRC  += $(OBK_SRCS)driver/drv_main.c\n"
+                                   "OBKM_SRC  += $(OBK_SRCS)driver/drv_sonoff_s61_import.c\n"
+                                   "OBKM_SRC  += $(OBK_SRCS)driver/drv_sdcard.c\n")
+        self.assertEqual(main, "\tbSafeMode = 1;\n\tCFG_InitAndLoad();\n\n"
+                               "\textern void Sonoff_S61_Import_Init(void);\n\tSonoff_S61_Import_Init();\n"
+                               "\n#if ENABLE_LITTLEFS\n")
+
+    def test_an_upstream_without_the_anchors_is_refused(self):
+        with self.assertRaisesRegex(uf.UpdateError, "drv_main.c"):
+            uf.with_module("OBKM_SRC =\n", self.MAIN, "m.c", "M_Init")
+        with self.assertRaisesRegex(uf.UpdateError, "CFG_InitAndLoad"):
+            uf.with_module(self.MAKEFILE, self.MAIN * 2, "m.c", "M_Init")
+
+    def test_the_modules_start_and_commands_are_read_from_its_source(self):
+        self.assertEqual(uf.module_init(self.MODULE), "Sonoff_S61_Import_Init")
+        self.assertEqual(uf.module_commands(self.MODULE), ["S61ImportWiFi", "S61RevertToStock"])
+        with self.assertRaises(uf.UpdateError):
+            uf.module_init("static void helper(void) {}\n")
+        # The S61's own module, as published.
+        module = (ROOT / "devices/sonoff-s61/drv_sonoff_s61_import.c").read_text(encoding="utf-8")
+        self.assertEqual(uf.module_init(module), "Sonoff_S61_Import_Init")
+        self.assertIn("S61RevertToStock", uf.module_commands(module))
+
+    def test_an_image_is_checked_against_what_it_was_to_hold(self):
+        image = rbl.pack(b"firmware with S61ImportWiFi in it", version="1.0.0")
+        self.assertEqual(uf.check_rbl(image, "it", "1.0.0", [b"S61ImportWiFi"]), b"firmware with S61ImportWiFi in it")
+        with self.assertRaisesRegex(uf.UpdateError, "1.0.1"):
+            uf.check_rbl(image, "it", "1.0.1", [])
+        with self.assertRaisesRegex(uf.UpdateError, "S61RevertToStock"):
+            uf.check_rbl(image, "it", None, [b"S61RevertToStock"])
+        with self.assertRaisesRegex(uf.UpdateError, "not an rt_ota image"):
+            uf.check_rbl(b"not an image", "it", None, [])
+        with self.assertRaisesRegex(uf.UpdateError, "not an app"):
+            uf.check_rbl(rbl.pack(b"x", name="bootloader", version="1"), "it", None, [])
 
 
 class UpdateHelperTests(unittest.TestCase):

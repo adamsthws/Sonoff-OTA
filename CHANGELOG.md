@@ -21,6 +21,13 @@ check.
   eWeLink account - with each chip family's steps under
   `tools/autoflash/routes/<family>/`, where one file held it all before.
   Nothing a run does changes.
+- The S61's firmware is published: OpenBeken 1.0.0 (OpenBK7231T_App at
+  `ce1abad` with the 4 MB table and the S61 import module) and ESPHome 1.0.0
+  for the S61 (built with ESPHome
+  [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0) on
+  LibreTiny 1.13.0), built and pinned by `tools/repo/update_firmware.py
+  openbeken` and `esphome --plug sonoff-s61`. The tool's S61 route is still
+  to come.
 - The repository is laid out by what things are: `tools/espressif/` and
   `tools/beken/` for each chip family's tooling and emulator, `tools/ewelink/`,
   `tools/repo/`, `devices/<plug>/` for what is one plug's alone, `tests/`

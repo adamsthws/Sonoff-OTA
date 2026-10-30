@@ -20,6 +20,17 @@
         latest) in ESPHome's own Docker image, check it, and publish it in
         artifacts/; --mover builds the mover too
 
+    python3 tools/repo/update_firmware.py esphome [VERSION] --plug sonoff-s61 [--image-version X.Y.Z]
+        the same for a Beken plug's ESPHome (devices/sonoff-s61/esphome.yaml, on
+        LibreTiny): the rt_ota image its build makes, checked and published
+
+    python3 tools/repo/update_firmware.py openbeken [--plug sonoff-s61] [--commit SHA]
+                                     [--image-version X.Y.Z]
+        build OpenBeken for a Beken plug - upstream at that commit (default: the
+        one pinned, else main's head), this project's 4 MB-table patches and
+        the plug's import module - in this project's build image, check it,
+        and publish it in artifacts/
+
 Each writes firmware.json, the published files and SHA256SUMS, and lists what
 is left to do by hand. Nothing is pushed or committed. docs/updating-firmware.md
 is the whole procedure, and what each check is for.
@@ -44,6 +55,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools.autoflash import esphome, imprint, tasmota_settings  # noqa: E402
+from tools.beken import rbl, uf2  # noqa: E402
 from tools.espressif.safeboot.safeboot_migration import (  # noqa: E402
     APP0_OFFSET,
     APP0_SIZE,
@@ -81,6 +93,25 @@ BOOTLOADER_FILE = "artifacts/esphome-sonoff-s60-bootloader-{version}.bin"
 # Downloads ESPHome's builds need (ESP-IDF and its tools, a gigabyte or so),
 # kept between builds. captures/ is never committed.
 BUILD_CACHE = ROOT / "captures" / "esphome-build"
+# The Beken plugs' firmware: each ends on OpenBeken or on ESPHome built on
+# LibreTiny, both rt_ota images the stock bootloader applies from the download
+# slot (devices/sonoff-s61/). OpenBeken is built from upstream at a pinned
+# commit with this project's 4 MB-table patches (tools/beken/openbeken/, offered
+# upstream) and the plug's import module, in a build image of this project's
+# (build.Dockerfile): the SDK's own toolchain wants a newer GLIBC than OpenBeken's
+# image has. Each plug: its module and its ESPHome config, and the files their
+# builds are published as.
+OPENBEKEN_REPO = "openshwprojects/OpenBK7231T_App"
+OPENBEKEN_DIR = ROOT / "tools" / "beken" / "openbeken"
+OPENBEKEN_PATCHES = ("openbk7231t_app-bk7238-4m-flash.patch", "beken_freertos_sdk-4m-pack-profile.patch")
+OPENBEKEN_BUILDER = "autoflash-openbeken-build"
+OPENBEKEN_BUILD_CACHE = ROOT / "captures" / "openbeken-build"
+BEKEN_BUILDS = {
+    "sonoff-s61": {
+        "openbeken": ("devices/sonoff-s61/drv_sonoff_s61_import.c", "artifacts/openbeken-sonoff-s61-{version}.rbl"),
+        "esphome": ("devices/sonoff-s61/esphome.yaml", "artifacts/esphome-sonoff-s61-{version}.rbl"),
+    },
+}
 # What the S60's config reaches into ESPHome for, beyond its documented
 # options: its last on_boot lambda saves the Wi-Fi under the one fixed key an
 # ESPHome build with no network of its own looks in (devices/sonoff-s60/esphome.md says
@@ -463,18 +494,21 @@ def with_ignore_exception(gitignore: str, old: str, new: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def publish(pins: dict[str, Any], key: str, file: str, data: bytes, record: dict[str, Any]) -> None:
-    old = pins["esphome"][key]["file"]
+def publish(section: dict[str, Any], key: str, file: str, data: bytes, record: dict[str, Any]) -> None:
+    """`data` as `file` in artifacts/, pinned under `key` of `section` (a part of
+    firmware.json) with `record`, in SHA256SUMS and let past .gitignore; the
+    file it replaces removed, unless another key still names it."""
+    old = section.get(key, {}).get("file", "")
     (ROOT / file).write_bytes(data)
-    if old != file and (ROOT / old).exists() and not any(
-            other["file"] == old for name, other in pins["esphome"].items() if name != key):
+    if old and old != file and (ROOT / old).exists() and not any(
+            other["file"] == old for name, other in section.items() if name != key):
         (ROOT / old).unlink()
     SHA256SUMS.write_text(replace_sums_line(SHA256SUMS.read_text(encoding="utf-8"),
-                                            Path(old).name if old != file else None, Path(file).name, data),
+                                            Path(old).name if old and old != file else None, Path(file).name, data),
                           encoding="utf-8")
     GITIGNORE.write_text(with_ignore_exception(GITIGNORE.read_text(encoding="utf-8"), old, file),
                          encoding="utf-8")
-    pins["esphome"][key] = {"file": file, **record, "size": len(data), "sha256": sha256_bytes(data)}
+    section[key] = {"file": file, **record, "size": len(data), "sha256": sha256_bytes(data)}
     print(f"  published {file}: {len(data):,} bytes, SHA-256 {sha256_bytes(data)}")
 
 
@@ -515,12 +549,12 @@ def command_esphome(args: argparse.Namespace) -> int:
         config_path = ROOT / ESPHOME_BUILDS[key][0]
         config_path.write_text(with_config_version(config_path.read_text(encoding="utf-8"), version),
                                encoding="utf-8")
-        publish(pins, key, ESPHOME_BUILDS[key][1].format(version=version), app,
+        publish(pins["esphome"], key, ESPHOME_BUILDS[key][1].format(version=version), app,
                 {"config": ESPHOME_BUILDS[key][0], "version": version, "esphome": release,
                  "esp_idf": described["esp_idf"], "builder": builder})
     version, _app, bootloader, described = built["image"]
     if args.new_bootloader and new_bootloader:
-        publish(pins, "bootloader", BOOTLOADER_FILE.format(version=version), bootloader,
+        publish(pins["esphome"], "bootloader", BOOTLOADER_FILE.format(version=version), bootloader,
                 {"config": ESPHOME_BUILDS["image"][0], "version": version, "esphome": release,
                  "esp_idf": described["esp_idf"], "builder": builder})
     elif not new_bootloader:
@@ -544,6 +578,211 @@ def command_esphome(args: argparse.Namespace) -> int:
             by_hand.append("what the change to the config does, in CHANGELOG.md and artifacts/README.md")
     left_to_do(by_hand + ["python3 -m unittest discover -s tests (tests/repo/test_firmware_pins.py checks the docs)",
                           "the emulator runs in docs/updating-firmware.md, then a real plug"])
+    return 0
+
+
+# -- the Beken plugs' firmware ---------------------------------------------------
+
+
+def beken_section(pins: dict[str, Any], plug: str) -> dict[str, Any]:
+    return pins.setdefault("beken", {}).setdefault(plug, {})
+
+
+def git(*args: str, cwd: Path) -> str:
+    result = subprocess.run(["git", *args], cwd=str(cwd), check=False, text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if result.returncode:
+        raise UpdateError(f"git {' '.join(args[:2])} failed in {cwd.name}:\n{result.stdout}")
+    return result.stdout.strip()
+
+
+def module_init(source: str) -> str:
+    """The module's one start-up function, `void Something_Init(void)`."""
+    found = re.findall(r"^void (\w+_Init)\(void\)", source, re.MULTILINE)
+    if len(found) != 1:
+        raise UpdateError("the module must define one `void <Name>_Init(void)` to be called at start-up")
+    return found[0]
+
+
+def module_commands(source: str) -> list[str]:
+    """The commands the module registers: each must be in the image built."""
+    return re.findall(r'CMD_RegisterCommand\("(\w+)"', source)
+
+
+def with_module(makefile: str, main: str, module: str, init: str) -> tuple[str, str]:
+    """platforms/obk_main.mk and src/user_main.c with the plug's module built
+    and run at start-up, as devices/sonoff-s61/openbeken.md says to add it:
+    listed beside the other drivers, and called once the config is loaded."""
+    anchor = "OBKM_SRC  += $(OBK_SRCS)driver/drv_main.c\n"
+    if makefile.count(anchor) != 1:
+        raise UpdateError("platforms/obk_main.mk no longer lists driver/drv_main.c once: where the module goes")
+    call = "\tCFG_InitAndLoad();\n"
+    if main.count(call) != 1:
+        raise UpdateError("src/user_main.c no longer calls CFG_InitAndLoad() once: where the module's start goes")
+    return (makefile.replace(anchor, anchor + f"OBKM_SRC  += $(OBK_SRCS)driver/{module}\n"),
+            main.replace(call, call + f"\n\textern void {init}(void);\n\t{init}();\n"))
+
+
+def openbeken_source(commit: str) -> Path:
+    """A fresh clone of OpenBeken at `commit`, its SDK with it, with this
+    project's 4 MB-table patches applied (tools/beken/openbeken/)."""
+    source = OPENBEKEN_BUILD_CACHE / "OpenBK7231T_App"
+    if source.exists():
+        # The SDK's toolchain unpacks read-only: made writable as it is removed.
+        def writable_then(remove, path, _exc):
+            os.chmod(Path(path).parent, 0o700)
+            remove(path)
+        shutil.rmtree(source, onerror=writable_then)
+    OPENBEKEN_BUILD_CACHE.mkdir(parents=True, exist_ok=True)
+    print(f"  cloning {OPENBEKEN_REPO} at {commit[:7]} and its SDK (a minute or two)...")
+    git("clone", "--quiet", f"https://github.com/{OPENBEKEN_REPO}.git", str(source), cwd=OPENBEKEN_BUILD_CACHE)
+    git("checkout", "--quiet", commit, cwd=source)
+    git("submodule", "update", "--init", "--depth=1", "sdk/beken_freertos_sdk", cwd=source)
+    for patch, where in zip(OPENBEKEN_PATCHES, (source, source / "sdk" / "beken_freertos_sdk")):
+        git("apply", str(OPENBEKEN_DIR / patch), cwd=where)
+    return source
+
+
+def openbeken_builder() -> str:
+    """This project's build image, built from build.Dockerfile: named by the
+    base image's digest and the Dockerfile's hash, which is what pins a build."""
+    dockerfile = OPENBEKEN_DIR / "build.Dockerfile"
+    base = re.search(r"^FROM (\S+)", dockerfile.read_text(encoding="utf-8"), re.MULTILINE).group(1)
+    docker("pull", "--quiet", base)
+    docker("build", "--quiet", "-t", OPENBEKEN_BUILDER, "-f", str(dockerfile), str(OPENBEKEN_DIR))
+    digests = json.loads(docker("image", "inspect", "--format", "{{json .RepoDigests}}", base))
+    pinned = next((entry for entry in digests if entry.startswith(base.split(":")[0] + "@")), base)
+    return f"{pinned} with {dockerfile.relative_to(ROOT)} {sha256_bytes(dockerfile.read_bytes())[:16]}"
+
+
+def build_openbeken(source: Path, version: str) -> bytes:
+    """OpenBeken for the BK7238 with the 4 MB table, at `version`: the rt_ota image."""
+    # Through a shell: the SDK's makefiles find their toolchain by $PWD, which
+    # only a shell sets.
+    run = ["run", "--rm", "-u", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp", "-v", f"{source}:/app",
+           OPENBEKEN_BUILDER, "sh", "-c"]
+    print("  building OpenBeken (a minute or two)...")
+    docker(*run, "cd /app && make APP_NAME=OpenBK7238 prebuild_OpenBK7238")
+    docker(*run, f"cd /app && make APP_VERSION={version} APP_NAME=OpenBK7238 FLASH_SIZE=4M OpenBK7238")
+    return (source / "output" / version / f"OpenBK7238_4M_{version}.rbl").read_bytes()
+
+
+def check_rbl(image: bytes, label: str, version: str | None, needles: list[bytes]) -> bytes:
+    """An rt_ota app image the stock bootloader applies, unpacked and checked:
+    it fits the download slot, says it is `version` (where the build names it
+    so), and holds each of `needles` - what the build was to put in it."""
+    try:
+        header = rbl.header(image)
+        firmware = rbl.unpack(image)
+    except rbl.RblError as exc:
+        raise UpdateError(f"{label} is not an rt_ota image: {exc}") from exc
+    if header.name != "app":
+        raise UpdateError(f"{label} is an rt_ota {header.name!r} image, not an app")
+    if version is not None and header.version != version:
+        raise UpdateError(f"{label} says it is {header.version}, not {version}")
+    if len(image) > uf2.DOWNLOAD_SIZE:
+        raise UpdateError(f"{label} is {len(image):,} bytes; the download slot holds {uf2.DOWNLOAD_SIZE:,}")
+    for needle in needles:
+        if needle not in firmware:
+            raise UpdateError(f"{label} does not hold {needle.decode('ascii', 'replace')!r}: not built as meant")
+    return firmware
+
+
+def command_openbeken(args: argparse.Namespace) -> int:
+    module_path, file_pattern = BEKEN_BUILDS[args.plug]["openbeken"]
+    pins = load_pins()
+    section = beken_section(pins, args.plug)
+    current = section.get("openbeken", {})
+    commit = args.commit or current.get("app_commit") or github(f"repos/{OPENBEKEN_REPO}/commits/main")["sha"]
+    version = args.image_version or (next_minor(current["version"]) if current else "1.0.0")
+    module = (ROOT / module_path).read_text(encoding="utf-8")
+    init, commands = module_init(module), module_commands(module)
+    builder = openbeken_builder()
+    print(f"OpenBeken {version} for the {args.plug}: {OPENBEKEN_REPO} at {commit[:7]}, built in {builder}")
+    source = openbeken_source(commit)
+    name = Path(module_path).name
+    shutil.copyfile(ROOT / module_path, source / "src" / "driver" / name)
+    makefile_path, main_path = source / "platforms" / "obk_main.mk", source / "src" / "user_main.c"
+    makefile, main = with_module(makefile_path.read_text(encoding="utf-8"), main_path.read_text(encoding="utf-8"),
+                                 name, init)
+    makefile_path.write_text(makefile, encoding="utf-8")
+    main_path.write_text(main, encoding="utf-8")
+    image = build_openbeken(source, version)
+    firmware = check_rbl(image, "the OpenBeken built", version, [command.encode("ascii") for command in commands])
+    sdk_commit = git("rev-parse", "HEAD", cwd=source / "sdk" / "beken_freertos_sdk")
+    print(f"  OpenBeken {version}: {len(image):,} bytes ({len(firmware):,} unpacked), the module's "
+          f"{', '.join(commands)} in it, {uf2.DOWNLOAD_SIZE - len(image):,} bytes to spare in the download slot")
+    if args.dry_run:
+        print("\nBuilt and checked; nothing published (--dry-run).")
+        return 0
+    publish(section, "openbeken", file_pattern.format(version=version), image, {
+        "version": version, "app_commit": commit, "sdk_commit": sdk_commit,
+        "module": module_path, "module_sha256": sha256_bytes(module.encode("utf-8")),
+        "patches": {patch: sha256_bytes((OPENBEKEN_DIR / patch).read_bytes()) for patch in OPENBEKEN_PATCHES},
+        "builder": builder})
+    save_pins(pins)
+    print("\nfirmware.json, SHA256SUMS, .gitignore and artifacts/ updated: git add the new file, and git rm the old.")
+    left_to_do(["artifacts/README.md: the file's row (name, SHA-256) and what changed",
+                "NOTICES.md: the file's name, the OpenBeken commit and the SDK's",
+                "CHANGELOG.md: the plug's OpenBeken is this version",
+                "python3 tests/run.py (tests/repo/test_firmware_pins.py checks the docs)",
+                "the emulator: tools/beken/cloud_push.py with the file, then the tool's own route"])
+    return 0
+
+
+def build_libretiny(builder: str, config_path: Path, version: str, workdir: Path) -> tuple[bytes, dict[str, Any], str]:
+    """Build one LibreTiny config at this version: its rt_ota image, the board
+    (its layout) the build used, and the LibreTiny version."""
+    config = with_config_version(config_path.read_text(encoding="utf-8"), version)
+    (workdir / config_path.name).write_text(config, encoding="utf-8")
+    print(f"  building {config_path.name} {version} (minutes; a first build downloads LibreTiny and its SDK)...")
+    docker("run", "--rm", "-u", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/config",
+           "-v", f"{workdir}:/config", builder, "compile", config_path.name)
+    name = re.search(r"^  name: (\S+)", config, re.MULTILINE).group(1)
+    out = workdir / ".esphome" / "build" / name / ".pioenvs" / name
+    board = json.loads((out / "board.json").read_text(encoding="utf-8"))
+    libretiny = next(path.name for path in out.glob("*_lt*.uf2")).rsplit("_lt", 1)[1].removesuffix(".uf2")
+    return (out / "image_bk7238_app.ota.rbl").read_bytes(), board, libretiny
+
+
+def command_esphome_beken(args: argparse.Namespace) -> int:
+    config_path, file_pattern = BEKEN_BUILDS[args.plug]["esphome"]
+    release = stable_release(ESPHOME_REPO, args.version)["tag_name"]
+    pins = load_pins()
+    section = beken_section(pins, args.plug)
+    current = section.get("esphome", {})
+    config = (ROOT / config_path).read_text(encoding="utf-8")
+    version = args.image_version or (next_minor(current["version"]) if current else config_version(config))
+    builder = esphome_builder(release)
+    print(f"ESPHome {release} for the {args.plug}: {builder}")
+    BUILD_CACHE.mkdir(parents=True, exist_ok=True)
+    image, board, libretiny = build_libretiny(builder, ROOT / config_path, version, BUILD_CACHE)
+    project = re.search(r"^    name: (\S+)", config, re.MULTILINE).group(1)
+    check_rbl(image, "the ESPHome built", None,
+              [version.encode("ascii"), project.encode("ascii"), release.encode("ascii"), b"autoflash_wifi",
+               b"autoflash_backup_read"])
+    layout = board.get("flash", {})
+    if layout.get("download") != f"0x{uf2.DOWNLOAD_OFFSET:06X}+0x{uf2.DOWNLOAD_SIZE:X}":
+        raise UpdateError(f"the build's download partition is {layout.get('download')}, not the stock "
+                          f"bootloader's slot at 0x{uf2.DOWNLOAD_OFFSET:x}: the config's platformio_options")
+    print(f"  ESPHome {version}: {len(image):,} bytes, LibreTiny {libretiny}, "
+          f"{uf2.DOWNLOAD_SIZE - len(image):,} bytes to spare in the download slot")
+    if args.dry_run:
+        print("\nBuilt and checked; nothing published (--dry-run).")
+        return 0
+    (ROOT / config_path).write_text(with_config_version(config, version), encoding="utf-8")
+    publish(section, "esphome", file_pattern.format(version=version), image,
+            {"config": config_path, "version": version, "esphome": release, "libretiny": libretiny,
+             "builder": builder})
+    save_pins(pins)
+    print("\nfirmware.json, SHA256SUMS, .gitignore, the config's version and artifacts/ updated: "
+          "git add the new file, and git rm the old.")
+    left_to_do(["artifacts/README.md: the file's row (name, SHA-256) and what changed",
+                "NOTICES.md: the file's name, the ESPHome release and LibreTiny version",
+                f"devices/{args.plug}/esphome.md: the ESPHome release that built the current image",
+                "CHANGELOG.md: the plug's ESPHome is this version",
+                "python3 tests/run.py (tests/repo/test_firmware_pins.py checks the docs)",
+                "the emulator: tools/beken/cloud_push.py with the file, then the tool's own route"])
     return 0
 
 
@@ -685,10 +924,20 @@ def main(argv: list[str] | None = None) -> int:
                               help="publish this build's bootloader where it differs (see the docs first)")
     build_parser.add_argument("--dry-run", action="store_true", help="build and check, publish nothing")
     build_parser.add_argument("--no-docs", action="store_true", help="leave the docs to be written by hand")
+    build_parser.add_argument("--plug", choices=sorted(BEKEN_BUILDS),
+                              help="a Beken plug's ESPHome (on LibreTiny) instead of the S60's")
     build_parser.set_defaults(run=command_esphome)
+    openbeken = commands.add_parser("openbeken", help="build and publish OpenBeken for a Beken plug")
+    openbeken.add_argument("--plug", choices=sorted(BEKEN_BUILDS), default="sonoff-s61")
+    openbeken.add_argument("--commit", help="OpenBK7231T_App's commit (default: the one pinned, else main's head)")
+    openbeken.add_argument("--image-version", help="the image's own version (default: next minor, or 1.0.0)")
+    openbeken.add_argument("--dry-run", action="store_true", help="build and check, publish nothing")
+    openbeken.set_defaults(run=command_openbeken)
     args = parser.parse_args(argv)
-    if shutil.which("docker") is None and args.command == "esphome":
-        print("ESPHome is built in its own Docker image: Docker is needed.", file=sys.stderr)
+    if args.command == "esphome" and args.plug:
+        args.run = command_esphome_beken
+    if shutil.which("docker") is None and args.command in ("esphome", "openbeken"):
+        print("Firmware is built in Docker images: Docker is needed.", file=sys.stderr)
         return 2
     try:
         return args.run(args)

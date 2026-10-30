@@ -112,7 +112,11 @@ docker run --rm -v "$(pwd)":/app ubuntu:24.04 bash -c '
   make APP_VERSION=s61 APP_NAME=OpenBK7238 FLASH_SIZE=4M OpenBK7238'
 ```
 
-`output/s61/OpenBK7238_4M_s61.rbl` is the `rt_ota` image for the **OTA
+`tools/repo/update_firmware.py openbeken` does all of the above - clone, patches,
+module, build in `build.Dockerfile` - and publishes the image as
+`artifacts/openbeken-sonoff-s61-<version>.rbl`, the OpenBeken and SDK commits
+pinned in `firmware.json` ([docs/updating-firmware.md](../../docs/updating-firmware.md)).
+By hand, `output/s61/OpenBK7238_4M_s61.rbl` is the `rt_ota` image for the **OTA
 conversion**: wrap it in the CoolKit FOTA container with
 [`../fota_wrap.py`](../../tools/beken/fota_wrap.py) to push it to a stock plug.
 `OpenBK7238_4M_QIO_s61.bin` beside it is a whole 4 MB flash — bootloader included

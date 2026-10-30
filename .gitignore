@@ -33,6 +33,7 @@ __pycache__/
 *.bin.*
 *.img
 *.ota
+*.rbl
 !artifacts/autoflash-bridge-sonoff-s60-4.4.4.ota
 !artifacts/tasmota-settings-template-15.6.0.0.bin
 !artifacts/autoflash-recovery-safeboot-imprintable.bin
@@ -41,6 +42,8 @@ __pycache__/
 !artifacts/esphome-sonoff-s60-imprintable-1.4.0.bin
 !artifacts/autoflash-mover-1.1.0.bin
 !artifacts/sonoff-s60-partition-table.bin
+!artifacts/openbeken-sonoff-s61-1.0.0.rbl
+!artifacts/esphome-sonoff-s61-1.0.0.rbl
 
 # Answers for unattended runs: the eWeLink password, perhaps sudo's (see .env.example).
 .env

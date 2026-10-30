@@ -14,6 +14,8 @@ releases it, by itself ([below](#by-itself)). By hand, it is the same steps
 | ESPHome for the S60 (`artifacts/esphome-sonoff-s60-imprintable-*.bin`) | for good | every ESPHome release | `firmware.json` |
 | ESPHome's bootloader (`artifacts/esphome-sonoff-s60-bootloader-*.bin`) | for good | only when it has to change | `firmware.json` |
 | The mover (`artifacts/autoflash-mover-*.bin`) | a minute or two | only when its config changes | `firmware.json` |
+| OpenBeken for the S61 (`artifacts/openbeken-sonoff-s61-*.rbl`) | for good | by hand: OpenBeken has no releases to settle on | `firmware.json` |
+| ESPHome for the S61 (`artifacts/esphome-sonoff-s61-*.rbl`) | for good | every ESPHome release, by hand so far | `firmware.json` |
 | The Berry Tasmota, the recovery Safeboot, the settings template, the bridge | minutes | no | [`artifacts/README.md`](../artifacts/README.md) says where, and how each is changed |
 
 The official Tasmota files are not kept here: each run downloads them from
@@ -160,7 +162,47 @@ built and where - so what pins a build is the Docker image it was made in, in
 `firmware.json`. The bootloader is repeatable: built again with the release
 that made the published one, it comes out the same.
 
-### 3. The docs
+### 3. OpenBeken and ESPHome for the S61
+
+A Beken plug ends on OpenBeken or on ESPHome built on LibreTiny, each an
+rt_ota image the plug's stock bootloader applies from its download slot
+([devices/sonoff-s61/](../devices/sonoff-s61/README.md)); the images are
+pinned under `beken` in `firmware.json`, by plug.
+
+```sh
+python3 tools/repo/update_firmware.py openbeken                       # the pinned OpenBeken commit
+python3 tools/repo/update_firmware.py openbeken --commit <sha> --image-version 1.1.0
+python3 tools/repo/update_firmware.py esphome 2026.10.0 --plug sonoff-s61
+```
+
+`openbeken` clones [OpenBK7231T_App](https://github.com/openshwprojects/OpenBK7231T_App)
+at the commit pinned (or `--commit`; with none pinned, `main`'s head) and its
+SDK, applies this project's 4 MB-table patches
+([`tools/beken/openbeken/`](../tools/beken/openbeken/), offered upstream),
+adds the plug's import module (`devices/sonoff-s61/drv_sonoff_s61_import.c`)
+to the build and to start-up as [openbeken.md](../devices/sonoff-s61/openbeken.md)
+says, and builds `OpenBK7238` with `FLASH_SIZE=4M` in this project's build
+image (`tools/beken/openbeken/build.Dockerfile`, Ubuntu 24.04: the SDK's own
+toolchain wants a newer GLIBC than OpenBeken's image has). It checks the
+image is an rt_ota app of the version asked, fits the download slot, and
+holds each command the module registers; then it publishes it, recording the
+OpenBeken and SDK commits, the module's and patches' hashes and the build
+image. OpenBeken has no releases, so nothing takes it by itself: update it
+by hand, on a commit that has been out a while. The version is this
+project's for the image (`--image-version`, the next minor by default), not
+OpenBeken's.
+
+`esphome --plug sonoff-s61` builds `devices/sonoff-s61/esphome.yaml` in
+ESPHome's image for the release, as the S60's is built, and takes
+`image_bk7238_app.ota.rbl`: checked as an rt_ota app that fits the slot, says
+its version, project and ESPHome release, and has the Wi-Fi action in it,
+with the build's download partition where the stock bootloader looks. Its
+first boot reads the plug's Wi-Fi and calibration from the stock store, so
+the image holds no placeholders and nothing is written into it. The config's
+version is raised and the image published as the S60's is. The docs for
+either are written by hand (below).
+
+### 4. The docs
 
 Each update writes what it changed, and `tests/repo/test_firmware_pins.py` fails
 while any of it is missing:
@@ -170,6 +212,9 @@ while any of it is missing:
 - `NOTICES.md`: the image's name, ESPHome release and ESP-IDF
   version;
 - `devices/sonoff-s60/esphome.md`: the ESPHome release that built the current image;
+- for the S61's images, the same by hand: their rows and paragraphs in
+  `artifacts/README.md`, `NOTICES.md` (the OpenBeken and SDK commits; the
+  ESPHome release and LibreTiny version), `devices/sonoff-s61/esphome.md`;
 - `CHANGELOG.md`: a line for each firmware, with a link to its release notes,
   under the release to come - a new section, a minor version on, once the one
   above has been released, with `tools/autoflash/__init__.py` raised to it.
@@ -183,7 +228,7 @@ changed: `--no-docs` leaves them all to be written by hand, as a change to
 the mover or the bootloader (`--mover`, `--new-bootloader`) needs anyway. The
 README's badges read `firmware.json` on `main`, and change by themselves.
 
-### 4. Test
+### 5. Test
 
 **Unit tests**, in a checkout with no emulator state linked in:
 
@@ -219,7 +264,7 @@ and the network gone at L1 and X1 ([testing.md](testing.md#the-fault-suite)).
 before the release: an emulator does not show real flash, radios or timings
 ([testing.md](testing.md#real-plugs)).
 
-### 5. Release
+### 6. Release
 
 The update raised the version in `tools/autoflash/__init__.py` to the
 changelog's; merging to `main` publishes the release

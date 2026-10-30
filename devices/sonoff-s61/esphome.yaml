@@ -6,7 +6,8 @@
 # the stock firmware itself is shipped in (docs/beken-s61-emulation.md). No
 # Wi-Fi and no passwords are in it: at boot the plug reads its own Wi-Fi
 # from where the stock firmware left it, the EasyFlash store at 0x3e2000 that
-# no conversion touches, and joins. Kept in this one file, so that Home
+# no conversion touches, and joins. Through its first start only, it lets the
+# tool read that data out as the plug's backup (autoflash_backup_read). Kept in this one file, so that Home
 # Assistant can adopt the plug from it (dashboard_import) and build it there.
 #
 # The S60's config (sonoff_s60.yaml) is the model: the same entities, actions,
@@ -34,6 +35,9 @@ esphome:
   # EasyFlash store (Wi-Fi, meter trim, identity) at 0x3e2000, which stays as
   # it is so the plug can always go back to stock. ESPHome's preferences take
   # the empty 32 KB at 0x3ee000; LittleFS (unused) the empty sector at 0x3e1000.
+  # The stock system store at 0x3f6000, never written, is named too: LibreTiny's
+  # flash reads stop where its last partition ends, and the backup reader's
+  # region runs to the end of the flash.
   platformio_options:
     board_build.bkrbl_size_app: "0x250000"
     board_flash.bootloader: "0x000000+0x11000"
@@ -42,6 +46,7 @@ esphome:
     board_flash.calibration: "0x3E0000+0x1000"
     board_flash.userdata: "0x3E1000+0x1000"
     board_flash.kvs: "0x3EE000+0x8000"
+    board_flash.stock_system: "0x3F6000+0xA000"
   on_boot:
     # Before Wi-Fi starts (its priority is 250): the network to join, from the
     # stock firmware's own store, and its own network's name. Wi-Fi details
@@ -134,12 +139,20 @@ esphome:
             }
             id(calibration_status) = source;
             ESP_LOGI("s61", "Calibration: %s", source);
+            // The backup reader opens on this image's first start only: any
+            // later start finds it was open, and shuts it for good.
+            id(backup_reader) = id(backup_reader) == 0 ? 1 : 2;
+            ESP_LOGI("s61", "Backup reader: %s", id(backup_reader) == 1 ? "open" : "shut");
             if (!id(stock_ssid).empty()) {
               ESP_LOGI("s61", "Wi-Fi from the stock store: '%s' (%d-char password)", id(stock_ssid).c_str(),
                        (int) id(stock_password).size());
             } else {
               ESP_LOGI("s61", "No Wi-Fi in the stock store");
             }
+        # Its state written now, not up to a minute later: a restart in that
+        # minute must find it.
+        - delay: 1s
+        - lambda: global_preferences->sync();
     # After Wi-Fi is set up: on the stock store's details (nothing saved
     # before), saved, so they stay. Not wifi.configure, which - when its first
     # try takes over 30 s, a router restarting, say - puts back what was there
@@ -211,6 +224,12 @@ globals:
     type: bool
     restore_value: true
     initial_value: "false"
+  # The backup reader (autoflash_backup_read): 0 before this image's first
+  # start, 1 open through it, 2 shut for good.
+  - id: backup_reader
+    type: uint8_t
+    restore_value: true
+    initial_value: "0"
   # The energy totals (Wh), counted from the meter's pulses. Doubles: a float
   # would drop a small load's few mWh once a total is large.
   - id: energy_daily_wh
@@ -281,6 +300,56 @@ api:
         # would forget it.
         - delay: 1s
         - lambda: global_preferences->sync();
+
+    # The plug's own data, for the conversion tool to keep as its backup: the
+    # factory record (MAC, radio calibration) and the stock store (Wi-Fi,
+    # meter trim, eWeLink identity), 128 KB at 0x3e0000, the region
+    # OpenBeken's /api/flash gives - in pieces of up to 2 KB, base64. Nothing
+    # else in the flash. Open only through this image's first start, until
+    # the tool shuts it (autoflash_backup_close) or 30 minutes pass,
+    # then never again: no one can read the plug out later.
+    - action: autoflash_backup_read
+      supports_response: only
+      variables:
+        offset: int
+        length: int
+      then:
+        - api.respond:
+            data: !lambda |-
+              const uint32_t start = 0x3e0000, size = 0x20000;
+              if (id(backup_reader) != 1) {
+                root["error"] = "shut";
+                return;
+              }
+              if (offset < 0 || length <= 0 || length > 2048 || (uint32_t) offset + length > size) {
+                root["error"] = "out of range";
+                return;
+              }
+              std::vector<uint8_t> piece(length);
+              if (lt_flash_read(start + offset, piece.data(), length) != (uint32_t) length) {
+                root["error"] = "not read";
+                return;
+              }
+              root["data"] = base64_encode(piece);
+    - action: autoflash_backup_close
+      then:
+        - lambda: id(backup_reader) = 2;
+        - delay: 1s
+        - lambda: global_preferences->sync();
+
+# The backup reader shuts by itself 30 minutes into its first start, read or not.
+interval:
+  - interval: 60s
+    then:
+      - if:
+          condition:
+            lambda: return id(backup_reader) == 1 && millis() > 30UL * 60 * 1000;
+          then:
+            - lambda: |-
+                id(backup_reader) = 2;
+                ESP_LOGI("s61", "Backup reader: shut (its time is up)");
+            - delay: 1s
+            - lambda: global_preferences->sync();
 
 ota:
   - platform: esphome

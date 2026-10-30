@@ -29,4 +29,8 @@ worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-e
 - **Stock firmware**: the public dump upstream BekenEmulator publishes is
   what the emulator and its tests run; this repository holds no Sonoff
   firmware ([`tools/beken/emulator/`](../../tools/beken/emulator/)).
+- **The images the tool installs**: OpenBeken with the module and the 4 MB
+  table (`artifacts/openbeken-sonoff-s61-<version>.rbl`) and ESPHome
+  (`artifacts/esphome-sonoff-s61-<version>.rbl`), built and pinned by
+  `tools/repo/update_firmware.py` ([docs/updating-firmware.md](../../docs/updating-firmware.md)).
 - **Not yet done**: a real plug, and the conversion tool's S61 route.
