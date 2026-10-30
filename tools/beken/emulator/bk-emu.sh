@@ -176,7 +176,10 @@ container() {
     local tty=()
     [ -t 0 ] && [ -t 1 ] && tty=(-t)
     mkdir -p "$FIRMWARES"
-    docker run --rm -i "${tty[@]}" --user "$(id -u):$(id -g)" \
+    # exec: a signal to this script (timeout, Ctrl-C) reaches the docker client,
+    # which passes it to the container; a child docker would run on, holding the
+    # image lock, with the container to be stopped by hand.
+    exec docker run --rm -i "${tty[@]}" --user "$(id -u):$(id -g)" \
         -v "$ROOT:/work" -v "$FIRMWARES:/opt/beken-emulator/firmwares:ro" \
         -e S61_DUMP="/opt/beken-emulator/firmwares/$S61_DUMP" \
         -w "/work${PWD#"$ROOT"}" "$IMAGE" "$@"
