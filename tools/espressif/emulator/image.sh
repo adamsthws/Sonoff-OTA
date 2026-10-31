@@ -27,7 +27,7 @@ PUBLISHED=${AUTOFLASH_EMU_PUBLISHED:-ghcr.io/adamsthws/autoflash-emu}
 
 tag() {
     (cd "$ROOT/tools/espressif/emulator" && find emu.Dockerfile patches container -type f -print0 \
-        | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+        | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
 }
 
 # The QEMU fork's source, as emu.Dockerfile pins it (QEMU_SOURCE_SHA256): from

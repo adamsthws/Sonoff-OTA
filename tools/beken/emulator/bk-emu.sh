@@ -105,7 +105,7 @@ ARCHIVE_URL=${AUTOFLASH_BEKEN_SOURCE_URL:-https://github.com/adamsthws/Sonoff-OT
 
 tag() {
     (cd "$HERE" && find UPSTREAM requirements.txt bk-emu.Dockerfile patches -type f -print0 \
-        | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+        | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
 }
 
 sha256() { sha256sum < "$1" | cut -c1-64; }
@@ -167,12 +167,14 @@ ensure() {
         exec 9>"$CACHE/beken-image.lock"
         flock 9
     fi
-    if [ "$rebuild" != --rebuild ] && labelled "$IMAGE"; then
-        return 0
+    if [ "$rebuild" = --rebuild ] || ! labelled "$IMAGE"; then
+        if [ "$rebuild" = --rebuild ] || [ "${AUTOFLASH_BEKEN_NO_PULL:-}" = 1 ] || ! pull "$IMAGE"; then
+            build "$IMAGE"
+        fi
     fi
-    if [ "$rebuild" = --rebuild ] || [ "${AUTOFLASH_BEKEN_NO_PULL:-}" = 1 ] || ! pull "$IMAGE"; then
-        build "$IMAGE"
-    fi
+    # Let go of it once the image is there: what runs next (exec docker run)
+    # would hold it for as long as it runs, and every other emulator wait.
+    exec 9>&-
 }
 
 # Firmware dumps come from upstream's repository, which publishes them, never

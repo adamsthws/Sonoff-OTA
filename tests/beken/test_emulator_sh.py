@@ -34,6 +34,55 @@ class ContainerIsExecedTests(unittest.TestCase):
         self.assertNotIn("still here", done.stdout)
 
 
+def english_locale():
+    """A UTF-8 English locale this computer has, or None."""
+    try:
+        found = subprocess.run(["locale", "-a"], capture_output=True, text=True, timeout=10).stdout.split()
+    except OSError:
+        return None
+    return next((name for name in found if name.lower() in ("en_gb.utf8", "en_us.utf8")), None)
+
+
+@unittest.skipIf(shutil.which("bash") is None or english_locale() is None, "no bash or English locale")
+class ImageTagTests(unittest.TestCase):
+    """An emulator image's tag is the same on every computer: its files sorted
+    by byte, not by the locale - an English one sorts UPSTREAM among the lower
+    case names, C before them, and a laptop's tag and the published image's
+    did not match (seen setting up the S61's suite on other machines)."""
+
+    def tags(self, script):
+        function = re.search(r"^tag\(\) \{.*?^\}", script.read_text(encoding="utf-8"), re.S | re.M).group(0)
+        here = script.parent
+        found = []
+        for locale in (english_locale(), "C"):
+            done = subprocess.run(["bash", "-c", f"HERE={here} ROOT={ROOT}\n{function}\ntag"], capture_output=True,
+                                  text=True, timeout=60, env={**os.environ, "LC_ALL": locale, "LANG": locale})
+            self.assertEqual(done.returncode, 0, done.stderr)
+            found.append(done.stdout.strip())
+        return found
+
+    def test_the_s61_images_tag_is_the_same_in_any_locale(self):
+        english, c = self.tags(SCRIPT)
+        self.assertEqual(english, c)
+
+    def test_the_s60_images_tag_is_the_same_in_any_locale(self):
+        english, c = self.tags(ROOT / "tools" / "espressif" / "emulator" / "image.sh")
+        self.assertEqual(english, c)
+
+
+@unittest.skipIf(shutil.which("bash") is None or shutil.which("flock") is None, "no bash or flock")
+class ImageLockTests(unittest.TestCase):
+    def test_the_lock_is_let_go_once_the_image_is_there(self):
+        # Held on, the docker run exec'd next kept it for its whole run, and
+        # every other emulator's start waited behind it (seen in the fault suite).
+        function = re.search(r"^ensure\(\) \{.*?^\}", SCRIPT.read_text(encoding="utf-8"), re.S | re.M).group(0)
+        with tempfile.TemporaryDirectory() as tmp:
+            script = ("set -u\nCACHE=%s IMAGE=img\nlabelled() { return 0; }\n%s\nensure\n"
+                      "[ -e /proc/$$/fd/9 ] && echo held || echo free\n" % (tmp, function))
+            done = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.stdout.strip(), "free", done.stderr)
+
+
 @unittest.skipIf(shutil.which("bash") is None, "no bash")
 class PlugNetRouterTests(unittest.TestCase):
     """plug-net.sh makes the container the plug's home router: .1 on the
