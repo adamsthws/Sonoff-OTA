@@ -69,7 +69,7 @@ def _execute(ctx: Context, step: str) -> int:
         # Its errors are the step's: seen in the fault suite, an Abort from
         # it crashed the run.
         set_up_if_erased(ctx, step)
-        if step in routes.FAMILY.DESTRUCTIVE_STEPS:
+        if step in routes.FAMILY.DESTRUCTIVE_STEPS and not ctx.dry_run:
             ctx.state.mark(step, ATTEMPTED, nothing_written=False)
         captured = handler(ctx)
     except QuitRun:
@@ -109,6 +109,11 @@ def _execute(ctx: Context, step: str) -> int:
         return 1
     # A step may end its stage otherwise: "skipped" or "already done".
     outcome = captured.pop("stage_outcome", "complete") if captured else "complete"
+    if captured and captured.get("dry_run"):
+        # Only said what it would do: not done, so a run carried on for real does it.
+        output.stage_end(outcome)
+        output.say(f"{step} done (dry run: not recorded)")
+        return 0
     ctx.state.mark(step, DONE, **{"result": captured})
     for key, value in (captured or {}).items():
         ctx.state.capture(f"{step}.{key}", value)
@@ -439,6 +444,9 @@ def run_steps(ctx: Context) -> int:
     output.say("")
     firewall.close_firewall_rules(ctx)
     output.tell("")
+    if ctx.dry_run:
+        output.show("Dry run complete: nothing was written to the device.", output.GREEN)
+        return 0
     output.show("Conversion complete!", output.GREEN)
     firmware = routes.ROUTE[0] or runs.run_firmware(ctx.state)
     if firmware == "sonoff":

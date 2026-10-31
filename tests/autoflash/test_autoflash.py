@@ -305,7 +305,8 @@ class RunStepsTests(unittest.TestCase):
         self.root = Path(directory.name)
         self.state = RunState.open(self.root)
 
-    def run_steps(self, *, codes=None, check=None, answer=0, unattended=False, skip=True, **overrides):
+    def run_steps(self, *, codes=None, check=None, answer=0, unattended=False, skip=True, dry_run=False,
+                  **overrides):
         """run_steps over STEPS, each step's code from `codes` (0 if not
         given), S2's evidence if interrupted, and the operator's answer:
         what it returned, the steps it ran, and the stand-ins, each of which
@@ -340,7 +341,7 @@ class RunStepsTests(unittest.TestCase):
                                                   {} if check is None else {"S2": check}, clear=True))
             patches.enter_context(mock.patch.object(prompts, "UNATTENDED", unattended))
             patches.enter_context(mock.patch.object(prompts, "answered_unattended"))
-            code = runner.run_steps(SimpleNamespace(state=self.state, research_bridge=False))
+            code = runner.run_steps(SimpleNamespace(state=self.state, research_bridge=False, dry_run=dry_run))
         return code, ran, stand_ins
 
     def test_every_step_runs_in_turn_and_the_rules_are_closed(self):
@@ -349,6 +350,14 @@ class RunStepsTests(unittest.TestCase):
         stand_ins["close_firewall_rules"].assert_called_once()
         stand_ins["invite_report"].assert_called_once()
         stand_ins["bundle_of_this_version"].assert_not_called()  # a new run's bundle is the one built
+
+    def test_a_dry_run_ends_saying_nothing_was_written_and_asks_for_no_report(self):
+        code, ran, stand_ins = self.run_steps(dry_run=True)
+        self.assertEqual((code, ran), (0, ["S1", "S2", "S3"]))
+        stand_ins["invite_report"].assert_not_called()
+        shown = " ".join(str(call.args[0]) for call in stand_ins["output"].show.call_args_list)
+        self.assertIn("Dry run complete: nothing was written", shown)
+        self.assertNotIn("Conversion complete", shown)
 
     def test_a_route_refused_stops_before_anything_is_done(self):
         code, ran, stand_ins = self.run_steps(settle_route=mock.Mock(side_effect=errors.Abort("no plug")))
@@ -1127,7 +1136,7 @@ class RetryTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         state = RunState.open(Path(directory.name))
-        ctx = SimpleNamespace(state=state)
+        ctx = SimpleNamespace(state=state, dry_run=False)
         outcomes = iter(errors)
 
         def fake_execute(_, name):
@@ -1167,6 +1176,22 @@ class RetryTests(unittest.TestCase):
         code, runs = self.run_with("E3", ["timed out", None])
         self.assertEqual((code, runs), (1, 1))
 
+    def test_a_dry_run_records_no_step_it_only_said_it_would_do(self):
+        # Carried on for real, the run must do them: nothing was written.
+        from types import SimpleNamespace
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        state = RunState.open(Path(directory.name))
+        for step, result, expected in (("E3", {"dry_run": True}, "pending"), ("E1", {"read": 1}, "done")):
+            title, _ = routes.STEP_INDEX[step]
+            with mock.patch.dict(routes.STEP_INDEX, {step: (title, mock.Mock(return_value=dict(result)))}), \
+                    mock.patch.object(routes, "begin_stage"), mock.patch.object(output, "stage_end"), \
+                    mock.patch.object(output, "say"), \
+                    mock.patch.object(state, "mark", wraps=state.mark) as marked:
+                self.assertEqual(runner.execute(SimpleNamespace(state=state, dry_run=True), step), 0)
+            self.assertEqual(state.status(step), expected, step)
+            self.assertNotIn("attempted", [call.args[1] for call in marked.call_args_list], step)
+
     def test_a_phase_with_no_result_keeps_the_commit_attempted(self):
         from types import SimpleNamespace
         from unittest import mock
@@ -1182,7 +1207,7 @@ class RetryTests(unittest.TestCase):
                  mock.patch.object(routes, "begin_stage"), \
                  mock.patch.object(output, "stage_end"), \
                  mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
-                runner.execute(SimpleNamespace(state=state), step)
+                runner.execute(SimpleNamespace(state=state, dry_run=False), step)
             self.assertEqual(state.status(step), expected, step)
 
 
@@ -1197,7 +1222,7 @@ class StageTimingTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         state = RunState.open(Path(directory.name))
-        ctx = SimpleNamespace(state=state)
+        ctx = SimpleNamespace(state=state, dry_run=False)
 
         def stage(context):
             context.last_runner = SimpleNamespace(busy_seconds=41.5)
@@ -1344,7 +1369,7 @@ class UnexpectedErrorTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         state = RunState.open(Path(directory.name))
-        ctx = SimpleNamespace(state=state)
+        ctx = SimpleNamespace(state=state, dry_run=False)
         title, _ = routes.STEP_INDEX[step]
         failing = mock.Mock(side_effect=error)
         with mock.patch.dict(routes.STEP_INDEX, {step: (title, failing)}), \
