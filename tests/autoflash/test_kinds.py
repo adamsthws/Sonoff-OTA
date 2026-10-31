@@ -41,12 +41,6 @@ class NamesTests(unittest.TestCase):
         for product in (None, "", "S60", "S60TPGX", 'S60TPG","GPIO":[0]'):
             self.assertEqual(S60.template_name(product), "Sonoff S60", product)
 
-    def test_its_region_from_the_model_letter(self):
-        self.assertEqual(S60.region("S60TPG"), "UK (Type G)")
-        self.assertEqual(S60.region("S60TPF"), "Europe (Type E/F)")
-        self.assertIsNone(S60.region("S60TPX"))
-        self.assertIsNone(S60.region(None))
-
     def test_before_the_plug_is_known_every_kind_is_named(self):
         self.assertEqual(kinds.names(), "Sonoff S60 or Sonoff S61")
         self.assertEqual(kinds.names("short"), "S60 or S61")

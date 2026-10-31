@@ -430,7 +430,7 @@ anywhere in the flash — so the stub cannot read it from the plug. Instead
 earlier runs (`plugs/<mac>/runs/*/autoflash-state.json`: a real conversion's, a
 kept plug's or an instance's), and `AUTOFLASH_STUB_PRODUCT_MODEL=S60TPG|S60TPF`
 overrides it or covers a plug never seen by the real cloud. With neither, none is
-served and the run's report leaves "Device model" and "Device type / region" blank
+served and the run's report leaves "Device model" blank
 (and the Tasmota template is named plainly "Sonoff S60") rather than guess.
 
 ### Every exchange, with examples
@@ -720,8 +720,8 @@ alike: Tasmota in all 16 stages, 4m 11s (stub) against 4m 13s (cloud); ESPHome
 in 11 stages, 2m 36s against 2m 38s. The one difference was the product model:
 blank in the stub runs, since the dump does not record it, against `S60TPG` from
 eWeLink. Once the stub served the product model eWeLink had given this plug (see
-[the stub server](#the-stub-server)), the stub Tasmota run reported `S60TPG`,
-"UK (Type G)" and named the Tasmota template "Sonoff S60TPG", as the cloud run
+[the stub server](#the-stub-server)), the stub Tasmota run reported `S60TPG`
+and named the Tasmota template "Sonoff S60TPG", as the cloud run
 did.
 
 **Interpretation:** a stub run stands in for a cloud run end to end, report

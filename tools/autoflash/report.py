@@ -132,6 +132,7 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     """
     hardware = hardware or {}
     kind = kinds.of_run(ctx.state)
+    firmware = runs.run_firmware(ctx.state)
     espressif = kind.family == "espressif"
     product = str(ctx.state.input("product_model") or "")
     model = kind.product_of(product)
@@ -152,11 +153,16 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     signal = min(readings) if readings else None
     fields = [
         ("Result", result),
-        ("Firmware", routes.FIRMWARES[runs.run_firmware(ctx.state)]),
+        ("Firmware", routes.FIRMWARES[firmware]),
         ("Converted from", CONVERTED_FROM[runs.run_source(ctx.state)]),
         ("Tool version", __version__),
         ("Device model", model or "__"),
-        ("Device type / region", kind.region(model) or "__"),
+        # What the new firmware calls the device: Tasmota's template, ESPHome's
+        # friendly name, OpenBeken's short name as it answered.
+        *([("Name in ESPHome", kind.esphome_name)] if firmware == "esphome"
+          else [("Name in Tasmota", kind.template_name(product))] if firmware == "tasmota"
+          else [("Name in OpenBeken", ctx.state.input("device_name") or kind.short)]
+          if firmware == "openbeken" else []),
         ("Stock firmware", ctx.state.input("stock_version") or "__"),
         # How it went, never where it is or which plug: the path holds the MAC.
         # A run from a converted plug takes none: one is there or not.
@@ -178,9 +184,6 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         # Whether the device had to be switched off and on to start its new
         # firmware: the emulated S61 never restarts by itself; a real one may.
         *([("Power cycled", "true" if ctx.state.input("power_cycles") else "false")] if not espressif else []),
-        *([("Name in ESPHome", kind.esphome_name)] if runs.run_firmware(ctx.state) == "esphome"
-          else [("Name in Tasmota", kind.template_name(product))]
-          if runs.run_firmware(ctx.state) == "tasmota" else []),
         ("Relay", hardware.get("Relay", "not checked")),
         ("Power meter", hardware.get("Power meter", "not checked")),
     ]

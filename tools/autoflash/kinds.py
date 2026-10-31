@@ -44,10 +44,8 @@ class Kind:
     name: str
     maker: str
     short: str
-    # eWeLink's product model for one, as the account gives it, and what the
-    # last letter of that says of the plug's type and region.
+    # eWeLink's product model for one, as the account gives it.
     product: re.Pattern[str]
-    regions: tuple[tuple[str, str], ...]
     # What its stock firmware calls itself, to eWeLink and to the updater.
     stock_model: str
     # The model a file must be wrapped for, for the stock updater to take it.
@@ -74,11 +72,6 @@ class Kind:
         """`product_model` as eWeLink gives it, if it is one of this kind's; else ""."""
         product = (product_model or "").strip().upper()
         return product if self.product.fullmatch(product) else ""
-
-    def region(self, product_model: str | None) -> str | None:
-        """The plug type and region a product model of this kind's stands for."""
-        product = self.product_of(product_model)
-        return dict(self.regions).get(product[-1:]) if product else None
 
     def template_name(self, product_model: str | None) -> str:
         """Tasmota's name for it: after its own product model where eWeLink gave
@@ -119,7 +112,6 @@ SONOFF_S60 = Kind(
     short="S60",
     # S60TP and the plug-type letter: the UK's S60TPG, Europe's S60TPF.
     product=re.compile(r"S60TP[A-Z]"),
-    regions=(("G", "UK (Type G)"), ("F", "Europe (Type E/F)")),
     stock_model="SN-ESP32C3-S60-01",
     wrapper_model="FWSW-E32S60-S60-ESP32C3FN4",
     # Relay GPIO4, status LED GPIO5, power meter GPIO7, button GPIO9.  The UK
@@ -142,7 +134,6 @@ SONOFF_S61 = Kind(
     short="S61",
     # The S61S (iPlug Gen2): S61STP and the plug-type letter, Europe's S61STPF.
     product=re.compile(r"S61STP[A-Z]"),
-    regions=(("F", "Europe (Type E/F)"), ("G", "UK (Type G)")),
     stock_model="SN-BK7238-S61-01",
     # The descriptor name in the FOTA container its stock updater stages (tools/beken/fota_wrap.py).
     wrapper_model="FWSW-01-S61-BK7238",

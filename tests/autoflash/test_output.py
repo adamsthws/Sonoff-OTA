@@ -764,7 +764,7 @@ class ReportTests(OutputTestCase):
         fields = dict(report.report_fields(self.ctx(), 441, False))
         self.assertEqual(fields["Result"], "Converted")
         self.assertEqual(fields["Device model"], "S60TPG")
-        self.assertEqual(fields["Device type / region"], "UK (Type G)")
+        self.assertNotIn("Device type / region", fields)  # the model says it
         self.assertEqual(fields["Stock firmware"], "1.2.0")
         self.assertNotIn("Python", fields["Computer"])
         self.assertRegex(fields["Python"], r"^3\.\d+\.\d+ \(")
@@ -772,6 +772,8 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Typed the Wi-Fi"], "No")
         self.assertEqual(fields["Joined setup network"], "No")
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60TPG")
+        labels = list(fields)
+        self.assertEqual(labels.index("Name in Tasmota"), labels.index("Device model") + 1)
 
     def test_an_s61_report_says_whether_it_was_power_cycled(self):
         self.assertNotIn("Power cycled", dict(report.report_fields(self.ctx(), 441, False)))  # an S60's
@@ -779,6 +781,14 @@ class ReportTests(OutputTestCase):
         self.assertEqual(dict(report.report_fields(self.ctx(**s61), 441, False))["Power cycled"], "False")
         ctx = self.ctx(**s61, power_cycles={"by hand": 1})
         self.assertEqual(dict(report.report_fields(ctx, 441, False))["Power cycled"], "True")
+
+    def test_an_openbeken_report_gives_its_name_as_the_device_answered(self):
+        s61 = dict(plug_kind="sonoff-s61", product_model="S61STPF", firmware="openbeken", source="esphome")
+        fields = dict(report.report_fields(self.ctx(**s61, device_name="S61"), 441, False))
+        self.assertEqual(fields["Name in OpenBeken"], "S61")
+        labels = list(fields)
+        self.assertEqual(labels.index("Name in OpenBeken"), labels.index("Device model") + 1)
+        self.assertNotIn("Name in ESPHome", fields)
 
     def test_an_openbeken_run_checks_the_relay_and_meter_as_tasmotas_does(self):
         ctx = self.ctx(plug_kind="sonoff-s61", product_model="S61STPF", firmware="openbeken", source="esphome")
