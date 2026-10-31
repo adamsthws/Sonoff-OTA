@@ -92,5 +92,39 @@ class PlugNetRouterTests(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertNotIn("br0", calls)
 
+
+@unittest.skipIf(shutil.which("bash") is None, "no bash")
+class NetworkRaceTests(unittest.TestCase):
+    """Plugs started side by side may choose the same free subnet: the one
+    whose create loses chooses again (seen with eight at once on a VM)."""
+
+    def make(self, creates_fail):
+        function = re.search(r"^network\(\) \{.*?^\}", SCRIPT.read_text(encoding="utf-8"), re.S | re.M).group(0)
+        with tempfile.TemporaryDirectory() as tmp:
+            calls = Path(tmp, "calls")
+            docker = ("#!/bin/sh\necho \"$*\" >> %s\n"
+                      "case \"$1 $2\" in\n"
+                      "  'network inspect') [ -f %s/made ] ;;\n"
+                      "  'network ls') : ;;\n"
+                      "  'network create') n=$(grep -c 'network create' %s); [ \"$n\" -gt %d ] && touch %s/made ;;\n"
+                      "esac\n" % (calls, tmp, calls, creates_fail, tmp))
+            for name, text in {"docker": docker, "sleep": "#!/bin/sh\n", "ip": "#!/bin/sh\n"}.items():
+                Path(tmp, name).write_text(text, encoding="utf-8")
+                Path(tmp, name).chmod(0o755)
+            done = subprocess.run(["bash", "-c", "set -u\nNETWORK=net\n%s\nnetwork" % function],
+                                  capture_output=True, text=True, timeout=60,
+                                  env={**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"})
+            return done, calls.read_text(encoding="utf-8").count("network create")
+
+    def test_a_lost_race_is_tried_again(self):
+        done, creates = self.make(creates_fail=2)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(creates, 3)
+
+    def test_it_gives_up_in_the_end(self):
+        done, creates = self.make(creates_fail=99)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("Could not make the Docker network net", done.stderr)
+
 if __name__ == "__main__":
     unittest.main()

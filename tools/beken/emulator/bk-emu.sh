@@ -72,6 +72,9 @@
 #
 # AUTOFLASH_BEKEN_IMAGE names the image (default autoflash-beken-emu),
 # AUTOFLASH_BEKEN_NETWORK the plug's network (default autoflash-beken),
+# AUTOFLASH_BEKEN_PLUG_NAME the plug (default autoflash-s61; its state is
+# captures/emulation/s61/<name>/), AUTOFLASH_BEKEN_COMPUTER a name for the
+# computer's container,
 # AUTOFLASH_BEKEN_PUBLISHED another place to pull from, AUTOFLASH_BEKEN_NO_PULL=1
 # always builds, AUTOFLASH_BEKEN_SOURCE_URL another place to download the archive
 # from. Tools run as your own user, so what they write in /work is yours.
@@ -233,21 +236,29 @@ network() {
         echo "remove it (docker network rm $NETWORK) and run this again" >&2
         exit 1
     fi
-    local subnet
-    subnet=$( { ip -4 route 2>/dev/null | awk '{print $1}'
-                docker network ls -q | xargs docker network inspect \
-                    -f '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' 2>/dev/null; } | python3 -I -c '
+    local subnet attempt
+    for attempt in 1 2 3 4 5 6 7 8; do
+        subnet=$( { ip -4 route 2>/dev/null | awk '{print $1}'
+                    docker network ls -q | xargs docker network inspect \
+                        -f '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' 2>/dev/null; } | python3 -I -c '
 import ipaddress, sys
 taken = [ipaddress.ip_network(line.strip(), strict=False) for line in sys.stdin
          if line.strip() and line.strip() != "default" and ":" not in line]
-for candidate in ("198.18.61.0/24", "172.31.61.0/24", "10.231.61.0/24"):
+# One a plug: the fault suite runs several side by side, each on its own.
+for candidate in [f"198.18.{n}.0/24" for n in range(61, 128)] + [f"172.31.{n}.0/24" for n in range(61, 128)]:
     if not any(ipaddress.ip_network(candidate).overlaps(network) for network in taken):
         print(candidate)
         break')
-    [ -n "$subnet" ] || { echo "No free /24 for the S61's Docker network: make one, and name it with AUTOFLASH_BEKEN_NETWORK" >&2; exit 1; }
-    # Another run starting at the same moment may have made it first.
-    docker network create --subnet "$subnet" --ip-range "${subnet%.*}.128/25" --gateway "${subnet%.*}.254" \
-        --label autoflash.emulator=1 "$NETWORK" >/dev/null 2>&1 || docker network inspect "$NETWORK" >/dev/null
+        [ -n "$subnet" ] || { echo "No free /24 for the S61's Docker network: make one, and name it with AUTOFLASH_BEKEN_NETWORK" >&2; exit 1; }
+        docker network create --subnet "$subnet" --ip-range "${subnet%.*}.128/25" --gateway "${subnet%.*}.254" \
+            --label autoflash.emulator=1 "$NETWORK" >/dev/null 2>&1 && return 0
+        # Made by another run starting at the same moment - or that subnet taken
+        # by another plug's network made since it was chosen: choose again.
+        docker network inspect "$NETWORK" >/dev/null 2>&1 && return 0
+        sleep "$attempt"
+    done
+    echo "Could not make the Docker network $NETWORK" >&2
+    exit 1
 }
 
 # The plug's network's first three numbers (198.18.61, say).
@@ -344,7 +355,8 @@ case "${1:-}" in
               --exclude /.env --exclude __pycache__/ "$ROOT/" "$WORK/"
         # The plug's power switch too, so a run can offer to switch it off and on.
         [ -f "$PLUG_STATE/power" ] || echo on > "$PLUG_STATE/power"
-        CONTAINER_OPTIONS=(--network "$NETWORK" -v "$PLUG_STATE/ca.crt:/plug/ca.crt:ro"
+        CONTAINER_OPTIONS=(${AUTOFLASH_BEKEN_COMPUTER:+--name "$AUTOFLASH_BEKEN_COMPUTER"}
+                           --network "$NETWORK" -v "$PLUG_STATE/ca.crt:/plug/ca.crt:ro"
                            -v "$PLUG_STATE/power:/plug/power" -e AUTOFLASH_EMULATOR_POWER=/plug/power
                            -e AUTOFLASH_EWELINK_API_BASE="https://$(subnet).1" --entrypoint bash)
         container /work/tools/beken/emulator/computer.sh "$@" ;;

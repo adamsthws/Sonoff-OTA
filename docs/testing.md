@@ -608,6 +608,40 @@ Before that:
   Sonoff's firmware), all came back with the settings and were converted -
   and the run now carries on by itself, trying the commit up to three times.
 
+## The S61's fault suite
+
+`tools/beken/emulator/fault_suite.py` does the same for the Sonoff S61, on
+emulated S61s (`bk-emu.sh plug`, [its README](../tools/beken/emulator/README.md)):
+each its own plug on a home Wi-Fi of its own, with the local eWeLink stub, so
+nothing reaches the internet and every scenario can run side by side.
+
+```sh
+tools/beken/emulator/fault_suite.py prep      # the starting plugs: on OpenBeken, on ESPHome
+tools/beken/emulator/fault_suite.py list > s61.txt
+AUTOFLASH_S61_WORKERS=2 tools/beken/emulator/fault_suite.py batch s61.txt   # what has not passed yet
+tools/beken/emulator/fault_suite.py report
+```
+
+Every direction between Sonoff's firmware, OpenBeken and ESPHome; at each
+step that writes to or waits on the plug, at 40% of its usual length, the
+plug switched off for 1 or 30 s, this computer off the plug's Wi-Fi for
+30 s, the tool killed and run again after 1 or 180 s, and Ctrl-C - and at
+the steps that write, a power cut and a kill at 10% and 90% too, a power cut
+and another as the tool sends the step again, and the plug's router giving
+it a new address once the step is done. Each route also has the plug
+switched off 10, 50 and 90% of the way through its bootloader writing the
+new firmware in, timed off the plug's own output: the moment a real plug is
+likeliest to be left unable to start. 138 scenarios. Then the
+tool is run again as a person would, switching the plug off and on where it
+says to, up to four times; the scenario passes when the run's record has
+every step of its route done. Results are in `captures/emulation/s61-suite/`.
+
+Each emulated S61 takes a core, so two workers suit a laptop. Sonoff's
+firmware in the emulator does not restart once it has its update (the
+README says so), so a route from it passes only through the switch off and
+on the tool asks for: those scenarios show how the tool copes with that, not
+whether a real plug restarts.
+
 ## Real plugs
 
 Real plugs are converted with each one powered through a second smart plug,

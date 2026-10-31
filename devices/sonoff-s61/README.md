@@ -37,5 +37,5 @@ worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-e
   - the push through eWeLink from Sonoff's firmware, OpenBeken and ESPHome each
   taking the next firmware as an update of its own, Sonoff's firmware back
   from the public dump, the backup through OpenBeken after the first
-  conversion. Written against the emulator's findings and tested against
-  stand-ins; not yet run end to end in the emulator, and never on a real plug.
+  conversion. Run end to end in the emulator in every direction, faults and
+  all ([its fault suite](../../docs/testing.md#the-s61s-fault-suite)); never yet on a real plug.
