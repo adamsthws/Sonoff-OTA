@@ -196,11 +196,6 @@ def names(attribute: str = "name") -> str:
     return " or ".join(getattr(kind, attribute) for kind in ALL)
 
 
-def stock_models() -> str:
-    """Every kind, with what its stock firmware calls itself."""
-    return ", ".join(f"{kind.name}: {kind.stock_model}" for kind in ALL)
-
-
 def name_words() -> set[str]:
     """The words of every kind's name, in lower case: an eWeLink name of only
     these (and its product model) is the one eWeLink gave, which names nobody."""

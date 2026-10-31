@@ -98,7 +98,7 @@ class TypedAddressTests(unittest.TestCase):
         with self.found(["1000aaaaaa"]), mock.patch.object(output, "tell"):
             problem = account.plug_at({"1001234abc"})("192.168.0.60")
         self.assertEqual(problem, ["192.168.0.60 is a different eWeLink device, not one of this "
-                                   "account's Sonoff S60 or Sonoff S61 plugs."])
+                                   "account's supported devices."])
 
     def test_without_an_account_any_ewelink_device_will_do(self):
         with self.found(["1000aaaaaa"]), mock.patch.object(output, "tell"):
@@ -195,7 +195,7 @@ class FindAccountPlugTests(unittest.TestCase):
              mock.patch.object(prompts, "section") as shown, \
              mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
             self.assertEqual(account.find_account_plug(self.ctx(), [S60]), "192.168.0.99")
-        self.assertEqual("Your plug is on this network but cannot reach the internet",
+        self.assertEqual("Your device is on this network but cannot reach the internet",
                          shown.call_args.args[0])
         self.assertIn("cannot reach the internet", shown.call_args.args[1][0])
 
@@ -205,7 +205,7 @@ class FindAccountPlugTests(unittest.TestCase):
              mock.patch.object(prompts, "ask_ipv4", return_value="192.168.0.50"), \
              mock.patch.object(prompts, "section") as shown:
             self.assertEqual(account.find_account_plug(ctx, [SWITCH]), "192.168.0.50")
-        self.assertIn("No Sonoff S60 or Sonoff S61 in the eWeLink account owner@example.com", shown.call_args.args[0])
+        self.assertIn("No supported device in the eWeLink account owner@example.com", shown.call_args.args[0])
         self.assertIn("- 'Hall light' (MINIR4)", shown.call_args.args[1])
 
 

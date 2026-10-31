@@ -78,7 +78,7 @@ CORE = [("plugoff", 1), ("plugoff", 30), ("outage", 30), ("crash", 1), ("crash",
 TIMING = [("plugoff", 1), ("crash", 1)]
 RUN_LIMIT = 1500       # seconds one run of the tool may take
 RECOVERY_RUNS = 4      # runs after the fault before a scenario fails
-POWER_CYCLE = re.compile(r"switch the plug off and on", re.IGNORECASE)
+POWER_CYCLE = re.compile(r"switch the (plug|device) off and on", re.IGNORECASE)
 
 
 def sid(route: str, step: str, fault: str, arg, at: int = 40) -> str:

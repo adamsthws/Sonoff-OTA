@@ -55,17 +55,17 @@ def run(
         raise RedirectTestError(f"{plug_ip} is already one of this computer's addresses")
     if hostsys.ping_ok(plug_ip):
         raise RedirectTestError(
-            f"something still answers at {plug_ip} - unplug the plug first, or two "
+            f"something still answers at {plug_ip} - unplug the device first, or two "
             "devices would share one address"
         )
     add, remove = hostsys.alias_commands(interface, plug_ip)
     if elevated(add) != 0:
         raise RedirectTestError(f"could not borrow {plug_ip}: {hostsys.display(add)}")
     try:
-        log("Test 1 of 2: a connection from the plug's address is redirected")
+        log("Test 1 of 2: a connection from the device's address is redirected")
         if connect(plug_ip, vendor_ip, vendor_port):
             raise RedirectTestError(
-                "a connection from the plug's address reached Sonoff's server, so "
+                "a connection from the device's address reached Sonoff's server, so "
                 "the router rule is not catching it"
             )
         log("  PASS - it did not reach Sonoff's server")

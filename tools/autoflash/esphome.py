@@ -63,11 +63,11 @@ class ImageError(ValueError):
 def check_app(image: bytes, label: str) -> None:
     """Refuse anything but an ESP32-C3 app that fits Sonoff's slot."""
     if len(image) > SLOT_SIZE:
-        raise ImageError(f"{label} is {len(image):,} bytes; the plug's app slot holds {SLOT_SIZE:,}")
+        raise ImageError(f"{label} is {len(image):,} bytes; the device's app slot holds {SLOT_SIZE:,}")
     if len(image) < 64 or image[0] != 0xE9:
         raise ImageError(f"{label} is not an ESP32 firmware image")
     if struct.unpack_from("<H", image, 12)[0] != ESP32_C3_CHIP_ID:
-        raise ImageError(f"{label} is not built for the plug's ESP32-C3")
+        raise ImageError(f"{label} is not built for the device's ESP32-C3")
     if struct.unpack_from("<I", image, 32)[0] != APP_DESC_MAGIC:
         raise ImageError(
             f"{label} is not an app image: use firmware.ota.bin, not firmware.factory.bin"
@@ -100,7 +100,7 @@ def published_bootloader() -> bytes:
     if len(bootloader) > BOOTLOADER_ROOM or bootloader[0] != 0xE9:
         raise ImageError(f"{BOOTLOADER.name} is not an ESP32 bootloader that fits before 0x8000")
     if struct.unpack_from("<H", bootloader, 12)[0] != ESP32_C3_CHIP_ID:
-        raise ImageError(f"{BOOTLOADER.name} is not built for the plug's ESP32-C3")
+        raise ImageError(f"{BOOTLOADER.name} is not built for the device's ESP32-C3")
     report = imprint.parse_esp_image(bootloader)
     if not report["checksum_valid"] or report["sha256_valid"] is not True:
         raise ImageError(f"{BOOTLOADER.name} fails its own integrity check")
@@ -366,8 +366,8 @@ class ApiLocked(Exception):
     (`wrong`) the key given is not its own."""
 
     def __init__(self, wrong: bool = False) -> None:
-        super().__init__("the API encryption key given is not the plug's" if wrong
-                         else "the plug's API is encrypted")
+        super().__init__("the API encryption key given is not the device's" if wrong
+                         else "the device's API is encrypted")
         self.wrong = wrong
 
 
@@ -408,7 +408,7 @@ class _Api:
         except noise.NoiseError:
             return False
         if chosen[:1] != b"\x01":  # Noise_NNpsk0_25519_ChaChaPoly_SHA256, the one there is
-            raise ConnectionError("the plug's API offers an encryption this tool does not know")
+            raise ConnectionError("the device's API offers an encryption this tool does not know")
         try:
             noise.handshake_reply(handshake, noise.read_frame(self._read))
         except noise.NoiseError as exc:

@@ -43,7 +43,7 @@ def step_esphome_install(ctx: Context) -> dict[str, Any]:
     """
     host = ctx.state.input("plug_ip")
     if host and esphome.is_esphome(host):
-        output.say("The plug already runs ESPHome; there is nothing to install again.")
+        output.say("The device already runs ESPHome; there is nothing to install again.")
         return {"already_installed": True}
     ssid, password = ctx.wifi()
     # Read off the temporary Tasmota, as E1 reads it on the way to Tasmota:
@@ -58,8 +58,8 @@ def step_esphome_install(ctx: Context) -> dict[str, Any]:
     name = ctx.esphome_firmware.name if ctx.esphome_firmware else esphome.IMAGE.name
     prompts.section("Installing ESPHome", quiet=True, body=[
         f"{name}, with your Wi-Fi written in (in memory only), goes into the half",
-        "of the plug's memory Tasmota is not running from. Every block is read back",
-        "and checked against the image; only then does the plug switch to it and",
+        "of the device's memory Tasmota is not running from. Every block is read back",
+        "and checked against the image; only then does the device switch to it and",
         "restart. Its memory layout stays as Sonoff made it.",
     ])
     if ctx.dry_run:
@@ -80,7 +80,7 @@ def step_leave_tasmota(ctx: Context) -> dict[str, Any]:
     """
     host = ctx.state.input("plug_ip")
     if host and esphome_ota.probe(host) is not None and not esphome.is_esphome(host):
-        output.say("The plug already runs the mover.")
+        output.say("The device already runs the mover.")
         return {"already": True}
     ssid, password = ctx.wifi()
     # The earliest reading of a run from Tasmota, before it makes way: the
@@ -102,12 +102,12 @@ def step_leave_tasmota(ctx: Context) -> dict[str, Any]:
         # the restart into the mover.  Not left waiting for one.
         if not table_written(ctx):
             raise
-        output.say("    Everything was written before the plan stopped; restarting the plug into the mover.")
+        output.say("    Everything was written before the plan stopped; restarting the device into the mover.")
         ctx.device.command("Restart 99")
         result = {"plan": plan.name, "restarted_after": "a stopped report"}
     if not ctx.dry_run:
-        wait_for_mover(ctx, "the plug to start the mover")
-        output.say("    The plug is running the mover, on Sonoff's memory layout.")
+        wait_for_mover(ctx, "the device to start the mover")
+        output.say("    The device is running the mover, on Sonoff's memory layout.")
     return result | {"signal_dbm": signal}
 
 
@@ -130,7 +130,7 @@ def wait_for_mover(ctx: Context, what: str) -> bool:
         raise Abort(
             f"{what} did not answer on your Wi-Fi, and its own network "
             f"({names.mover_network_hint(ctx)}) is not to be seen either. If your Wi-Fi is "
-            "on, switch the plug off and on: two minutes after it cannot join your "
+            "on, switch the device off and on: two minutes after it cannot join your "
             "Wi-Fi, it raises its own network, and running this again sets it up "
             "through that")
     if joined != before:
@@ -151,7 +151,7 @@ def step_esphome_from_mover(ctx: Context) -> dict[str, Any]:
     the other slot, checks it, and starts it."""
     host = ctx.state.input("plug_ip")
     if host and esphome.is_esphome(host):
-        output.say("The plug already runs ESPHome.")
+        output.say("The device already runs ESPHome.")
         return {"already": True}
     ssid, password = ctx.wifi()
     try:
@@ -168,7 +168,7 @@ def step_esphome_from_mover(ctx: Context) -> dict[str, Any]:
         except (esphome.ImageError, imprint.ImprintError, OSError) as exc:
             raise Abort(f"the ESPHome image cannot be used: {exc}") from exc
     seconds = handover.send_as_esphome_update(ctx, image, "ESPHome")
-    output.say(f"    ESPHome sent in {seconds}s; the plug restarts into it.")
+    output.say(f"    ESPHome sent in {seconds}s; the device restarts into it.")
     return {"seconds": seconds, "size": len(image)}
 
 
@@ -186,13 +186,13 @@ def step_startup_from_esphome(ctx: Context, *, again: bool = False) -> dict[str,
         # none). From an ESPHome that gives neither, the first is at D4.
         ctx.state.capture("X1.signal_dbm", join.note_signal(
             ctx, esphome.signal(host, ctx.esphome_key) if host else None, [
-                "Nothing has been written yet. From here the plug restarts several",
+                "Nothing has been written yet. From here the device restarts several",
                 "times, and each time it has to rejoin your Wi-Fi on its own; a weak",
                 "signal makes that less certain."]))
         handover.consent_to_leave(ctx, "ESPHome" if runs.run_source(ctx.state) == "esphome" else "firmware")
     running = unlock.identify(ctx, host) if host else None
     if running in ("startup", "hub"):
-        output.say("The plug is already past this step.")
+        output.say("The device is already past this step.")
         return {"already": running}
     ssid, password = ctx.wifi(why=[
         "ESPHome cannot say what its Wi-Fi password is, and the firmware that",
@@ -223,13 +223,13 @@ def step_berry_from_startup(ctx: Context) -> dict[str, Any]:
         return {"dry_run": True}
     running = unlock.identify(ctx, ctx.device.host)
     if running == "hub":
-        output.say("The plug already runs Tasmota.")
+        output.say("The device already runs Tasmota.")
         return {"already": True}
     if running in ("mover", "esphome", "esphome-login"):
         # The startup firmware confirms itself only once it has been used: a
         # plug switched off and on before then starts the firmware it ran
         # before (seen in the fault suite, a power cut early in X2).
-        output.tell("    The plug is back on the firmware it ran before - switched off and on")
+        output.tell("    The device is back on the firmware it ran before - switched off and on")
         output.tell("    before the startup firmware was settled in - so that is sent again.")
         step_startup_from_esphome(ctx, again=True)
     how = hub.upload_or_prompt(ctx, image, "Berry Tasmota")
@@ -269,14 +269,14 @@ def calibrate_esphome_meter(ctx: Context) -> dict[str, Any]:
     through Tasmota.  ESPHome reads the board's factor itself."""
     coefficients = wifi.backup_calibration(ctx)
     if coefficients is None:
-        return {"skipped": "no factory calibration in a backup of the plug"}
+        return {"skipped": "no factory calibration in a backup of the device"}
     host = ctx.state.input("plug_ip")
     try:
         given = esphome.api_give_calibration(host, coefficients, key=ctx.esphome_key)
     except esphome.ApiLocked:
         given = False
     if not given:
-        output.tell("    ESPHome did not take the plug's factory calibration from its backup")
+        output.tell("    ESPHome did not take the device's factory calibration from its backup")
         output.tell("    (one older than 1.4.0, or whose API key is not known).")
         return {"skipped": "ESPHome did not take it"}
     # Its sensor says what it made of it once the action has run.
@@ -287,7 +287,7 @@ def calibrate_esphome_meter(ctx: Context) -> dict[str, Any]:
             break
         time.sleep(0.5)
     if state and state.startswith("from backup"):
-        output.say("Gave ESPHome the plug's factory calibration, from its Sonoff backup")
+        output.say("Gave ESPHome the device's factory calibration, from its Sonoff backup")
     return {"calibration": state}
 
 
@@ -302,12 +302,12 @@ def wait_for_esphome(ctx: Context, wait: float) -> dict[str, Any]:
     """
     host = ctx.state.input("plug_ip")
     if not host:
-        raise Abort("the plug's address is not known")
+        raise Abort("the device's address is not known")
     if ctx.dry_run:
         output.say("[dry-run] would wait for ESPHome to answer")
         return {"dry_run": True}
     as_update = runs.run_source(ctx.state) in ("tasmota", "safeboot")  # through the mover (M1)
-    output.say("Waiting for the plug to start ESPHome and join your Wi-Fi...")
+    output.say("Waiting for the device to start ESPHome and join your Wi-Fi...")
     started = time.monotonic()
     first_seen = None
     resent = 0
@@ -327,8 +327,8 @@ def wait_for_esphome(ctx: Context, wait: float) -> dict[str, Any]:
             first_seen = None
             resent += 1
             if resent > 2:
-                raise Abort("the plug keeps going back to the mover instead of starting ESPHome")
-            output.say("    The plug went back to the mover: ESPHome restarted before it had")
+                raise Abort("the device keeps going back to the mover instead of starting ESPHome")
+            output.say("    The device went back to the mover: ESPHome restarted before it had")
             output.say("    confirmed itself. Sending ESPHome again...")
             step_esphome_from_mover(ctx)
             started = time.monotonic()
@@ -348,6 +348,6 @@ def wait_for_esphome(ctx: Context, wait: float) -> dict[str, Any]:
     raise Abort(
         "ESPHome was written and checked, but has not answered on your Wi-Fi within "
         "three minutes - most likely it cannot join it, and its own network "
-        f"({names.esphome_network_hint(ctx)}) is not to be seen either. Switch the plug off and "
+        f"({names.esphome_network_hint(ctx)}) is not to be seen either. Switch the device off and "
         "on, and run the same command again"
     )

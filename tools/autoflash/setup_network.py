@@ -197,7 +197,7 @@ def send_esphome_wifi(ssid: str, password: str, *, host: str = SETUP_HOST) -> No
     details, as its own page would: it saves them and joins at once."""
     query = urllib.parse.urlencode({"ssid": ssid, "psk": password})
     if page(host, f"/wifisave?{query}", timeout=10.0) is None:
-        raise SetupError(f"the plug's page at {host} did not answer")
+        raise SetupError(f"the device's page at {host} did not answer")
 
 
 def send_wifi(
@@ -223,7 +223,7 @@ def send_wifi(
     """
     query = urllib.parse.urlencode({"s1": ssid, "p1": password, "save": ""})
     if page(host, f"/wi?{query}", timeout=10.0) is None:
-        raise SetupError(f"the plug's setup page at {host} did not answer")
+        raise SetupError(f"the device's setup page at {host} did not answer")
     time.sleep(settle)
     started = time.monotonic()
     while True:

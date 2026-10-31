@@ -28,7 +28,7 @@ NAMES = {
     "esphome": "ESPHome",
     "openbeken": "OpenBeken",
     "midway": "a firmware part way through a conversion",
-    "untemplated": "Tasmota without the plug's template",
+    "untemplated": "Tasmota without the device's template",
     "installer": "this tool's installer, part way from Sonoff's firmware",
     "safeboot": "Tasmota's safeboot, its Tasmota missing",
     "locked": "Tasmota with a web password",
@@ -63,7 +63,7 @@ class Found:
         if self.firmware == "esphome-login":
             return f"the ESPHome at {self.host}, which has a web login (asked for next)"
         what = NAMES.get(self.firmware, self.firmware)
-        return f"the plug at {self.host}{f' ({self.name})' if self.name else ''}, running {what}"
+        return f"the device at {self.host}{f' ({self.name})' if self.name else ''}, running {what}"
 
 
 def _port_open(host: str, port: int, timeout: float) -> bool:

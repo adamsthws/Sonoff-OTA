@@ -656,7 +656,7 @@ def ask_ipv4(
 def wait_for_host(
     address: str,
     *,
-    what: str = "the plug",
+    what: str = "the device",
     timeout: float = 240.0,
     poll: float = 5.0,
 ) -> bool:
@@ -685,7 +685,7 @@ def wait_for_host(
 def wait_or_ask(
     address: str,
     *,
-    what: str = "the plug",
+    what: str = "the device",
     timeout: float = 240.0,
     help_lines: Sequence[str] = (),
     other: tuple[str, Callable[[], str]] | None = None,

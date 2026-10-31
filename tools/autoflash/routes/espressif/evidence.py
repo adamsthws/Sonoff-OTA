@@ -18,13 +18,13 @@ if TYPE_CHECKING:
 def evidence_esphome_installed(ctx: Context) -> tuple[bool | None, str]:
     host = ctx.state.input("plug_ip")
     if host and esphome.is_esphome(host):
-        return True, "The plug is running ESPHome, so the install did finish."
+        return True, "The device is running ESPHome, so the install did finish."
     if ctx.device.current_ota() == 1:
         return False, (
             "The plug is still running the temporary Tasmota, so it did not switch;\n"
             "  it is safe to do this step again."
         )
-    return None, "The plug neither runs ESPHome nor answers as the temporary Tasmota."
+    return None, "The device neither runs ESPHome nor answers as the temporary Tasmota."
 
 
 DESTRUCTIVE_STEPS = {"C2", "E2", "E3", "F2", "G1", "I1", "L1", "M1", "X1", "X2", "D5", "R1"}
@@ -38,7 +38,7 @@ def evidence_official_app_installed(ctx: "Context") -> tuple[bool | None, str]:
         setup = prompts.find_ssid(names.setup_networks(ctx))
         if setup:
             return True, (
-                f"The plug is not on your network, but it is broadcasting '{setup}'.\n"
+                f"The device is not on your network, but it is broadcasting '{setup}'.\n"
                 "  That is the full Tasmota asking to be set up - the temporary\n"
                 "  startup firmware cannot do that, so the install did finish."
             )
@@ -55,7 +55,7 @@ def evidence_official_app_installed(ctx: "Context") -> tuple[bool | None, str]:
     version = device.firmware_version()
     if version:
         return True, (
-            f"The plug is running {version}, not Safeboot, so the install did finish."
+            f"The device is running {version}, not Safeboot, so the install did finish."
         )
     return None, (
         "The plug is answering but will not say what it is running, so there is\n"
@@ -97,7 +97,7 @@ def evidence_commit_finished(ctx: "Context") -> tuple[bool | None, str]:
             "  it restarted - so this step did finish."
         )
     if status == "FAIL":
-        return False, "The plug reported that this step failed."
+        return False, "The device reported that this step failed."
     # No report: lost, or never sent (the plug's Wi-Fi was down as it
     # finished).  The commit writes nothing before it has the new table, and
     # the plug boots the startup firmware only once the new layout is in
@@ -119,7 +119,7 @@ def evidence_commit_finished(ctx: "Context") -> tuple[bool | None, str]:
             "The plug is still running from the old layout, so the step did not get\n"
             "  as far as switching to the new one; it is safe to do it again."
         )
-    return None, "The plug sent no report of this step, and does not show how far it got."
+    return None, "The device sent no report of this step, and does not show how far it got."
 
 
 # Consulted when a step was interrupted, to answer "did it finish?" from the
@@ -137,10 +137,10 @@ def evidence_by_what_answers(finished: set[str], not_yet: set[str]):
                 "hub": "the interim Tasmota"}.get(
             running, detect.NAMES.get(running, "nothing this tool knows"))
         if running in finished:
-            return True, f"The plug is running {name}, so this step did finish."
+            return True, f"The device is running {name}, so this step did finish."
         if running in not_yet:
-            return False, f"The plug is still running {name}, so this step has to be done again."
-        return None, "The plug is not answering, so it cannot show whether this step finished."
+            return False, f"The device is still running {name}, so this step has to be done again."
+        return None, "The device is not answering, so it cannot show whether this step finished."
     return evidence
 
 
@@ -149,7 +149,7 @@ def evidence_bootloader(ctx: "Context") -> tuple[bool | None, str]:
     actual = ctx.device.sha_region(0, len(image))
     if actual == esphome.BOOTLOADER_SHA256:
         return True, "ESPHome's bootloader is in place, so this step did finish."
-    return False, "The plug still has its old bootloader, so this step has to be done again."
+    return False, "The device still has its old bootloader, so this step has to be done again."
 
 
 ATTEMPTED_EVIDENCE: dict[str, Callable[["Context"], tuple[bool | None, str]]] = {

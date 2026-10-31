@@ -312,11 +312,11 @@ class MigrationState:
                         evidence_dir / "commit-report.json", "commit", sys.maxsize
                     )
                 except ValueError:
-                    print("  No commit report; the plug's own check of its table stands.")
+                    print("  No commit report; the device's own check of its table stands.")
                 else:
                     if self.commit_evidence.get("target_table_sha256") != self.target_table_sha256:
                         raise ValueError("commit evidence names a different partition table")
-                print("  The startup firmware on the plug is not one this checkout can rebuild:")
+                print("  The startup firmware on the device is not one this checkout can rebuild:")
                 print("  whatever follows the official sectors is written over.")
                 return
             try:
@@ -505,7 +505,7 @@ class MigrationState:
             raise ValueError("failure session differs")
         reason = report.get("reason") or "no reason given"
         if self.complete:
-            print(f"  The plug also said: {reason}")
+            print(f"  The device also said: {reason}")
             return
         evidence = self._base_evidence(self.phase, "FAIL")
         evidence["reason"] = reason
@@ -838,9 +838,9 @@ def main() -> int:
     parser.add_argument("--max-evidence-age", type=int, default=7200)
     parser.add_argument("--wait", type=int, default=240,
                         help="seconds to wait at most for a phase report: a phase keeps "
-                        "the plug busy for about a minute, retrying included")
+                        "the device busy for about a minute, retrying included")
     parser.add_argument("--idle", type=int, default=IDLE_LIMIT,
-                        help="seconds the plug may send nothing before waiting stops")
+                        help="seconds the device may send nothing before waiting stops")
     parser.add_argument(COMMIT_FLAG, action="store_true")
     parser.add_argument(RESTORE_FLAG, action="store_true")
     parser.add_argument(
@@ -851,17 +851,17 @@ def main() -> int:
     parser.add_argument(
         "--plan-from-stdin", action="store_true",
         help="plan: read the plan, with all it writes, from standard input - some "
-        "of it holds the Wi-Fi password or the plug's own secrets",
+        "of it holds the Wi-Fi password or the device's own secrets",
     )
     parser.add_argument(
         "--no-sensitive-captures", action="store_true",
-        help="keep only a hash of the plug's NVS, not its bytes - they can hold credentials",
+        help="keep only a hash of the device's NVS, not its bytes - they can hold credentials",
     )
     parser.add_argument(
         RECOVERY_UNPROVEN_FLAG, action="store_true",
-        help="restore: the startup firmware on the plug is one this checkout cannot "
+        help="restore: the startup firmware on the device is one this checkout cannot "
         "rebuild (a run begun by 1.2.0); write the official Safeboot over whatever "
-        "follows its official sectors, once the plug shows the official table and app0",
+        "follows its official sectors, once the device shows the official table and app0",
     )
     args = parser.parse_args()
     if args.recovery_from_stdin and args.plan_from_stdin:
@@ -957,16 +957,16 @@ def main() -> int:
 
     if outcome != "complete":
         if outcome == "silent":
-            print(f"TIMEOUT: the plug has sent nothing for {args.idle // 60} minutes, and "
+            print(f"TIMEOUT: the device has sent nothing for {args.idle // 60} minutes, and "
                   "gave no reason. Its own console (Tools -> Console in its web page) "
                   "says why it stopped.", file=sys.stderr)
         else:
-            print(f"TIMEOUT: the plug was still busy after {args.wait // 60} minutes, "
+            print(f"TIMEOUT: the device was still busy after {args.wait // 60} minutes, "
                   "with no result.", file=sys.stderr)
         return 3
     print(f"\n{args.phase.upper()} RESULT: {state.result_status}")
     if state.failure_reason:
-        print(f"THE PLUG SAYS: {state.failure_reason}")
+        print(f"THE DEVICE SAYS: {state.failure_reason}")
     print(f"Evidence: {evidence_dir / (args.phase + '-report.json')}")
     return 0 if state.result_status == "PASS" else 4
 

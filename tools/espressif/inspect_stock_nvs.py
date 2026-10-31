@@ -117,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Read {len(dump):,} bytes of NVS ({len(dump) // PAGE} pages), kept in memory only.\n")
     namespaces, values = parse(dump)
 
-    ssid = ask_text("Your Wi-Fi name (as the plug was set up with)").encode()
+    ssid = ask_text("Your Wi-Fi name (as the device was set up with)").encode()
     password = ask_secret("Its password (only compared, never shown)").encode()
 
     for ns in sorted({key[0] for key in values}):

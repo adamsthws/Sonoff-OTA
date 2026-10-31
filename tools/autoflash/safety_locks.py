@@ -113,7 +113,7 @@ def say_lock_back(root: Path, name: str) -> None:
     if (root / DIR / name).exists():
         output.say(f"{name} restored")
     else:
-        output.say(f"{name} left lifted: another run, on another plug, still needs it")
+        output.say(f"{name} left lifted: another run, on another device, still needs it")
 
 
 def restore_left_locks(root: Path) -> None:

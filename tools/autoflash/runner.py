@@ -160,7 +160,7 @@ def answers_within(device: device.Device, seconds: float) -> bool:
     """Whether the plug answers within `seconds`, asked every few."""
     started = time.monotonic()
     while (elapsed := time.monotonic() - started) < seconds:
-        output.progress(f"waiting for the plug, in case it is starting up... {elapsed:.0f}s")
+        output.progress(f"waiting for the device, in case it is starting up... {elapsed:.0f}s")
         if device.answers(timeout=3.0):
             output.progress_clear()
             return True
@@ -197,7 +197,7 @@ def set_up_if_erased(ctx: Context, step: str) -> bool:
     if not network:
         return False
     output.progress_clear()
-    output.tell("    The plug is not on your Wi-Fi but on its own setup network: its settings were")
+    output.tell("    The device is not on your Wi-Fi but on its own setup network: its settings were")
     output.tell("    erased (switched off and on 7 times, say), so it is set up through that again.")
     join.configure_plug_wifi(ctx, network)
     if ctx.state.is_done("F4"):
@@ -226,7 +226,7 @@ def wait_for_plug_back(ctx: Context, step: str | None = None) -> None:
 
     if back():
         return
-    output.tell("    The plug is not answering yet - waiting for it (a router restarting, say).")
+    output.tell("    The device is not answering yet - waiting for it (a router restarting, say).")
     started = time.monotonic()
     looked = started
     hinted = False
@@ -237,15 +237,15 @@ def wait_for_plug_back(ctx: Context, step: str | None = None) -> None:
         # setup network itself), and one that has lost its settings, looked for.
         if not hinted and step != "F4" and now - started > PLUG_BACK_HINT_AFTER:
             output.progress_clear()
-            output.tell("    At this stage the plug has no setup network of its own unless its settings")
+            output.tell("    At this stage the device has no setup network of its own unless its settings")
             output.tell("    were erased: it rejoins your Wi-Fi by itself as soon as it can. Check your")
-            output.tell("    router is on and the plug is plugged in; this keeps waiting.")
+            output.tell("    router is on and the device is plugged in; this keeps waiting.")
             hinted = True
         if step and now - looked >= ERASED_LOOK_EVERY:
             looked = now
             if set_up_if_erased(ctx, step):
                 return
-        output.progress(f"waiting for the plug... {now - started:.0f}s")
+        output.progress(f"waiting for the device... {now - started:.0f}s")
         if back():
             output.progress_clear()
             output.tell("    It is answering again.")
@@ -267,7 +267,7 @@ def confirm_skip(ctx: Context, step: str, title: str) -> bool:
         output.say(f"[skip] {step} {title} (recorded as done; could not re-check: {exc})")
         return True
     if ok:
-        output.say(f"[skip] {step} {title} (done, and the plug still agrees)")
+        output.say(f"[skip] {step} {title} (done, and the device still agrees)")
         return True
     output.transient_begin()  # the note and its question, gone once answered
     output.say("")
@@ -292,7 +292,7 @@ def tell_how_to_carry_on() -> None:
 def connection_lost(exc: BaseException) -> str:
     """A request the network or the plug dropped: in full in the log, in a line on screen."""
     output.log_only(traceback.format_exc().rstrip())
-    return f"the connection to the plug was lost ({type(exc).__name__}: {exc})"
+    return f"the connection to the device was lost ({type(exc).__name__}: {exc})"
 
 
 def unexpected(exc: BaseException) -> str:
@@ -342,9 +342,9 @@ def run_steps(ctx: Context) -> int:
     started = time.monotonic()
     safety_locks.restore_left_locks(ROOT)  # a resumed run skips A5, which looks too
     output.tell("")
-    output.tell("Converting a plug usually takes under 10 minutes. Some stages take a")
-    output.tell("minute or two with little to see - that's normal. Keep the plug plugged")
-    output.tell("in, and this computer on, until the last stage says complete.")
+    output.tell("Converting a device usually takes under 10 minutes. Some stages take a")
+    output.tell("minute or two with little to see - that's normal. Keep the device powered,")
+    output.tell("and this computer on, until the last stage says complete.")
     output.tell("")
     try:
         if ctx.state.input("plug_mac"):
@@ -397,14 +397,14 @@ def run_steps(ctx: Context) -> int:
             if finished is True:
                 # The plug itself shows the step completed: nothing to decide.
                 output.transient_end()
-                ctx.state.mark(step, DONE, note="the plug showed it had completed")
+                ctx.state.mark(step, DONE, note="the device showed it had completed")
                 output.stage_end("already done")
                 continue
             prompts.section("The last step was interrupted", [
                 f"The step that {routes.plain_description(step, title)} was",
-                "stopped part way through, and the plug does not show whether it",
+                "stopped part way through, and the device does not show whether it",
                 "finished. Doing it again is normally safe: every step checks the",
-                "plug before writing anything and refuses if it is not as expected.",
+                "device before writing anything and refuses if it is not as expected.",
             ])
             options = [
                 "Do that step again" + ("   <- recommended" if finished is False else ""),
@@ -427,10 +427,10 @@ def run_steps(ctx: Context) -> int:
             return 130
         if code == 0 and step == routes.FAMILY.POINT_OF_NO_RETURN and ctx.research_bridge:
             prompts.section("Research bridge installed - stopping here", [
-                f"{ctx.bridge.name} is on the plug. Join the bridge's network",
+                f"{ctx.bridge.name} is on the device. Join the bridge's network",
                 f"({names.our_setup_network(ctx)}, open) and run its research tool, e.g.:",
                 "  python tools/espressif/inspect_stock_nvs.py",
-                "Then switch the plug off and on: it goes back to its Sonoff",
+                "Then switch the device off and on: it goes back to its Sonoff",
                 "firmware. Or run this tool again to carry on the conversion.",
             ])
             firewall.close_firewall_rules(ctx)
@@ -450,12 +450,12 @@ def run_steps(ctx: Context) -> int:
     output.show("Conversion complete!", output.GREEN)
     firmware = routes.ROUTE[0] or runs.run_firmware(ctx.state)
     if firmware == "sonoff":
-        output.tell("The plug is running its own Sonoff firmware again, with the settings it")
+        output.tell("The device is running its own Sonoff firmware again, with the settings it")
         output.tell("had: it is back in the eWeLink app.")
     else:
-        output.tell(f"The plug is running {'official ' if firmware == 'tasmota' else ''}{routes.FIRMWARES[firmware]}...")
+        output.tell(f"The device is running {'official ' if firmware == 'tasmota' else ''}{routes.FIRMWARES[firmware]}...")
         url = report.plug_page_url(ctx.state.input("plug_ip"))
         if url:
-            output.show_link(url, "Your plug")
+            output.show_link(url, "Your device")
     report.invite_report(ctx, time.monotonic() - started - output.waited(), resumed)
     return 0

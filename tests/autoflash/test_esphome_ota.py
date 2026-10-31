@@ -255,7 +255,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_a_key_not_its_own_is_said_to_be(self):
         fake = self.fake(key=KEY)  # it takes plain updates too, but not with a wrong key offered
-        with self.assertRaisesRegex(ota.WrongKey, "not the one ESPHome on the plug has"):
+        with self.assertRaisesRegex(ota.WrongKey, "not the one ESPHome on the device has"):
             ota.upload("127.0.0.1", b"\xe9" * 100, port=fake.port, key=bytes(32))
         self.assertEqual(ota.wants("127.0.0.1", key=bytes(32), port=fake.port), ota.KEY)
         self.assertEqual(fake.received, [])

@@ -58,17 +58,17 @@ def serve_to_plug(ctx: Context, image: bytes, what: str, fetch: Callable[[str], 
                 break
             if not served and unstick and time.monotonic() - asked > FIRST_BYTE_WAIT:
                 output.progress_clear()
-                output.say(f"    The plug has not asked for {what} yet - restarting it, then asking again.")
+                output.say(f"    The device has not asked for {what} yet - restarting it, then asking again.")
                 if not unstick():
-                    raise OSError(f"the plug asked for nothing of {what}, and did not answer again after "
+                    raise OSError(f"the device asked for nothing of {what}, and did not answer again after "
                                   "being restarted")
                 unstick = None
                 fetch(url)
                 started = asked = time.monotonic()
-            output.progress(f"the plug is fetching {what}: {100 * served // len(image)}%")
+            output.progress(f"the device is fetching {what}: {100 * served // len(image)}%")
             time.sleep(2)
         else:
-            raise OSError(f"the plug fetched {server.unique_bytes_served():,} of {len(image):,} bytes of {what} "
+            raise OSError(f"the device fetched {server.unique_bytes_served():,} of {len(image):,} bytes of {what} "
                           f"in {FETCH_WAIT:.0f}s")
     finally:
         output.progress_clear()
@@ -76,7 +76,7 @@ def serve_to_plug(ctx: Context, image: bytes, what: str, fetch: Callable[[str], 
         server.server_close()
         thread.join(timeout=3)
     seconds = round(time.monotonic() - started, 1)
-    output.say(f"    The plug has all of {what} after {seconds}s; it restarts to install it.")
+    output.say(f"    The device has all of {what} after {seconds}s; it restarts to install it.")
     return seconds
 
 
@@ -166,8 +166,8 @@ def evidence_installed(ctx: Context) -> tuple[bool | None, str]:
     firmware, source = runs.run_firmware(ctx.state), runs.run_source(ctx.state)
     running = detect.identify(host, timeout=3.0) if host else None
     if running == firmware or (firmware == "sonoff" and running is None and not detect.answers_as_tasmota(host)):
-        return (True, f"The plug answers as {detect.NAMES[firmware]}." if running == firmware
-                else "The plug answers as neither OpenBeken nor ESPHome: Sonoff's firmware is back.")
+        return (True, f"The device answers as {detect.NAMES[firmware]}." if running == firmware
+                else "The device answers as neither OpenBeken nor ESPHome: Sonoff's firmware is back.")
     if running == source:
-        return False, f"The plug still answers as {detect.NAMES[source]}: the image was not applied."
-    return None, "The plug does not answer as the new firmware yet - it may still be installing it."
+        return False, f"The device still answers as {detect.NAMES[source]}: the image was not applied."
+    return None, "The device does not answer as the new firmware yet - it may still be installing it."

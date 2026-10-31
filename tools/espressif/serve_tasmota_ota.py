@@ -102,8 +102,7 @@ def main():
         kind = kinds.for_stock_model(model)
         if kind is None:
             raise EwelinkError(
-                f"Device model is {model}, not one this tool converts "
-                f"({kinds.stock_models()}); refusing"
+                f"Device model is {model}, not one this tool converts; refusing"
             )
         if wrapper["model"] != kind.wrapper_model:
             raise EwelinkError(

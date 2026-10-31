@@ -57,7 +57,7 @@ def find_current_firmware(ctx: Context) -> str:
     # On screen while it looks - 5-10 s, before any stage line and its clock -
     # and taken off again once it has looked.
     output.transient_begin()
-    output.tell("Looking for plugs already running Tasmota or ESPHome on your network...")
+    output.tell("Looking for supported devices on your network...")
     known = known_macs()
     # The network this computer's internet goes through first; its other
     # Ethernet and Wi-Fi networks, read once, only if no plug is there.
@@ -101,18 +101,18 @@ def find_current_firmware(ctx: Context) -> str:
             if hosts:
                 output.tell(f"    Left out, for its web {what}{' (not the one given)' if given else ''}: "
                      f"the {'Tasmota' if kind == 'locked' else 'ESPHome'} at {', '.join(hosts)}. "
-                     f"If it is the plug, {hint}.")
+                     f"If it is the device, {hint}.")
         locked = []
     if not found and not locked:
         return "sonoff"
-    stock = "A plug still on Sonoff's firmware (it is set up in the eWeLink app)"
+    stock = "A device still on Sonoff's firmware (it is set up in the eWeLink app)"
     if prompts.UNATTENDED and len(found) == 1:
         chosen = found[0]
-        prompts.answered_unattended("Which plug is this run for", chosen.describe())
+        prompts.answered_unattended("Which device is this run for", chosen.describe())
     else:
         offered = found + locked
         output.transient_begin()
-        choice = prompts.ask_choice("Which plug is this run for",
+        choice = prompts.ask_choice("Which device is this run for",
                             [found_plug.describe()[0].upper() + found_plug.describe()[1:]
                              for found_plug in offered] + [stock])
         output.transient_end()
@@ -162,7 +162,7 @@ def past_the_commit(ctx: Context, running: str) -> str:
             continue
         if (committed or finished_alone) and not state.is_done("H1"):
             if finished_alone:
-                output.say("    Its last run was stopped as the commit ran, and the plug finished it:")
+                output.say("    Its last run was stopped as the commit ran, and the device finished it:")
                 output.say("    it fetched the new layout, and runs the startup firmware now.")
             else:
                 output.say("    This computer's record of it says its last run got past the commit:")
@@ -229,7 +229,7 @@ def esphome_safe_mode(ctx: Context, running: str) -> str:
             return "esphome"
         time.sleep(5)
     raise Abort(
-        "the plug answers only ESPHome's update service, and has not started ESPHome "
+        "the device answers only ESPHome's update service, and has not started ESPHome "
         f"in {ESPHOME_SAFE_MODE_WAIT / 60:.0f} minutes. Leave it switched on for ten "
         "minutes, then run the same command again")
 

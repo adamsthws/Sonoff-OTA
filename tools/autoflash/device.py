@@ -63,7 +63,7 @@ class UploadRefused(DeviceError):
     nothing was written: it carries on as it was."""
 
     def __init__(self, reason: str) -> None:
-        super().__init__(f"the plug refused the upload: {reason}")
+        super().__init__(f"the device refused the upload: {reason}")
         self.reason = reason
 
 
@@ -388,7 +388,7 @@ class Device:
         digest = self.berry_value(code, "_s", timeout=timeout).lower().strip('"')
         if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise DeviceError(
-                f"expected a SHA-256 from the plug, got {digest[:40]!r} - the "
+                f"expected a SHA-256 from the device, got {digest[:40]!r} - the "
                 "running firmware probably cannot execute Berry"
             )
         return digest

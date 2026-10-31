@@ -425,7 +425,7 @@ def main() -> int:
     parser.add_argument("--ssid", help="2.4 GHz Wi-Fi network name (asked if omitted)")
     parser.add_argument("--without-wifi", action="store_true",
                         help="build everything but the startup firmware's Wi-Fi copy; "
-                             "the autoflash run adds it, read off the plug")
+                             "the autoflash run adds it, read off the device")
     parser.add_argument("--factory", type=Path, help="use a local factory image")
     parser.add_argument("--safeboot", type=Path, help="use a local Safeboot image")
     parser.add_argument("--app", type=Path, help="use a local native Tasmota image")
@@ -450,7 +450,7 @@ def main() -> int:
         print("No Wi-Fi details in it yet: the autoflash run adds them at E1.")
     else:
         print(f"Set up for the network {ssid!r}. The password is not stored.")
-    print("No flash dump used: preflight reads the source table and NVS live from the plug.")
+    print("No flash dump used: preflight reads the source table and NVS live from the device.")
     print("\nBUNDLE PREPARATION: PASS")
     return 0
 

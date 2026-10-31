@@ -23,14 +23,13 @@ def consent_to_leave(ctx: Context, what: str) -> None:
         return
     output.transient_begin()
     prompts.warning_box("Before going on", [
-        f"From here the plug's {what} is replaced. DO NOT UNPLUG IT during the",
-        "process. Changing firmware rewrites the memory map and the bootloader",
-        "for a moment each, when a power cut would leave a plug that has to be",
-        "opened to repair.",
-        "Only go ahead with a plug you can afford to lose",
+        f"From here the device's {what} is replaced. DO NOT UNPLUG IT during the",
+        "process: a power cut while its memory is rewritten could leave a device",
+        "that has to be opened to repair.",
+        "Only go ahead with a device you can afford to lose.",
     ])
     if not prompts.require_word(prompts.CONSENT_WORD):
-        raise NothingWritten("not confirmed - nothing has been written to the plug")
+        raise NothingWritten("not confirmed - nothing has been written to the device")
     output.transient_end()
     ctx.consented = True
 
@@ -59,7 +58,7 @@ def send_as_esphome_update(ctx: Context, image: bytes, what: str, port: int = es
             output.progress_clear()
             unlock.ask_esphome_key(ctx, host)
         except (esphome_ota.OTAError, OSError) as exc:
-            raise Abort(f"sending {what} to the plug failed: {exc}") from exc
+            raise Abort(f"sending {what} to the device failed: {exc}") from exc
         finally:
             output.progress_clear()
         started = time.monotonic()  # the time asked is not the time sending

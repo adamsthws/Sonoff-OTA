@@ -165,7 +165,7 @@ class Plan:
                     raise PlanError(f"{self.name}: a copy is from a region the plan writes")
         if self.busy_estimate() > BUSY_LIMIT:
             raise PlanError(f"{self.name}: about {self.busy_estimate():.0f} s of writing keeps the "
-                            f"plug busy past {BUSY_LIMIT:.0f} s; split it")
+                            f"device busy past {BUSY_LIMIT:.0f} s; split it")
         return self
 
     def final_table_sha256(self) -> str:
@@ -376,10 +376,10 @@ def back_to_sonoff(backup: bytes, running: int) -> list[Plan]:
     The bootloader stays ESPHome's: Sonoff's firmware starts under it.
     """
     if len(backup) != 0x400000 or sha256(backup[TABLE_ADDRESS:TABLE_ADDRESS + SECTOR]) != SONOFF_TABLE_SHA256:
-        raise PlanError("that is not a backup of a plug on Sonoff's layout")
+        raise PlanError("that is not a backup of a device on Sonoff's layout")
     slot = stock_slot(backup)
     if slot == running:
-        raise PlanError("Sonoff's firmware belongs in the slot the plug is running from")
+        raise PlanError("Sonoff's firmware belongs in the slot the device is running from")
     address = SONOFF_OTA[slot]
     app = backup[address:address + app_length(backup[address:address + SONOFF_SLOT_SIZE])]
     half = len(padded(app[:len(app) // 2]))

@@ -160,7 +160,7 @@ BACKUP_OUTCOMES = {
     "existing": ("already done", "Taken by an earlier run"),
     "failed": ("skipped", "Failed"),
     "not wanted": ("skipped", "Not taken (--no-backup)"),
-    "unreadable": ("skipped", "Not taken (plug unreadable)"),
+    "unreadable": ("skipped", "Not taken (device unreadable)"),
     "not taken": ("skipped", "Not taken"),
 }
 

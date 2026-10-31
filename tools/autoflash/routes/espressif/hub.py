@@ -38,7 +38,7 @@ def upload_or_prompt(ctx: "Context", path: Path, what: str) -> str:
             # Refused whole, nothing written: most likely damaged on the way.
             if attempt == UPLOAD_ATTEMPTS:
                 return upload_or_prompt_by_hand(ctx, path, what, exc)
-            output.tell(f"    The plug refused the upload ({exc.reason}); sending it again "
+            output.tell(f"    The device refused the upload ({exc.reason}); sending it again "
                  f"(attempt {attempt + 1} of {UPLOAD_ATTEMPTS}).")
             time.sleep(5)
         except Exception as exc:  # noqa: BLE001 - any failure falls back to the operator
@@ -75,7 +75,7 @@ def running_slot(device: device.Device, timeout: float = 60.0) -> int:
         if slot is not None:
             return slot
         if time.monotonic() > deadline:
-            raise Abort(f"the plug at {device.host} did not say which slot it runs from "
+            raise Abort(f"the device at {device.host} did not say which slot it runs from "
                         f"within {timeout:.0f}s")
         time.sleep(3)
 
@@ -89,10 +89,10 @@ def step_promote(ctx: Context) -> dict[str, Any]:
     # sensor, an encrypted API; the startup firmware gives none either), and
     # another of every other run through here.
     ctx.state.capture("D4.signal_dbm", join.note_signal(ctx, join.plug_signal(device), [
-        "From here the plug restarts several times, and each time it has to",
+        "From here the device restarts several times, and each time it has to",
         "rejoin your Wi-Fi on its own; a weak signal makes that less certain."]))
     slot = running_slot(device)
-    output.say(f"The plug is running from slot {slot}. The next steps need slot 1.")
+    output.say(f"The device is running from slot {slot}. The next steps need slot 1.")
     if slot == 1:
         device.command("SaveData 0")
         output.say("Already there. SaveData 0 - settings frozen so the migration's checks stay stable")
@@ -106,7 +106,7 @@ def step_promote(ctx: Context) -> dict[str, Any]:
     # until it gives up minutes later: a restart clears it.  It starts the same
     # slot - an upload switches only once it is whole.
     if ctx.state.status("D4") == FAILED:
-        output.say("Restarting the plug first, to clear the upload that was cut off...")
+        output.say("Restarting the device first, to clear the upload that was cut off...")
         booted, uptime = device.started_at(), device.uptime_seconds()
         device.command("Restart 1")
         device.wait_for_reboot(timeout=180, started_at=booted, before=uptime)
@@ -120,7 +120,7 @@ def step_promote(ctx: Context) -> dict[str, Any]:
         booted, uptime = device.started_at(), device.uptime_seconds()
         upload_or_prompt(ctx, image, "Berry Tasmota")
         uploads += 1
-        output.say("Waiting for the plug to restart into the other slot...")
+        output.say("Waiting for the device to restart into the other slot...")
         device.wait_for_reboot(timeout=300, started_at=booted, before=uptime)
         slot = running_slot(device)
         output.say(f"Now running from slot {slot}.")
@@ -132,7 +132,7 @@ def step_promote(ctx: Context) -> dict[str, Any]:
     after = slot
     if after != 1:
         raise Abort(
-            f"the plug is still running from slot {after} after {uploads} uploads; "
+            f"the device is still running from slot {after} after {uploads} uploads; "
             "it should alternate on every upload, so something is stopping the new "
             "image being selected"
         )
@@ -152,7 +152,7 @@ def plug_back_on_wifi(ctx: Context) -> None:
     if not ctx.finder.poll():
         setup = prompts.find_ssid(names.setup_networks(ctx), timeout=15)
         if setup:
-            output.tell(f"    The plug is not on your Wi-Fi: it is asking to be set up on {setup},")
+            output.tell(f"    The device is not on your Wi-Fi: it is asking to be set up on {setup},")
             output.tell("    as Tasmota does when it has lost its settings - after a power cut, say.")
             join.configure_plug_wifi(ctx, setup)
         else:
@@ -173,12 +173,12 @@ def sonoff_layout_back(ctx: Context) -> None:
         return  # no Berry to ask: the step's own checks say what is wrong
     if table != plans.INTERIM_TABLE_SHA256:
         return
-    output.tell("    The last commit stopped part way, with the plug's settings moved aside;")
+    output.tell("    The last commit stopped part way, with the device's settings moved aside;")
     output.tell("    putting them back first.")
     booted, uptime = device.started_at(), device.uptime_seconds()
     run_plan(ctx, plans.sonoff_layout_back(esphome.sonoff_table()))
     device.wait_for_reboot(timeout=300, started_at=booted, before=uptime)
-    output.say("    The plug is back on Sonoff's layout, with its settings.")
+    output.say("    The device is back on Sonoff's layout, with its settings.")
 
 
 # Tries at the upload, as the commit and the installer's sends are tried.

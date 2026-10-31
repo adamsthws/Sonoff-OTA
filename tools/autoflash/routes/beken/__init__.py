@@ -31,12 +31,12 @@ POINT_OF_NO_RETURN = "B2"
 RESUME_CHECK = None
 
 STOCK_STEPS: Steps = [
-    ("B1", "What the plug reports, through eWeLink", stock.step_identify),
+    ("B1", "What the device reports, through eWeLink", stock.step_identify),
     ("B2", "The new firmware, sent through eWeLink", stock.step_push),
 ]
 OPENBEKEN_FINAL_STEPS: Steps = [
     ("K1", "OpenBeken started and on the Wi-Fi", arrived.step_openbeken_check),
-    ("B4", "Back up the plug's own data, through OpenBeken", arrived.step_backup),
+    ("B4", "Back up the device's own data, through OpenBeken", arrived.step_backup),
 ]
 ESPHOME_FINAL_STEPS: Steps = [("K2", "ESPHome started and on the Wi-Fi", arrived.step_esphome_check)]
 SONOFF_FINAL_STEPS: Steps = [("K3", "Sonoff's firmware started and back in eWeLink", arrived.step_sonoff_check)]
@@ -77,7 +77,7 @@ ERASED_CHECK_STEPS: set[str] = set()
 STAGE_NAMES = {
     "B1": "Querying Sonoff firmware",
     "B2": "Sending the new firmware",
-    "B4": "Backing up the plug's data",
+    "B4": "Backing up the device's data",
     "K1": "Checking OpenBeken",
     "K2": "Checking ESPHome",
     "K3": "Checking Sonoff firmware",
@@ -88,16 +88,16 @@ STAGE_NAMES = {
 }
 TARGET_STAGE_NAMES: dict[str, dict[str, str]] = {}
 PLAIN_DESCRIPTION = {
-    "B1": "asks eWeLink what model and firmware the plug has",
-    "B2": "sends the plug its new firmware, which it installs as it restarts",
-    "B4": "keeps a backup of the plug's own data on this computer",
-    "K1": "checks the plug has started OpenBeken and joined your Wi-Fi",
-    "K2": "checks the plug has started ESPHome and joined your Wi-Fi",
-    "K3": "checks the plug has started its Sonoff firmware and is back in eWeLink",
-    "O1": "has OpenBeken fetch ESPHome, which the plug installs as it restarts",
-    "O2": "has OpenBeken fetch Sonoff's firmware, which the plug installs as it restarts",
-    "E1": "sends ESPHome an update carrying OpenBeken, which the plug installs as it restarts",
-    "E2": "sends ESPHome an update carrying Sonoff's firmware, which the plug installs as it restarts",
+    "B1": "asks eWeLink what model and firmware the device has",
+    "B2": "sends the device its new firmware, which it installs as it restarts",
+    "B4": "keeps a backup of the device's own data on this computer",
+    "K1": "checks the device has started OpenBeken and joined your Wi-Fi",
+    "K2": "checks the device has started ESPHome and joined your Wi-Fi",
+    "K3": "checks the device has started its Sonoff firmware and is back in eWeLink",
+    "O1": "has OpenBeken fetch ESPHome, which the device installs as it restarts",
+    "O2": "has OpenBeken fetch Sonoff's firmware, which the device installs as it restarts",
+    "E1": "sends ESPHome an update carrying OpenBeken, which the device installs as it restarts",
+    "E2": "sends ESPHome an update carrying Sonoff's firmware, which the device installs as it restarts",
 }
 # What a step cut off part way may have left: the plug says, by what it answers as.
 ATTEMPTED_EVIDENCE: dict[str, Callable[["Context"], tuple[bool | None, str]]] = {

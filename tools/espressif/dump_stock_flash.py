@@ -187,7 +187,7 @@ def read_dump(host: str) -> tuple[bytes, bytes, dict[str, Any]]:
     received = hashlib.sha256(flash).hexdigest()
     if on_plug is not None and on_plug != received:
         raise IncompleteDump(f"what arrived (SHA-256 {received[:16]}...) is not what is on "
-                             f"the plug ({on_plug[:16]}...)")
+                             f"the device ({on_plug[:16]}...)")
     efuse, _ = fetch(host, "/efuse", timeout=10)
     report = check(flash)
     report["efuse_sha256"] = hashlib.sha256(efuse).hexdigest()
@@ -214,8 +214,8 @@ def summary(report: dict[str, Any]) -> list[str]:
     lines = [f"{report['size']:,} bytes, SHA-256 {report['sha256']}",
              f"partition table MD5: {'valid' if report['partition_table_md5_valid'] else 'INVALID'}"]
     if "matches_plug" in report:
-        lines.append("byte for byte the same as the plug's flash, by the plug's own SHA-256"
-                     if report["matches_plug"] else "not checked against the plug (bridge before 4.4.2)")
+        lines.append("byte for byte the same as the device's flash, by the device's own SHA-256"
+                     if report["matches_plug"] else "not checked against the device (bridge before 4.4.2)")
     for item in report["partitions"]:
         app = item.get("app")
         what = f"{app['project']} {app['version']} ({app['date']})" if app else item.get("error", "")
@@ -247,7 +247,7 @@ def save_dump(host: str, label: str, version: str | None = None) -> int:
     if not is_good(report):
         return 1
     backup, saved = plugs.save_backup(flash, efuse, report, version)
-    print(f"{'Kept as' if saved else 'It already has'} this plug's Sonoff backup: {backup.relative_to(ROOT)}")
+    print(f"{'Kept as' if saved else 'It already has'} this device's Sonoff backup: {backup.relative_to(ROOT)}")
     return 0
 
 

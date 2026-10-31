@@ -85,7 +85,7 @@ class ApplyCutTests(unittest.TestCase):
 
 class RecoverTests(unittest.TestCase):
     def test_the_plug_is_switched_off_and_on_only_where_the_run_said_to(self):
-        for said, cycles in (("[..] FAILED: ... switch the plug off and on, then run", 1),
+        for said, cycles in (("[..] FAILED: ... switch the device off and on, then run", 1),
                              ("[..] FAILED: eWeLink could not be reached", 0)):
             powered = []
             instance = SimpleNamespace(last_log=lambda said=said: said, power=powered.append,
@@ -124,9 +124,9 @@ class RecoveryTests(unittest.TestCase):
         import inspect
         for module in (arrived, stock):
             for line in inspect.getsource(module).splitlines():
-                if "off and on" in line and "plug" in line:
+                if "off and on" in line and ("plug" in line or "device" in line):
                     self.assertRegex(line, fault_suite.POWER_CYCLE)
-        self.assertRegex("Switch the plug off and on - it keeps", fault_suite.POWER_CYCLE)
+        self.assertRegex("Switch the device off and on - it keeps", fault_suite.POWER_CYCLE)
 
 
 class SavingTests(unittest.TestCase):

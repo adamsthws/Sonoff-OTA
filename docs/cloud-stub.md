@@ -430,7 +430,7 @@ anywhere in the flash — so the stub cannot read it from the plug. Instead
 earlier runs (`plugs/<mac>/runs/*/autoflash-state.json`: a real conversion's, a
 kept plug's or an instance's), and `AUTOFLASH_STUB_PRODUCT_MODEL=S60TPG|S60TPF`
 overrides it or covers a plug never seen by the real cloud. With neither, none is
-served and the run's report leaves "Plug model" and "Plug type / region" blank
+served and the run's report leaves "Device model" and "Device type / region" blank
 (and the Tasmota template is named plainly "Sonoff S60") rather than guess.
 
 ### Every exchange, with examples

@@ -36,7 +36,7 @@ def choose_port(ctx: Context, key: str, candidates: tuple[int, ...], serving: st
         raise Abort(
             f"ports {candidates[0]} and {candidates[1]}-{candidates[-1]} are all in use on this "
             f"computer, so there is nowhere to serve {serving} from. Stop whatever is "
-            "using them and run this again - nothing was sent to the plug"
+            "using them and run this again - nothing was sent to the device"
         )
     if port != candidates[0]:
         output.say(f"Port {candidates[0]} is in use on this computer; serving {serving} on {port} instead.")
@@ -84,8 +84,8 @@ def ensure_firewall(ctx: Context) -> None:
     if hostsys.local_rules_ignored(plug_ip):
         prompts.section("This computer's firewall is managed by an organisation", [
             "It is set (by Group Policy) to ignore rules added on the computer itself,",
-            "so the plug cannot be let in from here. Ask whoever manages it, or use",
-            "another computer. Carrying on - if the plug is blocked, the next step",
+            "so the device cannot be let in from here. Ask whoever manages it, or use",
+            "another computer. Carrying on - if the device is blocked, the next step",
             "stops and says so.",
         ])
         return
@@ -105,8 +105,8 @@ def ensure_firewall(ctx: Context) -> None:
             if kind == "windows"
             else f"allows only {plug_ip} in, on TCP ports {', '.join(map(str, ports))}")
     output.transient_begin()  # the note, and the system's password question
-    prompts.section("Let the plug through this computer's firewall", [
-        f"This computer's firewall ({kind}) would block the plug from fetching its",
+    prompts.section("Let the device through this computer's firewall", [
+        f"This computer's firewall ({kind}) would block the device from fetching its",
         f"firmware. Adding one rule that {what}.",
         "This temporary rule is always removed when this tool exits (no matter how it exits).",
         *prompt_note,
@@ -122,7 +122,7 @@ def ensure_firewall(ctx: Context) -> None:
         prompts.section("The firewall rule could not be added", [
             "Add it yourself, in another window, with:",
             f"  {hostsys.display(add)}",
-            "and remove it after the conversion. Carrying on - if the plug is still",
+            "and remove it after the conversion. Carrying on - if the device is still",
             "blocked, the next step stops and says so.",
             *([
                 "",
@@ -148,7 +148,7 @@ def firewall_hint(ctx: Context) -> list[str]:
     """What to say when the plug never reached this computer."""
     plug_ip = ctx.state.input("plug_ip") or "PLUG_IP"
     lines = [
-        "The plug never connected to this computer. That is almost always this",
+        "The device never connected to this computer. That is almost always this",
         "computer's firewall, or this computer having changed address.",
     ]
     kind = hostsys.active_firewall()
@@ -156,7 +156,7 @@ def firewall_hint(ctx: Context) -> list[str]:
     if kind:
         program = hostsys.python_program() if kind in ("windows", "macos") else None
         add, _ = hostsys.firewall_commands(kind, plug_ip, ports, program)
-        lines += ["", f"A {kind} firewall is on. This allows the plug in:", f"  {hostsys.display(add)}"]
+        lines += ["", f"A {kind} firewall is on. This allows the device in:", f"  {hostsys.display(add)}"]
     advice = hostsys.firewall_advice(plug_ip if plug_ip != "PLUG_IP" else None, ports, after_failure=True)
     if advice:
         lines += ["", *advice]

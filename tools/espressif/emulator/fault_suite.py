@@ -944,7 +944,7 @@ class Scenario:
                      "/opt/venv/bin/python", TOOL, "run", "--unattended", "--env-file", "/tmp/autoflash-unattended.env",
                      "--firmware", self.target, timeout=200)
             said = re.sub(r"\s+", " ", re.sub(r"\x1b\[[0-9;]*m", "", out.stdout + out.stderr))
-            self.notes["second_refused"] = "another run is converting this plug" in said
+            self.notes["second_refused"] = "another run is converting this device" in said
             self.say("SECOND RUN: " + said[-600:])
         elif fault == "diskfull":
             pid = self.ex("pgrep", "-f", "-o", TOOL).stdout.strip()
@@ -962,7 +962,7 @@ class Scenario:
             # D1 through the installer's own network (the fallback, below);
             # and, on it, when the run gets that far: the run cut off just
             # after the upload, or this computer back on the home network.
-            words, act = {"cut": ("the plug is restarting into Tasmota", self.cut_run),
+            words, act = {"cut": ("the device is restarting into Tasmota", self.cut_run),
                           "dropupload": ("Sending Tasmota (", self.drop_join),
                           "dropsetup": ("Sending the Wi-Fi details", self.drop_join)}[arg]
             threading.Thread(target=self.when_said, args=(since, words, act), daemon=True).start()
@@ -988,11 +988,11 @@ class Scenario:
             # Tasmota sent through the installer cannot join the home Wi-Fi
             # (gone from just after the upload), and the run advises the 7
             # power cycles: done, and the Wi-Fi back.
-            if not self.when_said(since, "the plug is restarting into Tasmota", lambda: None):
+            if not self.when_said(since, "the device is restarting into Tasmota", lambda: None):
                 return
             self.ex(PLUG_CMD, "router", "off")
             self.say("FAULT: the home Wi-Fi gone after the upload")
-            if self.when_said(since, "Switch the plug off and on 7 times", lambda: None, limit=900):
+            if self.when_said(since, "Switch the device off and on 7 times", lambda: None, limit=900):
                 time.sleep(10)  # a person reads it
                 self.say("PERSON: switching the plug off and on 7 times")
                 self.ex(PLUG_CMD, "cycle", "7", timeout=300)
@@ -1478,7 +1478,7 @@ class Scenario:
         fault, arg = sc["fault"], sc["arg"]
         while "Converted" not in results[-1][1] and len(results) < MAX_RUNS:
             said = re.sub(r"\s+", " ", Path(self.log).read_text(encoding="utf-8", errors="replace").split("--- ")[-1])
-            if "switch the plug off and on" in said or "switch it off and on" in said:
+            if re.search(r"switch (the plug|the device|it) off and on", said):
                 self.say("following the run's advice: the plug switched off and on")
                 self.ex(PLUG_CMD, "restart")
                 time.sleep(5)
@@ -1562,7 +1562,7 @@ class Scenario:
         self.notes["names"], self.notes["networks"] = names, networks
         unknown, final = name_problems(names, networks, getattr(self, "target_final", self.target))
         # How long each Berry phase kept the plug busy, the longest try of
-        # each (the run's report: "Plug busy"). Kept, not judged: a real
+        # each (the run's report: "Device busy"). Kept, not judged: a real
         # S60TPG once stopped answering at 70-90 s, an S60TPF was fine at 2
         # minutes (report, test-reports discussion) - report lists the longest.
         self.notes["plug_busy"] = plug_busy(self.state, self.started)
@@ -1580,7 +1580,7 @@ class Scenario:
                 special = "NOT-FIRED"
         ours = re.sub(r"\s+", " ", "".join(self.ours(p, t) for m, p, t in run_logs(self.state)
                                            if m >= self.started))
-        converted_from_untemplated = "Converting the plug from Tasmota without the plug's template" in ours
+        converted_from_untemplated = "Converting the device from Tasmota without the device's template" in ours
         target_final = getattr(self, "target_final", self.target)
         template_bad = converted and target_final == "tasmota" and not self.template_ok()
         # The report of the last run, from a converted plug (its backup taken

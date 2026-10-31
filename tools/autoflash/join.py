@@ -72,16 +72,16 @@ def locate_plug(ctx: Context, *, timeout: float = 300.0, setup: bool = False) ->
         found = ctx.finder.poll()
         if found:
             output.progress_clear()
-            output.say(f"    The plug is on your network at {found}.")
+            output.say(f"    The device is on your network at {found}.")
             return found
-        output.progress(f"looking for the plug on your network... {time.monotonic() - started:.0f}s")
+        output.progress(f"looking for the device on your network... {time.monotonic() - started:.0f}s")
         time.sleep(5)
     output.progress_clear()
     other = None
     if setup:
         other = (f"It is showing its own Wi-Fi network ({names.setup_network_hint(ctx)})",
                  lambda: configure_plug_wifi(ctx, None))
-    found = prompts.wait_or_ask(ctx.state.input("plug_ip"), what="the plug", timeout=60.0, other=other)
+    found = prompts.wait_or_ask(ctx.state.input("plug_ip"), what="the device", timeout=60.0, other=other)
     ctx.set_plug_ip(found)
     return found
 
@@ -129,18 +129,18 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
     credentials = ctx.wifi(why=[
         "Tasmota could not be given them automatically, so it is waiting on its",
         "own setup network for them. Type them here and this sends them to the",
-        "plug for you once you have joined that network.",
+        "device for you once you have joined that network.",
     ])
-    prompts.section("Join the plug's setup network", [
+    prompts.section("Join the device's setup network", [
         f"In {hostsys.wifi_menu_hint()}, join:",
         f"    {network}      (open - no password)",
         "",
         "If a setup page opens by itself, close it: while that page is open the",
-        "plug keeps scanning for networks, which can drop this computer off its",
+        "device keeps scanning for networks, which can drop this computer off its",
         "network.",
         "",
         "The network can vanish for a few seconds every three minutes, as the",
-        "plug restarts to try your Wi-Fi again: if this computer is dropped off",
+        "device restarts to try your Wi-Fi again: if this computer is dropped off",
         "it, join it again.",
     ])
     wait_until_joined(network)
@@ -149,7 +149,7 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
         name_with_the_wifi(ctx)
         ssid, password = credentials
         for attempt in range(1, SETUP_SEND_ATTEMPTS + 1):
-            output.tell(f"    Sending the Wi-Fi details for '{ssid}'. The plug tests them first -")
+            output.tell(f"    Sending the Wi-Fi details for '{ssid}'. The device tests them first -")
             output.tell("    stay on its network for about 20 seconds...")
             try:
                 outcome, address = setup_network.send_wifi(ssid, password)
@@ -161,7 +161,7 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
             if outcome == "rejected":
                 if prompts.UNATTENDED:
                     break  # nobody to type others: on to the plug's page, below
-                output.tell(f"    The plug could not connect to '{ssid}' with those details. Type them")
+                output.tell(f"    The device could not connect to '{ssid}' with those details. Type them")
                 output.tell("    again - the network's name exactly as it appears, and its password:")
                 ssid, password = ask_credentials()
             elif setup_network_gone(ctx, network):
@@ -172,27 +172,27 @@ def configure_plug_wifi(ctx: Context, network: str | None) -> str:
                 outcome = "gone"
                 break
             else:
-                output.tell(f"    No word from the plug; sending them again (attempt {attempt + 1} "
+                output.tell(f"    No word from the device; sending them again (attempt {attempt + 1} "
                      f"of {SETUP_SEND_ATTEMPTS}).")
                 time.sleep(5)
             wait_until_joined(network)  # dropped off it meanwhile, joined again
         if outcome == "saved":
-            output.tell(f"    The plug connected to '{ssid}' and is restarting onto it"
+            output.tell(f"    The device connected to '{ssid}' and is restarting onto it"
                 + (f" at {address}." if address else "."))
             if address:
                 ctx.set_plug_ip(address)
         elif outcome == "rejected":
-            output.tell(f"    The plug could not connect to '{ssid}' with the bundle's details.")
+            output.tell(f"    The device could not connect to '{ssid}' with the bundle's details.")
         elif outcome == "gone":
-            output.tell("    No word from the plug, but its network has gone: it has most likely")
+            output.tell("    No word from the device, but its network has gone: it has most likely")
             output.tell(f"    joined '{ssid}' with them. It is looked for there.")
         else:
-            output.tell("    The plug did not say whether it connected. If it does not turn up")
+            output.tell("    The device did not say whether it connected. If it does not turn up")
             output.tell("    on your Wi-Fi, it is still waiting on its setup network: run this")
             output.tell("    again to retry.")
     if outcome in ("rejected", "manual"):
-        prompts.section("Set the Wi-Fi up on the plug's page instead", [
-            "Stay on the plug's network for this.",
+        prompts.section("Set the Wi-Fi up on the device's page instead", [
+            "Stay on the device's network for this.",
             f"Browse to http://{setup_network.SETUP_HOST}, choose your home Wi-Fi,",
             "type its password and save. When it says the connection worked:",
         ])
@@ -272,27 +272,27 @@ def check_plug_network(ctx: Context) -> dict[str, Any]:
     output.private(connected, "wifi-name")
     if not connected:
         raise Abort(
-            "the plug did not say which Wi-Fi network it is on, so the bundle's "
+            "the device did not say which Wi-Fi network it is on, so the bundle's "
             "network cannot be checked. Nothing was written"
         )
     output.transient_begin()
     while connected != wanted:
         prompts.section("The bundle is set up for a different Wi-Fi network", [
-            f"The plug is connected to        '{connected}'",
+            f"The device is connected to        '{connected}'",
             f"The bundle's firmware will join '{wanted}'",
             "",
-            "Later the plug has to rejoin Wi-Fi using only the bundle's details.",
+            "Later the device has to rejoin Wi-Fi using only the bundle's details.",
             "With these it would never come back. Nothing has been written.",
             "",
             f"Give the password for '{connected}' and the startup firmware is set",
             "up for that network instead.",
         ])
         if not prompts.ask_yes_no(f"Enter the password for '{connected}' now", default=True):
-            raise Abort(f"the plug is on '{connected}' but the bundle is set up for '{wanted}'")
+            raise Abort(f"the device is on '{connected}' but the bundle is set up for '{wanted}'")
         ctx.adopt_wifi(connected, ask_password(connected))
         wanted = bundle_ssid(ctx.manifest_path)
     output.transient_end()
-    output.say(f"Network check: the plug is on '{connected}', the network the startup "
+    output.say(f"Network check: the device is on '{connected}', the network the startup "
         f"firmware will join (signal {signal} dBm).")
     warn_if_weak_signal(ctx, signal, ["After the next stage the startup firmware has",
                                       "to rejoin on its own, and a weak signal makes that less certain."])
@@ -329,7 +329,7 @@ def advert_signal(ctx: Context, report: dict[str, Any], plug_ip: str) -> int | N
 def note_signal(ctx: Context, signal: int | None, then: list[str]) -> int | None:
     """Say a reading of the plug's Wi-Fi signal, and ask about a weak one."""
     if signal is not None:
-        output.say(f"Wi-Fi signal at the plug: {signal} dBm.")
+        output.say(f"Wi-Fi signal at the device: {signal} dBm.")
         warn_if_weak_signal(ctx, signal, then)
     return signal
 
@@ -344,9 +344,9 @@ def warn_if_weak_signal(ctx: Context, signal: Any, then: list[str]) -> None:
         output.say("    The signal is still weak; carrying on, as agreed.")
         return
     output.transient_begin()
-    prompts.section("The plug's Wi-Fi signal is weak", [
+    prompts.section("The device's Wi-Fi signal is weak", [
         f"It reports {signal} dBm. {then[0]}", *then[1:],
-        "Moving the plug nearer the access point first is worth it.",
+        "Moving the device nearer the access point first is worth it.",
     ])
     if not prompts.ask_yes_no("Carry on anyway", default=False):
         raise Abort("stopped for a weak Wi-Fi signal; nothing was written")
@@ -387,7 +387,7 @@ def on_a_plug_network() -> bool:
 def send_through_own_network(network: str, ssid: str, password: str) -> None:
     """ESPHome's (or the mover's) page given the details, up to
     SETUP_SEND_ATTEMPTS times, once this computer has joined its network."""
-    prompts.section("Join the plug's own network", [
+    prompts.section("Join the device's own network", [
         f"In {hostsys.wifi_menu_hint()}, join:",
         f"    {network}      (open - no password)",
         "",
@@ -399,11 +399,11 @@ def send_through_own_network(network: str, ssid: str, password: str) -> None:
             setup_network.send_esphome_wifi(ssid, password)
         except setup_network.SetupError as exc:
             if attempt == SETUP_SEND_ATTEMPTS:
-                raise Abort(f"the Wi-Fi details could not be sent to the plug: {exc}") from exc
+                raise Abort(f"the Wi-Fi details could not be sent to the device: {exc}") from exc
             output.tell(f"    {exc}; sending them again (attempt {attempt + 1} of {SETUP_SEND_ATTEMPTS}).")
             time.sleep(5)
             continue
-        output.tell(f"    Sent. The plug joins '{ssid}' now.")
+        output.tell(f"    Sent. The device joins '{ssid}' now.")
         return
 
 
@@ -424,7 +424,7 @@ def set_up_through_own_network(ctx: Context, what: str, check: Callable[[str], A
     output.tell(f"    {what} cannot join your Wi-Fi, so it has raised its own network, {network}.")
     ssid, password = ctx.wifi(why=[
         f"{what} cannot join your Wi-Fi, and is waiting on its own network for its",
-        "details. Type them here and this sends them to the plug for you.",
+        "details. Type them here and this sends them to the device for you.",
     ])
     for round_ in (1, 2):
         send_through_own_network(network, ssid, password)
@@ -440,11 +440,11 @@ def set_up_through_own_network(ctx: Context, what: str, check: Callable[[str], A
                 raise Abort(f"{what} did not join '{ssid}' with the details sent through its own "
                             "network. Check the network's name and password, then run this again") from None
         output.tell(f"    {what} did not join '{ssid}' with those details: most likely your Wi-Fi's name")
-        output.tell("    or password changed since the plug last joined it.")
+        output.tell("    or password changed since the device last joined it.")
         output.transient_begin()
-        prompts.section("The Wi-Fi details the plug should use", [
-            "Type the name and password of the 2.4 GHz network the plug should be on",
-            "now. They are sent to the plug through its own network.",
+        prompts.section("The Wi-Fi details the device should use", [
+            "Type the name and password of the 2.4 GHz network the device should be on",
+            "now. They are sent to the device through its own network.",
         ])
         ssid, password = ask_credentials()
         output.transient_end()
@@ -470,11 +470,11 @@ def wait_while_plug_busy(ctx: Context) -> None:
     device = ctx.device
     if device.answers(timeout=3.0) or not hostsys.ping_ok(host):
         return  # answering, or not on the network at all: the steps say which
-    output.tell("    The plug is on the network but not answering yet. It is most likely still")
+    output.tell("    The device is on the network but not answering yet. It is most likely still")
     output.tell("    finishing the step that was stopped, and gives up within a minute or two.")
     started = time.monotonic()
     while time.monotonic() - started < BUSY_PLUG_WAIT:
-        output.progress(f"waiting for the plug to finish... {time.monotonic() - started:.0f}s")
+        output.progress(f"waiting for the device to finish... {time.monotonic() - started:.0f}s")
         if device.answers(timeout=3.0):
             output.progress_clear()
             output.tell("    It is answering again.")

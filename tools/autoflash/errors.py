@@ -23,7 +23,7 @@ TRANSIENT_RE = re.compile(
     r"HTTP -1|timed out|timeout|sent nothing|did not answer|not answering|unreachable|"
     r"connection (refused|reset|aborted)|ConnectionError|IncompleteRead|URLError|"
     r"No route|stopped the \w+ without|did not complete within|Wi-Fi went down|"
-    r"closed the connection|Broken pipe|connection to the plug was lost",
+    r"closed the connection|Broken pipe|connection to the (plug|device) was lost",
     re.IGNORECASE,
 )
 

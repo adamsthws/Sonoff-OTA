@@ -71,7 +71,7 @@ def wifi_from_esphome(ctx: "Context") -> tuple[str, str] | None:
         return None
     output.private(found[0], "wifi-name")
     output.private(found[1], "wifi-password")
-    output.say(f"    Read the Wi-Fi details off ESPHome on the plug ('{found[0]}') - none to type.")
+    output.say(f"    Read the Wi-Fi details off ESPHome on the device ('{found[0]}') - none to type.")
     return found
 
 
@@ -104,19 +104,19 @@ def wifi_from_backup(ctx: "Context") -> tuple[str, str] | None:
         try:
             recovery_image(ctx.manifest_path, ssid, password)
         except BundleError:
-            output.tell(f"    The plug's Sonoff backup has an older password for '{ssid}' than the bundle's.")
+            output.tell(f"    The device's Sonoff backup has an older password for '{ssid}' than the bundle's.")
             return None
-        output.say(f"    The Wi-Fi in the plug's Sonoff backup, '{ssid}', is the bundle's - none to type.")
+        output.say(f"    The Wi-Fi in the device's Sonoff backup, '{ssid}', is the bundle's - none to type.")
         return found
     host = ctx.state.input("plug_ip")
     wifi = esphome.api_wifi(host, key=ctx.esphome_key) if host else None
     joined = wifi.get("ssid") if wifi else None
     if joined == ssid:
-        output.say(f"    The plug is on '{ssid}', the Wi-Fi in its Sonoff backup on this computer - "
+        output.say(f"    The device is on '{ssid}', the Wi-Fi in its Sonoff backup on this computer - "
             "none to type.")
         return found
     if joined:
-        output.tell(f"    The plug is on '{joined}' now, not on '{ssid}' as in its Sonoff backup.")
+        output.tell(f"    The device is on '{joined}' now, not on '{ssid}' as in its Sonoff backup.")
     return None
 
 
@@ -134,7 +134,7 @@ def read_wifi_from_plug(ctx: "Context") -> tuple[str, str] | None:
     the details are known to work at that moment.
     """
     def unreadable(reason: str) -> None:
-        output.tell(f"    The Wi-Fi details could not be read off the plug: {reason}.")
+        output.tell(f"    The Wi-Fi details could not be read off the device: {reason}.")
 
     for attempt in range(1, WIFI_READ_TRIES + 1):
         try:
@@ -170,7 +170,7 @@ def read_wifi_from_plug(ctx: "Context") -> tuple[str, str] | None:
     if not password:
         # Tasmota joins with exactly its first slot's details, and it is on
         # that network now - so an empty password means an open network.
-        output.say(f"    The plug is on '{ssid}', an open network (no password) - none to type.")
+        output.say(f"    The device is on '{ssid}', an open network (no password) - none to type.")
         return ssid, ""
-    output.say(f"    Read the Wi-Fi details the plug is connected with ('{ssid}') - none to type.")
+    output.say(f"    Read the Wi-Fi details the device is connected with ('{ssid}') - none to type.")
     return ssid, password

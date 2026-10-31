@@ -171,8 +171,7 @@ def query_plug(plug_ip: str, email: str, env: dict[str, str], work: Path) -> tup
     model, version = str(query.get("model", "")), str(query["version"])
     kind = kinds.for_stock_model(model)
     if kind is None:
-        raise Stop(f"{plug_ip} is a {model or 'device of unknown model'}, not one this tool "
-                   f"converts ({kinds.stock_models()})")
+        raise Stop(f"{plug_ip} is a {model or 'device of unknown model'}, not one this tool converts")
     return version, kind
 
 

@@ -141,7 +141,7 @@ class TasmotaTests(unittest.TestCase):
             found = detect.converted_plugs("192.168.0.1")
         self.assertEqual([(f.host, f.firmware, f.kind) for f in found],
                          [("192.168.0.137", "tasmota", "sonoff-s60")])
-        self.assertTrue(found[0].describe().startswith("the plug at 192.168.0.137"))
+        self.assertTrue(found[0].describe().startswith("the device at 192.168.0.137"))
 
     def test_a_tasmota_not_yet_set_up_is_taken_only_with_a_mac_this_computer_knows(self):
         # Official Tasmota, put on by a run stopped before it gave it the S60's

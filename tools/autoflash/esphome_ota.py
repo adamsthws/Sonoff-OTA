@@ -105,7 +105,7 @@ class NeedsPassword(OTAError):
     and none was given, or not the right one."""
 
     def __init__(self, given: bool) -> None:
-        super().__init__("ESPHome on the plug has an update password"
+        super().__init__("ESPHome on the device has an update password"
                          + (", and the one given is not it" if given else ""))
         self.given = given
 
@@ -115,7 +115,7 @@ class NeedsEncryption(OTAError):
     made with its API encryption key, and none was given."""
 
     def __init__(self) -> None:
-        super().__init__("ESPHome on the plug takes only encrypted updates (encryption: under ota: "
+        super().__init__("ESPHome on the device takes only encrypted updates (encryption: under ota: "
                          "in its ESPHome YAML config), made with its API encryption key")
 
 
@@ -123,7 +123,7 @@ class WrongKey(OTAError):
     """The API encryption key given is not the one ESPHome on the plug has."""
 
     def __init__(self) -> None:
-        super().__init__("the API encryption key given is not the one ESPHome on the plug has")
+        super().__init__("the API encryption key given is not the one ESPHome on the device has")
 
 
 @dataclass
@@ -143,7 +143,7 @@ def _recv(sock: socket.socket, count: int, what: str) -> bytes:
     while len(data) < count:
         piece = sock.recv(count - len(data))
         if not piece:
-            raise OTAError(f"the plug closed the connection at {what}")
+            raise OTAError(f"the device closed the connection at {what}")
         data += piece
     return data
 
@@ -211,7 +211,7 @@ class _Encrypted:
             except noise.NoiseError as exc:
                 raise OTAError(f"an encrypted answer: {exc}") from None
             if not self.pending:
-                raise OTAError("the plug sent an empty encrypted answer")
+                raise OTAError("the device sent an empty encrypted answer")
         data, self.pending = self.pending[:count], self.pending[count:]
         return data
 

@@ -58,23 +58,13 @@ def step_prerequisites(ctx: Context) -> dict[str, Any]:
     if runs.run_source(ctx.state) == "sonoff":
         needed = [
             "- The eWeLink app on your phone, signed in to an eWeLink account",
-            "  (free - a throwaway account is fine).",
-            "- The plug set up in the app on the 2.4 GHz Wi-Fi it should stay on:",
-            "  it keeps that network after the conversion, and cannot use 5 GHz.",
-            "- LAN Control turned on in the plug's settings in the app.",
+            "  (A throwaway account is fine).",
+            "- Your device set up in the app and connected to Wi-Fi.",
+            "- LAN Control turned on in the device's settings in the app.",
         ]
     else:
-        needed = [
-            "- The plug on the 2.4 GHz Wi-Fi it should stay on, as it is now: the",
-            "  firmware it gets keeps that network.",
-            "- This computer on the same network.",
-        ]
-    prompts.section("Before you start", needed + [
-        "- The plug in a socket nobody will switch off until the run finishes.",
-        "",
-        "Nothing on the plug changes until you confirm, once, just before the",
-        "point of no return - you will be asked then.",
-    ])
+        needed = ["- Your device connected to Wi-Fi, as it is now."]
+    prompts.section("Before you start, you'll need:", needed + ["- This computer on the same network."])
     prompts.wait_for_key()
     output.transient_end()  # read: the list leaves the screen, the stage line stays
     return {"shown": True}
@@ -93,13 +83,13 @@ def step_choose(ctx: Context) -> dict[str, Any]:
     given = ctx.firmware_given
     choices = [name for name in family.FIRMWARES if name != "sonoff"]
     if given == "sonoff":
-        raise Abort("the plug already runs Sonoff's firmware: there is nothing to convert")
+        raise Abort("the device already runs Sonoff's firmware: there is nothing to convert")
     if given and given not in choices:
-        raise Abort(f"this plug cannot go to {FIRMWARES[given]}: a {kind.name} takes "
+        raise Abort(f"this device cannot go to {FIRMWARES[given]}: a {kind.name} takes "
                     f"{' or '.join(family.FIRMWARES[name] for name in choices)}")
     firmware = given or ask_firmware("sonoff", choices)
     ctx.state.set_input("firmware", firmware)
-    output.say(f"Converting the plug to {FIRMWARES[firmware]}.")
+    output.say(f"Converting the device to {FIRMWARES[firmware]}.")
     apply_target(firmware, "sonoff", family)
     return {"firmware": firmware, "asked": not given}
 
@@ -108,15 +98,15 @@ def step_choose(ctx: Context) -> dict[str, Any]:
 # family's own steps follow once the firmware is chosen.
 STOCK_START: Steps = [
     ("A0", "Before you start", step_prerequisites),
-    ("A1", "Pair the plug in eWeLink", account.step_pair),
+    ("A1", "Pair the device in eWeLink", account.step_pair),
     ("A3", "Choose the firmware", step_choose),
 ]
 START: Steps = STOCK_START[:1]
-STAGE_NAMES = {"A0": "Confirming prerequisites", "A1": "Discovering the plug", "A3": "Choosing the firmware"}
+STAGE_NAMES = {"A0": "Confirming prerequisites", "A1": "Discovering the device", "A3": "Choosing the firmware"}
 PLAIN_DESCRIPTION = {
     "A0": "lists what needs to be in place before starting",
-    "A1": "gets the plug onto your network through the eWeLink app",
-    "A3": "asks which firmware the plug is to have",
+    "A1": "gets the device onto your network through the eWeLink app",
+    "A3": "asks which firmware the device is to have",
 }
 
 
@@ -189,7 +179,7 @@ def nothing_to_convert(ctx: Context, source: str) -> None:
     """Asked for what it runs: nothing to do, and nothing left unfinished."""
     ctx.state.set_input("source", source)
     ctx.state.set_input("firmware", source)
-    raise NothingToDo(f"The plug already runs {detect.NAMES[source]}: there is nothing to convert.")
+    raise NothingToDo(f"The device already runs {detect.NAMES[source]}: there is nothing to convert.")
 
 
 def settle_route(ctx: Context) -> tuple[str | None, str]:
@@ -203,7 +193,7 @@ def settle_route(ctx: Context) -> tuple[str | None, str]:
     given = ctx.firmware_given
     if kept and given and given != kept:
         raise Abort(
-            f"this plug is being converted to {FIRMWARES[kept]}, and a conversion cannot "
+            f"this device is being converted to {FIRMWARES[kept]}, and a conversion cannot "
             f"switch to {FIRMWARES[given]} part way. Carry on without "
             f"{'--esphome' if ctx.esphome_firmware else '--firmware'}, or start again with --new"
         )
@@ -232,10 +222,10 @@ def settle_route(ctx: Context) -> tuple[str | None, str]:
         if given == running:
             nothing_to_convert(ctx, running)
         if given not in offered:
-            raise Abort(f"this plug cannot go to {FIRMWARES[given]}: a {kinds.of_run(ctx.state).name} "
+            raise Abort(f"this device cannot go to {FIRMWARES[given]}: a {kinds.of_run(ctx.state).name} "
                         f"takes {' or '.join(offered.values())}")
         if given not in choices:
-            raise Abort(f"this plug cannot go to {FIRMWARES[given]}: there is no backup of its "
+            raise Abort(f"this device cannot go to {FIRMWARES[given]}: there is no backup of its "
                         "Sonoff firmware on this computer")
         firmware = given
     else:
@@ -244,7 +234,7 @@ def settle_route(ctx: Context) -> tuple[str | None, str]:
             nothing_to_convert(ctx, running)
     ctx.state.set_input("source", running)
     ctx.state.set_input("firmware", firmware)
-    output.say(f"Converting the plug from {detect.NAMES[running]} to {FIRMWARES[firmware]}.")
+    output.say(f"Converting the device from {detect.NAMES[running]} to {FIRMWARES[firmware]}.")
     return firmware, running
 
 
@@ -253,17 +243,17 @@ def ask_firmware(source: str, choices: list[str]) -> str:
     what is particular to this plug - part way, on Tasmota's safeboot, or with
     no backup to go back to Sonoff's firmware from."""
     output.transient_begin()
-    body = (["This plug was left part way through a conversion; it can go on to any",
+    body = (["This device was left part way through a conversion; it can go on to any",
              "of these from where it is."] if source in ("midway", "committed", "installer") else
             ["Its Tasmota goes back on first, with its settings; choosing Tasmota",
              "stops there. Or it can go on to either of the others."] if source == "safeboot" else
-            ["It runs Tasmota without the plug's template, so it switches nothing;",
+            ["It runs Tasmota without the device's template, so it switches nothing;",
              "choosing Tasmota gives it the template, keeping its other settings."]
             if source == "untemplated" else [])
     if source != "sonoff" and "sonoff" not in choices:
         body += [""] * bool(body) + ["Going back to Sonoff's own firmware needs the backup this tool takes",
-                                     "when it first converts a plug, and there is none for this one here."]
-    prompts.section("Choose the plug's new firmware", body)
+                                     "when it first converts a device, and there is none for this one here."]
+    prompts.section("Choose the device's new firmware", body)
     labels = {"tasmota": "Tasmota" if source != "tasmota" else "Tasmota, as it is (its meter calibrated, if it is not)",
               "openbeken": "OpenBeken", "esphome": "ESPHome",
               "sonoff": "Sonoff's own firmware (back to eWeLink, from its backup)"}
@@ -279,6 +269,12 @@ def ask_firmware(source: str, choices: list[str]) -> str:
 
 def stage_name(step: str) -> str:
     return _stage_name(step, STEP_INDEX[step][0], ROUTE[0], FAMILY)
+
+
+def stage_name_of(state: RunState, step: str) -> str:
+    """A step's stage name on a run's own route, as its record has it."""
+    title = next(title for name, title, _ in steps_of(state) if name == step)
+    return _stage_name(step, title, recorded_firmware(state), family_of(state))
 
 
 def _stage_name(step: str, title: str, firmware: str | None, family: ModuleType) -> str:

@@ -199,7 +199,7 @@ function Request-PythonRemoval {
     $record = Get-Content $InstalledMarker -Raw | ConvertFrom-Json
     Write-Host ""
     Write-Host " $($record.name) was installed for this tool. Remove it now, to leave nothing"
-    Write-Host " behind? If you will run the tool again - for another plug, or to finish this"
+    Write-Host " behind? If you will run the tool again - for another device, or to finish this"
     Write-Host " one - keep it: the next run then starts straight away."
     $answer = "$(Read-Host ' Remove Python now? [y/N]')"
     if ($answer.Trim() -notmatch '^(y|yes)$') { Write-Host " Kept."; return }

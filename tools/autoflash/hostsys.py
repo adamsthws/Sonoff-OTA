@@ -942,20 +942,20 @@ def firewall_advice(plug_ip: str | None, ports: Sequence[int], *, after_failure:
     if state["others"]:
         lines += [
             f"Security software besides Windows' own firewall is installed: {', '.join(state['others'])}.",
-            "It can block the plug even when Windows lets it in. If the plug cannot",
+            "It can block the device even when Windows lets it in. If the device cannot",
             f"connect, allow incoming connections in it to Python ({python_program()})",
             f"on TCP ports {_ports(ports)}, or pause it for the conversion.",
         ]
     if not state["local_rules"]:
         lines += [
             "This computer's firewall is managed by an organisation (Group Policy), set",
-            "to ignore rules added on the computer itself - so the plug cannot be let",
+            "to ignore rules added on the computer itself - so the device cannot be let",
             "in from here. Ask whoever manages it, or use another computer.",
         ]
     elif after_failure and state["domain"]:
         lines += [
             "This computer is managed by an organisation (it is joined to a domain), whose",
-            "policies may keep the plug out. If it still cannot connect, try another computer.",
+            "policies may keep the device out. If it still cannot connect, try another computer.",
         ]
     return lines
 
@@ -973,8 +973,8 @@ def security_software_note() -> list[str]:
     if not others:
         return []
     return [f"Security software besides Windows' own firewall is installed: {', '.join(others)}.",
-            "If the plug is on and set up as above, it may be dropping the plug's",
-            "answers - pausing it while you convert the plug is the quickest test."]
+            "If the device is on and set up as above, it may be dropping the device's",
+            "answers - pausing it while you convert the device is the quickest test."]
 
 
 def active_firewall() -> str | None:

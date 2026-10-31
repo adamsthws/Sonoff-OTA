@@ -167,12 +167,12 @@ class Context:
         output.transient_begin()  # until they are accepted, however many tries
         prompts.section("Your Wi-Fi details are needed", [
             *(["You chose to type them (--wifi)."] if forced else why or [
-                "They could not be read off the plug (the reason is above).",
+                "They could not be read off the device (the reason is above).",
                 "The startup firmware has to rejoin your Wi-Fi by itself after the",
                 "next stage, so it needs them written in.",
             ]),
             "",
-            "Use the 2.4 GHz network the plug should stay on. The password is held",
+            "Use the 2.4 GHz network the device should stay on. The password is held",
             "in memory for this run only, never written to disk, and you are not",
             "asked again later in the run.",
         ])
@@ -253,7 +253,7 @@ class Context:
                 return devices
             except EwelinkError as exc:
                 if "login failed" not in str(exc):
-                    output.tell(f"    Could not reach eWeLink ({exc}), so every plug that answers is listed.")
+                    output.tell(f"    Could not reach eWeLink ({exc}), so every device that answers is listed.")
                     return None
                 self._ewelink_password = None
                 output.transient_begin()
@@ -282,7 +282,7 @@ class Context:
         if not email:
             output.transient_begin()
             last = runs.load_settings().get("ewelink_email")
-            if last and prompts.ask_choice("Which eWeLink account is this plug in", [
+            if last and prompts.ask_choice("Which eWeLink account is this device in", [
                 f"The one used last time: {last}",
                 "A different account - enter its email",
             ]) == 0:
@@ -339,32 +339,32 @@ class Context:
             return self.args.listen_ip
         plug_ip = self.state.input("plug_ip")
         if not plug_ip:
-            raise Abort("the plug address is not known yet, so this computer's "
+            raise Abort("the device address is not known yet, so this computer's "
                         "address cannot be worked out; pass --listen-ip")
         try:
             derived = hostsys.local_ip_towards(plug_ip)
         except OSError as exc:
             raise Abort(
                 f"could not work out how this computer reaches {plug_ip} ({exc}); "
-                "check you are on the same network as the plug, or pass --listen-ip"
+                "check you are on the same network as the device, or pass --listen-ip"
             ) from exc
         address = ipaddress.ip_address(derived)
         if not (address.is_private and address.version == 4):
-            raise Abort(f"this computer's address towards the plug, {derived}, is not "
+            raise Abort(f"this computer's address towards the device, {derived}, is not "
                         "a home-network address")
         remembered = self.state.input("listen_ip")
         if remembered != derived:
             if remembered:
-                output.say(f"This computer's address towards the plug is now {derived} "
+                output.say(f"This computer's address towards the device is now {derived} "
                     f"(it was {remembered}).")
             else:
-                output.say(f"This computer's address towards the plug: {derived}")
+                output.say(f"This computer's address towards the device: {derived}")
             self.state.set_input("listen_ip", derived)
         return derived
 
     def set_plug_ip(self, address: str) -> None:
         if address != self.state.input("plug_ip"):
-            output.say(f"The plug is now at {address}.")
+            output.say(f"The device is now at {address}.")
             self.state.set_input("plug_ip", address)
 
     @property

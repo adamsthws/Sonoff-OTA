@@ -82,7 +82,7 @@ def calibrate_tasmota(command: Callable[[str], Any], coefficients: list[float] |
         command(f"Br gpio.pin_mode({pin}, gpio.INPUT)")
         level = answer.get("Br") if isinstance(answer, dict) else None
         if level not in ("0", "1"):
-            return {"skipped": "the plug's board could not be read"}
+            return {"skipped": "the device's board could not be read"}
         levels.append(int(level))
     factor = board_factor(levels)
     before = {}

@@ -41,7 +41,7 @@ def _linux() -> str:
     try:
         process = subprocess.Popen(
             [tool, "--what=sleep:idle", "--who=Autoflash",
-             "--why=A plug is being converted", "--mode=block", "sh", "-c", watcher],
+             "--why=A device is being converted", "--mode=block", "sh", "-c", watcher],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             start_new_session=True)
     except OSError as exc:

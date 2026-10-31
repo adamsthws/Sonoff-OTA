@@ -87,7 +87,7 @@ def describe_run(directory: Path) -> str:
     import datetime as dt
 
     state = RunState.open(directory)
-    where = state.input("plug_ip") or "a plug not yet found"
+    where = state.input("plug_ip") or "a device not yet found"
     mac = plugs.mac_of_run(directory) or state.input("plug_mac")
     if mac and state.input("plug_ip"):
         where += f", MAC {mac}"
@@ -96,20 +96,22 @@ def describe_run(directory: Path) -> str:
     steps = [step for step, _, _ in routes.steps_of(state)]
     done = [index for index, step in enumerate(steps) if state.is_done(step)]
     pending = next((step for step in steps[done[-1] + 1 if done else 0:] if not state.is_done(step)), None)
+    # Named as its stage line named it: no step ids on screen.
+    stage = f"stage {steps.index(pending) + 1}, {routes.stage_name_of(state, pending)}" if pending else ""
     try:
         when = dt.datetime.fromisoformat(state.data.get("updated_utc", "")).astimezone()
         today = when.date() == dt.date.today()
         stamp = when.strftime("%H:%M today" if today else "%d %b %H:%M")
     except ValueError:
         stamp = "an unknown time"
-    details = [f"stopped at step {pending}" if pending else "finished", stamp]
+    details = [f"stopped at {stage}" if pending else "finished", stamp]
     if pending and state.input("stopped_by") == "window":
         details.append("when its window was closed")
     if routes.past_the_point_of_no_return(state):
         details.append("past the point of no return")
     if not state.input("plug_ip"):
-        return f"a run that had not found its plug yet ({', '.join(details)})"
-    return f"the plug at {where} ({', '.join(details)})"
+        return f"a run that had not found its device yet ({', '.join(details)})"
+    return f"the device at {where} ({', '.join(details)})"
 
 
 def start_new_run(plug_ip: str | None) -> str:
@@ -169,14 +171,14 @@ def resolve_run_name(
         keep = ("the unfinished one stays" if len(unfinished) == 1
                 else "the unfinished ones stay")
         options = [f"Continue {describe_run(d)}" for d in unfinished] + [
-            f"Start a new plug - {keep} on record, to finish later",
+            f"Start a new conversion - {keep} on record, to finish later",
             "Remove an unfinished run",
         ]
         chosen = prompts.ask_choice(
             "A conversion did not finish last time. What now",
             options,
             help_lines=(
-                ["A plug past the point of no return no longer runs its Sonoff",
+                ["A device past the point of no return no longer runs its Sonoff",
                  "firmware - finish it before long; running this again offers it back."]
                 if any_past else []
             ),
@@ -188,7 +190,7 @@ def resolve_run_name(
             return runs.run_name(unfinished[chosen])
         if chosen == len(unfinished):
             output.transient_end()
-            RUN_CHOICE.append("Chosen at the start: a new plug. Left unfinished, on record:")
+            RUN_CHOICE.append("Chosen at the start: a new conversion. Left unfinished, on record:")
             RUN_CHOICE.extend(f"    {describe_run(d)}" for d in unfinished)
             return start_new_run(plug_ip)
         target = unfinished[0] if len(unfinished) == 1 else unfinished[prompts.ask_choice(
@@ -206,16 +208,16 @@ def remove_run(directory: Path) -> bool:
     state = RunState.open(directory)
     description = describe_run(directory)
     if routes.past_the_point_of_no_return(state):
-        prompts.section("This plug is part-converted", [
+        prompts.section("This device is part-converted", [
             "It no longer runs its Sonoff firmware, so it will not show up as a",
-            "new plug either. Once its record is removed, this tool cannot finish",
+            "new device either. Once its record is removed, this tool cannot finish",
             "it - finishing would mean doing the remaining steps by hand.",
         ])
     if not prompts.ask_yes_no(f"Remove the record of {description}", default=False):
         return False
     rules = [FirewallRule.from_json(item) for item in state.input("firewall_rules") or []]
     if rules:
-        output.say("It left a temporary firewall rule letting that plug connect to this")
+        output.say("It left a temporary firewall rule letting that device connect to this")
         output.say("computer. Removing it needs administrator rights, so you may be asked")
         output.say("for this computer's password.")
         for line in firewall.emulator_password_hint():
@@ -234,7 +236,7 @@ def remove_run(directory: Path) -> bool:
 
 
 def cmd_status(ctx: Context) -> int:
-    output.say(f"Plug:      {ctx.plug}")
+    output.say(f"Device:    {ctx.plug}")
     output.say(f"Address:   {ctx.state.input('plug_ip') or '(not set)'}")
     output.say(f"Manifest:  {ctx.manifest_path}")
     output.say(f"State:     {ctx.state.path}")
@@ -304,14 +306,14 @@ def refused_for_another_run(command: str, ctx: Context) -> bool:
         try:
             plugs.hold(mac, runs.run_name(ctx.dir))
         except plugs.PlugBusy as busy:
-            output.tell(f"Stopped before anything was done: another run is converting this plug ({mac}) "
+            output.tell(f"Stopped before anything was done: another run is converting this device ({mac}) "
                  f"right now{f' - {busy}' if str(busy) else ''}. Let it finish, or stop it first, "
                  "then run this again.")
             return True
     if command == "cleanup":
         busy = plugs.busy()
         if busy:
-            output.tell(f"Not cleaning up: a run is converting a plug right now ({'; '.join(busy)}), and "
+            output.tell(f"Not cleaning up: a run is converting a device right now ({'; '.join(busy)}), and "
                  "its firewall rule and secrets are in use. Let it finish, or stop it first, then "
                  "run this again.")
             return True
@@ -372,24 +374,24 @@ def _main() -> int:
     parser.add_argument("--plug-ip")
     parser.add_argument(
         "--listen-ip",
-        help="workstation address the plug fetches from; derived from the plug's "
+        help="workstation address the device fetches from; derived from the device's "
         "address when omitted",
     )
     parser.add_argument("--email")
     parser.add_argument("--web-user", help="Tasmota web username, for a Tasmota built with another than admin")
     parser.add_argument("--web-password",
-                        help="the plug's Tasmota web password, if it has one (asked for otherwise; never stored)")
+                        help="the device's Tasmota web password, if it has one (asked for otherwise; never stored)")
     parser.add_argument("--esphome-ota-password",
-                        help="the plug's ESPHome OTA update password, if it has one (asked for otherwise; never stored)")
+                        help="the device's ESPHome OTA update password, if it has one (asked for otherwise; never stored)")
     parser.add_argument("--esphome-web-user",
-                        help="the user name of the plug's ESPHome web login, if it has one (with --esphome-web-password)")
+                        help="the user name of the device's ESPHome web login, if it has one (with --esphome-web-password)")
     parser.add_argument("--esphome-web-password",
-                        help="the password of the plug's ESPHome web login (asked for otherwise; never stored)")
+                        help="the password of the device's ESPHome web login (asked for otherwise; never stored)")
     parser.add_argument("--esphome-api-key",
-                        help="the plug's ESPHome API encryption key, if it has one: for its Wi-Fi details, "
+                        help="the device's ESPHome API encryption key, if it has one: for its Wi-Fi details, "
                         "and its updates where they are encrypted (asked for otherwise; never stored)")
     parser.add_argument("--wifi", action="store_true",
-                        help="type the Wi-Fi details instead of reading them from the plug")
+                        help="type the Wi-Fi details instead of reading them from the device")
     parser.add_argument("--no-backup", action="store_true",
                         help="keep no backup of the Sonoff firmware (it holds the Wi-Fi password)")
     parser.add_argument("--firmware", choices=list(routes.FIRMWARES),
@@ -515,8 +517,8 @@ def _main() -> int:
             output.log_only("The run's window was closed: stopped at once.")
         output.stage_end("stopped")
         output.tell("")
-        output.tell("Stopped with Ctrl-C. Run again to pick up where you left off or to start again")
-        output.tell("(Every step checks the plug first, so running again is safe.)")
+        output.tell("Stopped with Ctrl-C. Run again to pick up where you left off, or to start again.")
+        output.tell("(Every step checks the device first, so running again is safe.)")
         ending = "cancelled"
         return 130
     finally:

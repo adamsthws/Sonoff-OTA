@@ -25,7 +25,7 @@ def step_pair(ctx: Context) -> dict[str, Any]:
     choice to make."""
     ip = ctx.state.input("plug_ip")
     if not ip:
-        output.say(f"Signing in to eWeLink to see which {kinds.names('short')} plugs are in the account...")
+        output.say("Signing in to eWeLink to see which supported devices are in the account...")
         devices = ctx.account_devices()
         ip = find_any_plug() if devices is None else find_account_plug(ctx, devices)
     ctx.state.set_input("plug_ip", ip)
@@ -144,7 +144,7 @@ def cut_off(sighting: Sighting) -> bool:
 
 # An update cut off part way - this computer stopped while it was being sent -
 # can leave the plug on Sonoff's firmware but away from eWeLink until it restarts.
-AFTER_A_CUT_OFF_SEND = ("switch the plug off and on: after an update cut off part way "
+AFTER_A_CUT_OFF_SEND = ("switch the device off and on: after an update cut off part way "
                         "it can stay away from eWeLink until it restarts.")
 
 
@@ -155,7 +155,7 @@ def why_not_found(sighting: Sighting) -> str:
     if cut_off(sighting):
         return (f"{describe_plug(plug)} answers at {sighting.ip}, but eWeLink shows it "
                 "offline - it cannot reach the internet. The conversion is sent to the "
-                "plug through eWeLink, so allow it internet access for this run (you can "
+                "device through eWeLink, so allow it internet access for this run (you can "
                 "block it again once it runs Tasmota, which needs no cloud). If it has "
                 f"that already, {AFTER_A_CUT_OFF_SEND}")
     if plug.online is False:
@@ -206,15 +206,15 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
             output.transient_begin()
             others = [f"- '{str(d.get('name') or '').strip() or d.get('deviceid')}' "
                       f"({d.get('productModel') or 'unknown model'})" for d in devices]
-            prompts.section(f"No {kinds.names()} in the eWeLink account {ctx.email()}", [
+            prompts.section(f"No supported device in the eWeLink account {ctx.email()}", [
                 *(["It has:", *others] if others else ["It has no devices."]),
                 "",
-                "Add the plug in the eWeLink app, or use the account it is in.",
+                "Add the device in the eWeLink app, or use the account it is in.",
             ])
             choice = prompts.ask_choice("What now", [
                 "Look again",
                 "Use a different eWeLink account",
-                "Type the plug's address myself",
+                "Type the device's address myself",
             ])
             output.transient_end()
         else:
@@ -229,7 +229,7 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
             if found:
                 output.transient_begin()
                 choice = prompts.ask_choice(
-                    "More than one plug in the account answered. Which one is this run for",
+                    "More than one device in the account answered. Which one is this run for",
                     [f"{describe_plug(sighting.plug)} at {sighting.ip}" for sighting in found],
                 )
                 output.transient_end()
@@ -244,7 +244,7 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
                     output.say(f"    It answers here but eWeLink shows it offline; checking again ({waited:.0f}s)...")
                 else:
                     output.say(f"    eWeLink shows it offline - just switched on, perhaps; checking again ({waited:.0f}s)...")
-                output.progress(f"waiting for eWeLink to see the plug online... {waited:.0f}s")
+                output.progress(f"waiting for eWeLink to see the device online... {waited:.0f}s")
                 time.sleep(10.0)
                 output.progress_clear()
                 refreshed = ctx.account_devices()
@@ -255,9 +255,9 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
             output.transient_begin()
             if all(map(cut_off, sightings)):
                 # Found here: only its own internet access is in the way.
-                title, note = "Your plug is on this network but cannot reach the internet", []
+                title, note = "Your device is on this network but cannot reach the internet", []
             else:
-                title, note = ("Your plug did not answer on this network",
+                title, note = ("Your device did not answer on this network",
                                hostsys.security_software_note())
             prompts.section(title, [
                 *(f"- {why_not_found(sighting)}" for sighting in sightings),
@@ -266,14 +266,14 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
             choice = prompts.ask_choice("What now", [
                 "Look again",
                 "Use a different eWeLink account",
-                "Type the plug's address myself",
+                "Type the device's address myself",
             ])
             output.transient_end()
         if choice == 2:
             output.transient_begin()  # gone once answered, as the menu was
             ip = prompts.ask_ipv4(
-                "The plug's address",
-                help_lines=["Find your plug's IP address in your router's device list, or eWeLink's device information."],
+                "The device's address",
+                help_lines=["Find your device's IP address in your router's device list, or eWeLink's device information."],
                 check=plug_at({plug.device_id for plug in plugs}),
             )
             output.transient_end()
@@ -291,7 +291,7 @@ def find_any_plug() -> str:
     it is ambiguous."""
     ip = None
     while not ip:
-        output.say("Looking for Sonoff plugs on your network...")
+        output.say("Looking for supported devices on your network...")
         plugs = find_ewelink_plugs()
         if len(plugs) == 1:
             ip, name = plugs[0]
@@ -299,7 +299,7 @@ def find_any_plug() -> str:
         elif plugs:
             output.transient_begin()
             choice = prompts.ask_choice(
-                "More than one Sonoff plug answered. Which one is this run for",
+                "More than one device answered. Which one is this run for",
                 [f"{name} at {address}" for address, name in plugs],
             )
             output.transient_end()
@@ -309,22 +309,22 @@ def find_any_plug() -> str:
             # stack another copy under the stage line.
             output.transient_begin()
             note = hostsys.security_software_note()
-            prompts.section("No Sonoff plug answered on this network", [
+            prompts.section("No supported device answered on this network", [
                 "Check, in the eWeLink app:",
-                "- the plug is added, on the same 2.4 GHz Wi-Fi network as this",
-                "  computer - the plug cannot use 5 GHz",
-                "- LAN Control is turned on in the plug's settings",
-                "- the plug is switched on at the wall",
+                "- the device is added, on the same 2.4 GHz Wi-Fi network as this",
+                "  computer - the device cannot use 5 GHz",
+                "- LAN Control is turned on in the device's settings",
+                "- the device is switched on at the wall",
                 *([""] + note if note else []),
             ])
             choice = prompts.ask_choice(
                 "What now",
-                ["Look again", "Type the plug's address myself"],
+                ["Look again", "Type the device's address myself"],
             )
             if choice == 1:
                 ip = prompts.ask_ipv4(
-                    "The plug's address",
-                    help_lines=["Find your plug's IP address in your router's device list, or eWeLink's device information."],
+                    "The device's address",
+                    help_lines=["Find your device's IP address in your router's device list, or eWeLink's device information."],
                     check=plug_at(None),
                 )
             output.transient_end()
@@ -337,7 +337,7 @@ def plug_at(wanted: set[str] | None) -> Callable[[str], list[str]]:
     discovery there.  The next stage asks it there, and needs the answer to
     go on: an address that only answers a ping - the router, say - would
     stop the run then, with nothing to show what was wrong."""
-    what = "a Sonoff plug" if wanted is None else "your plug"
+    what = "a supported device" if wanted is None else "your device"
 
     def check(address: str) -> list[str]:
         output.tell(f"    Checking that {address} is {what}...")
@@ -348,11 +348,10 @@ def plug_at(wanted: set[str] | None) -> Callable[[str], list[str]]:
         if found and (wanted is None or found & wanted):
             return []
         if found:
-            return [f"{address} is a different eWeLink device, not one of this account's "
-                    f"{kinds.names()} plugs."]
+            return [f"{address} is a different eWeLink device, not one of this account's supported devices."]
         return [
             f"{address} answered, but not as an eWeLink device - it is probably something",
-            "else, such as your router. If it is the plug, turn on LAN Control in its",
+            "else, such as your router. If it is the device, turn on LAN Control in its",
             "settings in the eWeLink app.",
         ]
     return check
@@ -369,7 +368,7 @@ def find_ewelink_plugs(timeout: float = 6.0) -> list[tuple[str, str]]:
         source = packet.get("source")
         if not source or "records" not in packet:
             continue
-        label = found.get(source, "a Sonoff plug")
+        label = found.get(source, "an eWeLink device")
         for record in packet["records"]:
             if record.get("type") == "TXT":
                 for value in record.get("value") or []:
@@ -391,15 +390,15 @@ def already_converting(plug_ip: str) -> None:
         return
     if setup_network.is_bridge_page(body):
         raise Abort(
-            f"the plug at {plug_ip} is already running our installer firmware, from "
+            f"the device at {plug_ip} is already running our installer firmware, from "
             "an earlier conversion. Run this again and choose to continue that "
-            "conversion. If none is offered, switch the plug off and on: it goes "
+            "conversion. If none is offered, switch the device off and on: it goes "
             "back to its Sonoff firmware, and a new conversion can start"
         )
     if "tasmota" in body.lower():
         raise Abort(
             f"{plug_ip} is running Tasmota, not Sonoff's firmware. If that is this "
-            "plug, part way through an earlier conversion, run this again and "
+            "device, part way through an earlier conversion, run this again and "
             "choose to continue that conversion"
         )
 
@@ -417,7 +416,7 @@ def step_discover(ctx: Context) -> dict[str, Any]:
         note = hostsys.security_software_note()
         if note:
             prompts.section("Something on this computer may be in the way", note)
-        raise Abort(f"the plug at {plug_ip} did not answer the eWeLink discovery; check "
+        raise Abort(f"the device at {plug_ip} did not answer the eWeLink discovery; check "
                     "it is switched on and LAN Control is on in the eWeLink app")
     mdns.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     email = ctx.email()
@@ -444,7 +443,7 @@ def step_discover(ctx: Context) -> dict[str, Any]:
     if kind is None:
         raise Abort(
             f"{plug_ip} is a {model or 'device of unknown model'}, which this tool does not "
-            f"convert - it converts the {kinds.stock_models()}. Nothing was written"
+            "convert yet. Nothing was written"
         )
     ctx.state.set_input("plug_kind", kind.key)
 
@@ -462,19 +461,19 @@ def step_discover(ctx: Context) -> dict[str, Any]:
         offered = f"{endpoints[0][0]} port {endpoints[0][1]} (not used - we deliver directly)"
     else:
         offered = "none - this is the latest Sonoff firmware"
-    prompts.section("What the plug reported", quiet=True, body=[
+    prompts.section("What the device reported", quiet=True, body=[
         f"Model            {model}",
         f"Product          {product or 'not given'}",
         f"Firmware now     {version}",
         f"Update offered   {offered}",
         "",
-        "The plug fetches our firmware straight from this computer, so no",
+        "The device fetches our firmware straight from this computer, so no",
         "router rule is needed.",
     ])
     # The earliest reading of a run from Sonoff's firmware: before anything is
     # written, while moving the plug costs nothing.
     signal = join.note_signal(ctx, join.advert_signal(ctx, report, plug_ip), [
-        "Nothing has been written yet. The conversion restarts the plug",
+        "Nothing has been written yet. The conversion restarts the device",
         "several times, and each time it has to rejoin your Wi-Fi on its own;",
         "a weak signal makes that less certain."])
     ctx.state.set_input("stock_version", version)

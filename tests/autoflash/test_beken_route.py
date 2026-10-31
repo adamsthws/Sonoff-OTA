@@ -216,7 +216,7 @@ class FromStockTests(unittest.TestCase):
                                         error="Cloud rejected upgrade command: error 410")
             with mock.patch.object(stock.prompts, "require_word", return_value=True), \
                     mock.patch.object(ota_push, "deliver", return_value=refused):
-                with self.assertRaisesRegex(errors.Abort, "Switch the plug off and on"):
+                with self.assertRaisesRegex(errors.Abort, "Switch the device off and on"):
                     stock.step_push(ctx)
 
     def test_the_evidence_of_a_push_is_what_the_plug_answers_as(self):
@@ -399,7 +399,7 @@ class ArrivedTests(unittest.TestCase):
                     mock.patch.object(arrived.join.time, "sleep"), \
                     mock.patch.object(arrived.prompts, "UNATTENDED", True), \
                     mock.patch.object(arrived.join.time, "monotonic", side_effect=iter(range(0, 10000, 100))):
-                with self.assertRaisesRegex(errors.Abort, "has not answered.*switch the plug off and on"):
+                with self.assertRaisesRegex(errors.Abort, "has not answered.*switch the device off and on"):
                     arrived.step_openbeken_check(ctx, wait=10)
 
     def not_back_then_back(self, ctx, choices, *, switch=None):
@@ -522,7 +522,7 @@ class ArrivedTests(unittest.TestCase):
                     mock.patch.object(detect, "identify", return_value=None), \
                     mock.patch.object(arrived.time, "sleep"), mock.patch.object(arrived.prompts, "UNATTENDED", True), \
                     mock.patch.object(arrived.time, "monotonic", side_effect=iter(range(0, 10000, 100))):
-                with self.assertRaisesRegex(errors.Abort, "has not shown.*switch the plug off and on"):
+                with self.assertRaisesRegex(errors.Abort, "has not shown.*switch the device off and on"):
                     arrived.step_sonoff_check(ctx, wait=50)
 
 

@@ -12,7 +12,7 @@ from tools.autoflash import awake
 
 # The run's own hold, as awake.keep_awake takes it: not an emulator's
 # ("Autoflash emulator"), which may be held at the same time.
-RUN_HOLD = "A plug is being converted"
+RUN_HOLD = "A device is being converted"
 
 
 def inhibitors(pid: int) -> str:

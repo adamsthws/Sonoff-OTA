@@ -39,7 +39,7 @@ class ScrubTests(PrivacyTestCase):
         for line in ("The plug is at 192.168.0.50; this computer is 10.0.0.2 and 172.16.4.1",
                      "Tasmota 15.6.0(release-tasmota), template tasmota-settings-template-15.6.0.0.bin",
                      "Stage 3 - Discovering the plug - Complete (4s)",
-                     "Sonoff S60 Plug model S60TPG"):
+                     "Sonoff S60 Device model S60TPG"):
             self.assertEqual(output.scrub(line), line)
 
     def test_the_home_folder_is_shortened(self):

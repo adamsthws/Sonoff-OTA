@@ -39,15 +39,15 @@ def account_record(ctx: Context) -> dict[str, Any]:
         mac = ctx.state.input("plug_mac")
         device_id = str(plugs.read_plug(mac).get("ewelink_id") or "") if mac else ""
     if not device_id:
-        raise Abort("the plug's eWeLink device id is not known: start again with --new, so the plug is found "
+        raise Abort("the device's eWeLink device id is not known: start again with --new, so the device is found "
                     "in the account first")
     devices = ctx.account_devices()
     if devices is None:
-        raise Abort("eWeLink could not be reached, and the plug's firmware can only be sent through it")
+        raise Abort("eWeLink could not be reached, and the device's firmware can only be sent through it")
     for device in devices:
         if device.get("deviceid") == device_id:
             return device
-    raise Abort(f"the plug is no longer in the eWeLink account {ctx.email()}; add it again in the app")
+    raise Abort(f"the device is no longer in the eWeLink account {ctx.email()}; add it again in the app")
 
 
 def step_identify(ctx: Context) -> dict[str, Any]:
@@ -60,18 +60,17 @@ def step_identify(ctx: Context) -> dict[str, Any]:
         raise Abort(str(exc)) from exc
     kind = kinds.for_stock_model(identity["model"])
     if kind is None:
-        raise Abort(f"the plug is a {identity['model']}, which this tool does not convert - it converts the "
-                    f"{kinds.stock_models()}. Nothing was written")
+        raise Abort(f"the device is a {identity['model']}, which this tool does not convert yet. Nothing was written")
     product = str(device.get("productModel") or "").strip().upper()
     ctx.state.set_input("plug_kind", kind.key)
     ctx.state.set_input("stock_version", identity["version"])
     ctx.state.set_input("product_model", product)
-    prompts.section("What the plug reported", quiet=True, body=[
+    prompts.section("What the device reported", quiet=True, body=[
         f"Model            {identity['model']}",
         f"Product          {product or 'not given'}",
         f"Firmware now     {identity['version']}",
         "",
-        "The plug fetches its new firmware straight from this computer, as its",
+        "The device fetches its new firmware straight from this computer, as its",
         "own updates come, and its bootloader installs it on the next start.",
     ])
     return {"stock_version": identity["version"], "model": identity["model"], "product": product}
@@ -93,14 +92,14 @@ def step_push(ctx: Context) -> dict[str, Any]:
     firewall.ensure_firewall(ctx)
     output.transient_begin()
     prompts.warning_box("Before going on", [
-        "From here the plug's Sonoff firmware is replaced, so the eWeLink app",
+        "From here the device's Sonoff firmware is replaced, so the eWeLink app",
         "will no longer control it. DO NOT UNPLUG IT during the process.",
-        "The plug's own settings - its Wi-Fi, its meter calibration, its eWeLink",
-        "identity - stay on the plug untouched, and the new firmware reads them.",
-        "Only go ahead with a plug you can afford to lose",
+        "The device's own settings - its Wi-Fi, its meter calibration, its eWeLink",
+        "identity - stay on the device untouched, and the new firmware reads them.",
+        "Only go ahead with a device you can afford to lose.",
     ])
     if not prompts.require_word(prompts.CONSENT_WORD):
-        raise NothingWritten("not confirmed - nothing has been written to the plug")
+        raise NothingWritten("not confirmed - nothing has been written to the device")
     output.transient_end()  # agreed: the note and the question have done their job
     if ctx.dry_run:
         output.say(f"[dry-run] would send {firmware} {version} ({len(container):,} bytes wrapped) to {plug_ip}")
@@ -113,7 +112,7 @@ def step_push(ctx: Context) -> dict[str, Any]:
             raise EwelinkError(f"the device's model is {model}, not the {kind.name}'s {kind.stock_model}")
         reported = str((found.get("params") or {}).get("fwVersion"))
         if reported != stock_version:
-            raise EwelinkError(f"the plug reports firmware {reported}, not the {stock_version} it reported at B1")
+            raise EwelinkError(f"the device reports firmware {reported}, not the {stock_version} it reported at B1")
 
     output.say(f"Sending {firmware} {version} ({len(image):,} bytes; {len(container):,} wrapped) through eWeLink...")
     started = time.monotonic()
@@ -126,16 +125,16 @@ def step_push(ctx: Context) -> dict[str, Any]:
         raise Abort(f"the firmware was not sent: {delivered.error or 'eWeLink did not take the command'}. "
                     f"{ota_push.NOT_SENT}")
     if BUSY.search(delivered.error or ""):
-        raise Abort("the plug turned the new firmware down: it is still busy with an update that was cut off "
-                    "part way. Switch the plug off and on - it keeps its Sonoff firmware - then run the same "
+        raise Abort("the device turned the new firmware down: it is still busy with an update that was cut off "
+                    "part way. Switch the device off and on - it keeps its Sonoff firmware - then run the same "
                     "command again")
     if not delivered.complete:
         # Sent, and some of it may be on the plug: the plug says what it runs
         # when the step is asked about (evidence_pushed).
-        raise OSError(f"the plug fetched {delivered.bytes_served:,} of {len(container):,} bytes before the "
+        raise OSError(f"the device fetched {delivered.bytes_served:,} of {len(container):,} bytes before the "
                       f"delivery stopped ({delivered.error or 'it stopped asking'})")
     seconds = round(time.monotonic() - started, 1)
-    output.say(f"    The plug has the whole image after {seconds}s; its bootloader installs it as it restarts.")
+    output.say(f"    The device has the whole image after {seconds}s; its bootloader installs it as it restarts.")
     return {"seconds": seconds, "firmware": firmware, "version": version, "bytes": len(container)}
 
 
@@ -146,7 +145,7 @@ def evidence_pushed(ctx: Context) -> tuple[bool | None, str]:
     firmware = runs.run_firmware(ctx.state)
     running = detect.identify(host, timeout=3.0) if host else None
     if running == firmware:
-        return True, f"The plug answers as {detect.NAMES[firmware]}: the firmware was delivered and installed."
+        return True, f"The device answers as {detect.NAMES[firmware]}: the firmware was delivered and installed."
     if running == "sonoff":
-        return False, "The plug still answers as Sonoff's firmware: the delivery did not finish."
-    return None, "The plug does not answer as the new firmware yet - it may still be installing it."
+        return False, "The device still answers as Sonoff's firmware: the delivery did not finish."
+    return None, "The device does not answer as the new firmware yet - it may still be installing it."

@@ -57,10 +57,10 @@ def make_bundle(ctx: Context, problem: str | None) -> dict[str, Any]:
     prompts.section("Prepare the firmware bundle", quiet=True, body=[
         *(["The existing bundle cannot be used:", f"  {problem}", ""] if problem else []),
         "This downloads the official Tasmota files and checks each one against",
-        "its pinned fingerprint. It is done once; later plugs reuse it.",
+        "its pinned fingerprint. It is done once; later devices reuse it.",
         "",
         "Your Wi-Fi details are not needed for this. Later in the run they are",
-        "read off the plug and written into an in-memory copy of the small",
+        "read off the device and written into an in-memory copy of the small",
         "temporary firmware, which has to rejoin your Wi-Fi by itself.",
     ])
     try:

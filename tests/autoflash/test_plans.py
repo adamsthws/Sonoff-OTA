@@ -227,7 +227,7 @@ class PlanCheckTests(unittest.TestCase):
         with mock.patch.object(plans, "BUSY_LIMIT", plan.busy_estimate()):
             self.allowed(plan)
         with mock.patch.object(plans, "BUSY_LIMIT", plan.busy_estimate() - 0.01):
-            with self.assertRaisesRegex(plans.PlanError, "keeps the plug busy past .* s; split it"):
+            with self.assertRaisesRegex(plans.PlanError, "keeps the device busy past .* s; split it"):
                 plan.check()
 
 

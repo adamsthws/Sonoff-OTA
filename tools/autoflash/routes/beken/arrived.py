@@ -52,14 +52,14 @@ def until_back(look: Callable[[], T], what: str, advice: str) -> T:
                 raise Abort(advice) from exc
         output.transient_begin()
         prompts.section(f"{what} has not answered yet", [
-            "The plug installs its new firmware as it restarts, and has not come",
-            "back yet. Switch the plug off and on - at the socket, off for a few",
+            "The device installs its new firmware as it restarts, and has not come",
+            "back yet. Switch the device off and on - at the socket, off for a few",
             "seconds - and it starts on its new firmware.",
         ])
-        options = ["Look for it again - the plug is back on"]
+        options = ["Look for it again - the device is back on"]
         switch = os.environ.get(EMULATED_POWER)
         if switch:
-            options.append("Power-cycle the emulated plug, then look for it again")
+            options.append("Power-cycle the emulated device, then look for it again")
         chosen = prompts.ask_choice("Once it is back on, choose", options)
         output.transient_end()
         if chosen == 1:
@@ -71,7 +71,7 @@ def power_cycle_emulated(switch: Path) -> None:
     switch.write_text("off\n", encoding="utf-8")
     time.sleep(EMULATED_OFF)
     switch.write_text("on\n", encoding="utf-8")
-    output.say("    Power-cycled the emulated plug.")
+    output.say("    Power-cycled the emulated device.")
 
 
 def step_openbeken_check(ctx: Context, wait: float = ARRIVAL_WAIT) -> dict[str, Any]:
@@ -98,8 +98,8 @@ def step_openbeken_check(ctx: Context, wait: float = ARRIVAL_WAIT) -> dict[str, 
             raise NotBack from exc
 
     found = until_back(look, "OpenBeken", (
-        "OpenBeken has not answered on your Wi-Fi. The plug installs it as it restarts, then reads "
-        "its Wi-Fi from the plug's own store and joins; if it has not, switch the plug off and on, "
+        "OpenBeken has not answered on your Wi-Fi. The device installs it as it restarts, then reads "
+        "its Wi-Fi from the device's own store and joins; if it has not, switch the device off and on, "
         "then run the same command again to check it"))
     seconds = round(time.monotonic() - started, 1)
     version = openbeken.version(found)
@@ -125,7 +125,7 @@ def step_backup(ctx: Context) -> dict[str, Any]:
 
 def _back_up(ctx: Context, mac: str) -> str:
     if plugs.find_backup(mac):
-        output.say("    The plug's own data is backed up already.")
+        output.say("    The device's own data is backed up already.")
         return "existing"
     if getattr(getattr(ctx, "args", None), "no_backup", False):
         return "not wanted"
@@ -135,31 +135,31 @@ def _back_up(ctx: Context, mac: str) -> str:
     try:
         region = openbeken.read_flash(
             host, start, size,
-            progress=lambda done, total: output.progress(f"reading the plug's own data: {100 * done // total}%"))
+            progress=lambda done, total: output.progress(f"reading the device's own data: {100 * done // total}%"))
     except OSError as exc:
         output.progress_clear()
-        output.tell(f"    The plug's own data could not be read ({exc}); carrying on without a backup. "
-                    "The plug keeps it, and the data read is checked next time.")
+        output.tell(f"    The device's own data could not be read ({exc}); carrying on without a backup. "
+                    "The device keeps it, and the data read is checked next time.")
         return "failed"
     finally:
         output.progress_clear()
     try:
         found = backup.factory_mac(region)
     except ValueError as exc:
-        output.tell(f"    What was read is not the plug's factory record ({exc}); no backup kept.")
+        output.tell(f"    What was read is not the device's factory record ({exc}); no backup kept.")
         return "unreadable"
     if found.lower() != mac.lower():
-        output.tell(f"    The data read names another plug ({found}); no backup kept.")
+        output.tell(f"    The data read names another device ({found}); no backup kept.")
         return "unreadable"
     try:
         stock, stock_version = images.stock_rbl(kind)
     except Abort as exc:
-        output.tell(f"    {exc}: the plug's data is kept, without Sonoff's firmware beside it.")
+        output.tell(f"    {exc}: the device's data is kept, without Sonoff's firmware beside it.")
         stock, stock_version = None, str(ctx.state.input("stock_version") or "")
     directory, saved = plugs.save_beken_backup(mac, region, stock, stock_version, kind=kind.name)
     if not saved:
         return "existing"
-    output.say(f"    Backed up the plug's own data ({len(region):,} bytes) and Sonoff's firmware to "
+    output.say(f"    Backed up the device's own data ({len(region):,} bytes) and Sonoff's firmware to "
                f"{directory.relative_to(plugs.CAPTURES.parent)}.")
     return "saved"
 
@@ -183,8 +183,8 @@ def step_esphome_check(ctx: Context, wait: float = ARRIVAL_WAIT) -> dict[str, An
             raise NotBack from exc
 
     until_back(look, "ESPHome", (
-        "ESPHome has not answered on your Wi-Fi. The plug installs it as it restarts, then reads its "
-        "Wi-Fi from the plug's own store and joins; if it has not, switch the plug off and on, then "
+        "ESPHome has not answered on your Wi-Fi. The device installs it as it restarts, then reads its "
+        "Wi-Fi from the device's own store and joins; if it has not, switch the device off and on, then "
         "run the same command again to check it"))
     seconds = round(time.monotonic() - started, 1)
     host = ctx.state.input("plug_ip")
@@ -205,7 +205,7 @@ def step_sonoff_check(ctx: Context, wait: float = CLOUD_WAIT) -> dict[str, Any]:
         started = time.monotonic()
         while time.monotonic() - started < wait:
             if host and detect.identify(host, timeout=3.0) in ("openbeken", "esphome"):
-                output.progress(f"the plug still runs the firmware it is leaving... {time.monotonic() - started:.0f}s")
+                output.progress(f"the device still runs the firmware it is leaving... {time.monotonic() - started:.0f}s")
             else:
                 devices = ctx.account_devices() if device_id else None
                 if devices is None and not device_id:
@@ -214,21 +214,21 @@ def step_sonoff_check(ctx: Context, wait: float = CLOUD_WAIT) -> dict[str, Any]:
                     if device.get("deviceid") == device_id and device.get("online"):
                         output.progress_clear()
                         seconds = round(time.monotonic() - started, 1)
-                        output.say(f"    eWeLink shows the plug online again after {seconds}s.")
+                        output.say(f"    eWeLink shows the device online again after {seconds}s.")
                         return {"seconds": seconds, "confirmed_by": "eWeLink"}
-                output.progress(f"waiting for eWeLink to show the plug online... {time.monotonic() - started:.0f}s")
+                output.progress(f"waiting for eWeLink to show the device online... {time.monotonic() - started:.0f}s")
             time.sleep(10)
         output.progress_clear()
         if host and detect.identify(host, timeout=3.0) in ("openbeken", "esphome"):
-            raise Abort("the plug still answers as the firmware it was to leave: Sonoff's firmware was not "
+            raise Abort("the device still answers as the firmware it was to leave: Sonoff's firmware was not "
                         "installed. Run the same command again to send it again")
         if not device_id:
-            output.tell("    The plug no longer answers as OpenBeken or ESPHome. Its eWeLink device id is not "
+            output.tell("    The device no longer answers as OpenBeken or ESPHome. Its eWeLink device id is not "
                         "known here, so whether it is back in the app is for the app to show.")
             return {"seconds": round(time.monotonic() - started, 1), "confirmed_by": "nothing answering"}
         raise NotBack
 
     return until_back(look, "Sonoff's firmware", (
-        "eWeLink has not shown the plug online again. Sonoff's firmware rejoins the Wi-Fi the plug was "
-        "on and reports to eWeLink by itself; if the app still shows it offline, switch the plug off "
+        "eWeLink has not shown the device online again. Sonoff's firmware rejoins the Wi-Fi the device was "
+        "on and reports to eWeLink by itself; if the app still shows it offline, switch the device off "
         "and on, then run the same command again to check it"))

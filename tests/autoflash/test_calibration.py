@@ -136,7 +136,7 @@ class CalibrateTasmotaTests(unittest.TestCase):
     def test_a_tasmota_without_berry_is_not_touched(self):
         tasmota = FakeTasmota(berry=False)
         outcome = calibration.calibrate_tasmota(tasmota, sleep=lambda _: None)
-        self.assertEqual(outcome, {"skipped": "the plug's board could not be read"})
+        self.assertEqual(outcome, {"skipped": "the device's board could not be read"})
         self.assertFalse([text for text in tasmota.sent if not text.startswith("Br ")])
 
 

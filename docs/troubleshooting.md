@@ -20,7 +20,7 @@ before writing anything.
 
 ## Your computer
 
-**"the plug did not fetch the ... instructions from this computer"**
+**"the device did not fetch the ... instructions from this computer"**
 
 The plug could not reach your computer. The tool adds a firewall rule itself
 when it can see a firewall (ufw or firewalld on Linux, Windows Defender
@@ -129,7 +129,7 @@ include. Reports from other regions are very welcome.
 
 ## The plug can't be found
 
-**"Your plug did not answer on this network"**
+**"Your device did not answer on this network"**
 
 The tool lists each plug in your eWeLink account that it converts, with what
 it found:
@@ -151,7 +151,7 @@ it found:
   or guest Wi-Fi, a different router, or a VPN. The message names the network
   the plug is on.
 
-**"No Sonoff S60 in the eWeLink account ..."**
+**"No supported device in the eWeLink account ..."**
 
 The plug is in a different eWeLink account. The message lists what the
 account does have; choose *Use a different eWeLink account*.
@@ -243,9 +243,9 @@ ten, it did not write anything. Tasmota needs the file's size passed in the
 request, and silently commits nothing without it. The tool sends it; if you are
 uploading by hand, use the plug's own web page rather than a bare `curl`.
 
-**"the plug rejected the firmware"**
+**"the device refused the upload"**
 
-The message includes what the plug said. Usually it means the file is wrong -
+The message includes what the device said. Usually it means the file is wrong -
 check `sha256sum -c SHA256SUMS` passes in `artifacts/` and that you are uploading the file the
 tool named, not the `.factory.bin`.
 
@@ -255,7 +255,7 @@ The stages that check, stage and rewrite the plug's memory run on the plug
 itself, and report back to your computer. When one stops, the plug says why,
 and the tool shows it:
 
-**"... did not pass: the plug says: ..."**
+**"... did not pass: the device says: ..."**
 
 The plug's own reason. Two kinds:
 
@@ -269,12 +269,12 @@ The plug's own reason. Two kinds:
   below -75 dBm). These stages are safe to repeat, so the tool tries them
   again by itself, up to three times, before stopping.
 
-**"the plug stopped the ... without reaching this computer"** or **"the plug
+**"the device stopped the ... without reaching this computer"** or **"the device
 has sent nothing for 2 minutes"**
 
 The plug lost its connection to your computer, so its reason could not arrive.
 The tool then reads the plug's own console and shows the last lines, marked
-`The plug's console:`, and gives the plug's reason from there ("its console
+`The device's console:`, and gives the plug's reason from there ("its console
 says: ..."). Then as above.
 
 **How long it waits**
@@ -290,7 +290,7 @@ that has stopped is noticed within about 20 seconds; no stage is waited on for
 more than 5 minutes in all. Waiting for you - to join a network, say - has no
 time limit.
 
-**"The plug is not answering at all"**
+**"The device is not answering at all"**
 
 A plug can be left answering nothing - not even its web page - though it
 still answers ping: kept busy too long, or left waiting on your computer when
@@ -300,7 +300,7 @@ writes only the spare half of memory, the rewrite downloads what it needs
 before it writes anything, and installing the official startup firmware
 carries on where it stopped. Then run this again.
 
-**"The plug is on the network but not answering yet"**
+**"The device is on the network but not answering yet"**
 
 A stage stopped part way (Ctrl-C, say) keeps the plug busy until it gives up,
 for up to a minute - and while busy, the plug answers nothing else. Run again straight away and the tool waits for it, then
@@ -308,7 +308,7 @@ carries on.
 
 ## Slots and restarts
 
-**"the plug is still running from slot 0 after 2 uploads"**
+**"the device is still running from slot 0 after 2 uploads"**
 
 Each upload writes the *other* half of memory and restarts into it, so the slot
 alternates every time. The tool handles one swap-back automatically. If it

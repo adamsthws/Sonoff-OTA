@@ -59,7 +59,7 @@ class PlugLockTests(unittest.TestCase):
     def test_the_run_refused_is_told_plainly(self):
         from types import SimpleNamespace
         with mock.patch.object(plugs, "hold", side_effect=plugs.PlugBusy("run plugs/x, process 7")):
-            with self.assertRaisesRegex(errors.Abort, "another run is converting this plug"):
+            with self.assertRaisesRegex(errors.Abort, "another run is converting this device"):
                 runs.hold_plug(SimpleNamespace(), MAC)
 
     def test_busy_names_the_plugs_others_hold(self):
@@ -88,7 +88,7 @@ class PlugLockTests(unittest.TestCase):
         try:
             with mock.patch.object(output, "tell") as told:
                 self.assertTrue(cli.refused_for_another_run("run", self.ctx()))
-            self.assertIn("another run is converting this plug", told.call_args.args[0])
+            self.assertIn("another run is converting this device", told.call_args.args[0])
         finally:
             other.kill()
             other.wait()

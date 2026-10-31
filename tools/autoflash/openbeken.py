@@ -101,7 +101,7 @@ def read_flash(host: str, start: int, length: int, *, timeout: float = 30.0,
                 break
             time.sleep(FLASH_PAUSE * (attempt + 1))
         if len(data) != wanted:
-            raise OSError(f"short read of the plug's flash at 0x{address:x}: {len(data)} of {wanted} bytes")
+            raise OSError(f"short read of the device's flash at 0x{address:x}: {len(data)} of {wanted} bytes")
         out += data
         if progress:
             progress(len(out), length)

@@ -50,11 +50,11 @@ REQUEST_RE = re.compile(r'"(?:GET|POST) (?P<path>/\S*) HTTP')
 SECTOR = 4096
 # Lines from the server worth showing as they are; everything else is folded
 # into a progress line and kept, in full, in the phase's log file.
-SHOWN_RE = re.compile(r"RESULT:|PLUG SAYS|REFUS|TIMEOUT|ERROR|Traceback|Stopped", re.IGNORECASE)
+SHOWN_RE = re.compile(r"RESULT:|(PLUG|DEVICE) SAYS|REFUS|TIMEOUT|ERROR|Traceback|Stopped", re.IGNORECASE)
 # The plug's own console lines worth showing when a phase fails: its Berry
 # prints and errors, which say why when it could not tell this computer.
 PLUG_CONSOLE_RE = re.compile(r'AUTOFLASH |migration_refused|BRY:|"Br":"\[')
-PLUG_SAYS_RE = re.compile(r"THE PLUG SAYS: (?P<reason>.+)")
+PLUG_SAYS_RE = re.compile(r"THE (PLUG|DEVICE) SAYS: (?P<reason>.+)")
 # A Berry error as Tasmota logs a console command's result:
 #   RSL: RESULT = {"Br":"[migration_refused] POST /capture/staged/22 returned HTTP -1 ..."}
 BERRY_ERROR_RE = re.compile(r'"Br":"\[(?P<kind>[^\]]+)\] (?P<message>.*)"\}')
@@ -63,7 +63,7 @@ TIMEOUT_RE = re.compile(r"TIMEOUT: (?P<reason>.+)")
 
 # A server line worth the screen, not only the log (phase_log).
 PHASE_PROBLEM_RE = re.compile(
-    r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in|PLUG SAYS|plug's console|"
+    r"REFUS|TIMEOUT|ERROR|Traceback|Stopped|FAIL|full output is in|(PLUG|DEVICE) SAYS|(plug|device)'s console|"
     r"not answering at all|switch it off|and on \(at this stage",
     re.IGNORECASE,
 )
@@ -84,7 +84,7 @@ def failure_reason(captured: str) -> str | None:
     for line in reversed(captured.splitlines()):
         found = PLUG_SAYS_RE.search(line)
         if found:
-            return "the plug says: " + found.group("reason").strip()
+            return "the device says: " + found.group("reason").strip()
         found = TIMEOUT_RE.search(line)
         if found:
             return found.group("reason").strip()
@@ -120,7 +120,7 @@ class PhaseDisplay:
         if request:
             path = request.group("path")
             if path.startswith("/berry/"):
-                self._line("    The plug fetched its instructions.")
+                self._line("    The device fetched its instructions.")
             elif path.startswith("/chunk/"):
                 self.copied_chunks.add(path)
                 copied = len(self.copied_chunks)
@@ -129,9 +129,9 @@ class PhaseDisplay:
                 self._status(f"    Copying {what}: block {copied}{total}")
             elif path.startswith("/capture/") and self.phase == "preflight":
                 self.read += 1
-                self._status(f"    Reading the plug's memory layout: {self.read} blocks")
+                self._status(f"    Reading the device's memory layout: {self.read} blocks")
             elif path == "/target-table":
-                self._line("    The plug fetched the new memory layout.")
+                self._line("    The device fetched the new memory layout.")
             return
         if SHOWN_RE.search(line):
             self._line("    " + line.strip())
@@ -193,7 +193,7 @@ class PhaseRunner:
         process.terminate()
         reader.join(5.0)
         raise PlugNeverConnected(
-            f"the plug did not fetch the {phase} instructions from this computer "
+            f"the device did not fetch the {phase} instructions from this computer "
             f"within {FETCH_DEADLINE:.0f}s; nothing was written"
         )
 
@@ -359,7 +359,7 @@ class PhaseRunner:
             said = self._show_plug_console()
             self._advise_if_stuck()
             if said and not any(PLUG_SAYS_RE.search(line) for line in captured):
-                captured.append(f"THE PLUG SAYS: {said}")  # what failure_reason() reports
+                captured.append(f"THE DEVICE SAYS: {said}")  # what failure_reason() reports
             self.log(f"    The server's full output is in {log_path}")
         return code, "\n".join(captured)
 
@@ -377,7 +377,7 @@ class PhaseRunner:
             return
         # Said before this run decides whether to try the step again, so it
         # must hold either way: nothing here about running the tool again.
-        self.log("    The plug is not answering at all - it may be off the Wi-Fi, or stuck waiting")
+        self.log("    The device is not answering at all - it may be off the Wi-Fi, or stuck waiting")
         self.log("    for this computer. If its web page still does not answer in a few minutes,")
         self.log("    switch it off and on: at this stage that is safe.")
 
@@ -396,7 +396,7 @@ class PhaseRunner:
             return None
         relevant = [line for line in lines if PLUG_CONSOLE_RE.search(line)][-8:]
         for line in relevant:
-            self.log(f"    The plug's console: {line}")
+            self.log(f"    The device's console: {line}")
         error = BERRY_ERROR_RE.search(relevant[-1]) if relevant else None
         if error is None:
             return None
@@ -425,7 +425,7 @@ class PhaseRunner:
                     # start the phase twice. Seen in the fault suite: a Wi-Fi
                     # blip as it went, and the plug never started.
                     if attempt == START_TRIES:
-                        self.log(f"    Starting it on the plug: {exc}")
+                        self.log(f"    Starting it on the device: {exc}")
                         return
                     self._resending = True
                     try:
@@ -437,7 +437,7 @@ class PhaseRunner:
                 except (TimeoutError, ConnectionError, http.client.HTTPException):
                     return  # sent, its reply lost or still to come: the server's evidence decides
                 except Exception as exc:  # noqa: BLE001 - the server's evidence decides
-                    self.log(f"    Starting it on the plug: {exc}")
+                    self.log(f"    Starting it on the device: {exc}")
                     return
         threading.Thread(target=fire, daemon=True).start()
 
@@ -478,7 +478,7 @@ class PhaseRunner:
                 checked = now
                 if self._plug_answers() and process.poll() is None:
                     raise PhaseError(
-                        f"the plug stopped the {phase} without reaching this computer"
+                        f"the device stopped the {phase} without reaching this computer"
                     )
 
     def _drive(self, phase, process, captured, reader, confirm, exec_timeout,
@@ -503,7 +503,7 @@ class PhaseRunner:
                 raise PhaseError(f"{phase} server did not print an arm command")
 
             closure = CLOSURE_NAME[phase]
-            self.log("Sending the instructions to the plug. This writes nothing yet.")
+            self.log("Sending the instructions to the device. This writes nothing yet.")
             self.device.berry_fire(short_loader(url, assign_to=closure), timeout=60.0)
             self._require_fetch(process, captured, reader, phase)
 
@@ -511,10 +511,10 @@ class PhaseRunner:
                 raise PhaseError(f"{phase} was not confirmed; nothing was armed")
 
             name, token = arm
-            self.log("Telling the plug to start. Leave it powered and connected.")
+            self.log("Telling the device to start. Leave it powered and connected.")
             self._start(f'{name}("{token}")')
         else:
-            self.log("Sending the instructions to the plug and starting.")
+            self.log("Sending the instructions to the device and starting.")
             self._start(short_loader(url))
             self._require_fetch(process, captured, reader, phase)
 

@@ -87,7 +87,7 @@ def hold_plug(ctx: Context, mac: str) -> None:
         plugs.hold(mac, run_name(ctx.dir) if hasattr(ctx, "dir") else "")
     except plugs.PlugBusy as busy:
         raise Abort(
-            f"another run is converting this plug ({mac}) right now"
+            f"another run is converting this device ({mac}) right now"
             + (f" - {busy}" if str(busy) else "")
             + ". Let it finish, or stop it first, then run this again. Nothing was done"
         ) from None

@@ -131,6 +131,7 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     """
     hardware = hardware or {}
     kind = kinds.of_run(ctx.state)
+    espressif = kind.family == "espressif"
     product = str(ctx.state.input("product_model") or "")
     model = kind.product_of(product)
     captures = ctx.state.data.get("captures", {})
@@ -153,8 +154,8 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Firmware", routes.FIRMWARES[runs.run_firmware(ctx.state)]),
         ("Converted from", CONVERTED_FROM[runs.run_source(ctx.state)]),
         ("Tool version", __version__),
-        ("Plug model", model or "__"),
-        ("Plug type / region", kind.region(model) or "__"),
+        ("Device model", model or "__"),
+        ("Device type / region", kind.region(model) or "__"),
         ("Stock firmware", ctx.state.input("stock_version") or "__"),
         # How it went, never where it is or which plug: the path holds the MAC.
         # A run from a converted plug takes none: one is there or not.
@@ -166,11 +167,13 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         # By stage number.  Busy is how long a Berry stage kept the plug from
         # anything else: at 70-90s a real S60TPG stops answering for good.
         ("Stage times", stage_timings(ctx, "seconds")),
-        ("Plug busy", stage_timings(ctx, "plug_busy_seconds")),
+        # Only where the route has them: a Berry stage's busy time, the Wi-Fi
+        # typed or a setup network joined are an Espressif route's.
+        *([("Device busy", stage_timings(ctx, "plug_busy_seconds"))] if espressif else []),
         ("Retries", ", ".join(retried) or "none"),
-        ("Plug Wi-Fi signal", f"{signal} dBm" if isinstance(signal, int) else "not recorded"),
-        ("Typed the Wi-Fi", "yes" if ctx.state.input("wifi_typed") else "no"),
-        ("Joined setup network", "yes" if joined else "no"),
+        ("Device Wi-Fi signal", f"{signal} dBm" if isinstance(signal, int) else "not recorded"),
+        *([("Typed the Wi-Fi", "yes" if ctx.state.input("wifi_typed") else "no"),
+           ("Joined setup network", "yes" if joined else "no")] if espressif else []),
         *([("Name in ESPHome", kind.esphome_name)] if runs.run_firmware(ctx.state) == "esphome"
           else [("Name in Tasmota", kind.template_name(product))]
           if runs.run_firmware(ctx.state) == "tasmota" else []),
@@ -272,7 +275,7 @@ def check_hardware(ctx: Context) -> dict[str, str]:
         restored = switch(was_on)
         second = meter()
     except (DeviceError, OSError, ValueError) as exc:
-        output.say(f"    The plug did not answer the check: {exc}")
+        output.say(f"    The device did not answer the check: {exc}")
         return {key: "could not be checked" for key in ("Relay", "Power meter")}
     on, off = (second, first) if was_on else (first, second)
     result = describe_hardware(switched, restored, on, off)
@@ -287,7 +290,7 @@ def check_esphome_hardware(ctx: Context) -> dict[str, str]:
     output.say("Checking the relay and power meter...")
     was_on = esphome.relay(host)
     if was_on is None:
-        output.say("    The plug did not answer the check.")
+        output.say("    The device did not answer the check.")
         return {key: "could not be checked" for key in ("Relay", "Power meter")}
     switched = esphome.switch_relay(host, not was_on)
     time.sleep(METER_SETTLE)

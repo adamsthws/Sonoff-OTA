@@ -218,7 +218,7 @@ def require_imprinted(image: bytes) -> None:
         raise ImprintError(
             "this image still has its credential placeholders - it has not had "
             "a network name and password written into it, and installing it "
-            "would leave the plug unable to reach any network"
+            "would leave the device unable to reach any network"
         )
     for marker in (SSID_MARKER, PASSWORD_MARKER, *LEGACY_MARKERS):
         if marker in image:

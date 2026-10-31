@@ -19,7 +19,7 @@ def sonoff_backup(ctx: Context) -> bytes:
     mac = ctx.state.input("plug_mac")
     backup = plugs.find_backup(mac) if mac else None
     if backup is None:
-        raise Abort("there is no backup of this plug's Sonoff firmware on this computer")
+        raise Abort("there is no backup of this device's Sonoff firmware on this computer")
     try:
         return (backup.directory / "flash.bin").read_bytes()
     except OSError as exc:
@@ -53,7 +53,7 @@ def step_sonoff_check(ctx: Context, wait: float = 240.0) -> dict[str, Any]:
         raise Abort(
             "Sonoff's firmware was written and checked, but has not answered on your Wi-Fi. "
             "If the network dropped while it first started, it does not try again: switch "
-            "the plug off and on, then run the same command again to check it. It rejoins the "
+            "the device off and on, then run the same command again to check it. It rejoins the "
             "network it was on when the backup was taken; if that has changed, add it again "
             "in the eWeLink app"
         ) from exc

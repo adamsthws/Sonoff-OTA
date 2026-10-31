@@ -470,11 +470,11 @@ class ConciseTests(OutputTestCase):
     def test_quiet_sections_are_logged_only(self):
         def body():
             prompts.section("What the plug reported", ["Firmware now 1.2.0"], quiet=True)
-            prompts.section("Join the plug's setup network", ["Connect to it now."])
+            prompts.section("Join the device's setup network", ["Connect to it now."])
         screen, log = self.run_with(io.StringIO(), False, body)
         self.assertNotIn("What the plug reported", screen)
         self.assertIn("What the plug reported", log)
-        self.assertIn("Join the plug's setup network", screen)
+        self.assertIn("Join the device's setup network", screen)
 
     def test_the_warning_is_a_short_note(self):
         screen, _ = self.run_with(io.StringIO(), False,
@@ -614,7 +614,7 @@ class FallbackScreenTests(OutputTestCase):
                  mock.patch.object(prompts, "_read_secret", side_effect=lambda q, r: next(secrets)):
                 self.assertEqual(context.Context.wifi(Ctx()), ("Home-2G", "password-one"))
         screen, log = self.run_with(io.StringIO(), False, body)
-        self.assertIn("could not be read off the plug: it did not answer as Tasmota", screen)
+        self.assertIn("could not be read off the device: it did not answer as Tasmota", screen)
         self.assertIn("Your Wi-Fi details are needed", screen)
         self.assertIn("The two passwords did not match", screen)
         self.assertNotIn("password-one", log)
@@ -633,9 +633,9 @@ class FallbackScreenTests(OutputTestCase):
                  mock.patch.object(time, "sleep"):
                 join.configure_plug_wifi(ctx, "tasmota-5A3C1F-7340")
         screen, _ = self.run_with(io.StringIO(), False, body)
-        for words in ("Join the plug's setup network", "tasmota-5A3C1F-7340", "(open - no password)",
+        for words in ("Join the device's setup network", "tasmota-5A3C1F-7340", "(open - no password)",
                       "stay on its network for about 20 seconds",
-                      "The plug connected to 'Home-2G' and is restarting onto it",
+                      "The device connected to 'Home-2G' and is restarting onto it",
                       "Back to your usual Wi-Fi"):
             self.assertIn(words, screen)
 
@@ -697,7 +697,7 @@ class FallbackScreenTests(OutputTestCase):
         sent, screen = self.send([("rejected", None)], unattended=True)
         self.assertEqual(sent, ["Home-2G"])
         self.assertFalse(self.asked)
-        self.assertIn("Set the Wi-Fi up on the plug's page instead", screen)
+        self.assertIn("Set the Wi-Fi up on the device's page instead", screen)
 
 class FailureReasonTests(OutputTestCase):
     """When something fails, the reason reaches the screen, not only the log."""
@@ -720,7 +720,7 @@ class FailureReasonTests(OutputTestCase):
     def test_a_phase_refusal_is_shown_and_its_progress_is_not(self):
 
         def body():
-            phases.phase_log("    The plug fetched its instructions.")
+            phases.phase_log("    The device fetched its instructions.")
             phases.phase_log("    REFUSED: preflight evidence has the wrong source table")
             phases.phase_log("    The server's full output is in captures/run/preflight-server.log")
         screen, log = self.run_with(io.StringIO(), False, body)
@@ -763,8 +763,8 @@ class ReportTests(OutputTestCase):
     def test_the_report_is_filled_in_from_the_run(self):
         fields = dict(report.report_fields(self.ctx(), 441, False))
         self.assertEqual(fields["Result"], "Converted")
-        self.assertEqual(fields["Plug model"], "S60TPG")
-        self.assertEqual(fields["Plug type / region"], "UK (Type G)")
+        self.assertEqual(fields["Device model"], "S60TPG")
+        self.assertEqual(fields["Device type / region"], "UK (Type G)")
         self.assertEqual(fields["Stock firmware"], "1.2.0")
         self.assertNotIn("Python", fields["Computer"])
         self.assertRegex(fields["Python"], r"^3\.\d+\.\d+ \(")
@@ -772,6 +772,16 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Typed the Wi-Fi"], "No")
         self.assertEqual(fields["Joined setup network"], "No")
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60TPG")
+
+    def test_a_report_gives_only_what_its_route_has(self):
+        # Busy time, the Wi-Fi typed and a setup network joined are an Espressif route's.
+        espressif_only = ("Device busy", "Typed the Wi-Fi", "Joined setup network")
+        fields = dict(report.report_fields(self.ctx(), 441, False))
+        self.assertTrue(all(label in fields for label in espressif_only))
+        s61 = self.ctx(plug_kind="sonoff-s61", product_model="S61STPF", firmware="openbeken", source="sonoff")
+        fields = dict(report.report_fields(s61, 441, False))
+        self.assertFalse(any(label in fields for label in espressif_only))
+        self.assertEqual(fields["Device model"], "S61STPF")
 
     def test_the_report_has_each_stages_time_and_how_long_the_plug_was_busy(self):
         ctx = self.ctx()
@@ -782,26 +792,26 @@ class ReportTests(OutputTestCase):
         fields = dict(report.report_fields(ctx, 441, False))
         number = {step: n for n, (step, _, _) in enumerate(routes.STEPS, 1)}
         self.assertEqual(fields["Stage times"], f"{number['E2']}=36s, {number['G1']}=43s")
-        self.assertEqual(fields["Plug busy"], f"{number['E2']}=34s, {number['G1']}=1m01s")
+        self.assertEqual(fields["Device busy"], f"{number['E2']}=34s, {number['G1']}=1m01s")
         self.assertEqual(fields["Retries"], f"{number['E2']} (1 retry)")
-        self.assertEqual(fields["Plug Wi-Fi signal"], "-61 dBm")
+        self.assertEqual(fields["Device Wi-Fi signal"], "-61 dBm")
 
     def test_on_the_way_to_esphome_the_signal_is_from_its_install(self):
         ctx = self.ctx(firmware="esphome")
         ctx.state.capture("I1.signal_dbm", -58)
-        self.assertEqual(dict(report.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-58 dBm")
+        self.assertEqual(dict(report.report_fields(ctx, 441, False))["Device Wi-Fi signal"], "-58 dBm")
 
     def test_from_tasmota_to_esphome_the_signal_is_from_leaving_tasmota(self):
         ctx = self.ctx(firmware="esphome", source="tasmota")
         ctx.state.capture("L1.signal_dbm", -63)
-        self.assertEqual(dict(report.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-63 dBm")
+        self.assertEqual(dict(report.report_fields(ctx, 441, False))["Device Wi-Fi signal"], "-63 dBm")
 
     def test_with_several_readings_the_report_gives_the_lowest(self):
         ctx = self.ctx()
         for key, value in {"A2.signal_dbm": -48, "D4.signal_dbm": -71, "E1.signal_dbm": -55,
                            "I1.signal_dbm": None}.items():
             ctx.state.capture(key, value)
-        self.assertEqual(dict(report.report_fields(ctx, 441, False))["Plug Wi-Fi signal"], "-71 dBm")
+        self.assertEqual(dict(report.report_fields(ctx, 441, False))["Device Wi-Fi signal"], "-71 dBm")
 
     def test_a_run_from_before_the_timings_says_so(self):
         fields = dict(report.report_fields(self.ctx(), 441, False))
@@ -934,7 +944,7 @@ class ReportTests(OutputTestCase):
                                         "Power meter": "on: 239 V, 0 W; off: 0 V, 0 W"}))
         self.assertEqual(fields["Relay"], "Switches (meter confirms)")
         self.assertEqual(fields["Power meter"], "On: 239 V, 0 W; off: 0 V, 0 W")
-        self.assertEqual(fields["Plug model"], "S60TPG")
+        self.assertEqual(fields["Device model"], "S60TPG")
 
     def test_the_plug_page_is_the_plug_or_the_emulators_forward(self):
         with mock.patch.dict(os.environ, {}, clear=False):
@@ -953,7 +963,7 @@ class ReportTests(OutputTestCase):
         ctx = self.ctx(product_model="", wifi_typed=True)
         ctx.state.capture("F4.wifi_route", "setup network")
         fields = dict(report.report_fields(ctx, 60, True))
-        self.assertEqual(fields["Plug model"], "__")
+        self.assertEqual(fields["Device model"], "__")
         self.assertEqual(fields["Typed the Wi-Fi"], "Yes")
         self.assertEqual(fields["Joined setup network"], "Yes")
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60")
@@ -973,11 +983,11 @@ class ReportTests(OutputTestCase):
         self.assertIn("already on your clipboard", screen)
         self.assertIn(f"Test reports: {report.REPORTS_URL}", screen)
         self.assertIn("Throw your friendly neighbourhood dev a biscuit:", screen)
-        self.assertGreater(screen.index(report.DONATE_URL), screen.index("Plug model"))  # after the report
+        self.assertGreater(screen.index(report.DONATE_URL), screen.index("Device model"))  # after the report
         self.assertGreater(screen.index(f"PayPal: {report.DONATE_URL}"), screen.index(f"Ko-fi: {report.KOFI_URL}"))
         self.assertNotIn("**", screen)                       # the terminal shows no Markdown
-        self.assertRegex(screen, r"Plug model: +S60TPG")
-        self.assertIn("**Plug model:** S60TPG", copied[0])   # the thread gets bold labels
+        self.assertRegex(screen, r"Device model: +S60TPG")
+        self.assertIn("**Device model:** S60TPG", copied[0])   # the thread gets bold labels
         self.assertIn("**Relay:** Switches (meter confirms)", copied[0])
 
 

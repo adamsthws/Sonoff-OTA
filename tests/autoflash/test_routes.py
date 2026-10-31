@@ -83,6 +83,21 @@ class FamilyTests(unittest.TestCase):
                       for firmware in family.FIRMWARES if firmware != "sonoff")
         self.assertEqual(layouts[0][1], longest)
 
+    def test_before_you_start_lists_what_is_needed_for_any_device(self):
+        for source, needed in (("sonoff", "- LAN Control turned on in the device's settings in the app."),
+                               ("tasmota", "- Your device connected to Wi-Fi, as it is now.")):
+            shown = []
+            ctx = SimpleNamespace(state=self.state(source=source))
+            with mock.patch.object(routes.prompts, "section", side_effect=lambda title, body: shown.append((title, body))), \
+                    mock.patch.object(routes.prompts, "wait_for_key"), \
+                    mock.patch.object(routes.output, "transient_begin"), mock.patch.object(routes.output, "transient_end"):
+                routes.step_prerequisites(ctx)
+            title, body = shown[0]
+            self.assertEqual(title, "Before you start, you'll need:")
+            self.assertIn(needed, body)
+            self.assertEqual(body[-1], "- This computer on the same network.")
+            self.assertFalse(any("plug" in line for line in body))
+
     def test_every_family_gives_the_runner_the_same_names(self):
         for name, family in routes.FAMILIES.items():
             with self.subTest(family=name):

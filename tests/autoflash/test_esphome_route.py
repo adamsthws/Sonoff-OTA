@@ -129,7 +129,7 @@ class RouteTests(RouteTestCase):
 
     def test_an_install_cut_short_by_the_network_is_tried_again(self):
         self.assertIn("I1", espressif.RETRY_STEPS)
-        said = ("esphome did not pass: the plug says: migration_refused: "
+        said = ("esphome did not pass: the device says: migration_refused: "
                 "POST /capture/written/21 returned HTTP -11 after 6 attempts")
         self.assertRegex(said, errors.TRANSIENT_RE)
 

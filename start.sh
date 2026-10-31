@@ -156,7 +156,7 @@ offer_removal() {
     [ -f "$MARKER" ] || return 0
     echo
     echo " $(cat "$MARKER") was installed for this tool. Remove it now, to leave nothing"
-    echo " behind? If you will run the tool again - for another plug, or to finish this"
+    echo " behind? If you will run the tool again - for another device, or to finish this"
     echo " one - keep it: the next run then starts straight away."
     printf ' Remove Python now? [y/N] '
     read -r answer || answer=""

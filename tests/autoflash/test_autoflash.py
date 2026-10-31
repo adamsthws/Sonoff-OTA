@@ -273,7 +273,7 @@ class ConfirmSkipTests(unittest.TestCase):
         skipped, asked, said = self.skip(lambda ctx: (True, ""))
         self.assertTrue(skipped)
         asked.assert_not_called()
-        self.assertIn("the plug still agrees", said)
+        self.assertIn("the device still agrees", said)
 
     def test_a_check_that_cannot_run_leaves_the_record_standing(self):
         for error in (device.DeviceError("refused"), OSError("unreachable"), ValueError("bad reply")):
@@ -834,8 +834,7 @@ class ModelGuardTests(unittest.TestCase):
         self.assertEqual(self.state.input("plug_kind"), "sonoff-s60")  # kept for the run
 
     def test_any_other_model_is_refused_before_anything_is_sent(self):
-        with self.assertRaisesRegex(errors.Abort, "which this tool does not convert - it converts "
-                                                     "the Sonoff S60: SN-ESP32C3-S60-01"):
+        with self.assertRaisesRegex(errors.Abort, "SN-ESP32-MINIR4, which this tool does not convert yet"):
             self.discover_with_model("SN-ESP32-MINIR4")
 
 
@@ -964,7 +963,7 @@ class PhaseFailureTests(unittest.TestCase):
         from tools.autoflash.phases import failure_reason
         captured = "STAGE RESULT: FAIL\nTHE PLUG SAYS: migration_refused: GET /chunk/safeboot/2 returned HTTP -1\n"
         self.assertEqual(failure_reason(captured),
-                         "the plug says: migration_refused: GET /chunk/safeboot/2 returned HTTP -1")
+                         "the device says: migration_refused: GET /chunk/safeboot/2 returned HTTP -1")
 
     def test_a_timeout_is_given(self):
         from tools.autoflash.phases import failure_reason
@@ -977,7 +976,10 @@ class PhaseFailureTests(unittest.TestCase):
 
     def test_the_step_abort_carries_the_reason(self):
         error = phases.phase_failed("stage", 4, "THE PLUG SAYS: flash is not exactly 4 MiB")
-        self.assertEqual(str(error), "stage did not pass: the plug says: flash is not exactly 4 MiB")
+        self.assertEqual(str(error), "stage did not pass: the device says: flash is not exactly 4 MiB")
+        # The server's own marker now, and the old one a log of an earlier version holds.
+        error = phases.phase_failed("stage", 4, "THE DEVICE SAYS: flash is not exactly 4 MiB")
+        self.assertEqual(str(error), "stage did not pass: the device says: flash is not exactly 4 MiB")
         self.assertEqual(str(phases.phase_failed("stage", 3, "")), "stage did not pass (exit 3)")
 
     def console(self, lines):
@@ -1000,7 +1002,7 @@ class PhaseFailureTests(unittest.TestCase):
         ])
         self.assertEqual(said, "POST /capture/staged/22 returned HTTP -1 after 21 attempts")
         self.assertEqual(len(shown), 2)
-        self.assertTrue(all(line.startswith("    The plug's console: ") for line in shown))
+        self.assertTrue(all(line.startswith("    The device's console: ") for line in shown))
 
     def test_another_berry_error_keeps_its_kind(self):
         said, _ = self.console(['RSL: RESULT = {"Br":"[index_error] list index out of range"}'])
@@ -1152,13 +1154,13 @@ class RetryTests(unittest.TestCase):
         return code, ran.call_count
 
     def test_a_network_failure_is_tried_again(self):
-        code, runs = self.run_with("E2", ["stage did not pass: the plug says: POST /capture/staged/22 "
+        code, runs = self.run_with("E2", ["stage did not pass: the device says: POST /capture/staged/22 "
                                           "returned HTTP -1 after 21 attempts", None])
         self.assertEqual((code, runs), (0, 2))
 
     def test_a_wifi_drop_is_tried_again(self):
         # The plug now gives up after 20s, and this computer waits out the rest.
-        code, runs = self.run_with("E2", ["stage did not pass: the plug says: migration_refused: "
+        code, runs = self.run_with("E2", ["stage did not pass: the device says: migration_refused: "
                                           "the plug's Wi-Fi went down and was not back within "
                                           "20 seconds", None])
         self.assertEqual((code, runs), (0, 2))
@@ -1168,7 +1170,7 @@ class RetryTests(unittest.TestCase):
         self.assertEqual((code, runs), (1, 3))
 
     def test_a_refusal_is_not_tried_again(self):
-        code, runs = self.run_with("E2", ["stage did not pass: the plug says: "
+        code, runs = self.run_with("E2", ["stage did not pass: the device says: "
                                           "migration_refused: NVS changed since preflight"])
         self.assertEqual((code, runs), (1, 1))
 
@@ -1413,7 +1415,7 @@ class UnexpectedErrorTests(unittest.TestCase):
             self.assertEqual(state.status("H1"), FAILED)
             self.assertIn("Traceback", logged.call_args.args[0])
             message = told.call_args.args[0]
-            self.assertIn("the connection to the plug was lost", message)
+            self.assertIn("the connection to the device was lost", message)
             self.assertNotIn("unexpected", message)
             self.assertRegex(message, errors.TRANSIENT_RE)
 
@@ -1639,10 +1641,10 @@ class CommitEvidenceTests(unittest.TestCase):
 
     def test_a_read_back_that_differed_is_tried_again_and_so_is_a_refusal_as_changed(self):
         result, tries, _, _ = self.commit_tries([
-            tasmota.CommitFailed("commit did not pass: the plug says: migration_refused: "
+            tasmota.CommitFailed("commit did not pass: the device says: migration_refused: "
                                    "canonical Safeboot read-back differs at 0x31000",
                                    "AUTOFLASH ROLLBACK PASS: interim layout kept"),
-            tasmota.CommitFailed("commit refused before writing anything - the plug says: "
+            tasmota.CommitFailed("commit refused before writing anything - the device says: "
                                    "migration_refused: staged Safeboot SHA-256 differs", ""),
             {"exit": 0}])
         self.assertEqual((result, tries), ({"exit": 0}, 3))
@@ -1661,10 +1663,10 @@ class CommitEvidenceTests(unittest.TestCase):
 
     def test_a_rollback_that_failed_or_another_refusal_is_never_tried_again(self):
         for failure in (
-                tasmota.CommitFailed("commit did not pass: the plug says: migration_refused: "
+                tasmota.CommitFailed("commit did not pass: the device says: migration_refused: "
                                        "canonical Safeboot read-back differs at 0x31000",
                                        "AUTOFLASH ROLLBACK FAILED; DO NOT REBOOT OR REMOVE POWER"),
-                tasmota.CommitFailed("commit did not pass: the plug says: migration_refused: "
+                tasmota.CommitFailed("commit did not pass: the device says: migration_refused: "
                                        "commit requires old ota_1 to be running", "")):
             result, tries, recoveries, _ = self.commit_tries([failure, {"exit": 0}])
             self.assertIs(result, failure)
@@ -1980,7 +1982,7 @@ sys.exit({code})
         (code, said), _ = self.run_phase("stage", [self.loader(), self.FETCH], code=3, recovery=b"image")
         self.assertEqual(code, 3)
         self.assertEqual((self.root / "stdin").read_text(encoding="utf-8"), "5")  # the recovery image, piped
-        self.assertTrue(said.endswith("THE PLUG SAYS: the staged image did not verify"), said)
+        self.assertTrue(said.endswith("THE DEVICE SAYS: the staged image did not verify"), said)
         self.assertTrue(any("stage-server.log" in line for line in self.logged), self.logged)
 
 
@@ -2004,7 +2006,7 @@ class PhaseDisplayTests(unittest.TestCase):
         lines += ['  [10.0.0.5] "POST /report/stage HTTP/1.1" 200 -', "", "STAGE RESULT: PASS",
                   "Evidence: /tmp/x/stage-report.json"]
         written, logged = self.run_lines("stage", 198, lines)
-        self.assertEqual(logged, ["    The plug fetched its instructions.", "    STAGE RESULT: PASS"])
+        self.assertEqual(logged, ["    The device fetched its instructions.", "    STAGE RESULT: PASS"])
         self.assertIn("block 198/198", written)
         self.assertNotIn("\n", written.rstrip("\n"), "progress stays on one line")
 
@@ -2066,7 +2068,7 @@ class RunChoiceTests(unittest.TestCase):
         name, menu = self.choose(0)
         self.assertEqual(name, "half")
         options = menu.call_args.args[1]
-        self.assertIn("stopped at step C3", options[0])
+        self.assertIn("stopped at stage 7, Backing up Sonoff firmware", options[0])
         self.assertIn("past the point of no return", options[0])
 
     def test_starting_a_new_plug_leaves_the_unfinished_run_alone(self):
@@ -2086,8 +2088,8 @@ class RunChoiceTests(unittest.TestCase):
         with mock.patch.object(output, "say") as say:
             cli.log_run_choice()
         logged = "\n".join(call.args[0] for call in say.call_args_list)
-        self.assertIn("a new plug", logged)
-        self.assertIn("stopped at step C3", logged)
+        self.assertIn("a new conversion", logged)
+        self.assertIn("stopped at stage 7, Backing up Sonoff firmware", logged)
         self.assertIn("past the point of no return", logged)
         self.assertEqual(cli.RUN_CHOICE, [])
 
@@ -2618,20 +2620,20 @@ class BackOnSonoffTests(unittest.TestCase):
         import tools.espressif.serve_tasmota_ota as sender
         refused = "ERROR: Device reports 1.3.0, expected 1.2.0; refusing"
         advice = self.advice([refused, sender.NOT_SENT], reported=[refused, sender.NOT_SENT])
-        self.assertEqual(advice, "Nothing was sent to the plug, so it keeps its Sonoff firmware.")
+        self.assertEqual(advice, "Nothing was sent to the device, so it keeps its Sonoff firmware.")
 
     def test_a_command_sent_and_never_fetched_is_the_firewall(self):
         self.assertEqual(self.advice(["Upgrade command sent with owner-controlled private-LAN URLs."]), "FIREWALL")
 
     def test_offline_and_cut_off_sends_keep_their_own_advice(self):
-        self.assertIn("eWeLink does not see the plug", self.advice(["Device is offline in eWeLink; refusing"]))
+        self.assertIn("eWeLink does not see the device", self.advice(["Device is offline in eWeLink; refusing"]))
         self.assertIn("stopped part way", self.advice(["Served /user1.bin"], started=True))
 
     def test_a_failed_send_is_followed_by_the_next_though_the_plug_is_quiet(self):
         # Seen in the fault suite: a send refused (the plug offline in eWeLink),
         # then the plug not answering here for a moment - and the run asked the
         # person to join an installer network that was never raised.
-        failed = errors.Abort("eWeLink does not see the plug")
+        failed = errors.Abort("eWeLink does not see the device")
         address, sent, waited, _ = self.reach(["sonoff"] + [None] * 10, sends=(failed, None),
                                               found=(None, "192.168.1.51"))
         self.assertEqual((address, sent, waited), ("192.168.1.51", 2, 0))
@@ -2749,7 +2751,7 @@ class TasmotaBackTests(unittest.TestCase):
         self.assertFalse(installed)
 
     def test_back_but_not_a_plug_this_tool_converts(self):
-        with self.assertRaisesRegex(errors.Abort, "not set up as a plug this tool converts"):
+        with self.assertRaisesRegex(errors.Abort, "not set up as a device this tool converts"):
             self.back(found=None)
 
     def test_back_but_its_settings_gone(self):
@@ -4821,7 +4823,7 @@ class MoverOwnNetworkTests(unittest.TestCase):
     def test_neither_says_to_switch_it_off_and_on(self):
         result, sent, _ = self.wait([False], network=None)
         self.assertIsInstance(result, errors.Abort)
-        self.assertIn("switch the plug off and on", str(result))
+        self.assertIn("switch the device off and on", str(result))
         self.assertIn("autoflash-recovery-CDEF", str(result))
 
     def test_the_details_go_to_esphomes_own_page(self):
@@ -5546,7 +5548,7 @@ class EsphomeUpdatePasswordTests(unittest.TestCase):
     def test_a_key_given_that_is_not_its_own_is_asked_for_or_gone_on_without(self):
         self.key, self.wanted = self.KEY, None
         with mock.patch.object(prompts, "UNATTENDED", True):
-            with self.assertRaisesRegex(errors.Abort, "not the one ESPHome on the plug has.*--esphome-api-key"):
+            with self.assertRaisesRegex(errors.Abort, "not the one ESPHome on the device has.*--esphome-api-key"):
                 unlock.unlock_esphome(self.ctx(key=bytes(32)))
         ctx = self.ctx(key=bytes(32))
         with mock.patch.object(prompts, "ask_choice", return_value=1) as menu:

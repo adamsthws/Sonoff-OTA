@@ -1,5 +1,5 @@
 name: A conversion went wrong
-description: A run that stopped, failed or left the plug in a state it should not be in.
+description: A run that stopped, failed or left the device in a state it should not be in.
 labels: [bug]
 body:
   - type: markdown
@@ -27,12 +27,24 @@ body:
     validations:
       required: true
   - type: dropdown
+    id: device
+    attributes:
+      label: The device
+      options:
+        - Sonoff S60
+        - Sonoff S61
+        - Something else (say above)
+    validations:
+      required: true
+  - type: dropdown
     id: firmware
     attributes:
       label: The firmware it was converting to
       options:
         - Tasmota
         - ESPHome
+        - OpenBeken
+        - Sonoff's own firmware (going back)
         - It had not asked yet
     validations:
       required: true
@@ -41,11 +53,11 @@ body:
     attributes:
       label: The run's log
       description: |
-        Drag `run.log` in here: the tool prints where it is, and its first line says the tool's version. It is safe to share - your account, network and plug are written in it as `<email>`, `<wifi-name>`, `<device-id>` and so on. **Its folder's name is your plug's MAC address**: attach the file, but do not paste its path.
+        Drag `run.log` in here: the tool prints where it is, and its first line says the tool's version. It is safe to share - your account, network and device are written in it as `<email>`, `<wifi-name>`, `<device-id>` and so on. **Its folder's name is your device's MAC address**: attach the file, but do not paste its path.
   - type: checkboxes
     id: private
     attributes:
       label: Nothing private
       options:
-        - label: I have not pasted my eWeLink login, my Wi-Fi's name or password, or my plug's MAC address here.
+        - label: I have not pasted my eWeLink login, my Wi-Fi's name or password, or my device's MAC address here.
           required: true

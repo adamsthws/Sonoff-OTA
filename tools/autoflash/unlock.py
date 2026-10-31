@@ -29,7 +29,7 @@ def identify(ctx: Context, host: str) -> str | None:
 def locked_out(ctx: Context, plug: detect.Found) -> str:
     """Why an unattended run stops at `plug`, locked: what to give."""
     if plug.firmware == "esphome-login":
-        return (f"ESPHome on the plug at {plug.host} has a web login"
+        return (f"ESPHome on the device at {plug.host} has a web login"
                 f"{', and the one given is not it' if ctx.esphome_login else ''}: {ESPHOME_LOGIN_HINT}")
     return str(NeedsPassword(plug.host, bool(ctx.web_password)))
 
@@ -80,7 +80,7 @@ def secret_or_retry(title: str, lines: list[str], secrets: list[Secret],
         if answer is False:
             output.transient_end()
             return secret, value
-        output.tell("    The plug did not answer; choose again to try once more." if answer is None
+        output.tell("    The device did not answer; choose again to try once more." if answer is None
              else f"    That is not its {secret.kind}." if secret else f"    {still}")
 
 
@@ -101,7 +101,7 @@ def ask_web_password(ctx: Context, host: str) -> None:
     if prompts.UNATTENDED:
         raise Abort(str(NeedsPassword(host, wrong)))
     ctx.web_password = password_or_retry("Tasmota's web password", [
-        f"Tasmota on the plug at {host} has a web password.",
+        f"Tasmota on the device at {host} has a web password.",
         *(["The one given (--web-password, or AUTOFLASH_TASMOTA_PASSWORD) is not it."] if wrong else []),
         "Type it to go on (Tasmota's one user name, admin, is filled in); or clear it",
         "in Tasmota yourself - Configuration > Other > Web Admin Password, emptied",
@@ -164,9 +164,9 @@ def ask_esphome_password(ctx: Context, host: str) -> None:
     if keyed:
         secrets.append(esphome_key_secret(lambda key: esphome_update_check(host, None, key)))
     secret, value = secret_or_retry("ESPHome's update password", [
-        f"ESPHome on the plug at {host} has an update password (set in Home",
+        f"ESPHome on the device at {host} has an update password (set in Home",
         "Assistant, say). The next firmware goes on as an ESPHome update, which needs",
-        "it. Type it to go on; or remove it from the plug's ESPHome YAML config (the",
+        "it. Type it to go on; or remove it from the device's ESPHome YAML config (the",
         "'password:' line under 'ota:'), re-flash, then try again without one.",
         *(["Its API encryption key does instead (key: under api: encryption: there):",
            "with it, the update goes encrypted."] if keyed else []),
@@ -194,7 +194,7 @@ def ask_esphome_key(ctx: Context, host: str, *, wifi: bool = False) -> bool:
                     f"{ESPHOME_KEY_HINT}; or remove that encryption: line, re-flash, then run this again")
     if wifi:
         secret, value = secret_or_retry("ESPHome's API encryption key", [
-            f"ESPHome on the plug at {host} gives its Wi-Fi details through its API (ours",
+            f"ESPHome on the device at {host} gives its Wi-Fi details through its API (ours",
             "does from 1.1.0), but its API is encrypted (api: encryption: in its ESPHome",
             "YAML config). Type its key - after key: there - and it gives them; or type",
             "the Wi-Fi details yourself instead.",
@@ -203,7 +203,7 @@ def ask_esphome_key(ctx: Context, host: str, *, wifi: bool = False) -> bool:
             lambda: False, still="", last="Type the Wi-Fi details instead")
     else:
         secret, value = secret_or_retry("ESPHome's encrypted updates", [
-            f"ESPHome on the plug at {host} takes only encrypted updates: the ota:",
+            f"ESPHome on the device at {host} takes only encrypted updates: the ota:",
             "section of its ESPHome YAML config has encryption:, which makes them with its",
             "API encryption key (after key: under api: encryption: there). Type that key",
             "to go on; or remove encryption: from under ota:, re-flash, then try again.",
@@ -247,7 +247,7 @@ def ask_esphome_login(ctx: Context, host: str) -> None:
         return None if found is None else found == "login"
 
     _, ctx.esphome_login = secret_or_retry("ESPHome's web login", [
-        f"ESPHome on the plug at {host} has a web login (auth: under web_server: in",
+        f"ESPHome on the device at {host} has a web login (auth: under web_server: in",
         "its ESPHome YAML config). Type its user name and password to go on; or remove",
         "auth: from there, re-flash, then try again without one.",
         *(["The one given (--esphome-web-user and --esphome-web-password, or as",
@@ -266,16 +266,16 @@ def check_esphome_key(ctx: Context, host: str) -> None:
         return
     access = esphome.api_access(host, ctx.esphome_key)
     if access == esphome.API_PLAIN:
-        output.say("    ESPHome's API on the plug is not encrypted: the API encryption key given is not needed.")
+        output.say("    ESPHome's API on the device is not encrypted: the API encryption key given is not needed.")
         ctx.esphome_key = None
     elif access == esphome.API_KEY:
         if prompts.UNATTENDED:
             raise Abort(f"{esphome_ota.WrongKey()}: {ESPHOME_KEY_HINT}")
         secret, value = secret_or_retry("ESPHome's API encryption key", [
             "The API encryption key given (--esphome-api-key, or AUTOFLASH_ESPHOME_API_KEY)",
-            f"is not the one ESPHome on the plug at {host} has: its YAML config has it, after",
+            f"is not the one ESPHome on the device at {host} has: its YAML config has it, after",
             "key: under api: encryption:. Type that one; or go on without it, when the",
-            "plug's Wi-Fi details and its update can be had another way.",
+            "device's Wi-Fi details and its update can be had another way.",
             "A key typed is held in memory for this run only, never written to disk.",
         ], [esphome_key_secret(lambda key: api_key_check(host, key))],
             lambda: False, still="", last="Go on without it")
@@ -307,14 +307,14 @@ def unlocked(ctx: Context, plug: detect.Found) -> detect.Found:
     if plug.firmware == "esphome-login":
         ask_esphome_login(ctx, plug.host)
         if identify(ctx, plug.host) != "esphome":
-            raise Abort(f"the ESPHome at {plug.host} did not answer as a plug this tool converts")
+            raise Abort(f"the ESPHome at {plug.host} did not answer as a device this tool converts")
         return detect.Found(plug.host, "esphome", plug.mac)
     ask_web_password(ctx, plug.host)
     running = identify(ctx, plug.host)
     if running in ("mover", "startup", "hub"):
         running = "midway"
     if running not in ("tasmota", "midway"):
-        raise Abort(f"the Tasmota at {plug.host} did not answer as a plug this tool converts")
+        raise Abort(f"the Tasmota at {plug.host} did not answer as a device this tool converts")
     return detect.Found(plug.host, running, plug.mac)
 
 

@@ -193,12 +193,12 @@ def describe_cloud(message: dict[str, Any], seq: str) -> str | None:
         error = message.get("error", 0)
         return "Cloud: upgrade command accepted" if error == 0 else f"Cloud: upgrade command rejected (error {error})"
     if action == "sysmsg" and "online" in params:
-        return ("Cloud: the plug is back online" if params["online"]
-                else "Cloud: the plug went offline - expected while it restarts to install")
+        return ("Cloud: the device is back online" if params["online"]
+                else "Cloud: the device went offline - expected while it restarts to install")
     shown = {key: value for key, value in params.items()
              if key not in CLOUD_PRIVATE_KEYS and isinstance(value, (str, int, float, bool))}
     if action == "update":
-        return f"Cloud: the plug reported {json.dumps(shown, sort_keys=True)}" if shown else None
+        return f"Cloud: the device reported {json.dumps(shown, sort_keys=True)}" if shown else None
     if action is None and message.get("error", 0) == 0:
         return None  # replies to the cloud's own keep-alives
     detail = f" {json.dumps(shown, sort_keys=True)}" if shown else ""
@@ -225,7 +225,7 @@ def until_online(device: dict, look_again, *, sleep=time.sleep, say=print) -> di
 # Said when a send failed before the upgrade command went out: the plug was
 # never asked to fetch the installer, so it never came - which the run must
 # not blame on this computer's firewall (tools.autoflash.routes.espressif.installer.bridge_failure_advice).
-NOT_SENT = "The upgrade command was not sent: nothing reached the plug."
+NOT_SENT = "The upgrade command was not sent: nothing reached the device."
 
 
 
@@ -276,8 +276,8 @@ def deliver(*, email: str, password: str, country_code: str, region: str, device
         if not device.get("online"):
             raise EwelinkError(
                 "Device is offline in eWeLink; refusing to send - the upgrade command "
-                "reaches the plug only through eWeLink. If it has internet access, "
-                "switch the plug off and on (after a send cut off part way it can "
+                "reaches the device only through eWeLink. If it has internet access, "
+                "switch the device off and on (after a send cut off part way it can "
                 "stay away from eWeLink until it restarts), then run this again"
             )
         dispatch = api_json(WS_DISPATCH[region], headers={"Authorization": "Bearer " + session["at"]})

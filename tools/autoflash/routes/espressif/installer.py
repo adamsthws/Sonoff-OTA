@@ -56,15 +56,15 @@ def bridge_failure_advice(ctx: Context, reported: list[str], started: bool) -> l
     """What to do about a send of the installer that failed, by how far it got."""
     if started:
         return [
-            "The plug started downloading it from this computer, but stopped part",
+            "The device started downloading it from this computer, but stopped part",
             "way - most likely its Wi-Fi dropped: a router restarting, or a weak",
             "signal. It keeps its Sonoff firmware, so nothing is lost; run this",
             "again once its Wi-Fi is steady.",
         ]
     if output.tool_said("offline in eWeLink"):
         return [
-            "eWeLink does not see the plug, so the installer cannot be sent. It",
-            "keeps its Sonoff firmware, so nothing is lost: switch the plug off",
+            "eWeLink does not see the device, so the installer cannot be sent. It",
+            "keeps its Sonoff firmware, so nothing is lost: switch the device off",
             "and on, wait for it to show online in the eWeLink app, and run this",
             "again.",
         ]
@@ -72,11 +72,11 @@ def bridge_failure_advice(ctx: Context, reported: list[str], started: bool) -> l
         # Seen against the real cloud: eWeLink's servers dropping connections,
         # and the run blamed this computer's firewall for a plug never asked.
         if any("refusing" in line.lower() for line in reported):
-            return ["Nothing was sent to the plug, so it keeps its Sonoff firmware."]
+            return ["Nothing was sent to the device, so it keeps its Sonoff firmware."]
         return [
-            "This computer's connection to eWeLink failed before the plug was told",
+            "This computer's connection to eWeLink failed before the device was told",
             "to fetch the installer - eWeLink's servers, or this computer's",
-            "internet, having trouble. Nothing was sent, so the plug keeps its",
+            "internet, having trouble. Nothing was sent, so the device keeps its",
             "Sonoff firmware: run this again in a few minutes.",
         ]
     return firewall.firewall_hint(ctx)
@@ -101,13 +101,13 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
         kept = "Its Sonoff firmware is backed up to this computer first, in full."
     output.transient_begin()
     prompts.warning_box("Before going on", [
-        "From here the plug's Sonoff firmware is replaced, so the eWeLink app",
+        "From here the device's Sonoff firmware is replaced, so the eWeLink app",
         "will no longer control it. DO NOT UNPLUG IT during the process.",
         kept,
-        "Only go ahead with a plug you can afford to lose",
+        "Only go ahead with a device you can afford to lose.",
     ])
     if not prompts.require_word(prompts.CONSENT_WORD):
-        raise NothingWritten("not confirmed - nothing has been written to the plug")
+        raise NothingWritten("not confirmed - nothing has been written to the device")
     output.transient_end()  # agreed: the note and the question have done their job
 
     started = time.monotonic()
@@ -224,7 +224,7 @@ def reach_bridge(ctx: Context, *, tasmota: bool = False) -> str:
         found = wait_for_bridge(ctx, bridge.split()[0], gone_back=gone_back, tasmota=tasmota)
         if found != BACK_ON_SONOFF:
             return found or setup_network.SETUP_HOST
-        output.tell("    While waiting, the plug went back to Sonoff's own firmware (switched off")
+        output.tell("    While waiting, the device went back to Sonoff's own firmware (switched off")
         output.tell("    and on, say).")
 
 
@@ -240,14 +240,14 @@ def resend_if_back_on_sonoff(ctx: Context) -> str | None:
         failed = False
         if not ctx.state.input("stock_version"):
             # A run started on the installer has none of eWeLink's details.
-            raise Abort("the plug is back on Sonoff's own firmware, so the installer has to "
+            raise Abort("the device is back on Sonoff's own firmware, so the installer has to "
                         "be sent again through eWeLink: run this again with --new")
         sends += 1
         ctx.bridge_sends = sends
-        output.tell("    The plug is running Sonoff's own firmware again: it goes back to it when")
+        output.tell("    The device is running Sonoff's own firmware again: it goes back to it when")
         output.tell("    switched off and on before the installer has done its work, so nothing")
         output.tell(f"    is lost. Sending the installer again (attempt {sends} of {BRIDGE_SENDS}).")
-        ctx.state.mark("C2", FAILED, error="redo: the plug went back to Sonoff's firmware")
+        ctx.state.mark("C2", FAILED, error="redo: the device went back to Sonoff's firmware")
         try:
             ctx.state.mark("C2", DONE, result=step_bridge(ctx))
         except Abort as exc:
@@ -275,10 +275,10 @@ def ask_to_join_bridge(bridge: str, *, tasmota: bool = False) -> None:
     else:
         joining = [f"    {bridge}      (open - no password)"]
     prompts.section("Join the bridge's Wi-Fi network", [
-        *(["The plug is running our small installer - or Tasmota, if the installer",
+        *(["The device is running our small installer - or Tasmota, if the installer",
            "had sent it before the run stopped: either has made its own Wi-Fi network,",
            f"by the same name. In {hostsys.wifi_menu_hint()}, join:"] if tasmota else
-          ["The plug is running our small installer, which has made its own Wi-Fi",
+          ["The device is running our small installer, which has made its own Wi-Fi",
            f"network. In {hostsys.wifi_menu_hint()}, join:"]),
         *joining,
         "",
@@ -302,7 +302,7 @@ def step_backup(ctx: Context) -> dict[str, Any]:
     Its stage is "skipped" when no backup could be taken, as the conversion
     does not need one."""
     if any(ctx.state.status(step) in (DONE, ATTEMPTED) for step in AFTER_BACKUP):
-        output.say("    The plug is past the installer already, so there is nothing to back up from.")
+        output.say("    The device is past the installer already, so there is nothing to back up from.")
         outcome = "not taken"
     else:
         skip = backup_not_needed(ctx)
@@ -318,7 +318,7 @@ def step_backup(ctx: Context) -> dict[str, Any]:
 def step_berry_tasmota(ctx: Context) -> dict[str, Any]:
     """D1/D2 - Berry-capable Tasmota through the bridge."""
     image = ROOT / "captures/safeboot-recovery-migration/tasmota32c3-bluetooth.bin"
-    output.say("Looking for the plug's Wi-Fi network...")
+    output.say("Looking for the device's Wi-Fi network...")
     bridge = prompts.find_ssid(names.bridge_networks(ctx))
     setup = None if bridge else prompts.find_ssid(names.setup_networks(ctx))
     if setup:
@@ -403,7 +403,7 @@ def backup_failed(problem: str) -> int:
     options = ["Try again", "Carry on without a backup"]
     output.transient_begin()
     prompts.section("The Sonoff firmware could not be backed up", [
-        f"Reading the plug's memory failed twice: {problem}.",
+        f"Reading the device's memory failed twice: {problem}.",
         "",
         "The conversion can be performed without a backup, though that's not recommended.",
     ])
@@ -412,8 +412,8 @@ def backup_failed(problem: str) -> int:
         choice = BACKUP_WITHOUT
     else:
         choice = prompts.ask_choice("What now", options, help_lines=[
-            "Quitting leaves the plug on the installer: run this again to carry on",
-            "from here, or switch the plug off and on to go back to Sonoff.",
+            "Quitting leaves the device on the installer: run this again to carry on",
+            "from here, or switch the device off and on to go back to Sonoff.",
         ])
     output.transient_end()
     return choice
@@ -431,7 +431,7 @@ def back_up_stock(ctx: Context, host: str) -> str:
         output.say(f"    {skip[1]}")
         return skip[0]
     known = ctx.state.input("plug_mac")
-    output.say("Backing up the plug's Sonoff firmware - about a minute...")
+    output.say("Backing up the device's Sonoff firmware - about a minute...")
     first = True
     while True:
         problem = ""
@@ -450,7 +450,7 @@ def back_up_stock(ctx: Context, host: str) -> str:
             except urllib.error.HTTPError as exc:
                 if exc.code == 404:
                     # A bridge from before 4.4.2, given with --bridge.
-                    output.say("    This installer cannot read the plug's memory, so no backup is kept.")
+                    output.say("    This installer cannot read the device's memory, so no backup is kept.")
                     return "unreadable"
                 problem = str(exc)
             except OSError as exc:  # a short transfer included
@@ -466,7 +466,7 @@ def back_up_stock(ctx: Context, host: str) -> str:
 
     mac = plugs.mac_from_efuse(efuse)
     if known and plugs.folder_name(known) != plugs.folder_name(mac):
-        output.say(f"    The network reported {known} for the plug; its chip says {mac}, which is used.")
+        output.say(f"    The network reported {known} for the device; its chip says {mac}, which is used.")
     if hasattr(ctx, "file_under_plug"):
         ctx.file_under_plug(mac)  # if A1 could not tell its MAC
     out, _ = plugs.save_backup(flash, efuse, report, ctx.state.input("stock_version"),
@@ -474,7 +474,7 @@ def back_up_stock(ctx: Context, host: str) -> str:
     ctx.state.set_input("stock_backup", runs.display_path(out))
     for line in dump_stock_flash.summary(report):
         output.say(f"    {line}")
-    output.say(f"    Saved in {runs.display_path(out)}, under the plug's MAC (private: it holds the")
+    output.say(f"    Saved in {runs.display_path(out)}, under the device's MAC (private: it holds the")
     output.say("    Wi-Fi password).")
     if not dump_stock_flash.is_good(report):
         output.tell("    It did not check out as a whole, bootable flash, so it may not restore;")
@@ -527,7 +527,7 @@ def _wait_for_bridge(ctx: Context, network: str, *, timeout: float | None = None
         elif not hinted and time.monotonic() - heard >= NOTHING_THERE_HINT_AFTER:
             hinted = True
             output.progress_clear()
-            output.tell("    Nothing is answering at the plug's address. If it is not on your Wi-Fi at all -")
+            output.tell("    Nothing is answering at the device's address. If it is not on your Wi-Fi at all -")
             output.tell("    after a Wi-Fi outage, Sonoff's firmware can stay off it - switch it off and on:")
             output.tell("    at this stage that is safe. This carries on by itself.")
         if gone_back is not None and time.monotonic() - looked >= GONE_BACK_EVERY:
@@ -568,7 +568,7 @@ def quick_power_cycle_hint(ctx: Context) -> list[str]:
         "It was given the Wi-Fi details the installer had just joined with, so",
         "this is unusual. If a few more minutes pass and it still has not appeared:",
         "",
-        "  Switch the plug off and on 7 times in a row, leaving it on for only",
+        "  Switch the device off and on 7 times in a row, leaving it on for only",
         "  2-3 seconds each time, then leave it on.",
         "",
         "That makes Tasmota clear its settings and open its setup network",
@@ -651,8 +651,8 @@ def upload_tasmota(image: Path, host: str = setup_network.SETUP_HOST) -> None:
     try:
         setup_network.upload_to_bridge(image, host=host)
     except setup_network.SetupError as exc:
-        raise Abort(f"{exc}. The plug still has the installer; run this again") from exc
-    output.say(f"    Upload verified in {time.monotonic() - started:.0f}s; the plug is restarting into Tasmota.")
+        raise Abort(f"{exc}. The device still has the installer; run this again") from exc
+    output.say(f"    Upload verified in {time.monotonic() - started:.0f}s; the device is restarting into Tasmota.")
 
 
 def tasmota_or_its_network(ctx: Context, *, timeout: float,
@@ -693,7 +693,7 @@ def finish_tasmota_setup(ctx: Context, *, route: str, wait: float = 120.0) -> di
     network = found[1] if found else None
     if network and network.startswith(names.TASMOTA_AP_PREFIX):
         names.note_setup_network(ctx, network)
-        output.say(f"    This plug is {network} - the same name shows in your router.")
+        output.say(f"    This device is {network} - the same name shows in your router.")
     ip = join.configure_plug_wifi(ctx, network)
     named = network if network != names.our_setup_network(ctx) else ctx.state.input("device_name")
     return {"plug_ip": ip, "device_name": named, "upload_route": route}
@@ -725,7 +725,7 @@ def evidence_bridge_installed(ctx: "Context") -> tuple[bool | None, str]:
     bridge = prompts.find_ssid(names.bridge_networks(ctx))
     if bridge:
         return True, (
-            f"The plug is broadcasting a Wi-Fi network called '{bridge}'.\n"
+            f"The device is broadcasting a Wi-Fi network called '{bridge}'.\n"
             "  At this stage only the installer firmware does that, so this step did finish."
         )
     return None, (

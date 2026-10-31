@@ -51,7 +51,7 @@ if _STUB_API_BASE:
 # always something in between reading encrypted connections.
 INSPECTED = ("{what} certificate was not trusted - security software, or a work or "
              "school network, that inspects encrypted connections does this. Try another "
-             "network, or pause that software while you convert the plug")
+             "network, or pause that software while you convert the device")
 
 
 class EwelinkError(RuntimeError):
