@@ -1,5 +1,6 @@
 import contextlib
 import io
+import re
 import os
 import subprocess
 import sys
@@ -22,6 +23,9 @@ class OutputTestCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.log = Path(self.tmp.name) / "run.log"
         patcher = mock.patch.dict(os.environ, {"NO_COLOR": "1"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch("sys.stdin", io.StringIO())   # never the terminal running the tests
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -51,7 +55,7 @@ class ConciseTests(OutputTestCase):
     def test_piped_output_gets_one_line_per_change(self):
         screen, log = self.run_with(io.StringIO(), False, self.stages)
         self.assertIn("Stage 1 - Checking the files - Underway", screen)
-        self.assertIn("Stage 1 - Checking the files - Complete (0s)", screen)
+        self.assertIn("Stage 1 - Checking the files - Complete", screen)
         self.assertIn("Join the bridge's Wi-Fi network", screen)
         self.assertNotIn("bundle and pinned artifacts", screen)
         self.assertIn("bundle and pinned artifacts: OK", log)
@@ -73,7 +77,7 @@ class ConciseTests(OutputTestCase):
                 output.stage_begin(number, name)
                 output.stage_end("complete")
         screen, log = self.run_with(io.StringIO(), False, body)
-        done = [line for line in screen.splitlines() if line.endswith("Complete (0s)")]
+        done = [line for line in screen.splitlines() if line.endswith("Complete")]
         self.assertEqual(len(done), 2)
         self.assertEqual(done[0].index(" - Complete"), done[1].index(" - Complete"))
         self.assertEqual(done[0].index(" - Checking"), done[1].index(" - Installing"))
@@ -88,7 +92,7 @@ class ConciseTests(OutputTestCase):
                 output.stage_begin(number, name)
                 output.stage_end("complete")
         screen, log = self.run_with(io.StringIO(), False, body)
-        done = [line for line in screen.splitlines() if line.endswith("Complete (0s)")]
+        done = [line for line in screen.splitlines() if line.endswith("Complete")]
         self.assertTrue(done[0].startswith(" Stage  3 - Choosing the firmware "))
         self.assertTrue(done[1].startswith(" Stage  4 - Querying Sonoff firmware "))
         self.assertNotIn(" of ", screen + log)
@@ -98,7 +102,90 @@ class ConciseTests(OutputTestCase):
         output.set_stage_width(30, 17)   # the last run's
         screen, _ = self.run_with(io.StringIO(), False, lambda: (output.stage_begin(1, "Checking the files"),
                                                                  output.stage_end("complete")))
-        self.assertIn(" Stage 1 - Checking the files - Complete (0s)", screen)
+        self.assertIn(" Stage 1 - Checking the files - Complete", screen)
+
+    def test_an_underway_stage_shows_a_spinner_not_its_seconds(self):
+        frames = []
+
+        def body():
+            frames.append(output.spinner_frames())   # this terminal's
+            output.stage_begin(1, "Checking the files")
+            with mock.patch.object(output.time, "monotonic", return_value=output._s.stage_started + 75.0):
+                output.tick()
+                output.stage_end("complete")
+        screen, log = self.run_with(FakeTerminal(), False, body)
+        underway = [part for part in screen.split("\r") if "Underway" in part]
+        self.assertTrue(underway)
+        self.assertFalse(any(re.search(r"Underway \S*\d", part) for part in underway))
+        self.assertTrue(all(part.rstrip()[-1] in frames[0] for part in underway))
+        self.assertTrue(all(re.search(r"Underway \S \s*$", part) for part in underway))   # the cursor clear of it
+        self.assertIn("Stage 1 - Checking the files - complete (1m 15s)", log)
+
+    def test_only_the_stage_under_way_has_a_spinner(self):
+        # A message under an underway line leaves that line where it is: without its spinner.
+        def body():
+            output.stage_begin(1, "Checking the files")
+            output.tick()
+            output.show("Something to read")
+            output.stage_end("complete")
+        screen, _ = self.run_with(FakeTerminal(), False, body)
+        rows = [row.split("\r")[-1].rstrip() for row in screen.split("\n")]
+        self.assertIn(" Stage 1 - Checking the files - Underway", rows)
+        self.assertIn(" Stage 1 - Checking the files - Complete", rows)
+
+    @unittest.skipIf(output.IS_WINDOWS, "a POSIX terminal's echo")
+    def test_keys_pressed_while_nothing_asks_are_not_echoed(self):
+        # An Enter echoed under the spinner left the underway line, spinner
+        # and all, above the stage's Complete.
+        import termios
+        leader, follower = os.openpty()
+        self.addCleanup(os.close, leader)
+        keyboard = os.fdopen(follower, "r", encoding="utf-8")
+        self.addCleanup(keyboard.close)
+
+        def echoing():
+            return bool(termios.tcgetattr(follower)[3] & termios.ECHO)
+        seen = []
+
+        def body():
+            output.stage_begin(1, "Sending the new firmware")
+            seen.append(echoing())
+            output.before_input("What now")
+            seen.append(echoing())
+            output.answered("1")
+            seen.append(echoing())
+        with mock.patch("sys.stdin", keyboard):
+            self.run_with(FakeTerminal(), False, body)
+            self.assertEqual(seen, [False, True, False])
+            self.assertTrue(echoing())   # as it was, once the run is over
+
+    def test_the_cursor_shows_only_while_a_question_waits(self):
+        def body():
+            output.stage_begin(1, "Sending the new firmware")
+            output.before_input("What now")
+            output.answered("1")
+            output.stage_end("complete")
+        with mock.patch.dict(os.environ, {"NO_COLOR": ""}), mock.patch.object(output, "IS_WINDOWS", False):
+            screen, _ = self.run_with(FakeTerminal(), False, body)
+        hide, show = "\x1b[?25l", "\x1b[?25h"
+        self.assertEqual(re.findall(r"\x1b\[\?25[lh]", screen), [hide, show, hide, show])
+        self.assertLess(screen.index(hide), screen.index("Underway"))
+        self.assertTrue(screen.endswith(show))   # back once the run is over
+
+    def test_the_spinner_is_braille_where_the_terminal_can_show_it(self):
+        utf8 = mock.Mock(encoding="utf-8")
+        with mock.patch("sys.stdout", utf8), mock.patch.dict(os.environ, {"TERM": "xterm-256color"}), \
+                mock.patch.object(output, "IS_WINDOWS", False):
+            self.assertEqual(output.spinner_frames(), output.BRAILLE_FRAMES)
+            with mock.patch.dict(os.environ, {"TERM": "linux"}):
+                self.assertEqual(output.spinner_frames(), output.PLAIN_FRAMES)
+        with mock.patch("sys.stdout", mock.Mock(encoding="cp1252")):
+            self.assertEqual(output.spinner_frames(), output.PLAIN_FRAMES)
+        with mock.patch("sys.stdout", utf8), mock.patch.object(output, "IS_WINDOWS", True), \
+                mock.patch.dict(os.environ, {"WT_SESSION": ""}):
+            self.assertEqual(output.spinner_frames(), output.PLAIN_FRAMES)   # the classic console
+            os.environ["WT_SESSION"] = "1"
+            self.assertEqual(output.spinner_frames(), output.BRAILLE_FRAMES)
 
     def test_an_answered_question_is_taken_off_the_screen(self):
         def body():
@@ -313,7 +400,7 @@ class ConciseTests(OutputTestCase):
         screen, log = self.run_with(FakeTerminal(), False, body)
         self.assertIn(f"{output.BOLD}Underway{output.RESET}", screen)
         self.assertIn(f"{output.GREEN}Stage 1{output.RESET} - Checking the files - "
-                      f"{output.GREEN}Complete{output.RESET} (0s)", screen)
+                      f"{output.GREEN}Complete{output.RESET}", screen)
         self.assertIn("Stage 1 - Checking the files - complete (0s)", log)
 
     def test_a_stage_done_on_an_earlier_run_is_green_too(self):
@@ -358,7 +445,10 @@ class ConciseTests(OutputTestCase):
         self.assertTrue(any(line.startswith(" Stage 1 - Installing Tasmota - Complete") for line in lines))
 
     def test_progress_stays_off_the_concise_screen_and_the_log(self):
+        frames = []
+
         def body():
+            frames.append(output.spinner_frames())
             output.stage_begin(1, "Installing Tasmota")
             output.progress("looking for the installer on your network... 12s")
             output.progress_clear()
@@ -366,7 +456,7 @@ class ConciseTests(OutputTestCase):
         screen, log = self.run_with(FakeTerminal(), False, body)
         self.assertNotIn("looking for the installer", screen)
         self.assertNotIn("looking for the installer", log)
-        self.assertIn("Installing Tasmota - Underway 0s", screen)
+        self.assertIn(f"Installing Tasmota - Underway {frames[0][0]}", screen)
 
     def test_a_stage_begun_twice_keeps_one_line(self):
         def body():

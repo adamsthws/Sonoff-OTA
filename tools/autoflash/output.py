@@ -4,8 +4,9 @@ Everything is written to the run's log file, with the time it happened.  What
 the terminal shows depends on the mode:
 
 - concise (the default for a run): one line per stage, redrawn in place as it
-  goes from "underway" to "complete", plus anything the person running it has
-  to read or answer;
+  goes from "underway", a spinner turning beside it, to "complete" (the time
+  it took is the log's and the report's), plus anything the person running
+  it has to read or answer;
 - verbose: every message, as the tool has always printed them.
 
 Before a run starts, and for the commands that only report (status, list,
@@ -73,6 +74,8 @@ class _State:
     paused = False                    # waiting for the keyboard: draw nothing
     held = False                      # between questions that belong together: no clock
     ticker: threading.Thread | None = None
+    keys_shown: list | None = None    # the terminal's settings while it echoes keys (_hide_keys)
+    cursor_hidden = False
     tool_tail: collections.deque = collections.deque(maxlen=40)  # the last helper's last lines
     stop_ticker = threading.Event()
 
@@ -158,6 +161,8 @@ def start(log_path: Path | None, *, verbose: bool) -> None:
             _s.stop_ticker.clear()
             _s.ticker = threading.Thread(target=_tick_forever, daemon=True)
             _s.ticker.start()
+        if _s.concise:
+            _hide_keys()
 
 
 def finish() -> None:
@@ -168,6 +173,7 @@ def finish() -> None:
         _s.ticker = None
     with _lock:
         _break()
+        _show_keys()
         if _s.log is not None:
             _write_log("=== run ended ===")
             _s.log.close()
@@ -335,6 +341,7 @@ def before_input(prompt: str = "") -> None:
     """Called just before reading the keyboard: the question must start on its own line."""
     with _lock:
         _break()
+        _show_keys()
         _gap("?")
         _s.paused = True
         if _s.waiting_since is None:
@@ -368,6 +375,8 @@ def after_input() -> None:
             _s.transient_rows += _rows(_s.pending_prompt + _s.pending_answer)
         _s.pending_prompt, _s.pending_answer = None, ""
         _s.paused = False
+        if _s.concise:
+            _hide_keys()
         if _s.waiting_since is not None:
             waited = time.monotonic() - _s.waiting_since
             _s.stage_waited += waited
@@ -534,16 +543,16 @@ def stage_end(outcome: str) -> None:
             return
         elapsed = _elapsed(_stage_seconds())
         timing = f" ({elapsed})" if outcome == "complete" else ""
-        line = f"{_s.stage} - {outcome}{timing}"
+        line = f"{_s.stage} - {outcome}{timing}"   # its time in the log and the report, not on screen
         _write_log(line)
         if _s.concise:
             colour = {"complete": GREEN, "already done": GREEN, "skipped": GREEN,
                       "stopped": RED}.get(outcome)
             word = outcome.capitalize()
-            plain = f"{_s.stage_screen} - {word}{timing}"
+            plain = f"{_s.stage_screen} - {word}"
             text = plain if not colour else (
                 styled(_s.stage_prefix, colour) + _s.stage_screen[len(_s.stage_prefix):]
-                + " - " + styled(word, colour) + timing)
+                + " - " + styled(word, colour))
             if _s.live and _s.live_is_stage:
                 # Replace the "underway" line in place.
                 first, _, rest = _fit(text).partition("\n")
@@ -598,7 +607,7 @@ def progress_keep() -> None:
 
 
 def tick() -> None:
-    """Redraw the stage line so its clock moves during a long wait."""
+    """Redraw the stage line so its spinner turns during a long wait."""
     with _lock:
         if _s.concise and _s.stage is not None and not _s.paused and not _s.held and sys.stdout.isatty():
             _draw_stage()
@@ -725,25 +734,47 @@ def waited() -> float:
 
 
 def _tick_forever() -> None:
-    while not _s.stop_ticker.wait(1.0):
+    while not _s.stop_ticker.wait(SPIN_EVERY):
         _tick()
 
 
 def _tick() -> None:
-    """The stage clock, a second on.  Not while a block is open to be taken
+    """The stage's spinner, a turn on.  Not while a block is open to be taken
     away again: drawn under its rows - while what it shows is still being
     worked out, say (Windows' security software takes PowerShell a few
-    seconds) - the clock's line would be a second stage line in the block."""
+    seconds) - the spinner's line would be a second stage line in the block."""
     with _lock:
         if (_s.concise and _s.stage is not None and not _s.paused and not _s.held
                 and _s.transient_rows is None):
             _draw_stage()
 
 
+# The stage line's spinner, a turn every SPIN_EVERY seconds: braille where the
+# terminal's font has it, else plain characters (spinner_frames).
+BRAILLE_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+PLAIN_FRAMES = "|/-\\"
+SPIN_EVERY = 0.1
+
+
+def spinner_frames() -> str:
+    """Braille, unless the terminal cannot show it: an encoding without it,
+    the Linux console's font, or Windows' classic console (Windows Terminal
+    has it)."""
+    try:
+        BRAILLE_FRAMES.encode(sys.stdout.encoding or "ascii")
+    except (UnicodeEncodeError, LookupError):
+        return PLAIN_FRAMES
+    if os.environ.get("TERM") == "linux" or (IS_WINDOWS and not os.environ.get("WT_SESSION")):
+        return PLAIN_FRAMES
+    return BRAILLE_FRAMES
+
+
 def _draw_stage() -> None:
-    clock = _elapsed(_stage_seconds())
-    line = f"{MARGIN}{_s.stage_screen} - Underway {clock}"
-    shown = f"{MARGIN}{_s.stage_screen} - {styled('Underway', BOLD)} {clock}"
+    frames = spinner_frames()
+    spinner = frames[int(_stage_seconds() / SPIN_EVERY) % len(frames)]
+    # A space after the spinner: the terminal's cursor sits clear of it.
+    line = f"{MARGIN}{_s.stage_screen} - Underway {spinner} "
+    shown = f"{MARGIN}{_s.stage_screen} - {styled('Underway', BOLD)} {spinner} "
     if _clip(line) != line:
         line = shown = _clip(line)
     if _s.live and not _s.live_is_stage:
@@ -751,6 +782,48 @@ def _draw_stage() -> None:
     sys.stdout.write("\r" + shown + " " * max(0, _s.live - len(line)))
     sys.stdout.flush()
     _s.live, _s.live_is_stage = len(line), True
+
+
+def _hide_keys() -> None:
+    """No cursor, and no echo of keys pressed, while nothing asks: an Enter
+    would move the stage line down a row, and the spinner left on the row
+    above would stay there.  What is typed is dropped before the next
+    question anyway (prompts.discard_typed_ahead).  The echo on POSIX
+    terminals only: Windows' console shows nothing typed until a read."""
+    if not _s.cursor_hidden and sys.stdout.isatty() and colour_ok():
+        sys.stdout.write("\x1b[?25l")
+        sys.stdout.flush()
+        _s.cursor_hidden = True
+    if IS_WINDOWS or _s.keys_shown is not None:
+        return
+    import termios
+    try:
+        fd = sys.stdin.fileno()
+        if not os.isatty(fd):
+            return
+        shown = termios.tcgetattr(fd)
+        hidden = list(shown)
+        hidden[3] &= ~termios.ECHO
+        termios.tcsetattr(fd, termios.TCSANOW, hidden)
+    except (OSError, ValueError, termios.error):
+        return  # no terminal to keep quiet
+    _s.keys_shown = shown
+
+
+def _show_keys() -> None:
+    """The cursor back, and the terminal echoing keys as _hide_keys() found it."""
+    if _s.cursor_hidden:
+        sys.stdout.write("\x1b[?25h")
+        sys.stdout.flush()
+        _s.cursor_hidden = False
+    shown, _s.keys_shown = _s.keys_shown, None
+    if shown is None:
+        return
+    import termios
+    try:
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, shown)
+    except (OSError, ValueError, termios.error):
+        pass  # the terminal has gone
 
 
 def _rows(text: str) -> int:
@@ -764,7 +837,13 @@ def _break() -> None:
     """Finish an unfinished line so the next output starts on a fresh one."""
     if _s.live:
         if _s.live_is_stage:
-            sys.stdout.write("\n")            # the underway line stays as it was
+            # The underway line stays, without its spinner: only the stage
+            # under way now has one, on the line drawn for it last.
+            line = f"{MARGIN}{_s.stage_screen} - Underway"
+            shown = f"{MARGIN}{_s.stage_screen} - {styled('Underway', BOLD)}"
+            if _clip(line) != line:
+                line = shown = _clip(line)
+            sys.stdout.write("\r" + shown + " " * max(0, _s.live - len(line)) + "\n")
             if _s.transient_rows is not None:
                 _s.transient_rows += 1
             _s.after_stage = True
