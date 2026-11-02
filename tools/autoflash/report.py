@@ -348,7 +348,8 @@ def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     check = {"esphome": check_esphome_hardware, "tasmota": check_hardware, "openbeken": check_hardware,
              "sonoff": check_ewelink_hardware}.get(
         runs.run_firmware(ctx.state), lambda ctx: {})
-    fields = report_fields(ctx, seconds, resumed, check(ctx))
+    with output.working("Generating your report..."):
+        fields = report_fields(ctx, seconds, resumed, check(ctx))
     offer_report(ctx, fields, "Please share how it went!")
     output.tell("")
     output.show("You've reached the bit where I hold out my hat!", output.GREEN)
@@ -382,7 +383,7 @@ def invite_stopped_report(ctx: Context, ending: str) -> None:
 def offer_report(ctx: Context, fields: list[tuple[str, str]], heading: str) -> None:
     ctx.reported = True
     copied = hostsys.copy_to_clipboard(report_markdown(fields))
-    output.tell("")
+    output.blank()
     output.show(heading, output.GREEN)
     if copied:
         output.tell("Paste your results into the thread (they're already on your clipboard):")

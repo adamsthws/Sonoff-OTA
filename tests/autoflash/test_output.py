@@ -1199,6 +1199,39 @@ def rendered(text):
     return rows
 
 
+class WorkingTests(OutputTestCase):
+    """A wait outside any stage shows what it is, with the stages' spinner,
+    and goes again once it is over."""
+
+    def test_the_report_being_put_together_is_shown_then_taken_away(self):
+        def body():
+            with mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((100, 40))):
+                output.show("Conversion complete!")
+                with output.working("Generating your report..."):
+                    output.say("Checking the relay through eWeLink...")   # logged only
+                    output._tick()
+                    seen.append(rendered(screen.getvalue()))
+                output.blank()
+                output.show("Please share how it went!")
+
+        seen = []
+        screen = FakeTerminal()
+        with mock.patch.object(output, "_tick_forever"):   # drawn here, not by the ticker
+            text, log = self.run_with(screen, False, body)
+        self.assertEqual(seen[0][-2:], ["", "Generating your report... |"])   # a spinner, a blank row above
+        self.assertEqual(rendered(text), ["Conversion complete!", "", "Please share how it went!"])
+        self.assertNotIn("Generating", log)
+
+    def test_nothing_is_drawn_where_the_screen_is_not_a_terminal(self):
+        def body():
+            with output.working("Generating your report..."):
+                pass
+            output.blank()
+            output.show("Please share how it went!")
+        text, _ = self.run_with(io.StringIO(), False, body)
+        self.assertEqual(text, "\n Please share how it went!\n")
+
+
 class StageGapTests(OutputTestCase):
     """Whatever is shown under a stage's line - a message, a question, a
     helper's output - has one blank line between it and the stage line."""

@@ -74,6 +74,8 @@ class _State:
     after_blank = False               # a blank line was the last on screen
     draws_notice = False              # a first Ctrl-C's notice is drawn under the stage line
     notice_rows = 0                   # rows of it on screen now
+    working: str | None = None        # a wait outside any stage, its spinner drawn (working())
+    working_started = 0.0
     paused = False                    # waiting for the keyboard: draw nothing
     held = False                      # between questions that belong together: no clock
     ticker: threading.Thread | None = None
@@ -523,6 +525,40 @@ def hold():
             _s.held = before
 
 
+@contextlib.contextmanager
+def working(text: str):
+    """A short wait outside any stage - the report being put together after
+    the last one - shown as `text` and the stages' spinner on a row of its
+    own, below a blank one, and taken away once it is over.  On a terminal
+    in concise mode only: elsewhere what the wait does is shown as it is."""
+    with _lock:
+        shown = _s.concise and _s.ticker is not None and _s.stage is None
+        if shown:
+            _break()
+            if not _s.after_blank:
+                _print("")
+            _s.working, _s.working_started = text, time.monotonic()
+            _draw_working()
+    try:
+        yield
+    finally:
+        with _lock:
+            if shown:
+                _s.working = None
+                if _s.live and not _s.live_is_stage:
+                    sys.stdout.write("\r" + " " * _s.live + "\r")
+                    sys.stdout.flush()
+                    _s.live = 0
+
+
+def blank() -> None:
+    """A blank row, unless the screen ends with one already (working()'s)."""
+    with _lock:
+        _write_log("")
+        if not _s.after_blank:
+            _print("")
+
+
 def set_stage_width(width: int, most: int = 0) -> None:
     """The longest stage name in the run, and the most stages it may have, so
     every stage line's name and status line up."""
@@ -794,6 +830,8 @@ def _tick() -> None:
         if (_s.concise and _s.stage is not None and not _s.paused and not _s.held
                 and _s.transient_rows is None):
             _draw_stage()
+        elif _s.working and not _s.paused and not _s.held and _s.transient_rows is None:
+            _draw_working()
 
 
 # The stage line's spinner, a turn every SPIN_EVERY seconds: braille where the
@@ -839,6 +877,15 @@ def _draw_stage() -> None:
     sys.stdout.flush()
     _s.live, _s.live_is_stage = len(line), True
     _s.notice_rows = len(rows)
+
+
+def _draw_working() -> None:
+    frames = spinner_frames()
+    spinner = frames[int((time.monotonic() - _s.working_started) / SPIN_EVERY) % len(frames)]
+    line = _clip(f"{MARGIN}{_s.working} {spinner} ")
+    sys.stdout.write("\r" + line + " " * max(0, _s.live - len(line)))
+    sys.stdout.flush()
+    _s.live, _s.live_is_stage = len(line), False
 
 
 def _clear_notice() -> str:

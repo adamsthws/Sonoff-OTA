@@ -91,6 +91,9 @@ check.
 - A run from a converted plug - back to Sonoff's firmware, say - reports
   the plug's model and its Sonoff firmware from what the tool kept of the
   plug at its first conversion, where it gave `__` for both.
+- While the report is put together after the last stage - the device's
+  checks take a few seconds - "Generating your report..." shows with the
+  stages' spinner, and goes when the report is shown.
 - A blank line stands between every question and the options or text above
   it.
 - A first Ctrl-C asks "! Are you sure?", under the stage line where it was
