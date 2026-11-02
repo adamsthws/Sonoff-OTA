@@ -15,6 +15,7 @@ from typing import Any, TYPE_CHECKING
 from tools.autoflash import __version__, esphome, hostsys, kinds, output, plugs, routes, runs
 from tools.autoflash.device import DeviceError
 from tools.autoflash.runs import ROOT
+from tools.ewelink import relay as ewelink_relay
 
 if TYPE_CHECKING:
     from tools.autoflash.context import Context
@@ -174,6 +175,9 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Device Wi-Fi signal", f"{signal} dBm" if isinstance(signal, int) else "not recorded"),
         *([("Typed the Wi-Fi", "yes" if ctx.state.input("wifi_typed") else "no"),
            ("Joined setup network", "yes" if joined else "no")] if espressif else []),
+        # Whether the device had to be switched off and on to start its new
+        # firmware: the emulated S61 never restarts by itself; a real one may.
+        *([("Power cycled", "true" if ctx.state.input("power_cycles") else "false")] if not espressif else []),
         *([("Name in ESPHome", kind.esphome_name)] if runs.run_firmware(ctx.state) == "esphome"
           else [("Name in Tasmota", kind.template_name(product))]
           if runs.run_firmware(ctx.state) == "tasmota" else []),
@@ -305,9 +309,29 @@ def check_esphome_hardware(ctx: Context) -> dict[str, str]:
     return result
 
 
+def check_ewelink_hardware(ctx: Context) -> dict[str, str]:
+    """check_hardware's two switches for a device back on Sonoff's firmware,
+    through eWeLink as the app switches it.  Its meter is not read: eWeLink
+    gives it only while the app asks for it, in units each model has its own."""
+    device_id = str(plugs.read_plug(ctx.state.input("plug_mac") or "").get("ewelink_id") or "")
+    if not device_id:
+        return {"Relay": "not checked", "Power meter": "not checked"}
+    output.say("Checking the relay through eWeLink...")
+    switched = ewelink_relay.check_relay(
+        email=ctx.email(), password=ctx.ewelink_env()["EWELINK_PASSWORD"], country_code="+44", region="eu",
+        device_id=device_id, say=output.say)
+    result = {"Relay": "could not be checked" if switched is None
+              else "switches (through eWeLink)" if all(switched) else "did not switch",
+              "Power meter": "not checked"}
+    output.say(f"    Relay: {answer(result['Relay'])}")
+    return result
+
+
 def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     """Ask for a report, with this run's details ready to paste."""
-    check = {"esphome": check_esphome_hardware, "tasmota": check_hardware}.get(
+    # OpenBeken takes Tasmota's commands (Power, Status 10): the same check.
+    check = {"esphome": check_esphome_hardware, "tasmota": check_hardware, "openbeken": check_hardware,
+             "sonoff": check_ewelink_hardware}.get(
         runs.run_firmware(ctx.state), lambda ctx: {})
     fields = report_fields(ctx, seconds, resumed, check(ctx))
     offer_report(ctx, fields, "Please share how it went!")

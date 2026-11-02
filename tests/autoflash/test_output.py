@@ -773,6 +773,36 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Joined setup network"], "No")
         self.assertEqual(fields["Name in Tasmota"], "Sonoff S60TPG")
 
+    def test_an_s61_report_says_whether_it_was_power_cycled(self):
+        self.assertNotIn("Power cycled", dict(report.report_fields(self.ctx(), 441, False)))  # an S60's
+        s61 = dict(plug_kind="sonoff-s61", product_model="S61STPF", firmware="openbeken", source="sonoff")
+        self.assertEqual(dict(report.report_fields(self.ctx(**s61), 441, False))["Power cycled"], "False")
+        ctx = self.ctx(**s61, power_cycles={"by hand": 1})
+        self.assertEqual(dict(report.report_fields(ctx, 441, False))["Power cycled"], "True")
+
+    def test_an_openbeken_run_checks_the_relay_and_meter_as_tasmotas_does(self):
+        ctx = self.ctx(plug_kind="sonoff-s61", product_model="S61STPF", firmware="openbeken", source="esphome")
+        with mock.patch.object(report, "check_hardware", return_value={"Relay": "works"}) as checked, \
+                mock.patch.object(report, "offer_report"), mock.patch.object(output, "show_links"):
+            report.invite_report(ctx, 441, False)
+        checked.assert_called_once_with(ctx)
+
+    def test_a_run_back_to_sonoff_checks_the_relay_through_ewelink(self):
+        ctx = self.ctx(plug_kind="sonoff-s61", product_model="S61STPF", firmware="sonoff", source="openbeken",
+                       plug_mac="12:34:56:ab:cd:ef")
+        ctx.email = lambda: "someone@example.invalid"
+        ctx.ewelink_env = lambda: {"EWELINK_PASSWORD": "made-up-password"}
+        with mock.patch.object(plugs, "read_plug", return_value={"ewelink_id": "1000abcdef"}), \
+                mock.patch.object(report.ewelink_relay, "check_relay", return_value=(True, True)) as switched, \
+                mock.patch.object(report, "offer_report") as offered, mock.patch.object(output, "show_links"):
+            report.invite_report(ctx, 441, False)
+        self.assertEqual(switched.call_args.kwargs["device_id"], "1000abcdef")
+        fields = dict(offered.call_args.args[1])
+        self.assertEqual(fields["Relay"], "Switches (through eWeLink)")
+        with mock.patch.object(plugs, "read_plug", return_value={"ewelink_id": "1000abcdef"}), \
+                mock.patch.object(report.ewelink_relay, "check_relay", return_value=(True, False)):
+            self.assertEqual(report.check_ewelink_hardware(ctx)["Relay"], "did not switch")
+
     def test_a_report_gives_only_what_its_route_has(self):
         # Busy time, the Wi-Fi typed and a setup network joined are an Espressif route's.
         espressif_only = ("Device busy", "Typed the Wi-Fi", "Joined setup network")

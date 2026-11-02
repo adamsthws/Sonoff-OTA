@@ -7,8 +7,9 @@ eWeLink (B2), OpenBeken's by URL (O1, O2), ESPHome's as a UF2 through its OTA
 (E1, E2) - which the stock bootloader applies on the restart that follows.
 The plug's own store, with its Wi-Fi and calibration, is never written, so
 each firmware reads it on first boot and nothing is typed or copied across.
-The backup (B4) comes after the first conversion, through OpenBeken, the one
-firmware that can read the store out: the stock firmware has no way to.
+The backup (B4) comes after the first conversion, through the new firmware:
+OpenBeken's flash reads, or our ESPHome's backup reader, open through its
+first start only. The stock firmware has no way to read the store out.
 """
 
 from __future__ import annotations
@@ -36,9 +37,12 @@ STOCK_STEPS: Steps = [
 ]
 OPENBEKEN_FINAL_STEPS: Steps = [
     ("K1", "OpenBeken started and on the Wi-Fi", arrived.step_openbeken_check),
-    ("B4", "Back up the device's own data, through OpenBeken", arrived.step_backup),
+    ("B4", "Back up the device's own data, through its new firmware", arrived.step_backup),
 ]
-ESPHOME_FINAL_STEPS: Steps = [("K2", "ESPHome started and on the Wi-Fi", arrived.step_esphome_check)]
+ESPHOME_FINAL_STEPS: Steps = [
+    ("K2", "ESPHome started and on the Wi-Fi", arrived.step_esphome_check),
+    ("B4", "Back up the device's own data, through its new firmware", arrived.step_backup),
+]
 SONOFF_FINAL_STEPS: Steps = [("K3", "Sonoff's firmware started and back in eWeLink", arrived.step_sonoff_check)]
 FROM_OPENBEKEN: dict[str, Steps] = {
     "esphome": [("O1", "ESPHome, fetched by OpenBeken", onward.step_openbeken_to_esphome)],

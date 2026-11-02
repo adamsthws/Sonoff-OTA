@@ -162,6 +162,10 @@ BACKUP_OUTCOMES = {
     "not wanted": ("skipped", "Not taken (--no-backup)"),
     "unreadable": ("skipped", "Not taken (device unreadable)"),
     "not taken": ("skipped", "Not taken"),
+    # An S61 converted straight to ESPHome: only OpenBeken reads its own data
+    # out, and the plug keeps it, untouched.
+    "openbeken only": ("skipped", "Not taken (this ESPHome cannot read it out; OpenBeken can)"),
+    "reader shut": ("skipped", "Not taken (ESPHome's backup reader had shut; OpenBeken can read it out)"),
 }
 
 
@@ -311,9 +315,11 @@ Going back to the Sonoff firmware
 
 
 def save_beken_backup(mac: str, region: bytes, stock: bytes | None, stock_version: str,
-                      *, kind: str = "plug", date: str | None = None) -> tuple[Path, bool]:
+                      *, kind: str = "plug", date: str | None = None,
+                      source: str = "OpenBeken GET /api/flash after conversion") -> tuple[Path, bool]:
     """Keep a Beken plug's own data as its backup, Sonoff's firmware beside it
-    where there is one; `kind`, what the plug is called in the README.
+    where there is one; `kind`, what the plug is called in the README;
+    `source`, how it was read out.
 
     Returns where it is, and whether it was saved now: a plug that has one
     already keeps it, whatever was read this time.
@@ -326,7 +332,7 @@ def save_beken_backup(mac: str, region: bytes, stock: bytes | None, stock_versio
     start, _size = BEKEN_REGION
     manifest: dict[str, Any] = {
         "device": kind, "mac": mac, "taken": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "source": "OpenBeken GET /api/flash after conversion",
+        "source": source,
         "regions": {BEKEN_BACKUP_BIN: {"flash_offset": f"0x{start:x}", "length": len(region),
                                        "sha256": hashlib.sha256(region).hexdigest()}},
     }

@@ -10,6 +10,7 @@ holds it, and the plug joins the home network by itself when it starts.
 
 from __future__ import annotations
 
+import base64
 import gzip
 import hashlib
 import http.client
@@ -570,6 +571,79 @@ def api_give_calibration(host: str, coefficients: list[float], port: int = API_P
     argument = b"".join(b"\x45" + struct.pack("<f", number) for number in coefficients)
     return _action_answer(host, (CALIBRATION_ACTION,), b"\x12" + _varint(len(argument)) + argument,
                           port, timeout, key, answered=False) is not None
+
+
+# Our S61 ESPHome's backup reader (devices/sonoff-s61/esphome.yaml, from 1.1.0),
+# open through its first start only, and the action that shuts it for good.
+BACKUP_READ, BACKUP_CLOSE = "autoflash_backup_read", "autoflash_backup_close"
+BACKUP_PIECE = 2048
+
+
+class BackupShut(Exception):
+    """The ESPHome's backup reader is shut: its first start is over, or the
+    tool has shut it already."""
+
+
+def _int_argument(number: int) -> bytes:
+    """An int action argument (its sint32 field 5, zigzagged), as its own message."""
+    argument = b"\x28" + _varint((number << 1) ^ (number >> 31))
+    return b"\x12" + _varint(len(argument)) + argument
+
+
+def api_read_backup(host: str, size: int, *, progress: Callable[[int, int], None] | None = None,
+                    port: int = API_PORT, timeout: float = 300.0, key: bytes | None = None) -> bytes | None:
+    """The plug's own data, `size` bytes of the region its backup reader
+    gives, piece by piece over one connection.  None from an ESPHome without
+    the reader; BackupShut from one whose reader is shut; OSError when a
+    piece is not given."""
+    api = _Api(host, port, timeout, key)
+    data = bytearray()
+    call, action_key = 0, None
+
+    def ask() -> None:
+        nonlocal call
+        call += 1
+        arguments = _int_argument(len(data)) + _int_argument(min(BACKUP_PIECE, size - len(data)))
+        api.send((_CALL, b"\x0d" + struct.pack("<I", action_key) + arguments + b"\x18" + _varint(call) + b"\x20\x01"))
+    try:
+        api.send((_LIST, b""))
+        for kind, payload in api.messages():
+            if kind == _ACTION:
+                action = _fields(payload)
+                if action.get(1) == BACKUP_READ.encode() and isinstance(action.get(2), int):
+                    action_key = action[2]
+            elif kind == _LISTED:
+                if action_key is None:
+                    return None
+                ask()
+            elif kind == _ANSWER:
+                answer = _fields(payload)
+                if answer.get(1) != call:
+                    continue
+                raw = answer.get(4)
+                details = json.loads(raw) if answer.get(2) and isinstance(raw, bytes) else {}
+                if details.get("error") == "shut":
+                    raise BackupShut()
+                piece = base64.b64decode(details.get("data") or "", validate=True)
+                if not piece:
+                    raise OSError(f"the device did not give its data at {len(data):#x}: "
+                                  f"{details.get('error') or 'no answer'}")
+                data += piece
+                if progress is not None:
+                    progress(len(data), size)
+                if len(data) >= size:
+                    return bytes(data[:size])
+                ask()
+        raise OSError("the device stopped giving its data")
+    except (ValueError, IndexError) as exc:  # binascii.Error and json's are ValueErrors
+        raise OSError(f"the device's data did not come through whole: {exc}") from None
+    finally:
+        api.close()
+
+
+def api_close_backup(host: str, port: int = API_PORT, timeout: float = 8.0, key: bytes | None = None) -> bool:
+    """Shut the backup reader for good. False from an ESPHome without it."""
+    return _action_answer(host, (BACKUP_CLOSE,), b"", port, timeout, key, answered=False) is not None
 
 
 def calibration_state(host: str) -> str | None:

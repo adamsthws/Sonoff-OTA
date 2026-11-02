@@ -36,6 +36,7 @@ worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-e
 - **The conversion tool's route**: [`tools/autoflash/routes/beken/`](../../tools/autoflash/routes/beken/)
   - the push through eWeLink from Sonoff's firmware, OpenBeken and ESPHome each
   taking the next firmware as an update of its own, Sonoff's firmware back
-  from the public dump, the backup through OpenBeken after the first
-  conversion. Run end to end in the emulator in every direction, faults and
+  from the public dump, the backup through the new firmware after the first
+  conversion (OpenBeken's flash reads, or ESPHome's backup reader, open
+  through its first start only). Run end to end in the emulator in every direction, faults and
   all ([its fault suite](../../docs/testing.md#the-s61s-fault-suite)); never yet on a real plug.

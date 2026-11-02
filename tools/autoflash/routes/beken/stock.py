@@ -10,7 +10,7 @@ import re
 import time
 from typing import Any, TYPE_CHECKING
 
-from tools.autoflash import detect, firewall, kinds, output, plugs, prompts, runs
+from tools.autoflash import detect, firewall, join, kinds, output, plugs, prompts, runs
 from tools.autoflash.errors import Abort, NothingWritten
 from tools.autoflash.routes.beken import images
 from tools.beken import fota_wrap
@@ -73,7 +73,20 @@ def step_identify(ctx: Context) -> dict[str, Any]:
         "The device fetches its new firmware straight from this computer, as its",
         "own updates come, and its bootloader installs it on the next start.",
     ])
-    return {"stock_version": identity["version"], "model": identity["model"], "product": product}
+    # Its Wi-Fi signal, as it last told eWeLink: read before anything is
+    # written, while moving it costs nothing (the S60 reads its LAN advert).
+    signal = account_signal(device)
+    join.note_signal(ctx, signal, [
+        "Nothing has been written yet. After the conversion the device has to",
+        "rejoin your Wi-Fi on its own; a weak signal makes that less certain."])
+    return {"stock_version": identity["version"], "model": identity["model"], "product": product,
+            "signal_dbm": signal}
+
+
+def account_signal(device: dict[str, Any]) -> int | None:
+    """The Wi-Fi signal the device last reported to eWeLink (its rssi), in dBm."""
+    rssi = (device.get("params") or {}).get("rssi")
+    return rssi if isinstance(rssi, int) and not isinstance(rssi, bool) and -120 < rssi < 0 else None
 
 
 def step_push(ctx: Context) -> dict[str, Any]:
@@ -94,9 +107,6 @@ def step_push(ctx: Context) -> dict[str, Any]:
     prompts.warning_box("Before going on", [
         "From here the device's Sonoff firmware is replaced, so the eWeLink app",
         "will no longer control it. DO NOT UNPLUG IT during the process.",
-        "The device's own settings - its Wi-Fi, its meter calibration, its eWeLink",
-        "identity - stay on the device untouched, and the new firmware reads them.",
-        "Only go ahead with a device you can afford to lose.",
     ])
     if not prompts.require_word(prompts.CONSENT_WORD):
         raise NothingWritten("not confirmed - nothing has been written to the device")

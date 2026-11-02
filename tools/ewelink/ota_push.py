@@ -29,8 +29,8 @@ from typing import Any, Callable
 if __package__ in (None, ""):  # run as a script: the repository root, for `tools.`
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.ewelink.get_device_key import APP_ID, EwelinkError, api_json, get_devices, login_session, select_device  # noqa: E402
-from tools.ewelink.probe_ota_command import WS_DISPATCH, nonce  # noqa: E402
+from tools.ewelink.get_device_key import EwelinkError, get_devices, login_session, select_device  # noqa: E402
+from tools.ewelink.relay import app_socket  # noqa: E402
 from tools.ewelink.websocket_minimal import WebSocket, WebSocketError  # noqa: E402
 
 
@@ -280,17 +280,7 @@ def deliver(*, email: str, password: str, country_code: str, region: str, device
                 "switch the device off and on (after a send cut off part way it can "
                 "stay away from eWeLink until it restarts), then run this again"
             )
-        dispatch = api_json(WS_DISPATCH[region], headers={"Authorization": "Bearer " + session["at"]})
-        ws = WebSocket.connect(dispatch["domain"], int(dispatch["port"]))
-        now = time.time()
-        ws.send_json({
-            "action": "userOnline", "at": session["at"], "apikey": session["user"]["apikey"],
-            "appid": APP_ID, "nonce": nonce(), "ts": int(now), "userAgent": "app",
-            "sequence": str(int(now * 1000)), "version": 8,
-        })
-        handshake = ws.receive_json(timeout=10)
-        if handshake.get("error", 0) != 0:
-            raise EwelinkError("Cloud WebSocket authentication failed")
+        ws = app_socket(region, session)
 
         digest = hashlib.sha256(firmware).hexdigest()
         server = FirmwareServer((listen_ip, listen_port), firmware, device_ip, say, names=names, live=live)

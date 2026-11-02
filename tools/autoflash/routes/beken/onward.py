@@ -12,7 +12,7 @@ import threading
 import time
 from typing import Any, Callable, TYPE_CHECKING
 
-from tools.autoflash import detect, firewall, handover, kinds, openbeken, output, runs
+from tools.autoflash import detect, esphome, firewall, handover, join, kinds, openbeken, output, runs
 from tools.autoflash.errors import Abort
 from tools.autoflash.routes.beken import images
 from tools.beken import uf2
@@ -80,8 +80,22 @@ def serve_to_plug(ctx: Context, image: bytes, what: str, fetch: Callable[[str], 
     return seconds
 
 
+def read_signal(ctx: Context, leaving: str) -> int | None:
+    """The Wi-Fi signal the firmware it is leaving reports - OpenBeken as
+    Tasmota does (Status 11), ESPHome through its signal sensor - asked about
+    if weak before the go-ahead, as from Sonoff's firmware (B1): every
+    direction checks it while nothing is written."""
+    host = ctx.state.input("plug_ip")
+    signal = (join.plug_signal(ctx.device) if leaving == "OpenBeken"
+              else esphome.signal(host, ctx.esphome_key) if host else None)
+    return join.note_signal(ctx, signal, [
+        "Nothing has been written yet. After the change the device has to",
+        "rejoin your Wi-Fi on its own; a weak signal makes that less certain."])
+
+
 def step_openbeken_to_esphome(ctx: Context) -> dict[str, Any]:
     """O1 - ESPHome, fetched by OpenBeken into the download slot."""
+    signal = read_signal(ctx, "OpenBeken")
     handover.consent_to_leave(ctx, "OpenBeken")
     image, version = images.image(ctx, "esphome")
     if ctx.dry_run:
@@ -89,13 +103,14 @@ def step_openbeken_to_esphome(ctx: Context) -> dict[str, Any]:
     host = ctx.state.input("plug_ip")
     seconds = serve_to_plug(ctx, image, f"ESPHome {version}", lambda url: openbeken.ota_http(host, url),
                             unstick=lambda: openbeken.restart(host))
-    return {"seconds": seconds, "version": version}
+    return {"seconds": seconds, "version": version, "signal_dbm": signal}
 
 
 def step_openbeken_to_sonoff(ctx: Context) -> dict[str, Any]:
     """O2 - Sonoff's firmware, fetched by OpenBeken into the download slot:
     through the plug's import module, which checks the slot is the stock
     bootloader's before it fetches."""
+    signal = read_signal(ctx, "OpenBeken")
     handover.consent_to_leave(ctx, "OpenBeken")
     kind = kinds.of_run(ctx.state)
     stock, version = images.stock_rbl(kind)
@@ -115,12 +130,13 @@ def step_openbeken_to_sonoff(ctx: Context) -> dict[str, Any]:
 
     seconds = serve_to_plug(ctx, stock, f"Sonoff's firmware {version}", fetch,
                             unstick=lambda: openbeken.restart(host))
-    return {"seconds": seconds, "version": version}
+    return {"seconds": seconds, "version": version, "signal_dbm": signal}
 
 
 def step_esphome_to_openbeken(ctx: Context) -> dict[str, Any]:
     """E1 - OpenBeken, sent to ESPHome as an update: a UF2 carrying the image,
     which LibreTiny writes to the download slot."""
+    signal = read_signal(ctx, "ESPHome")
     handover.consent_to_leave(ctx, "ESPHome")
     kind = kinds.of_run(ctx.state)
     image, version = images.image(ctx, "openbeken")
@@ -128,11 +144,12 @@ def step_esphome_to_openbeken(ctx: Context) -> dict[str, Any]:
         return {"dry_run": True, "version": version}
     data = uf2.write(image, name=f"openbeken-{kind.key}", version=version)
     seconds = handover.send_as_esphome_update(ctx, data, f"OpenBeken {version}", port=ESPHOME_OTA_PORT)
-    return {"seconds": seconds, "version": version}
+    return {"seconds": seconds, "version": version, "signal_dbm": signal}
 
 
 def step_esphome_to_sonoff(ctx: Context) -> dict[str, Any]:
     """E2 - Sonoff's firmware, sent to ESPHome as an update the same way."""
+    signal = read_signal(ctx, "ESPHome")
     handover.consent_to_leave(ctx, "ESPHome")
     kind = kinds.of_run(ctx.state)
     stock, version = images.stock_rbl(kind)
@@ -140,7 +157,7 @@ def step_esphome_to_sonoff(ctx: Context) -> dict[str, Any]:
         return {"dry_run": True, "version": version}
     data = uf2.write(stock, name="sonoff-stock", version=version)
     seconds = handover.send_as_esphome_update(ctx, data, f"Sonoff's firmware {version}", port=ESPHOME_OTA_PORT)
-    return {"seconds": seconds, "version": version}
+    return {"seconds": seconds, "version": version, "signal_dbm": signal}
 
 
 # How long a plug just switched on may take to answer, before its record is judged.

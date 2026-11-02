@@ -25,8 +25,8 @@ class RouteTests(unittest.TestCase):
     def test_every_direction_is_one_move_and_a_check(self):
         for firmware, source, expected in (
             ("openbeken", "sonoff", ["A0", "A1", "A3", "B1", "B2", "K1", "B4"]),
-            ("esphome", "sonoff", ["A0", "A1", "A3", "B1", "B2", "K2"]),
-            ("esphome", "openbeken", ["A0", "O1", "K2"]),
+            ("esphome", "sonoff", ["A0", "A1", "A3", "B1", "B2", "K2", "B4"]),
+            ("esphome", "openbeken", ["A0", "O1", "K2", "B4"]),
             ("sonoff", "openbeken", ["A0", "B4", "O2", "K3"]),
             ("openbeken", "esphome", ["A0", "E1", "K1", "B4"]),
             ("sonoff", "esphome", ["A0", "E2", "K3"]),
@@ -62,7 +62,9 @@ def a_context(tmp, **inputs):
                            args=SimpleNamespace(no_backup=False), consented=True,
                            listen_ip=lambda: "192.168.0.2", email=lambda: "owner@example.com",
                            ewelink_env=lambda: {"EWELINK_PASSWORD": "pw"}, account_plug=None,
-                           account_devices=lambda: None)
+                           account_devices=lambda: None,
+                           # OpenBeken answering Tasmota's Status 11, its Wi-Fi signal in it.
+                           device=SimpleNamespace(command=lambda cmd: {"StatusSTS": {"Wifi": {"Signal": -60}}}))
 
 
 class ImagesTests(unittest.TestCase):
@@ -148,13 +150,35 @@ class FromStockTests(unittest.TestCase):
                 plugs.remember_plug(MAC, ewelink_id="1001234abc")
                 with mock.patch.object(stock.prompts, "section"):
                     result = stock.step_identify(ctx)
-            self.assertEqual(result, {"stock_version": "1.0.2", "model": "SN-BK7238-S61-01", "product": "S61STPF"})
+            self.assertEqual(result, {"stock_version": "1.0.2", "model": "SN-BK7238-S61-01", "product": "S61STPF",
+                                      "signal_dbm": None})
             self.assertEqual(ctx.state.input("stock_version"), "1.0.2")
             # Another model on the account is never the plug.
             ctx.account_devices = lambda: [dict(self.DEVICE, extra={"model": "SN-ESP32-MINIR4"})]
             with mock.patch.object(plugs, "PLUGS", plugs_dir), mock.patch.object(plugs, "CAPTURES", Path(tmp)):
                 with self.assertRaisesRegex(errors.Abort, "does not convert"):
                     stock.step_identify(ctx)
+
+    def test_b1_reads_the_wifi_signal_the_device_gave_ewelink_and_asks_about_a_weak_one(self):
+        for rssi, asked in ((-61, False), (-85, True)):
+            with tempfile.TemporaryDirectory() as tmp:
+                ctx = a_context(tmp)
+                device = dict(self.DEVICE, params={"fwVersion": "1.0.2", "rssi": rssi})
+                ctx.account_devices = lambda device=device: [device]
+                with mock.patch.object(plugs, "PLUGS", Path(tmp) / "plugs"), mock.patch.object(plugs, "CAPTURES", Path(tmp)):
+                    plugs.remember_plug(MAC, ewelink_id="1001234abc")
+                    with mock.patch.object(stock.prompts, "section"), \
+                            mock.patch.object(stock.join.prompts, "section"), \
+                            mock.patch.object(stock.join.output, "transient_begin"), \
+                            mock.patch.object(stock.join.output, "transient_end"), \
+                            mock.patch.object(stock.join.prompts, "ask_yes_no", return_value=False) as question:
+                        if asked:
+                            with self.assertRaisesRegex(errors.Abort, "weak Wi-Fi signal; nothing was written"):
+                                stock.step_identify(ctx)
+                        else:
+                            self.assertEqual(stock.step_identify(ctx)["signal_dbm"], rssi)
+                self.assertEqual(question.called, asked)
+        self.assertIsNone(stock.account_signal({"params": {"rssi": "strong"}}))
 
     def test_b2_wraps_the_image_and_sends_it_through_ewelink(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -263,6 +287,24 @@ class OnwardTests(unittest.TestCase):
 
         with mock.patch.object(ota_push, "FirmwareServer", Server):
             return step(ctx)
+
+    def test_every_direction_checks_the_wifi_signal_before_the_go_ahead(self):
+        # OpenBeken's as Tasmota gives it, ESPHome's from its sensor: a weak one asked about first.
+        order = []
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = a_context(tmp, plug_ip="192.0.2.50", firmware="esphome", source="openbeken")
+            ctx.device = SimpleNamespace(command=lambda cmd: {"StatusSTS": {"Wifi": {"Signal": -85}}})
+            with mock.patch.object(onward.join, "warn_if_weak_signal",
+                                   side_effect=lambda ctx, signal, then: order.append(("weak?", signal))), \
+                    mock.patch.object(onward.handover, "consent_to_leave",
+                                      side_effect=lambda ctx, what: order.append(("go-ahead", what))), \
+                    mock.patch.object(onward, "serve_to_plug", return_value=1.0), \
+                    mock.patch.object(onward.join.output, "say"):
+                self.assertEqual(onward.step_openbeken_to_esphome(ctx)["signal_dbm"], -85)
+                with mock.patch.object(onward.esphome, "signal", return_value=-70), \
+                        mock.patch.object(onward.handover, "send_as_esphome_update", return_value=1.0):
+                    self.assertEqual(onward.step_esphome_to_openbeken(ctx)["signal_dbm"], -70)
+        self.assertEqual(order, [("weak?", -85), ("go-ahead", "OpenBeken"), ("weak?", -70), ("go-ahead", "ESPHome")])
 
     def test_openbeken_fetches_esphome_by_url(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -428,7 +470,8 @@ class ArrivedTests(unittest.TestCase):
                 mock.patch.object(arrived.prompts, "ask_choice", side_effect=choose), \
                 mock.patch.object(arrived.prompts, "section"), \
                 mock.patch.object(arrived.output, "transient_begin"), mock.patch.object(arrived.output, "transient_end"), \
-                mock.patch.object(arrived.time, "sleep"), mock.patch.dict(arrived.os.environ, env, clear=False):
+                mock.patch.object(arrived.time, "sleep"), mock.patch.dict(arrived.os.environ, env, clear=False), \
+                mock.patch.object(plugs, "PLUGS", ctx.state.path.parent / "plugs"):
             if not switch:
                 arrived.os.environ.pop(arrived.EMULATED_POWER, None)
             arrived.step_esphome_check(ctx)
@@ -439,6 +482,8 @@ class ArrivedTests(unittest.TestCase):
             ctx = a_context(tmp, plug_ip="192.0.2.50")
             offered, looks = self.not_back_then_back(ctx, [0])
             self.assertEqual((len(offered[0]), looks), (1, 2))   # no emulator: one choice, and q
+            # Counted for the report, by whom.
+            self.assertEqual(ctx.state.input("power_cycles"), {"by hand": 1})
 
     def test_in_the_emulator_the_tool_can_switch_the_plug_off_and_on(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -497,6 +542,41 @@ class ArrivedTests(unittest.TestCase):
             ctx.args.no_backup = True
             with mock.patch.object(plugs, "PLUGS", Path(tmp) / "plugs"), mock.patch.object(plugs, "CAPTURES", Path(tmp)):
                 self.assertEqual(arrived.step_backup(ctx)["outcome"], "not wanted")
+
+    def esphome_backup(self, tmp, read):
+        """B4 on ESPHome, its reader giving what `read` does: the outcome, and
+        whether the reader was shut after."""
+        ctx = a_context(tmp, firmware="esphome", stock_version="1.0.2")
+        with mock.patch.object(plugs, "PLUGS", Path(tmp) / "plugs"), mock.patch.object(plugs, "CAPTURES", Path(tmp)), \
+                mock.patch.object(arrived.esphome, "api_read_backup", side_effect=read), \
+                mock.patch.object(arrived.esphome, "api_close_backup", return_value=True) as shut, \
+                mock.patch.object(arrived.backup, "factory_mac", return_value=MAC), \
+                mock.patch.object(images, "stock_rbl", return_value=(b"RBL stock", "1.0.2")):
+            outcome = arrived.step_backup(ctx)["outcome"]
+            found = plugs.find_backup(MAC)
+            source = json.loads((found.directory / plugs.BEKEN_MANIFEST).read_text())["source"] if found else None
+        return outcome, shut.called, source
+
+    def test_b4_reads_esphome_s_reader_then_shuts_it_for_good(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            outcome, shut, source = self.esphome_backup(tmp, lambda host, size, progress: b"\x01" * size)
+            self.assertEqual((outcome, shut), ("saved", True))
+            self.assertIn("ESPHome", source)
+
+    def test_b4_on_an_esphome_whose_reader_is_shut_or_absent_takes_none(self):
+        def shut(host, size, progress):
+            raise arrived.esphome.BackupShut()
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self.esphome_backup(tmp, shut), ("reader shut", True, None))
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self.esphome_backup(tmp, lambda host, size, progress: None), ("openbeken only", True, None))
+
+    def test_b4_leaves_a_reader_whose_read_failed_to_shut_by_itself(self):
+        # Tried again, it can still be read; untried, its time runs out.
+        def cut(host, size, progress):
+            raise OSError("the device stopped giving its data")
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(self.esphome_backup(tmp, cut), ("failed", False, None))
 
     def test_k3_waits_for_ewelink_to_show_the_plug_online(self):
         with tempfile.TemporaryDirectory() as tmp:
