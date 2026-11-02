@@ -424,6 +424,9 @@ class FotaWrapTests(unittest.TestCase):
         self.assertEqual(desc[0x20:0x30], b"1.18.319".ljust(16, b"\x00"))
         self.assertEqual(struct.unpack_from(">I", desc, 0x30)[0], 116 - 16)   # payload at 116, base 16
         self.assertEqual(struct.unpack_from(">I", desc, 0x34)[0], len(self.RBL))
+        # Without it the plug stages the payload but reports the update failed,
+        # and never restarts to install it.
+        self.assertEqual(struct.unpack_from(">I", desc, 0x38)[0], zlib.crc32(self.RBL))
         self.assertEqual(struct.unpack_from(">I", desc, 0x3C)[0], zlib.crc32(desc[:0x3C]))
         self.assertEqual(c[116:], self.RBL)
 

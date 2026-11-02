@@ -581,12 +581,20 @@ container, decoded from the device's own read offsets and parse code:
 - **`[40:40+76·n]` descriptors** (76 bytes each), data `[0:0x3c]` + a big-endian CRC32
   at `+0x3c` over `[0:0x3c]`. In the data region: an **18-byte image-type name at
   `+0x00`**, a version at `+0x20`, a **big-endian `u32` file-offset at `+0x30`** (the
-  image's absolute offset = this + base `16`), and a **big-endian `u32` size at
-  `+0x34`**. The name selects the handler that **stages to the download partition**;
+  image's absolute offset = this + base `16`), a **big-endian `u32` size at
+  `+0x34`**, and a **big-endian CRC32 of the payload at `+0x38`**. The name selects the handler that **stages to the download partition**;
   it must be **`"FWSW-01-S61-BK7238"`** (an `strncmp` at `0x2c45d`). A wrong/empty name
   falls through to a no-op handler that buffers in RAM and never writes flash — which
   is why early attempts downloaded but staged nothing;
 - **payloads** follow the descriptors, each at the offset its descriptor gives.
+
+The payload's CRC is checked only once the whole payload is in (`0x397ce`), and
+the payload is staged as it arrives, so a wrong one still leaves the image in the
+download partition - but the updater then reports `{"ota":"fail","ota_fail_reason":1}`
+and returns without restarting. Only with it right does the task write
+`ota&state` 4 and post the OTA event (id 1) whose handler (`0x2c738`) waits 1 s
+and calls `bk_reboot(1)`, so the bootloader installs the update straight away;
+with it wrong, the plug converts only when it is next switched on.
 
 The CRCs are standard CRC-32 (zlib poly), stored big-endian because the firmware
 byte-swaps the field before comparing. With this container the plug (ONLINE on the

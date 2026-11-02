@@ -15,11 +15,15 @@ Container layout (decoded from the firmware; all multi-byte CRCs big-endian):
     [40:..]  descriptor  (76 bytes) data[0:0x3c] + CRC32 over [0:0x3c] at [0x3c];
                          data: name[18]@0 ("FWSW-01-S61-BK7238" - selects the staging
                          handler), version@0x20, u32 file-offset @0x30 (abs = this+16),
-                         u32 size @0x34  (offset/size big-endian)
+                         u32 size @0x34, CRC32 of the payload @0x38  (all big-endian)
     [..]     payload     the .rbl, right after the descriptors
 
 The device verifies only integrity: the magic, the trailer/descriptor CRC-32s, a
-version-greater-than check, and the `upgrade` command's digest (SHA-256 of the file).
+version-greater-than check, the `upgrade` command's digest (SHA-256 of the file),
+and, once the payload is in, its CRC-32 against the descriptor's. The payload is
+staged as it arrives, so one whose CRC does not match is still in the download
+slot - but the updater reports the update failed (`"ota":"fail"`) and does not
+restart, and the bootloader applies it only when the plug is next switched on.
 
 Usage:
     fota_wrap.py IN.rbl [-o OUT.fota] [--name NAME] [--version VER]
@@ -80,6 +84,7 @@ def wrap(rbl: bytes, name: str = STAGING_NAME, version: str | None = None) -> by
     payload_off = 16 + len(trailer) + len(desc)           # = 116
     struct.pack_into(">I", desc, 0x30, payload_off - 16)  # file-offset field (abs = this + 16)
     struct.pack_into(">I", desc, 0x34, len(rbl))          # image size
+    struct.pack_into(">I", desc, 0x38, zlib.crc32(rbl) & 0xffffffff)   # payload CRC: checked once it is in
     struct.pack_into(">I", desc, 0x3c, zlib.crc32(bytes(desc[:0x3c])) & 0xffffffff)
 
     return bytes(header) + bytes(trailer) + bytes(desc) + rbl

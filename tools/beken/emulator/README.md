@@ -34,15 +34,13 @@ online (`cloud_online.StockHooks`) only while it is the one that starts.
 plug as on a home network, and its eWeLink is the stub. It works in its own
 copy of this checkout (the plug's `work/`), so its runs' captures are its own;
 an unattended run takes its eWeLink account from `work/captures/` (a made-up
-one: the stub takes any). One thing the emulator does not yet do as a plug
-would: Sonoff's firmware, having fetched and staged a new image whole, reports
-the update failed and does not restart - `bk-emu.sh power cycle`, as the tool
-then asks, and the bootloader applies it. An attended run there offers to
-switch it off and on itself: the plug's power switch is passed to the computer
-(`AUTOFLASH_EMULATOR_POWER`). It does the same on the emulator's
-built-in network, pushed by `tools/beken/cloud_push.py` with no tool or bridge
-involved (left running after the image is staged), so it is the emulated
-plug's own; whether a real S61 restarts there is not known.
+one: the stub takes any). Sonoff's firmware, having fetched and staged a new
+image whole and checked its CRC, restarts a second later, and the bootloader
+installs it, as a real plug's does (the firmware's own code says so,
+[docs/beken-s61-emulation.md](../../../docs/beken-s61-emulation.md)). A plug
+that does not come back is switched off and on - `bk-emu.sh power cycle`, as
+the tool then asks; an attended run there offers to do it itself: the plug's
+power switch is passed to the computer (`AUTOFLASH_EMULATOR_POWER`).
 
 **The plug's web page goes through a proxy** (`bk-emu.sh ui`, `ui_proxy.py`),
 OpenBeken's or ESPHome's - `ui` tells which by the name the plug gave its

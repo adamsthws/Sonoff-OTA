@@ -637,10 +637,9 @@ says to, up to four times; the scenario passes when the run's record has
 every step of its route done. Results are in `captures/emulation/s61-suite/`.
 
 Each emulated S61 takes a core, so two workers suit a laptop. Sonoff's
-firmware in the emulator does not restart once it has its update (the
-README says so), so a route from it passes only through the switch off and
-on the tool asks for: those scenarios show how the tool copes with that, not
-whether a real plug restarts.
+firmware restarts by itself once it has its update, in the emulator as on a
+real plug, so the switch off and on the tool asks for comes only after a
+fault.
 
 ## Real plugs
 
