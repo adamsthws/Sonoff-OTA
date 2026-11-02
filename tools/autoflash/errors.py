@@ -17,6 +17,16 @@ class NothingWritten(Abort):
     else does not say what the plug is (past_the_commit)."""
 
 
+class GoBack(Exception):
+    """A step finds that an earlier one did not take on the plug - the image
+    it sent was never installed: the run goes back and does that one again.
+    `outcome`: what the stage line says of the step that found it."""
+
+    def __init__(self, step: str, reason: str, outcome: str) -> None:
+        super().__init__(reason)
+        self.step, self.reason, self.outcome = step, reason, outcome
+
+
 # A failure worth another go: the plug or the network not answering.  A refusal
 # - the plug's checks, a password, the wrong model - would only say it again.
 TRANSIENT_RE = re.compile(

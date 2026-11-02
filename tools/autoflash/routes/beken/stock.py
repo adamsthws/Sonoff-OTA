@@ -101,6 +101,7 @@ def payload(ctx: Context, firmware: str, image: bytes) -> bytes:
     """What B2 puts in the download slot: the image - and, for the interim
     firmware, the marker after it, by which it knows itself as that
     (tools/beken/interim_marker.py).  A run to OpenBeken sends the image alone."""
+    image = images.as_sent(ctx, "B2", image)
     return interim_marker.with_marker(image) if firmware != runs.run_firmware(ctx.state) else image
 
 
@@ -124,14 +125,16 @@ def step_push(ctx: Context) -> dict[str, Any]:
     listen_ip = ctx.listen_ip()
     port = firewall.choose_port(ctx, "delivery_port", firewall.DELIVERY_PORTS, "the firmware")
     firewall.ensure_firewall(ctx)
-    output.transient_begin()
-    prompts.warning_box("Before going on", [
-        "From here the device's Sonoff firmware is replaced, so the eWeLink app",
-        "will no longer control it. DO NOT UNPLUG IT during the process.",
-    ])
-    if not prompts.require_word(prompts.CONSENT_WORD):
-        raise NothingWritten("not confirmed - nothing has been written to the device")
-    output.transient_end()  # agreed: the note and the question have done their job
+    if not getattr(ctx, "consented", False):  # once a run: not again when sent again (errors.GoBack)
+        output.transient_begin()
+        prompts.warning_box("Before going on", [
+            "From here the device's Sonoff firmware is replaced, so the eWeLink app",
+            "will no longer control it. DO NOT UNPLUG IT during the process.",
+        ])
+        if not prompts.require_word(prompts.CONSENT_WORD):
+            raise NothingWritten("not confirmed - nothing has been written to the device")
+        output.transient_end()  # agreed: the note and the question have done their job
+        ctx.consented = True
     if ctx.dry_run:
         output.say(f"[dry-run] would send {shown} {version} ({len(container):,} bytes wrapped) to {plug_ip}")
         return {"dry_run": True, "firmware": firmware, "version": version}

@@ -631,7 +631,13 @@ and another as the tool sends the step again, and the plug's router giving
 it a new address once the step is done. Each route also has the plug
 switched off 10, 50 and 90% of the way through its bootloader writing the
 new firmware in, timed off the plug's own output: the moment a real plug is
-likeliest to be left unable to start. 138 scenarios. Then the
+likeliest to be left unable to start. And each step that sends an image the
+stock bootloader installs - Sonoff's firmware's (B2), OpenBeken's fetch of
+ESPHome (J2, O1) - has one it refuses: sent spoilt once
+(`--simulate-bad-image STEP`, one byte of its body changed), the plug fetches
+it whole but starts the firmware it had again, and the scenario passes only
+when the tool saw that and sent the image again by itself. 172 scenarios.
+Then the
 tool is run again as a person would, switching the plug off and on where it
 says to, up to four times; the scenario passes when the run's record has
 every step of its route done. Results are in `captures/emulation/s61-suite/`.

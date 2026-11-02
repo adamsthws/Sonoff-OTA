@@ -100,6 +100,9 @@ class Context:
         self._finder: join.PlugFinder | None = None
         # The go-ahead to replace the plug's firmware, given in this run.
         self.consented = False
+        # The step a step found had not taken on the plug (errors.GoBack),
+        # which the run goes back to next.
+        self.go_back: str | None = None
         # The account's record of the plug A1 chose, for its plug.json.
         self.account_plug: account.AccountPlug | None = None
         # Held only in memory: the Wi-Fi details, and the recovery image built

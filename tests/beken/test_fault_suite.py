@@ -28,6 +28,26 @@ class ScenarioTests(unittest.TestCase):
             self.assertLessEqual(set(steps), set(fault_suite.route_steps(route)), route)
 
 
+class BadImageScenarioTests(unittest.TestCase):
+    def test_each_step_that_sends_an_image_the_bootloader_installs_has_one_it_refuses(self):
+        found = {sc["id"] for sc in fault_suite.scenarios() if sc["fault"] == "badimage"}
+        self.assertEqual(found, {"sonoff>openbeken:B2:badimage-once", "sonoff>esphome:B2:badimage-once",
+                                 "sonoff>esphome:J2:badimage-once", "openbeken>esphome:O1:badimage-once"})
+
+    def test_it_hears_the_run_send_the_image_again(self):
+        # Matched against what the run says as it goes back (arrived.until_back).
+        from unittest import mock
+        from tools.autoflash import errors
+        from tools.autoflash.routes.beken import arrived
+
+        def look(restarted):
+            raise arrived.NotTaken
+        ctx = SimpleNamespace(state=SimpleNamespace(input=lambda key: None, set_input=lambda key, value: None))
+        with mock.patch.object(arrived.prompts, "UNATTENDED", True), self.assertRaises(errors.GoBack) as back:
+            arrived.until_back(ctx, look, "OpenBeken", "advice", sent_by="B2")
+        self.assertRegex(back.exception.reason, fault_suite.SENT_AGAIN)
+
+
 class NewScenarioTests(unittest.TestCase):
     def test_every_route_has_its_apply_cut_and_the_writing_steps_their_double_and_readdress(self):
         ids = {sc["id"] for sc in fault_suite.scenarios()}

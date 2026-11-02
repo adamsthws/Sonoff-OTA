@@ -4,6 +4,7 @@ import unittest
 from unittest import mock
 
 from tools.autoflash import cli, credentials, hostsys, interrupt, output, prompts
+from tools.autoflash.routes.beken import images as beken_images
 from tools.autoflash.routes.espressif import installer
 
 
@@ -15,6 +16,7 @@ class BeforeTheRunTests(unittest.TestCase):
         with mock.patch("sys.argv", ["cli.py", "run"]), mock.patch("sys.stdout", screen), \
                 mock.patch.object(hostsys, "password_asker"), mock.patch.object(prompts, "UNATTENDED"), \
                 mock.patch.object(installer, "SIMULATED_BACKUP_FAILURES"), \
+                mock.patch.object(beken_images, "SPOIL_STEP"), \
                 mock.patch.object(cli.signal, "signal"), mock.patch.object(interrupt, "install"), \
                 mock.patch.object(credentials, "load", return_value={}), \
                 mock.patch.object(cli, "adopt_older_runs"), mock.patch.object(output, "start_at_top"), \

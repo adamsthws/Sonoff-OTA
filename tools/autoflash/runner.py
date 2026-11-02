@@ -32,7 +32,7 @@ from tools.autoflash.phases import PhaseError, PlugNeverConnected
 from tools.autoflash.prompts import QuitRun
 from tools.autoflash.routes.espressif import tasmota
 from tools.autoflash.runs import ROOT
-from tools.autoflash.state import ATTEMPTED, DONE, FAILED
+from tools.autoflash.state import ATTEMPTED, DONE, FAILED, PENDING
 
 if TYPE_CHECKING:
     from tools.autoflash.context import Context
@@ -75,6 +75,23 @@ def _execute(ctx: Context, step: str) -> int:
     except QuitRun:
         output.stage_end("stopped")
         return 130  # main() says so, once it has cleaned up
+    except errors.GoBack as back:
+        times = int(ctx.state.data.get("captures", {}).get(f"{back.step}.sent_again") or 0) + 1
+        if times > GO_BACK_LIMIT:
+            ctx.state.mark(step, FAILED, error=back.reason)
+            output.stage_end("stopped")
+            message = (f"{back.reason}, after it was sent {times} times. Switch the device off and on, "
+                       "then run the same command again")
+            ctx.last_failure, ctx.last_failed_step = message, step
+            output.tell(f"FAILED: {message}")
+            return 1
+        ctx.state.capture(f"{back.step}.sent_again", times)
+        ctx.state.mark(step, PENDING)
+        ctx.state.mark(back.step, PENDING, note=back.reason)
+        output.stage_end(back.outcome)
+        output.tell(f"{back.reason}. Doing {back.step} again.")
+        ctx.go_back = back.step
+        return 0
     except PlugNeverConnected as exc:
         ctx.state.mark(step, FAILED, error=str(exc))
         output.stage_end("stopped")
@@ -124,6 +141,9 @@ def _execute(ctx: Context, step: str) -> int:
 
 ATTEMPTS = 3
 RETRY_PAUSE = 10.0
+# A step a later one found had not taken on the plug (errors.GoBack) is done
+# again this many times in a run; one that still does not take stops the run.
+GO_BACK_LIMIT = 2
 # A router restart takes a minute or two.  The plug gives up on a step within
 # about a minute - busier for longer, it stops answering for good (its energy
 # meter's readings pile up) - so this computer does the waiting, between tries.
@@ -406,6 +426,11 @@ def run_steps(ctx: Context) -> int:
             output.say(f"    Doing {step} again: the device does not show it finished.")
             output.transient_end()
         code = execute_with_retries(ctx, step)
+        back = getattr(ctx, "go_back", None)
+        if code == 0 and back:
+            ctx.go_back = None
+            index = next(i for i, (name, _, _) in enumerate(routes.STEPS) if name == back)
+            continue
         if code == 0 and stop_here_after_ctrl_c(step):
             firewall.close_firewall_rules(ctx)
             return 130

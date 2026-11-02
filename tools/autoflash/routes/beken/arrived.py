@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING, TypeVar
 
 from tools.autoflash import detect, esphome, join, kinds, openbeken, output, plugs, prompts
-from tools.autoflash.errors import Abort
+from tools.autoflash.errors import Abort, GoBack
 from tools.autoflash.routes.beken import images, onward
 from tools.beken import backup
 
@@ -34,6 +34,9 @@ CLOUD_WAIT = 180.0
 # on (tools/beken/emulator/bk-emu.sh computer), offered as a choice of its own.
 EMULATED_POWER = "AUTOFLASH_EMULATOR_POWER"
 EMULATED_OFF = 3.0   # seconds off: long enough for the emulator to stop the plug
+# An OpenBeken's uptime set against the time since it fetched an image: this
+# much shorter, and it started after the fetch, not before (step_esphome_check).
+RESTART_SLACK = 10
 
 T = TypeVar("T")
 
@@ -42,18 +45,45 @@ class NotBack(Exception):
     """The plug did not answer as its new firmware in the time waited."""
 
 
-def until_back(ctx: Context, look: Callable[[], T], what: str, advice: str) -> T:
-    """look(), and again each time the person at the keyboard says the plug is
-    back on after a restart, until it finds the plug or they stop (q).  An
-    unattended run stops at the first NotBack, with `advice` as the reason.
-    Each switch off and on is counted, by whom (power_cycles), for the report:
-    whether a real plug restarts by itself, as the emulated one does not."""
+class NotTaken(Exception):
+    """Restarted, the plug started the firmware it was leaving: the image it
+    was sent was not installed, and will not be by waiting."""
+
+
+def until_back(ctx: Context, look: Callable[[bool], T], what: str, advice: str,
+               sent_by: str | None = None) -> T:
+    """look(restarted), and again each time the person at the keyboard says
+    the plug is back on after a restart - `restarted` then True - until it
+    finds the plug or they stop (q).  An unattended run stops at the first
+    NotBack, with `advice` as the reason.  Each switch off and on is counted,
+    by whom (power_cycles), for the report: whether a real plug restarts by
+    itself, as the emulated one does not.
+
+    `sent_by`: the step that sent the image.  A look after a restart that
+    finds the plug on the firmware it was leaving (NotTaken) sends the run
+    back to that step, unasked: the bootloader installs a whole image on the
+    first start after it arrived, so one not installed then never will be.
+    Before a restart that says nothing: the plug may not have restarted.
+    A switch off and on asked for is remembered in the run's record
+    (restart_asked), so a run that stopped to ask - an unattended one, or a
+    person who quit there - takes it as done when it is run again."""
+    restarted = bool(ctx.state.input("restart_asked"))
     while True:
         try:
-            return look()
+            found = look(restarted)
+        except NotTaken as exc:
+            ctx.state.set_input("restart_asked", None)
+            if sent_by is None:
+                raise Abort(advice) from exc
+            raise GoBack(sent_by, f"{what} was not installed: the device restarted on the firmware it had",
+                         "not installed") from exc
         except NotBack as exc:
+            ctx.state.set_input("restart_asked", True)
             if prompts.UNATTENDED:
                 raise Abort(advice) from exc
+        else:
+            ctx.state.set_input("restart_asked", None)
+            return found
         output.transient_begin()
         prompts.section(f"{what} has not answered yet", [
             "The device installs its new firmware as it restarts, and has not come",
@@ -72,6 +102,7 @@ def until_back(ctx: Context, look: Callable[[], T], what: str, advice: str) -> T
         ctx.state.set_input("power_cycles", counted)
         if chosen == 1:
             power_cycle_emulated(Path(switch))
+        restarted = True
 
 
 def power_cycle_emulated(switch: Path) -> None:
@@ -98,19 +129,25 @@ def step_openbeken_check(ctx: Context, wait: float = ARRIVAL_WAIT, *, interim: b
     kind = kinds.of_run(ctx.state)
     started = time.monotonic()
 
-    def check(host: str) -> dict[str, Any] | None:
+    # Sent by Sonoff's firmware (B2): one still answering after a restart
+    # did not take the image.
+    sent_by = "B2" if ctx.state.is_done("B2") else None
+
+    def check(host: str, restarted: bool) -> dict[str, Any] | None:
         found = openbeken.info(host, timeout=3.0)
         if found and openbeken.kind(host, found, timeout=3.0) is kind:
             answer = openbeken.is_interim(host, timeout=3.0)
             if answer is not None:
                 return {**found, "interim": answer}
+        if restarted and sent_by and detect.identify(host, timeout=3.0) == "sonoff":
+            raise NotTaken
         return None
 
-    def look() -> dict[str, Any]:
+    def look(restarted: bool) -> dict[str, Any]:
         nonlocal started
         started = time.monotonic()
         try:
-            return join.wait_for(ctx, check, f"{shown} on your Wi-Fi", timeout=wait)
+            return join.wait_for(ctx, lambda host: check(host, restarted), f"{shown} on your Wi-Fi", timeout=wait)
         except Abort as exc:
             raise NotBack from exc
 
@@ -118,7 +155,7 @@ def step_openbeken_check(ctx: Context, wait: float = ARRIVAL_WAIT, *, interim: b
     found = until_back(ctx, look, title, (
         f"{title} has not answered on your Wi-Fi. The device installs it as it restarts, then reads its "
         "Wi-Fi from the device's own store and joins; if it has not, switch the device off and on, then run "
-        "the same command again to check it"))
+        "the same command again to check it"), sent_by=sent_by)
     seconds = round(time.monotonic() - started, 1)
     version = openbeken.version(found)
     settled = found["interim"] == interim
@@ -212,15 +249,36 @@ def _back_up(ctx: Context, mac: str) -> str:
 
 def step_esphome_check(ctx: Context, wait: float = ARRIVAL_WAIT) -> dict[str, Any]:
     """K2 - ESPHome started from the image, and on the home Wi-Fi, reading its
-    calibration from the plug's own store."""
+    calibration from the plug's own store.
+
+    OpenBeken fetches ESPHome (J2, or O1) and restarts by itself to install
+    it: one answering that has started since - its uptime below what it was
+    before the fetch, or than the time since - its bootloader did not take
+    the image, and the run goes back to send it again (until_back), no
+    restart to ask for.  Both, as the emulated plug's clock runs fast: there
+    its uptime outgrows the time since, but not on a real plug."""
     if ctx.dry_run:
         return {"dry_run": True}
     started = time.monotonic()
+    captures = ctx.state.data.get("captures", {})
+    sent_by = next((step for step in ("J2", "O1")
+                    if ctx.state.is_done(step) and isinstance(captures.get(f"{step}.fetched_at"), int)), None)
+
+    def restarted_since_sent(uptime: int) -> bool:
+        before = captures.get(f"{sent_by}.uptime_before")
+        return ((isinstance(before, int) and uptime < before)
+                or uptime < time.time() - captures[f"{sent_by}.fetched_at"] - RESTART_SLACK)
 
     def check(host: str) -> bool:
-        return esphome.is_esphome(host, timeout=3.0) and esphome.relay(host) is not None
+        if esphome.is_esphome(host, timeout=3.0) and esphome.relay(host) is not None:
+            return True
+        if sent_by:
+            uptime = (openbeken.info(host, timeout=3.0) or {}).get("uptime_s")
+            if isinstance(uptime, int) and restarted_since_sent(uptime):
+                raise NotTaken
+        return False
 
-    def look() -> bool:
+    def look(_restarted: bool) -> bool:
         nonlocal started
         started = time.monotonic()
         try:
@@ -231,7 +289,7 @@ def step_esphome_check(ctx: Context, wait: float = ARRIVAL_WAIT) -> dict[str, An
     until_back(ctx, look, "ESPHome", (
         "ESPHome has not answered on your Wi-Fi. The device installs it as it restarts, then reads its "
         "Wi-Fi from the device's own store and joins; if it has not, switch the device off and on, then "
-        "run the same command again to check it"))
+        "run the same command again to check it"), sent_by=sent_by)
     seconds = round(time.monotonic() - started, 1)
     host = ctx.state.input("plug_ip")
     calibration = esphome.calibration_state(host)
@@ -247,7 +305,7 @@ def step_sonoff_check(ctx: Context, wait: float = CLOUD_WAIT) -> dict[str, Any]:
     device_id = str(plugs.read_plug(ctx.state.input("plug_mac") or "").get("ewelink_id") or "")
     host = ctx.state.input("plug_ip")
 
-    def look() -> dict[str, Any]:
+    def look(_restarted: bool) -> dict[str, Any]:
         started = time.monotonic()
         while time.monotonic() - started < wait:
             if host and detect.identify(host, timeout=3.0) in ("openbeken", "interim", "esphome"):

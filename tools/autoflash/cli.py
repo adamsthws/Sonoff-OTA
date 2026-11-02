@@ -45,6 +45,7 @@ from tools.autoflash.context import Context  # noqa: E402
 from tools.autoflash.errors import Abort  # noqa: E402
 from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.prompts import QuitRun  # noqa: E402
+from tools.autoflash.routes.beken import images as beken_images  # noqa: E402
 from tools.autoflash.routes.espressif import bundle, installer  # noqa: E402
 from tools.autoflash.state import RunState  # noqa: E402
 from tools.espressif.safeboot.prepare_imprinted_bundle import forget_stored_password  # noqa: E402
@@ -410,10 +411,13 @@ def _main() -> int:
                         help="show every action as it happens (it is all in the run's log either way)")
     parser.add_argument("--simulate-backup-failure", action="store_true",
                         help=argparse.SUPPRESS)  # testing: the backup's first two reads fail
+    parser.add_argument("--simulate-bad-image", nargs="?", const="B2", metavar="STEP",
+                        help=argparse.SUPPRESS)  # testing: the S61's image STEP sends is refused by its bootloader
     parser.add_argument("--bridge", help=argparse.SUPPRESS)  # research: archive/docs/reference/automatic-wifi.md
     args = parser.parse_args()
     prompts.UNATTENDED = args.unattended
     installer.SIMULATED_BACKUP_FAILURES = 2 if args.simulate_backup_failure else 0
+    beken_images.SPOIL_STEP = args.simulate_bad_image
 
     try:
         given = credentials.load(args.env_file)

@@ -26,6 +26,12 @@ a new address once the step is done (readdress); and at each route's
 "apply", the plug switched off 10, 50 or 90% of the way through its
 bootloader writing the new firmware in - timed off the plug's own output,
 across the switch off and on a route from Sonoff's firmware needs first.
+And at each step that sends an image the stock bootloader installs - Sonoff's
+firmware's (B2) and OpenBeken's fetch of ESPHome (J2, O1) - an image it
+refuses (badimage): the tool sends it spoilt once (--simulate-bad-image
+STEP), fetched whole but failing the bootloader's CRC check, so the plug
+starts the firmware it had again; the scenario passes when the tool sends
+it again by itself and the plug is converted.
 
 Each emulator is a plug of its own (autoflash-s61-N, on autoflash-beken-N),
 AUTOFLASH_S61_WORKERS of them at once (default 2: each takes a core, and the
@@ -80,6 +86,10 @@ TIMING = [("plugoff", 1), ("crash", 1)]
 RUN_LIMIT = 1500       # seconds one run of the tool may take
 RECOVERY_RUNS = 4      # runs after the fault before a scenario fails
 POWER_CYCLE = re.compile(r"switch the (plug|device) off and on", re.IGNORECASE)
+# The steps whose image the stock bootloader installs, and the tool can send
+# spoilt (--simulate-bad-image STEP): Sonoff's firmware's, and OpenBeken's
+# fetch of ESPHome.
+BAD_IMAGE_STEPS = {"B2", "J2", "O1"}
 
 
 def sid(route: str, step: str, fault: str, arg, at: int = 40) -> str:
@@ -103,6 +113,10 @@ def scenarios() -> list[dict]:
                 for fault, arg in (("double", "plugoff-1"), ("readdress", "new")):
                     found.append(dict(id=sid(route, step, fault, arg), route=route, step=step,
                                       fault=fault, arg=arg, at=40))
+        # An image the bootloader refuses, sent again.
+        for step in set(steps) & BAD_IMAGE_STEPS:
+            found.append(dict(id=sid(route, step, "badimage", "once"), route=route, step=step,
+                              fault="badimage", arg="once", at=40))
         # The plug switched off while its bootloader writes the new firmware in:
         # timed off the plug's own output, a share of the way through the write.
         for at in (10, 50, 90):
@@ -201,9 +215,9 @@ class Instance:
     def power(self, how: str) -> None:
         self.sh("power", how, timeout=60)
 
-    def tool(self, target: str, log: Path, new: bool = False) -> subprocess.Popen:
+    def tool(self, target: str, log: Path, new: bool = False, more: tuple[str, ...] = ()) -> subprocess.Popen:
         args = ["computer", "tools/autoflash/cli.py", "run", "--unattended", "--env-file",
-                "captures/tool.env", "--firmware", target] + (["--new"] if new else [])
+                "captures/tool.env", "--firmware", target] + (["--new"] if new else []) + list(more)
         out = open(log, "a", encoding="utf-8")
         return subprocess.Popen([str(BK_EMU), *args], env=self.env, stdout=out, stderr=subprocess.STDOUT,
                                 stdin=subprocess.DEVNULL)
@@ -355,6 +369,8 @@ def run_scenario(instance: Instance, sc: dict) -> dict:
         return dict(result="NOT-READY", notes=notes)
     if sc["step"] == "apply":
         outcome = apply_scenario(instance, sc, target, log, notes)
+    elif sc["fault"] == "badimage":
+        outcome = bad_image_scenario(instance, sc, target, log, notes)
     else:
         outcome = step_scenario(instance, sc, target, log, notes)
     for index, path in enumerate(instance.runs()):
@@ -383,6 +399,29 @@ def apply_scenario(instance: Instance, sc: dict, target: str, log: Path, notes: 
     if cut.fired is None:
         return dict(result="NO-STEP", runs=runs)
     return dict(result="PASS" if converted(instance.last_state(), sc["route"]) else "FAIL", runs=runs)
+
+
+# What a run says as it goes back to send an image again (errors.GoBack).
+SENT_AGAIN = re.compile(r"was not installed: the device restarted on the firmware it had")
+
+
+def bad_image_scenario(instance: Instance, sc: dict, target: str, log: Path, notes: dict) -> dict:
+    """The step's image sent spoilt, once - each run is asked, as a route may
+    reach the step only after a restart, and the tool spoils it once a run's
+    record - and runs again, as a person would, until the plug is converted:
+    which must come from a run that saw the image was not installed and sent
+    it again."""
+    spoil = ("--simulate-bad-image", sc["step"])
+    finish(instance.tool(target, log, new=True, more=spoil), instance)
+    runs = 1
+    while not converted(instance.last_state(), sc["route"]) and runs <= RECOVERY_RUNS:
+        recover(instance, target, notes)
+        finish(instance.tool(target, log, more=spoil), instance)
+        runs += 1
+    notes["sent_again"] = any(SENT_AGAIN.search(path.read_text(encoding="utf-8", errors="replace"))
+                              for path in instance.runs())
+    ok = converted(instance.last_state(), sc["route"]) and notes["sent_again"]
+    return dict(result="PASS" if ok else "FAIL", runs=runs)
 
 
 def step_scenario(instance: Instance, sc: dict, target: str, log: Path, notes: dict) -> dict:

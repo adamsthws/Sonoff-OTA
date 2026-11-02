@@ -100,7 +100,7 @@ def step_openbeken_to_esphome(ctx: Context) -> dict[str, Any]:
     """O1 - ESPHome, fetched by OpenBeken into the download slot."""
     signal = read_signal(ctx, "OpenBeken")
     handover.consent_to_leave(ctx, "OpenBeken")
-    return {**_fetch_esphome(ctx), "signal_dbm": signal}
+    return {**_fetch_esphome(ctx, "O1"), "signal_dbm": signal}
 
 
 def step_interim_to_esphome(ctx: Context) -> dict[str, Any]:
@@ -109,10 +109,10 @@ def step_interim_to_esphome(ctx: Context) -> dict[str, Any]:
     was replaced (B2), and the signal read there - or, on a run that found
     the plug left on the interim firmware, asked for here, as O1 asks."""
     if runs.run_source(ctx.state) != "interim":
-        return _fetch_esphome(ctx)
+        return _fetch_esphome(ctx, "J2")
     signal = read_signal(ctx, "OpenBeken")
     handover.consent_to_leave(ctx, INTERIM_FIRMWARE)
-    return {**_fetch_esphome(ctx), "signal_dbm": signal}
+    return {**_fetch_esphome(ctx, "J2"), "signal_dbm": signal}
 
 
 def step_interim_to_openbeken(ctx: Context) -> dict[str, Any]:
@@ -148,14 +148,19 @@ def set_interim(ctx: Context, interim: bool, why: str, *, restart: bool = True) 
     return restarted
 
 
-def _fetch_esphome(ctx: Context) -> dict[str, Any]:
+def _fetch_esphome(ctx: Context, step: str) -> dict[str, Any]:
+    """ESPHome fetched by OpenBeken (O1, J2), which restarts once it has it.
+    Its uptime before (uptime_before) and when it had all of it (fetched_at):
+    an OpenBeken started since did not take it (arrived.step_esphome_check)."""
     image, version = images.image(ctx, "esphome")
     if ctx.dry_run:
         return {"dry_run": True, "version": version}
     host = ctx.state.input("plug_ip")
-    seconds = serve_to_plug(ctx, image, f"ESPHome {version}", lambda url: openbeken.ota_http(host, url),
-                            unstick=lambda: openbeken.restart(host))
-    return {"seconds": seconds, "version": version}
+    uptime = (openbeken.info(host) or {}).get("uptime_s")
+    seconds = serve_to_plug(ctx, images.as_sent(ctx, step, image), f"ESPHome {version}",
+                            lambda url: openbeken.ota_http(host, url), unstick=lambda: openbeken.restart(host))
+    return {"seconds": seconds, "version": version, "fetched_at": round(time.time()),
+            **({"uptime_before": uptime} if isinstance(uptime, int) else {})}
 
 
 def step_openbeken_to_sonoff(ctx: Context, leaving: str = "OpenBeken") -> dict[str, Any]:

@@ -424,6 +424,19 @@ class RunStepsTests(unittest.TestCase):
         self.assertEqual(ran, ["S1", "S2", "S3"])
         stand_ins["ask_choice"].assert_not_called()
 
+    def test_a_step_sent_back_to_runs_again_and_the_run_carries_on_from_it(self):
+        sent_back = []
+
+        def execute(ctx, step):
+            ran.append(step)
+            if step == "S2" and not sent_back:
+                sent_back.append(step)
+                ctx.go_back = "S1"   # as runner._execute does on errors.GoBack
+            return 0
+        ran = []
+        code, _, _ = self.run_steps(execute_with_retries=mock.Mock(side_effect=execute))
+        self.assertEqual((code, ran), (0, ["S1", "S2", "S1", "S2", "S3"]))
+
     def test_a_failing_step_stops_the_run_and_says_how_to_carry_on(self):
         code, ran, stand_ins = self.run_steps(codes={"S2": 1})
         self.assertEqual((code, ran), (1, ["S1", "S2"]))
@@ -1251,6 +1264,44 @@ class StageTimingTests(unittest.TestCase):
              mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
             runner.execute(ctx, "E2")
         self.assertEqual(state.data["captures"]["E2.plug_busy_seconds"], 41.5)
+
+
+class GoBackTests(unittest.TestCase):
+    """A step that finds an earlier one did not take on the plug sends the run
+    back to it, unasked, a few times at most."""
+
+    def setUp(self):
+        from types import SimpleNamespace
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.state = RunState.open(Path(directory.name))
+        self.ctx = SimpleNamespace(state=self.state, dry_run=False, go_back=None)
+
+    def execute(self):
+        def stage(context):
+            raise errors.GoBack("E1", "ESPHome was not installed: the device restarted on the firmware it had",
+                                "not installed")
+        title, _ = routes.STEP_INDEX["E2"]
+        with mock.patch.dict(routes.STEP_INDEX, {"E2": (title, stage)}), \
+             mock.patch.object(routes, "begin_stage"), mock.patch.object(output, "stage_end") as ended, \
+             mock.patch.object(output, "tell") as told, mock.patch.object(output, "say"):
+            return runner.execute(self.ctx, "E2"), ended, told
+
+    def test_the_run_goes_back_to_the_step_not_taken(self):
+        self.state.mark("E1", DONE)
+        code, ended, told = self.execute()
+        self.assertEqual((code, self.ctx.go_back), (0, "E1"))
+        self.assertEqual((self.state.status("E1"), self.state.status("E2")), ("pending", "pending"))
+        ended.assert_called_once_with("not installed")   # not "stopped": the run goes on
+        self.assertIn("Doing E1 again", told.call_args.args[0])
+
+    def test_one_that_still_does_not_take_stops_the_run(self):
+        self.state.capture("E1.sent_again", runner.GO_BACK_LIMIT)
+        code, ended, _ = self.execute()
+        self.assertEqual((code, self.ctx.go_back), (1, None))
+        self.assertEqual(self.state.status("E2"), "failed")
+        ended.assert_called_once_with("stopped")
+        self.assertIn(f"after it was sent {runner.GO_BACK_LIMIT + 1} times", self.ctx.last_failure)
 
 
 class PlugBackTests(unittest.TestCase):

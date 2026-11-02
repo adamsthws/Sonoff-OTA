@@ -283,9 +283,28 @@ class FromStockTests(unittest.TestCase):
             with mock.patch.object(detect, "identify", return_value="openbeken"):
                 self.assertIsNone(stock.evidence_pushed(ctx)[0])
 
+    def test_a_spoilt_image_fails_only_the_bootloaders_check_and_only_once(self):
+        # --simulate-bad-image: fetched whole (the update's CRC is made over it
+        # as sent), but the RBL's own CRC of its body no longer holds.
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = a_context(tmp, firmware="openbeken")
+            image, _ = images.image(ctx, "openbeken")
+            with mock.patch.object(images, "SPOIL_STEP", "B2"), mock.patch.object(images.output, "say"):
+                spoilt = stock.payload(ctx, "openbeken", image)
+                again = stock.payload(ctx, "openbeken", image)
+                self.assertEqual(images.as_sent(ctx, "J2", image), image)   # another step's: as it is
+            self.assertEqual((len(spoilt), spoilt[:rbl.HEADER]), (len(image), image[:rbl.HEADER]))
+            with self.assertRaises(rbl.RblError):
+                rbl.unpack(spoilt)
+            # Once a run, by its record: the image sent again - by this run, or
+            # one run again after it, asked the same - is the good one.
+            self.assertEqual(again, image)
+            self.assertTrue(ctx.state.data["captures"]["B2.spoilt"])
+
     def test_b2_not_confirmed_writes_nothing_and_a_cut_off_delivery_stays_attempted(self):
         with tempfile.TemporaryDirectory() as tmp:
             ctx = a_context(tmp, stock_version="1.0.2", firmware="esphome")
+            ctx.consented = False   # the go-ahead not given yet in this run
             ctx.account_plug = SimpleNamespace(device_id="1001234abc")
             ctx.account_devices = lambda: [self.DEVICE]
             common = [mock.patch.object(stock.firewall, "choose_port", return_value=8088),
@@ -297,10 +316,14 @@ class FromStockTests(unittest.TestCase):
             with mock.patch.object(stock.prompts, "require_word", return_value=False):
                 with self.assertRaises(errors.NothingWritten):
                     stock.step_push(ctx)
-            with mock.patch.object(stock.prompts, "require_word", return_value=True), \
+            with mock.patch.object(stock.prompts, "require_word", return_value=True) as asked, \
                     mock.patch.object(ota_push, "deliver", return_value=ota_push.Delivery(sent=False, error="login failed")):
                 with self.assertRaisesRegex(errors.Abort, "was not sent: login failed"):
                     stock.step_push(ctx)
+                # Given once a run: B2 sent again (errors.GoBack) does not ask again.
+                with self.assertRaisesRegex(errors.Abort, "was not sent: login failed"):
+                    stock.step_push(ctx)
+            asked.assert_called_once()
             with mock.patch.object(stock.prompts, "require_word", return_value=True), \
                     mock.patch.object(ota_push, "deliver",
                                       return_value=ota_push.Delivery(sent=True, complete=False, bytes_served=100)):
@@ -682,6 +705,95 @@ class ArrivedTests(unittest.TestCase):
             self.assertIn("Restarting it, so your network knows it by its new name",
                           " ".join(str(call.args[0]) for call in said.call_args_list))
             self.assertFalse(self.server.interim)
+
+    def waiting_on_sonoff(self, ctx, answers):
+        """J1 with the plug answering as Sonoff's firmware throughout, and the
+        question after each wait answered with `answers` in turn."""
+        with mock.patch.object(openbeken, "info", return_value=None), \
+                mock.patch.object(detect, "identify", return_value="sonoff"), \
+                mock.patch.object(arrived.join.time, "sleep"), \
+                mock.patch.object(arrived.join.time, "monotonic", side_effect=iter(range(0, 100000, 100))), \
+                mock.patch.object(arrived.prompts, "section"), mock.patch.object(arrived.output, "transient_begin"), \
+                mock.patch.object(arrived.output, "transient_end"), \
+                mock.patch.object(arrived.prompts, "ask_choice", side_effect=answers) as asked:
+            try:
+                arrived.step_interim_check(ctx, wait=1000)
+            finally:
+                self.asked = asked.call_count
+
+    def test_j1_after_b2_sends_the_run_back_to_it_when_a_restart_leaves_sonoffs_firmware(self):
+        # The image was sent whole, but the plug, switched off and on, starts
+        # Sonoff's firmware again: it was not installed, and never will be.
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = a_context(tmp, firmware="esphome")
+            ctx.state.mark("B2", state.DONE)
+            with self.assertRaises(errors.GoBack) as back:
+                self.waiting_on_sonoff(ctx, [0])
+            self.assertEqual((back.exception.step, back.exception.outcome), ("B2", "not installed"))
+            self.assertIn("The interim firmware was not installed", back.exception.reason)
+            # Before the restart, Sonoff's firmware answering said nothing: asked once, to switch it off and on.
+            self.assertEqual(self.asked, 1)
+
+    def test_a_switch_off_and_on_asked_for_is_taken_as_done_by_the_next_run(self):
+        # An unattended run stops to ask; run again after it, Sonoff's firmware
+        # answering means the image was not taken - at once, not after a wait.
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = a_context(tmp, firmware="esphome")
+            ctx.state.mark("B2", state.DONE)
+            with mock.patch.object(arrived.prompts, "UNATTENDED", True), self.assertRaises(errors.Abort):
+                self.waiting_on_sonoff(ctx, [])
+            self.assertTrue(ctx.state.input("restart_asked"))
+            with self.assertRaises(errors.GoBack):
+                self.waiting_on_sonoff(ctx, [])
+            self.assertEqual(self.asked, 0)
+            self.assertIsNone(ctx.state.input("restart_asked"))   # the image sent again starts afresh
+
+    def k2_with_openbeken_up_for(self, ctx, uptime):
+        """K2 with the plug answering as OpenBeken, up `uptime` seconds."""
+        with mock.patch.object(arrived.esphome, "is_esphome", return_value=False), \
+                mock.patch.object(openbeken, "info", return_value={"uptime_s": uptime}), \
+                mock.patch.object(arrived.join.time, "sleep"), \
+                mock.patch.object(arrived.join.time, "monotonic", side_effect=iter(range(0, 100000, 100))), \
+                mock.patch.object(arrived.prompts, "UNATTENDED", True):
+            arrived.step_esphome_check(ctx, wait=1000)
+
+    def test_k2_after_j2_sends_the_run_back_when_openbeken_restarted_since_the_fetch(self):
+        # OpenBeken restarts by itself once it has ESPHome: back on OpenBeken
+        # since, its bootloader did not take the image - no restart to ask for.
+        import time
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = a_context(tmp, firmware="esphome")
+            ctx.state.mark("J2", state.DONE)
+            ctx.state.capture("J2.fetched_at", round(time.time()) - 120)
+            with self.assertRaises(errors.GoBack) as back:
+                self.k2_with_openbeken_up_for(ctx, 30)
+            self.assertEqual(back.exception.step, "J2")
+            self.assertIn("ESPHome was not installed", back.exception.reason)
+            # Up since before the fetch: not restarted yet, only waited for.
+            with self.assertRaisesRegex(errors.Abort, "switch the device off and on"):
+                self.k2_with_openbeken_up_for(ctx, 600)
+
+    def test_k2_sees_the_restart_by_the_uptime_before_the_fetch_whatever_its_clock(self):
+        # The emulated plug's clock runs fast: its uptime soon outgrows the time
+        # since the fetch, but restarted it is still below what it was before.
+        import time
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = a_context(tmp, firmware="esphome")
+            ctx.state.mark("J2", state.DONE)
+            ctx.state.capture("J2.fetched_at", round(time.time()) - 20)
+            ctx.state.capture("J2.uptime_before", 900)
+            with self.assertRaises(errors.GoBack):
+                self.k2_with_openbeken_up_for(ctx, 300)
+            with self.assertRaisesRegex(errors.Abort, "switch the device off and on"):
+                self.k2_with_openbeken_up_for(ctx, 950)
+
+    def test_without_b2_a_plug_on_sonoffs_firmware_is_only_waited_for(self):
+        # Nothing this run sent to go back to: asked again, as before.
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = a_context(tmp, firmware="esphome")
+            with self.assertRaises(errors.Abort):
+                self.waiting_on_sonoff(ctx, [0, errors.Abort("stopped")])
+            self.assertEqual(self.asked, 2)
 
     def test_j1_finds_the_interim_firmware_and_names_it_so(self):
         self.server.interim, self.server.short_name = True, "autoflash-recovery-CDEF"
