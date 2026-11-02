@@ -8,6 +8,7 @@ import time
 import unittest
 import urllib.error
 import urllib.parse
+from unittest import mock
 
 from tools.autoflash import device
 from tools.autoflash.device import Device, DeviceError
@@ -15,7 +16,8 @@ from tools.autoflash.device import Device, DeviceError
 
 class BusyTasmota(http.server.ThreadingHTTPServer):
     """Answers as a Tasmota plug does - /slow only after `delay` seconds, as
-    while Berry runs - and notes whether the client closed a request first."""
+    while Berry runs, or once `release` is set - and notes whether the client
+    closed a request first."""
     daemon_threads = True
 
     def __init__(self, delay: float = 0.0):
@@ -24,6 +26,7 @@ class BusyTasmota(http.server.ThreadingHTTPServer):
         self.slow_page = False
         self.closed_unanswered: list[bool] = []
         self.answered = threading.Event()
+        self.release = threading.Event()
 
 
 class BusyTasmotaHandler(http.server.BaseHTTPRequestHandler):
@@ -41,7 +44,7 @@ class BusyTasmotaHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         server: BusyTasmota = self.server
         if self.path.startswith("/slow") or (server.slow_page and self.path == "/"):
-            time.sleep(server.delay)
+            server.release.wait(server.delay)
             # A client that gave up and closed has sent its FIN by now.
             readable, _, _ = select.select([self.connection], [], [], 0)
             closed = bool(readable) and self.connection.recv(1, socket.MSG_PEEK) == b""
@@ -58,41 +61,59 @@ class BusyTasmotaHandler(http.server.BaseHTTPRequestHandler):
             self.reply(200, b"<title>Tasmota</title>")
 
 
+# Long enough that a plug told to answer late answers only once released: a
+# test that checks what happens before the answer does not race it.
+NOT_YET = 60
+
+
+def held_ends(within: float = 10) -> bool:
+    """Whether every request held ends, its worker done, within `within` seconds."""
+    deadline = time.monotonic() + within
+    while device.held_requests() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return device.held_requests() == 0
+
+
 class HeldRequestTests(unittest.TestCase):
+    def setUp(self):
+        # The requests held are the whole process's: each test counts its own.
+        patcher = mock.patch.object(device, "_held", [])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def start(self, delay: float = 0.0) -> Device:
         server = BusyTasmota(delay)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(lambda: (server.shutdown(), server.server_close()))
+        self.addCleanup(server.release.set)  # no request left waiting
         self.server = server
         return Device(f"127.0.0.1:{server.server_address[1]}")
 
     def test_a_request_the_plug_has_not_answered_is_held_open_not_closed(self):
         # Closing it is what leaves a busy plug's web server stuck for good.
-        plug = self.start(delay=1.5)
+        plug = self.start(delay=NOT_YET)
         with self.assertRaises(TimeoutError):
             plug._get("/slow", {}, timeout=0.3)
         self.assertEqual(device.held_requests(), 1)
-        self.assertTrue(self.server.answered.wait(5))
-        time.sleep(0.2)
+        self.server.release.set()
+        self.assertTrue(self.server.answered.wait(10))
+        self.assertTrue(held_ends(), "the answered request was still held")
         self.assertEqual(self.server.closed_unanswered, [False])
-        self.assertEqual(device.held_requests(), 0)
 
     def test_a_plug_with_requests_held_is_not_sent_more_than_a_few(self):
-        plug = self.start(delay=1.5)
+        plug = self.start(delay=NOT_YET)
         for _ in range(device.MOST_HELD + 2):
             with self.assertRaises(TimeoutError):
                 plug._get("/slow", {}, timeout=0.2)
         self.assertEqual(device.held_requests(plug.host), device.MOST_HELD)
-        deadline = time.monotonic() + 10
-        while device.held_requests() and time.monotonic() < deadline:
-            time.sleep(0.1)
+        self.server.release.set()
+        self.assertTrue(held_ends(), "the answered requests were still held")
         self.assertEqual(self.server.closed_unanswered, [False] * device.MOST_HELD)
         self.assertEqual(plug._get("/slow", {}, timeout=5), "late")  # answered: sent again
 
     def test_a_held_request_is_kept_alive_and_ends_when_the_plug_restarts(self):
         # The commit restarts the plug, cutting off the reply to the request that
         # started it: that hold must end, or it counts against the plug for ever.
-        from unittest import mock
         import struct
         listener = socket.socket()
         listener.bind(("127.0.0.1", 0))
@@ -111,18 +132,15 @@ class HeldRequestTests(unittest.TestCase):
         connection = accepted[0]
         connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
         connection.close()
-        deadline = time.monotonic() + 5
-        while device.held_requests(plug.host) and time.monotonic() < deadline:
-            time.sleep(0.05)
-        self.assertEqual(device.held_requests(plug.host), 0)
+        self.assertTrue(held_ends(), "the cut-off request was still held")
 
     def test_the_web_page_check_still_says_no_at_once(self):
-        plug = self.start(delay=1.5)
+        plug = self.start(delay=NOT_YET)
         self.server.slow_page = True
-        started = time.monotonic()
         self.assertFalse(plug.answers(timeout=0.3))
-        self.assertLess(time.monotonic() - started, 1.0)
-        self.assertTrue(self.server.answered.wait(5))
+        self.assertFalse(self.server.answered.is_set())  # no, before the plug answered
+        self.server.release.set()
+        self.assertTrue(self.server.answered.wait(10))
 
     def test_errors_reach_the_caller_as_before(self):
         plug = self.start()

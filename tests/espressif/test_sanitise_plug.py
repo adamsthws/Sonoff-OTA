@@ -140,17 +140,20 @@ class PublicPlugsTests(unittest.TestCase):
         import argparse
         import io
         import threading
-        import time
         from contextlib import redirect_stdout
         from unittest import mock
-        # The way to Tasmota's first run takes long and fails; the way to
-        # ESPHome's is quick, and its second starts while the first still runs.
+        # The way to Tasmota's first run fails, and lasts until the way to
+        # ESPHome's second run starts - which it does only if not waiting on it.
         events, lock = [], threading.Lock()
+        second_started = threading.Event()
 
         def fake_run(instance, source, firmware, save, log):
             with lock:
                 events.append(("start", source))
-            time.sleep(0.3 if source == "public-pre-final-tasmota" else 0.05)
+            if source == "public-on-esphome":
+                second_started.set()
+            if source == "public-pre-final-tasmota":
+                second_started.wait(10)
             with lock:
                 events.append(("end", source))
             ok = source != "public-pre-final-tasmota"

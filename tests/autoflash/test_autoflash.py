@@ -632,8 +632,7 @@ class TypedAheadTests(unittest.TestCase):
         order = []
         with mock.patch.object(prompts, "discard_typed_ahead", side_effect=lambda: order.append("dropped")), \
              mock.patch("builtins.input", side_effect=lambda _: order.append("asked") or "2"), \
-             mock.patch.object(prompts, "UNATTENDED", False), mock.patch.object(prompts, "_emit"), \
-             mock.patch.object(prompts.output, "answered"):
+             mock.patch.object(prompts, "UNATTENDED", False), mock.patch.object(prompts, "_emit"):
             self.assertEqual(prompts.ask_choice("Which plug is this run for", ["a", "b"]), 1)
         self.assertEqual(order, ["dropped", "asked"])
 
@@ -4930,7 +4929,8 @@ class DeliveryPortTests(unittest.TestCase):
                                   listen_ip=lambda: "192.168.1.141", email=lambda: "me@example.com",
                                   ewelink_env=lambda: {})
             opened = []
-            with mock.patch.object(runs, "ROOT", root), \
+            # installer's own ROOT: the lock it lifts is this one, never the checkout's.
+            with mock.patch.object(installer, "ROOT", root), \
                  mock.patch.object(hostsys, "port_is_free", lambda ip, port: port not in busy), \
                  mock.patch.object(firewall, "ensure_firewall",
                                    lambda c: opened.append(firewall.firewall_ports(c))), \
@@ -4945,6 +4945,9 @@ class DeliveryPortTests(unittest.TestCase):
                     error = str(exc)
             command = run_tool.call_args.args[0] if run_tool.called else None
             port = command[command.index("--listen-port") + 1] if command else None
+            if command:
+                # Lifted here, under this root: its record says so.
+                self.assertTrue((root / "captures" / ".safety-locks" / "RECOVERY_LOCK.guard").exists())
             return port, opened, state.input("delivery_port"), error
 
     def test_8088_is_used_when_free(self):

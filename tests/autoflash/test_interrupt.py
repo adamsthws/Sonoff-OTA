@@ -8,6 +8,7 @@ from tools.autoflash import interrupt, output, prompts, runner
 
 class CtrlCTests(unittest.TestCase):
     def setUp(self):
+        self.addCleanup(interrupt._state.update, dict(interrupt._state))
         interrupt.clear()
         interrupt._state.update(closed=False, deferring=0, deferred=False, asking=0)
         self.clock = [1000.0]
@@ -157,8 +158,9 @@ class NoticeWrittenTests(unittest.TestCase):
         # drawn, so the notice is written out, laid out as the drawn one.
         with mock.patch.object(output, "colour_ok", return_value=True), \
                 mock.patch.object(interrupt.time, "monotonic", return_value=1000.0), \
-                mock.patch.multiple(output._s, draws_notice=True, concise=True, ticker=object(),
-                                    stage="Stage 1 - Confirming prerequisites", transient_rows=0, live=0):
+                mock.patch.multiple(output._s, draws_notice=True, concise=True, ticker=object(), paused=False,
+                                    held=False, stage="Stage 1 - Confirming prerequisites", transient_rows=0,
+                                    live=0):
             interrupt._state["first"] = 1000.0
             try:
                 self.assertEqual(output._notice_text(),

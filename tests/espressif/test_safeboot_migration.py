@@ -856,55 +856,77 @@ class MigrationValidationTests(unittest.TestCase):
         import time as clock
         from unittest import mock
         import tools.espressif.safeboot.serve_safeboot_migration as server_module
+        returned = threading.Event()
+        taken_after_return: list[bool] = []
+
+        class Handler(server_module.MigrationHandler):
+            timeout = 0.5
+
+            def setup(self):
+                # Taken up only once handle_request() is back - which it is
+                # not, if it waits for the request to be handled.
+                taken_after_return.append(returned.wait(10))
+                super().setup()
         with tempfile.TemporaryDirectory() as directory:
             fixture = MigrationFixture(Path(directory))
             state = fixture.state("preflight")
-            with mock.patch.object(server_module.MigrationHandler, "timeout", 0.5):
-                server = MigrationServer(("127.0.0.1", 0), "127.0.0.1", state)
-                server.timeout = 0.2
-                try:
-                    stalled = socket.create_connection(server.server_address, timeout=2)
-                    stalled.sendall(b"POST /capture/table/0 HTTP/1.1\r\nHost: x\r\n"
-                                    b"Content-Length: 8192\r\n\r\n" + b"00" * 100)
-                    started = clock.monotonic()
-                    with mock.patch("builtins.print") as printed:
-                        server.handle_request()
-                        # Back at once: the half-read request waits in its own thread...
-                        self.assertLess(clock.monotonic() - started, 1)
-                        # ...and is still dropped once its timeout passes.
-                        while printed.call_args is None and clock.monotonic() - started < 5:
-                            clock.sleep(0.05)
-                    self.assertIsNotNone(printed.call_args, "the stalled request was never dropped")
-                    self.assertRegex(printed.call_args.args[0], "timed out|request dropped")
-                    stalled.close()
-                finally:
-                    server.server_close()
+            server = MigrationServer(("127.0.0.1", 0), "127.0.0.1", state)
+            server.RequestHandlerClass = Handler
+            server.timeout = 0.2
+            try:
+                stalled = socket.create_connection(server.server_address, timeout=2)
+                stalled.sendall(b"POST /capture/table/0 HTTP/1.1\r\nHost: x\r\n"
+                                b"Content-Length: 8192\r\n\r\n" + b"00" * 100)
+                with mock.patch("builtins.print") as printed:
+                    server.handle_request()
+                    returned.set()
+                    # The half-read request waits in its own thread...
+                    deadline = clock.monotonic() + 10
+                    while printed.call_args is None and clock.monotonic() < deadline:
+                        clock.sleep(0.05)
+                self.assertEqual(taken_after_return, [True], "handle_request() waited for the request")
+                # ...and is still dropped once its timeout passes.
+                self.assertIsNotNone(printed.call_args, "the stalled request was never dropped")
+                self.assertRegex(printed.call_args.args[0], "timed out|request dropped")
+                stalled.close()
+            finally:
+                server.server_close()
 
     def test_a_request_cut_off_by_an_outage_does_not_hold_up_the_next(self):
         # After a network outage the plug's abandoned requests are still open
         # here, each waited on for up to MigrationHandler.timeout. The plug's
         # next request must be answered meanwhile, not after them: it gives up
         # on a reply within 5 seconds (emulator, ESPHome run with an outage).
-        import http.client
+        import select
         import socket
-        import time as clock
         with tempfile.TemporaryDirectory() as directory:
             fixture = MigrationFixture(Path(directory))
             state = fixture.state("preflight")
             server = MigrationServer(("127.0.0.1", 0), "127.0.0.1", state)
+            reading = threading.Event()
+
+            class Handler(MigrationHandler):
+                def do_POST(self):
+                    reading.set()
+                    super().do_POST()
+            server.RequestHandlerClass = Handler
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             stalled = socket.create_connection(server.server_address, timeout=2)
             try:
                 stalled.sendall(b"POST /capture/table/0 HTTP/1.1\r\nHost: x\r\n"
                                 b"Content-Length: 8192\r\n\r\n" + b"00" * 100)
-                clock.sleep(0.2)  # taken up by the server before the next arrives
-                started = clock.monotonic()
-                connection = http.client.HTTPConnection(*server.server_address, timeout=4)
+                # Taken up by the server before the next arrives.
+                self.assertTrue(reading.wait(10), "the stalled request was never taken up")
+                # Given up on well before the stalled request would be dropped.
+                connection = http.client.HTTPConnection(
+                    *server.server_address, timeout=MigrationHandler.timeout / 2)
                 connection.request("GET", "/berry/preflight.be")
                 self.assertEqual(connection.getresponse().status, 200)
-                self.assertLess(clock.monotonic() - started, 2)
                 connection.close()
+                # Answered while the stalled request is still waited on, not after it.
+                self.assertEqual(select.select([stalled], [], [], 0)[0], [],
+                                 "the stalled request was dropped first")
             finally:
                 stalled.close()
                 server.shutdown()

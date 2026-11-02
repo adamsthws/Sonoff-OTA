@@ -28,6 +28,10 @@ class OutputTestCase(unittest.TestCase):
         patcher = mock.patch("sys.stdin", io.StringIO())   # never the terminal running the tests
         patcher.start()
         self.addCleanup(patcher.stop)
+        # A question asked and never answered leaves the output waiting for the keyboard.
+        patcher = mock.patch.multiple(output._s, paused=False, held=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         output.finish()

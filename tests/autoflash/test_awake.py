@@ -22,18 +22,27 @@ def inhibitors(pid: int) -> str:
     return "\n".join(line for line in listed.splitlines() if RUN_HOLD in line and f" {pid} " in f" {line} ")
 
 
+def comes_to(check, want: bool, within: float = 15) -> bool:
+    """Whether `check()` comes to `want` within `within` seconds: systemd
+    lists a hold, or drops it, a moment after the process that takes it."""
+    deadline = time.monotonic() + within
+    while bool(check()) != want and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return bool(check()) == want
+
+
 def systemd_holds() -> bool:
     """Whether this system lets this user hold off sleep: a runner with no
     login session (GitHub Actions) has systemd-inhibit, but takes no hold."""
     if not (shutil.which("systemd-inhibit") and sys.platform.startswith("linux")):
         return False
     probe = subprocess.Popen(["systemd-inhibit", "--what=sleep", "--who=autoflash-test-probe",
-                              "--why=probe", "--mode=block", "sleep", "5"],
+                              "--why=probe", "--mode=block", "sleep", "15"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        time.sleep(0.5)
-        listed = subprocess.run(["systemd-inhibit", "--list", "--no-pager"], capture_output=True, text=True).stdout
-        return "autoflash-test-probe" in listed
+        return comes_to(lambda: "autoflash-test-probe" in subprocess.run(
+            ["systemd-inhibit", "--list", "--no-pager"], capture_output=True, text=True).stdout,
+            True, within=10)
     finally:
         probe.kill()
         probe.wait()
@@ -55,11 +64,9 @@ class AwakeTests(unittest.TestCase):
     def test_systemd_holds_off_sleep_and_lets_go(self):
         self.assertEqual(awake.keep_awake(), "kept awake with systemd-inhibit")
         pid = awake._held["process"].pid
-        time.sleep(0.5)
-        self.assertTrue(inhibitors(pid))
+        self.assertTrue(comes_to(lambda: inhibitors(pid), True), "no hold taken")
         awake.let_sleep()
-        time.sleep(0.5)
-        self.assertFalse(inhibitors(pid))
+        self.assertTrue(comes_to(lambda: inhibitors(pid), False), "the hold was not let go")
 
     @unittest.skipUnless(HOLDS, "systemd does not let this user hold off sleep here")
     def test_a_run_killed_outright_leaves_no_hold_behind(self):
@@ -74,14 +81,10 @@ class AwakeTests(unittest.TestCase):
         line = run.stdout.readline()
         self.assertIn("kept awake", line)
         pid = int(line.split()[-1])
-        time.sleep(0.5)
-        self.assertTrue(inhibitors(pid))
+        self.assertTrue(comes_to(lambda: inhibitors(pid), True), "no hold taken")
         run.kill()  # no clean-up of its own
         run.wait()
-        deadline = time.monotonic() + 15
-        while inhibitors(pid) and time.monotonic() < deadline:
-            time.sleep(1)
-        self.assertFalse(inhibitors(pid))
+        self.assertTrue(comes_to(lambda: inhibitors(pid), False), "the hold outlived the run")
 
 
 if __name__ == "__main__":
