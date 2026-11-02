@@ -78,6 +78,21 @@ check.
   S60TPG`), and ESPHome's comment: one for every model, so one image serves
   them all. The report gives neither the name nor the plug type and region:
   the model line says both.
+- The S60's installer is sent to Sonoff's updater as version 9.9.9, as the
+  S61's firmware is, where it was sent as its own version (4.4.4): a Sonoff
+  release numbered above the installer would otherwise have stopped the
+  conversion, should the S60's updater take only a newer version as the
+  S61's does. The installer itself, and its published file, are unchanged.
+- The report says whether the end-of-run checks passed (`Checks passed`),
+  where it gave the relay's and the power meter's results: what is checked
+  can differ from one kind of device to another, and the report stays the
+  same. For a plug the checks still switch its relay off and on, and what
+  they found is in the run's log.
+- A run from a converted plug - back to Sonoff's firmware, say - reports
+  the plug's model and its Sonoff firmware from what the tool kept of the
+  plug at its first conversion, where it gave `__` for both.
+- A blank line stands between every question and the options or text above
+  it.
 
 ## 2.2.0
 

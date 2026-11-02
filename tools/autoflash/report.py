@@ -36,7 +36,7 @@ def plug_page_url(plug_ip: str | None) -> str | None:
     emulated = os.environ.get("AUTOFLASH_EMULATOR_URL")
     if emulated:
         return emulated
-    return f"http://{plug_ip}/" if plug_ip else None
+    return f"http://{plug_ip}" if plug_ip else None
 
 
 def computer_description() -> str:
@@ -96,7 +96,10 @@ def run_result(ctx: Context, ending: str) -> str:
     failed = getattr(ctx, "last_failed_step", "")
     stopped = next(((number, step) for number, (step, _, _) in enumerate(routes.STEPS, 1)
                     if (step == failed if failed else not ctx.state.is_done(step))), None)
-    where = (f"stage {stopped[0]} of {len(routes.STEPS)} ({routes.stage_name(stopped[1])})"
+    # No total before the firmware is chosen: STEPS is then only the start
+    # every route shares, and how many stages would follow is not known.
+    total = f" of {len(routes.STEPS)}" if routes.ROUTE[0] else ""
+    where = (f"stage {stopped[0]}{total} ({routes.stage_name(stopped[1])})"
              if stopped else "the end")
     reason = ctx.last_failure or (
         ctx.state.data.get("steps", {}).get(stopped[1], {}).get("error", "") if stopped else "")
@@ -133,10 +136,16 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     """
     hardware = hardware or {}
     kind = kinds.of_run(ctx.state)
-    firmware = runs.run_firmware(ctx.state)
+    # None for a run stopped before its firmware was chosen (A3).
+    firmware = routes.recorded_firmware(ctx.state)
     espressif = kind.family == "espressif"
-    product = str(ctx.state.input("product_model") or "")
+    # A run that starts on a converted plug never asks Sonoff's firmware or
+    # eWeLink: what the plug's record kept from its first conversion - the
+    # model, and the Sonoff firmware its backup holds - stands in.
+    record = plugs.read_plug(ctx.state.input("plug_mac") or "")
+    product = str(ctx.state.input("product_model") or record.get("model") or "")
     model = kind.product_of(product)
+    stock_version = str(ctx.state.input("stock_version") or record.get("stock_version") or "")
     captures = ctx.state.data.get("captures", {})
     joined = (captures.get("D1.upload_route") == "bridge network"
               or captures.get("D1.resumed") is True
@@ -154,11 +163,11 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     signal = min(readings) if readings else None
     fields = [
         ("Result", result),
-        ("Firmware", routes.FIRMWARES[firmware]),
+        ("Firmware", routes.FIRMWARES[firmware] if firmware else "not chosen"),
         ("Converted from", CONVERTED_FROM[runs.run_source(ctx.state)]),
         ("Tool version", __version__),
         ("Device model", model or "__"),
-        ("Stock firmware", ctx.state.input("stock_version") or "__"),
+        ("Stock firmware", stock_version or "__"),
         # How it went, never where it is or which plug: the path holds the MAC.
         # A run from a converted plug takes none: one is there or not.
         ("Sonoff backup", plugs.BACKUP_OUTCOMES[ctx.state.input("backup_outcome")
@@ -179,12 +188,20 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         # Whether the device had to be switched off and on to start its new
         # firmware: the emulated S61 never restarts by itself; a real one may.
         *([("Power cycled", "true" if ctx.state.input("power_cycles") else "false")] if not espressif else []),
-        ("Relay", hardware.get("Relay", "not checked")),
-        ("Power meter", hardware.get("Power meter", "not checked")),
+        ("Checks passed", checks_passed(hardware)),
     ]
     if os.environ.get("AUTOFLASH_EMULATOR_URL"):
         fields.append(("Ran in the emulator", "yes"))
     return [(label, answer(value)) for label, value in fields]
+
+
+def checks_passed(hardware: dict[str, str]) -> str:
+    """The end-of-run checks as one answer, whatever the device: for a plug,
+    its relay switching off and on.  What each check found is in the log."""
+    relay = hardware.get("Relay", "not checked")
+    if relay == "not checked":
+        return "not run"
+    return "true" if relay.startswith("switches") else "false"
 
 
 def answer(value: str) -> str:

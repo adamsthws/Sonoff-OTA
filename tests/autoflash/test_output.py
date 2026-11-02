@@ -772,6 +772,30 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Typed the Wi-Fi"], "No")
         self.assertEqual(fields["Joined setup network"], "No")
 
+    def test_a_run_from_a_converted_plug_takes_the_model_and_stock_firmware_from_its_record(self):
+        # Back to Sonoff from OpenBeken: neither Sonoff's firmware nor
+        # eWeLink was asked, but the plug's record has both.
+        ctx = self.ctx(plug_kind="sonoff-s61", product_model="", stock_version="", firmware="sonoff",
+                       source="openbeken", plug_mac="12:34:56:ab:cd:ef")
+        with mock.patch.object(plugs, "read_plug", return_value={"model": "S61STPF", "stock_version": "1.3.0"}) as read:
+            fields = dict(report.report_fields(ctx, 441, False))
+        read.assert_called_with("12:34:56:ab:cd:ef")
+        self.assertEqual(fields["Device model"], "S61STPF")
+        self.assertEqual(fields["Stock firmware"], "1.3.0")
+        with mock.patch.object(plugs, "read_plug", return_value={}):
+            fields = dict(report.report_fields(ctx, 441, False))
+        self.assertEqual((fields["Device model"], fields["Stock firmware"]), ("__", "__"))
+        # What the run itself found comes first.
+        with mock.patch.object(plugs, "read_plug", return_value={"model": "S61STPF", "stock_version": "1.3.0"}):
+            fields = dict(report.report_fields(self.ctx(plug_kind="sonoff-s61", product_model="S61STPE",
+                                                        stock_version="1.2.0", source="sonoff"), 441, False))
+        self.assertEqual((fields["Device model"], fields["Stock firmware"]), ("S61STPE", "1.2.0"))
+
+    def test_a_run_stopped_before_its_firmware_is_chosen_names_none(self):
+        self.assertEqual(dict(report.report_fields(self.ctx(), 441, False))["Firmware"], "Not chosen")
+        chosen = dict(report.report_fields(self.ctx(firmware="esphome"), 441, False))
+        self.assertEqual(chosen["Firmware"], "ESPHome")
+
     def test_an_s61_report_says_whether_it_was_power_cycled(self):
         self.assertNotIn("Power cycled", dict(report.report_fields(self.ctx(), 441, False)))  # an S60's
         s61 = dict(plug_kind="sonoff-s61", product_model="S61STPF", firmware="openbeken", source="sonoff")
@@ -806,7 +830,7 @@ class ReportTests(OutputTestCase):
             report.invite_report(ctx, 441, False)
         self.assertEqual(switched.call_args.kwargs["device_id"], "1000abcdef")
         fields = dict(offered.call_args.args[1])
-        self.assertEqual(fields["Relay"], "Switches (through eWeLink)")
+        self.assertEqual(fields["Checks passed"], "True")
         with mock.patch.object(plugs, "read_plug", return_value={"ewelink_id": "1000abcdef"}), \
                 mock.patch.object(report.ewelink_relay, "check_relay", return_value=(True, False)):
             self.assertEqual(report.check_ewelink_hardware(ctx)["Relay"], "did not switch")
@@ -898,6 +922,19 @@ class ReportTests(OutputTestCase):
                          f"stopped at stage {number} of {len(routes.STEPS)} "
                          f"({routes.stage_name('E3')}): commit refused")
 
+    def test_a_run_stopped_before_its_firmware_is_chosen_gives_no_total(self):
+        # Until A3 the route is only the shared start: its length is no total.
+        from tools.autoflash.state import DONE
+        routes.apply_target(None, "sonoff")
+        self.addCleanup(routes.apply_target, "tasmota", "sonoff")
+        ctx = self.ctx()
+        ctx.last_failure = ("an unattended run needs to be told which firmware: "
+                            "--firmware tasmota or --firmware esphome")
+        for step in ("A0", "A1"):
+            ctx.state.mark(step, DONE)
+        self.assertEqual(report.run_result(ctx, "failed"),
+                         f"stopped at stage 3 ({routes.stage_name('A3')}): {ctx.last_failure}")
+
     def test_only_a_run_that_failed_offers_its_report_not_one_the_operator_stopped(self):
         self.assertEqual(report.report_ending(1, None), "failed")       # a stage failed
         self.assertEqual(report.report_ending(1, "crashed"), "crashed")  # something unexpected
@@ -970,24 +1007,30 @@ class ReportTests(OutputTestCase):
 
     def test_hardware_that_was_not_checked_says_so(self):
         fields = dict(report.report_fields(self.ctx(), 441, False))
-        self.assertEqual(fields["Relay"], "Not checked")
-        self.assertNotIn("Mains voltage", fields)
-        self.assertEqual(fields["Power meter"], "Not checked")
+        self.assertEqual(fields["Checks passed"], "Not run")
+        self.assertNotIn("Relay", fields)
+        self.assertNotIn("Power meter", fields)
         self.assertNotIn("System prompts", fields)
         self.assertNotIn("__", fields.values())
 
     def test_every_answer_starts_with_a_capital_and_only_that_changes(self):
-        fields = dict(report.report_fields(self.ctx(), 441, False,
-                                       {"Relay": "switches (meter confirms)",
-                                        "Power meter": "on: 239 V, 0 W; off: 0 V, 0 W"}))
-        self.assertEqual(fields["Relay"], "Switches (meter confirms)")
-        self.assertEqual(fields["Power meter"], "On: 239 V, 0 W; off: 0 V, 0 W")
+        fields = dict(report.report_fields(self.ctx(), 441, False, {"Relay": "switches (meter confirms)"}))
+        self.assertEqual(fields["Checks passed"], "True")
         self.assertEqual(fields["Device model"], "S60TPG")
+
+    def test_the_checks_pass_when_the_relay_switches_whatever_the_meter_says(self):
+        # What each check found goes to the log; the report gives one answer,
+        # the same for any kind of device.
+        for relay, passed in (("switches (meter confirms)", "true"), ("switches (meter unchanged)", "true"),
+                              ("switches (through eWeLink)", "true"), ("did not switch", "false"),
+                              ("could not be checked", "false"), ("not checked", "not run")):
+            self.assertEqual(report.checks_passed({"Relay": relay, "Power meter": "on: 0 V, 0 W"}), passed, relay)
+        self.assertEqual(report.checks_passed({}), "not run")
 
     def test_the_plug_page_is_the_plug_or_the_emulators_forward(self):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AUTOFLASH_EMULATOR_URL", None)
-            self.assertEqual(report.plug_page_url("192.168.0.50"), "http://192.168.0.50/")
+            self.assertEqual(report.plug_page_url("192.168.0.50"), "http://192.168.0.50")   # no trailing slash
             self.assertIsNone(report.plug_page_url(None))
         with mock.patch.dict(os.environ, {"AUTOFLASH_EMULATOR_URL": "http://localhost:8080"}):
             self.assertEqual(report.plug_page_url("192.168.60.50"), "http://localhost:8080")
@@ -1025,7 +1068,8 @@ class ReportTests(OutputTestCase):
         self.assertNotIn("**", screen)                       # the terminal shows no Markdown
         self.assertRegex(screen, r"Device model: +S60TPG")
         self.assertIn("**Device model:** S60TPG", copied[0])   # the thread gets bold labels
-        self.assertIn("**Relay:** Switches (meter confirms)", copied[0])
+        self.assertIn("**Checks passed:** True", copied[0])
+        self.assertNotIn("Relay", copied[0])
 
 
 

@@ -167,8 +167,10 @@ class EndingTests(RouteTestCase):
     def test_the_report_says_esphome(self):
         fields = dict(report.report_fields(self.ctx(firmware="esphome"), 300, False))
         self.assertEqual(fields["Firmware"], "ESPHome")
-        tasmota = dict(report.report_fields(self.ctx(run="tasmota-run"), 300, False))
-        self.assertEqual(tasmota["Firmware"], "Tasmota")
+        # A run of 1.x, from before there was a choice, installed Tasmota.
+        legacy = self.ctx(run="tasmota-run")
+        legacy.state.mark("D1", DONE)
+        self.assertEqual(dict(report.report_fields(legacy, 300, False))["Firmware"], "Tasmota")
 
     def test_the_hardware_check_switches_through_esphome(self):
         relay = {"on": True}

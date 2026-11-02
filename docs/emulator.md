@@ -665,7 +665,8 @@ gives each request its own connection.
   from the installer 4.4.3 on, so all can be joined (`wifi join NAME`, and
   `wifi home` to go back); an earlier release's installer, with WPA2, cannot.
 - **No power meter.** The CSE7766 is not emulated, so readings are absent and
-  the end-of-run check reports the meter unchanged.
+  the end-of-run check's log says the meter is unchanged; the checks still
+  pass, as the relay switches.
 - **One plug, one region.** The emulator runs whatever the dump came from. A
   dump of another model or region (with that owner's account) is needed to
   emulate it.
