@@ -2230,12 +2230,18 @@ class EsphomeSafeModeTests(unittest.TestCase):
 
 
 class ConsentTests(unittest.TestCase):
-    """Only the word itself goes ahead; anything else stops."""
+    """Only the word itself goes ahead, and q stops; anything else is asked again."""
 
-    def consent(self, reply):
+    def consent(self, *replies):
         from unittest import mock
         import tools.autoflash.prompts as prompts
-        with mock.patch("builtins.input", return_value=reply), \
+        self.asked = []
+        answers = iter(replies)
+
+        def answer(prompt):
+            self.asked.append(prompt)
+            return next(answers)
+        with mock.patch("builtins.input", side_effect=answer), \
              mock.patch.object(prompts, "_emit"), mock.patch.object(output, "say"):
             return prompts.require_word(prompts.CONSENT_WORD)
 
@@ -2262,10 +2268,36 @@ class ConsentTests(unittest.TestCase):
             with self.subTest(reply=reply):
                 self.assertTrue(self.consent(reply))
 
-    def test_anything_else_stops(self):
+    def test_anything_else_is_asked_again_rather_than_stopping(self):
+        # An Enter or a y pressed by habit gets a second chance.
         for reply in ("y", "yes", "proceed now", "procede", ""):
             with self.subTest(reply=reply):
-                self.assertFalse(self.consent(reply))
+                self.assertTrue(self.consent(reply, "proceed"))
+                self.assertEqual(len(self.asked), 2)
+                self.assertIn("(or hit q to quit):", self.asked[1])   # its own row, the one typed on
+        with mock.patch.object(output, "question", wraps=output.question) as laid_out:
+            self.consent("", "PROCEED")
+        self.assertEqual(laid_out.call_args.args[0], "Only the TYPED word PROCEED is accepted")
+
+    def test_q_stops(self):
+        for reply in ("q", "quit", "Q"):
+            with self.subTest(reply=reply):
+                self.assertFalse(self.consent("y", reply))
+
+    def test_ctrl_c_there_stops_at_once_as_at_every_question(self):
+        # Read as any question is: a Ctrl-C there is not a first press of
+        # one during work, whose notice could never be taken away again.
+        import signal
+        from tools.autoflash import interrupt
+
+        def press(prompt):
+            interrupt._on_interrupt(signal.SIGINT, None)
+        interrupt.clear()
+        with mock.patch("builtins.input", side_effect=press), mock.patch.object(interrupt, "_say") as said, \
+                self.assertRaises(KeyboardInterrupt):
+            prompts.require_word(prompts.CONSENT_WORD)
+        said.assert_not_called()
+        self.assertFalse(interrupt.pending())
 
 
 class StartChoiceTests(unittest.TestCase):

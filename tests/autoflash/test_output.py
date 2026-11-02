@@ -159,6 +159,54 @@ class ConciseTests(OutputTestCase):
             self.assertEqual(seen, [False, True, False])
             self.assertTrue(echoing())   # as it was, once the run is over
 
+    def test_a_ctrl_c_at_a_question_is_not_shown_as_a_caret_c(self):
+        # It stops the run there: "^C" after the question said nothing more.
+        # Before a run starts too: the first question is asked before it.
+        import termios
+        leader, follower = os.openpty()
+        self.addCleanup(os.close, leader)
+        keyboard = os.fdopen(follower, "r", encoding="utf-8")
+        self.addCleanup(keyboard.close)
+        found = termios.tcgetattr(follower)
+        found[3] |= termios.ECHO | termios.ECHOCTL
+        termios.tcsetattr(follower, termios.TCSANOW, found)
+
+        def flags():
+            return termios.tcgetattr(follower)[3] & (termios.ECHO | termios.ECHOCTL)
+        seen = []
+
+        def answer(prompt):
+            seen.append(flags())
+            return "y"
+
+        def pressed(prompt):
+            seen.append(flags())
+            raise KeyboardInterrupt
+        with mock.patch("sys.stdin", keyboard), mock.patch("sys.stdout", FakeTerminal()):
+            with mock.patch("builtins.input", side_effect=answer):
+                prompts.ask_yes_no("Go on")                  # no run started
+            with mock.patch("builtins.input", side_effect=pressed), self.assertRaises(KeyboardInterrupt):
+                prompts.ask_yes_no("Go on")
+        self.assertEqual(seen, [termios.ECHO, termios.ECHO])          # typing echoed, ^C not
+        self.assertEqual(flags(), termios.ECHO | termios.ECHOCTL)     # as it was, however it ended
+
+    def test_a_question_cut_short_by_ctrl_c_ends_its_row(self):
+        from tools.autoflash import interrupt
+        screen = FakeTerminal()
+
+        def pressed(prompt):
+            screen.write(prompt)   # input() shows the question, then Ctrl-C
+            raise KeyboardInterrupt
+
+        def body():
+            with mock.patch("builtins.input", side_effect=pressed), self.assertRaises(KeyboardInterrupt):
+                prompts.ask_yes_no("Go on")
+            output.show("Stopped with Ctrl-C.")
+        self.run_with(screen, False, body)
+        self.assertIn("\n Stopped with Ctrl-C.", screen.getvalue())
+        self.assertNotIn("(y/n, q to quit):  Stopped", screen.getvalue())
+        self.assertEqual(interrupt._state["asking"], 0)
+
     def test_the_cursor_shows_only_while_a_question_waits(self):
         def body():
             output.stage_begin(1, "Sending the new firmware")
@@ -422,6 +470,29 @@ class ConciseTests(OutputTestCase):
         self.assertIn(f"{output.GREEN}Stage 6{output.RESET} - Backing up the Sonoff firmware - "
                       f"{output.GREEN}Skipped{output.RESET}", screen)
         self.assertIn("Stage 6 - Backing up the Sonoff firmware - skipped", log)
+
+    def test_a_question_cut_short_is_taken_off_with_its_note_when_the_stage_stops(self):
+        # Seen: Ctrl-C at PROCEED left the note, the question and the stage's
+        # underway line, and its Stopped line came under them.
+        def pressed(prompt):
+            screen.write(prompt)
+            raise KeyboardInterrupt
+
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True), \
+                 mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 24))):
+                output.stage_begin(5, "Sending interim firmware")
+                output.transient_begin()
+                prompts.warning_box("Before going on", ["DO NOT UNPLUG IT during the process."])
+                with mock.patch("builtins.input", side_effect=pressed), self.assertRaises(KeyboardInterrupt):
+                    prompts.require_word(prompts.CONSENT_WORD)
+                output.stage_end("stopped")
+                output.show("Stopped with Ctrl-C.")
+        screen = FakeTerminal()
+        text, log = self.run_with(screen, False, body)
+        rows = [row for row in rendered(text) if row]
+        self.assertEqual(rows, ["Stage 5 - Sending interim firmware - Stopped", "Stopped with Ctrl-C."])
+        self.assertIn("Before going on", log)   # the log keeps it
 
     def test_without_cursor_control_the_question_stays(self):
         def body():

@@ -36,6 +36,7 @@ from . import __version__, interrupt
 IS_WINDOWS = platform.system() == "Windows"
 
 GREEN, RED, YELLOW, BOLD, RESET = "\x1b[32m", "\x1b[31m", "\x1b[33m", "\x1b[1m", "\x1b[0m"
+DIM = "\x1b[2m"   # an aside: how to open a link, how to quit
 # Every row on screen starts this far in, clear of the terminal's left edge.
 MARGIN = " "
 PURPLE = "\x1b[38;5;135m"  # #af5fff: link titles, opposite the green on the colour wheel
@@ -310,7 +311,7 @@ def show_links(links: list[tuple[str, str | None]], indent: str = "    ", *, hin
             _print(indent + hyperlink(url, title, width))
         how = click_hint() if hint else ""
         if how:
-            _print(indent + styled(f"({how})", "\x1b[2m"))
+            _print(indent + styled(f"({how})", DIM))
 
 
 def styled(text: str, *codes: str) -> str:
@@ -373,13 +374,14 @@ def before_input(prompt: str = "") -> None:
             _write_log(f"? {prompt.strip()}")
 
 
-def question(text: str, tail: str = "") -> str:
+def question(text: str, tail: str = "", hint: str = "") -> str:
     """before_input(), with the question laid out for the screen: every row
     but its last written here, the last returned for input() to show.
-    `tail` - ": ", say - follows the question on screen but not in the log."""
+    `tail` - ": ", say - follows the question on screen but not in the log.
+    `hint` - how to quit, say - goes on a row of its own under it, dimmed."""
     with _lock:
-        before_input(text)
-        body = text + tail
+        before_input(f"{text} {hint}" if hint else text)
+        body = text + (f"\n{styled(hint, DIM)}" if hint else "") + tail
         rows = _fit(body.rstrip(" ")).split("\n")
         rows[-1] += body[len(body.rstrip(" ")):]
         for row in rows[:-1]:
@@ -480,17 +482,17 @@ def short_window(*, before_start: bool = False) -> int | None:
     return rows if rows < MIN_ROWS else None
 
 
-def transient_mark() -> tuple[int, bool] | None:
+def transient_mark() -> tuple[int, bool, bool] | None:
     """Where the open block has got to, for transient_rewind() to go back to.
     None when nothing is being taken off the screen."""
     with _lock:
         if _s.transient_rows is None:
             return None
         _break()
-        return _s.transient_rows, _s.after_stage
+        return _s.transient_rows, _s.after_stage, _s.after_blank
 
 
-def transient_rewind(mark: tuple[int, bool] | None) -> bool:
+def transient_rewind(mark: tuple[int, bool, bool] | None) -> bool:
     """Take the rows since transient_mark() off the screen and keep the block
     open, so a question asked again does not pile up under its earlier tries
     - a block taller than the window could no longer be taken away at all.
@@ -506,7 +508,7 @@ def transient_rewind(mark: tuple[int, bool] | None) -> bool:
             _s.live = 0
         sys.stdout.write("\x1b[1F\x1b[2K" * rows)
         sys.stdout.flush()
-        _s.transient_rows, _s.after_stage = mark
+        _s.transient_rows, _s.after_stage, _s.after_blank = mark
         return True
 
 
@@ -594,10 +596,13 @@ def stage_begin(number: int, name: str) -> None:
 
 def stage_end(outcome: str) -> None:
     """outcome: "complete", "stopped", "already done" or "skipped" (a stage
-    the run does not need, passed over)."""
+    the run does not need, passed over).  A block - a note and its question
+    - still open is taken off first: one cut short by Ctrl-C or q would
+    otherwise stay, the stage's underway line with it above its last."""
     with _lock:
         if _s.stage is None:
             return
+        transient_end()
         elapsed = _elapsed(_stage_seconds())
         timing = f" ({elapsed})" if outcome == "complete" else ""
         line = f"{_s.stage} - {outcome}{timing}"   # its time in the log and the report, not on screen

@@ -61,7 +61,7 @@ def _emit(lines: Iterable[str]) -> None:
         output.show(f"{BULLET}{line}")
 
 
-def _retry(mark: tuple[int, bool] | None, lines: Iterable[str]) -> None:
+def _retry(mark: tuple[int, bool, bool] | None, lines: Iterable[str]) -> None:
     """A wrong answer: take it and its question off the screen again, back to
     `mark`, then say why before asking again - so wrong answers do not pile
     up, one under another, until the question is taller than the window."""
@@ -127,8 +127,7 @@ def _raw(question: str, default: str | None, private: str | None = None) -> str:
         raise _no_one_to_answer(question)
     suffix = f" [{default}]" if default else ""
     discard_typed_ahead()
-    with interrupt.asking():  # nothing in flight at a question: Ctrl-C stops at once
-        answer = input(output.question(f"{question}{suffix}", ": ")).strip()
+    answer = _read_answer(output.question(f"{question}{suffix}", ": ")).strip()
     if private:
         output.private(answer, private)
     output.answered(answer)
@@ -137,6 +136,48 @@ def _raw(question: str, default: str | None, private: str | None = None) -> str:
     if not answer and default is not None:
         return default
     return answer
+
+
+def _read_answer(prompt: str) -> str:
+    """input() for a question laid out by output.question().  Nothing is in
+    flight at a question, so Ctrl-C stops the run at once; its row is ended
+    then, so what the run says next starts on its own."""
+    with interrupt.asking(), _ctrl_c_unseen():
+        try:
+            return input(prompt)
+        except KeyboardInterrupt:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            output.after_input()
+            raise
+
+
+@contextlib.contextmanager
+def _ctrl_c_unseen():
+    """While an answer is typed, the terminal echoes it but shows no ^C for a
+    Ctrl-C, which stops the run there and needs no mark; its settings are
+    given back however the answer ends."""
+    try:
+        import termios
+    except ImportError:  # Windows: its console shows no ^C
+        yield
+        return
+    saved = None
+    try:
+        if sys.stdin.isatty():
+            fd = sys.stdin.fileno()
+            saved = termios.tcgetattr(fd)
+            quiet = list(saved)
+            quiet[3] &= ~termios.ECHOCTL
+            termios.tcsetattr(fd, termios.TCSANOW, quiet)
+    except (OSError, ValueError, termios.error):
+        saved = None  # no terminal to quieten
+    try:
+        yield
+    finally:
+        if saved is not None:
+            with contextlib.suppress(OSError, ValueError, termios.error):
+                termios.tcsetattr(fd, termios.TCSANOW, saved)
 
 
 class SecretLine:
@@ -811,14 +852,26 @@ def confirm(prompt: str) -> bool:
 
 
 def require_word(word: str) -> bool:
-    """True only if the operator types `word` - any capitalisation - and Enter."""
+    """True once the operator types `word` - any capitalisation - and Enter;
+    False if they type q (or another quit word) instead.  Anything else - an
+    Enter or a y pressed by habit - is not taken as either: the question is
+    asked again, saying only the word itself goes ahead."""
     output.tell("")
-    # Read directly: an empty answer must stop here, not be asked again.
-    question = f"Type {word.upper()} to go ahead - anything else stops, changing nothing: "
+    question = f"Type {word.upper()} to go ahead - q stops, changing nothing"
     if UNATTENDED:
         # Given in advance by starting the run with --unattended.
-        answered_unattended(question.rstrip(": "), word.upper())
+        answered_unattended(question, word.upper())
         return True
-    answer = input(output.question(question))
-    output.answered(answer)
-    return answer.strip().lower() == word.lower()
+    discard_typed_ahead()
+    mark = output.transient_mark()
+    prompt = output.question(question, ": ")
+    while True:
+        answer = _read_answer(prompt).strip().lower()
+        output.answered(answer)
+        if answer == word.lower():
+            return True
+        if answer in QUIT_WORDS:
+            return False
+        output.transient_rewind(mark)  # the wrong answer, and its question, off the screen
+        prompt = output.question(f"Only the TYPED word {word.upper()} is accepted", " ",
+                                 hint="(or hit q to quit):")

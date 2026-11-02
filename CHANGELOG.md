@@ -97,6 +97,18 @@ check.
 - The links after a successful run start with GitHub Sponsors, before Ko-fi
   and PayPal.
 - The addresses of a list of links line up under one another.
+- At PROCEED, an answer other than the word - an Enter or a y pressed by
+  habit - asks again ("Only the TYPED word PROCEED is accepted"), where it
+  stopped the run; q stops. Ctrl-C there stops the run at once, as at every
+  question, where it was taken as a first press during work.
+- A Ctrl-C at a question is not shown as `^C`, and what the run says next
+  starts on a row of its own.
+- A run starts at the top of the window, with all of it to use: what the
+  window showed is scrolled up into its scrollback, not cleared, so it can
+  still be scrolled back to.
+- A question cut short by Ctrl-C or q - PROCEED, say - is taken off the
+  screen with its note when the run stops, as an answered one is, where it
+  stayed, with its stage shown twice: underway above it, stopped below.
 - A blank line stands between every question and the options or text above
   it.
 - A first Ctrl-C asks "! Are you sure?", under the stage line where it was
