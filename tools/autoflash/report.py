@@ -22,7 +22,8 @@ if TYPE_CHECKING:
 
 # Where people share how their conversion went: the pinned "Test reports" thread.
 REPORTS_URL = "https://github.com/adamsthws/Sonoff-OTA/discussions/1"
-# Shown once a conversion has succeeded, after the report.
+# Shown once a conversion has succeeded, after the report, in this order.
+SPONSORS_URL = "https://github.com/sponsors/adamsthws"
 KOFI_URL = "https://ko-fi.com/adamsthws"
 DONATE_URL = "https://www.paypal.me/adamsthws"
 
@@ -354,7 +355,7 @@ def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
     output.tell("")
     output.show("You've reached the bit where I hold out my hat!", output.GREEN)
     output.tell("Free software, not free biscuits... Throw your friendly neighbourhood dev a biscuit:")
-    output.show_links([(KOFI_URL, "Ko-fi"), (DONATE_URL, "PayPal")], hint=True)
+    output.show_links([(SPONSORS_URL, "GitHub"), (KOFI_URL, "Ko-fi"), (DONATE_URL, "PayPal")], hint=True)
 
 
 def report_ending(code: int | None, ending: str | None) -> str | None:

@@ -94,6 +94,9 @@ check.
 - While the report is put together after the last stage - the device's
   checks take a few seconds - "Generating your report..." shows with the
   stages' spinner, and goes when the report is shown.
+- The links after a successful run start with GitHub Sponsors, before Ko-fi
+  and PayPal.
+- The addresses of a list of links line up under one another.
 - A blank line stands between every question and the options or text above
   it.
 - A first Ctrl-C asks "! Are you sure?", under the stage line where it was

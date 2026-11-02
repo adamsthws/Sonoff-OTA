@@ -267,17 +267,17 @@ def links_ok() -> bool:
     return not IS_WINDOWS or bool(os.environ.get("WT_SESSION"))
 
 
-def hyperlink(url: str, title: str | None = None) -> str:
+def hyperlink(url: str, title: str | None = None, width: int = 0) -> str:
     """The URL as a link the terminal can open on a click (OSC 8).
 
     The URL itself is always shown, after the title if there is one, so a
     terminal that does not take the sequence still has it to pick out or
     copy.  Only the URL is the link: the title stays outside it, coloured
     wherever colour is, as some terminals repaint link text in their own
-    colour.
+    colour.  `width`: the title padded to it, so the URLs of a list line up.
     """
     link = f"\x1b]8;;{url}\x1b\\{url}\x1b]8;;\x1b\\" if links_ok() else url
-    return f"{styled(title + ':', BOLD, _purple())} {link}" if title else link
+    return f"{styled(title + ':', BOLD, _purple())}{' ' * (width - len(title))} {link}" if title else link
 
 
 def _purple() -> str:
@@ -301,11 +301,13 @@ def show_link(url: str, title: str | None = None, indent: str = "    ") -> None:
 
 
 def show_links(links: list[tuple[str, str | None]], indent: str = "    ", *, hint: bool = False) -> None:
-    """Links one to a line, and with hint=True how to open them underneath."""
+    """Links one to a line, their URLs lined up, and with hint=True how to
+    open them underneath."""
+    width = max((len(title) for _, title in links if title), default=0)
     with _lock:
         for url, title in links:
-            _write_log(indent + (f"{title}: {url}" if title else url))
-            _print(indent + hyperlink(url, title))
+            _write_log(indent + (f"{title}:{' ' * (width - len(title))} {url}" if title else url))
+            _print(indent + hyperlink(url, title, width))
         how = click_hint() if hint else ""
         if how:
             _print(indent + styled(f"({how})", "\x1b[2m"))
