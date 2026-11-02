@@ -64,11 +64,15 @@ def secrets(flash: bytes) -> dict[bytes, str]:
 
 def redactor(flash: bytes):
     table = secrets(flash)
-    pattern = re.compile(b"|".join(re.escape(s) for s in sorted(table, key=len, reverse=True)))
+    # No secrets (a public plug's flash, say) would join to an empty pattern,
+    # which matches everywhere and has no label.
+    pattern = table and re.compile(b"|".join(re.escape(s) for s in sorted(table, key=len, reverse=True)))
 
     def apply(line: bytes) -> bytes:
         if MEMORY_DUMP.match(line):
             return b""
+        if not pattern:
+            return line
         return pattern.sub(lambda m: b"<redacted:" + table[m.group(0)].encode() + b">", line)
 
     return apply
