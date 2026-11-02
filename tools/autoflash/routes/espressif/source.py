@@ -28,9 +28,9 @@ def known_macs() -> set[str]:
 
 
 def find_current_firmware(ctx: Context) -> str:
-    """What the plug runs now: Tasmota or ESPHome if it is one this tool can
-    find converted on the network, else Sonoff's firmware (found later,
-    through eWeLink).  With --plug-ip, the plug at that address."""
+    """What the plug runs now: Tasmota, ESPHome or OpenBeken if it is one this
+    tool can find converted on the network, else Sonoff's firmware (found
+    later, through eWeLink).  With --plug-ip, the plug at that address."""
     given = ctx.state.input("plug_ip")
     if given:
         running = unlock.identify(ctx, given)
@@ -48,6 +48,15 @@ def find_current_firmware(ctx: Context) -> str:
                 and detect.answers_as_tasmota(given):
             # A Tasmota without the plug's template, as the search finds it.
             running = "untemplated"
+        if running in ("openbeken", "interim"):
+            # Its kind is its import module's to say, as the search finds it.
+            found = detect.openbeken_plug(given)
+            if not found or found.firmware != running:
+                raise Abort(f"the device at {given} did not say twice alike what it runs: run the same command "
+                            "again")
+            found.mac = mac
+            adopt_plug(ctx, found)
+            return running
         if running in ("tasmota", "esphome", "midway", "installer", "untemplated"):
             adopt_plug(ctx, detect.Found(given, running, mac))
             if mover:

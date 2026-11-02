@@ -1,7 +1,7 @@
 """The plug on its new firmware: started, on the Wi-Fi, and answering as what
-was installed (K1 OpenBeken, K2 ESPHome, K3 Sonoff's own firmware) - and,
-on OpenBeken, the plug's own data backed up (B4), which only OpenBeken can
-read out.
+was installed (K1 OpenBeken, J1 OpenBeken as the interim firmware, K2
+ESPHome, K3 Sonoff's own firmware) - and, on OpenBeken, the plug's own data
+backed up (B4), which only OpenBeken can read out.
 
 A plug that has not come back on its new firmware is the person's to switch
 off and on, then looked for again (until_back); an unattended run stops there,
@@ -15,9 +15,9 @@ import time
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING, TypeVar
 
-from tools.autoflash import detect, esphome, join, kinds, openbeken, output, plugs, prompts, runs
+from tools.autoflash import detect, esphome, join, kinds, openbeken, output, plugs, prompts
 from tools.autoflash.errors import Abort
-from tools.autoflash.routes.beken import images
+from tools.autoflash.routes.beken import images, onward
 from tools.beken import backup
 
 if TYPE_CHECKING:
@@ -82,72 +82,94 @@ def power_cycle_emulated(switch: Path) -> None:
     output.say("    Power-cycled the emulated device.")
 
 
-def step_openbeken_check(ctx: Context, wait: float = ARRIVAL_WAIT) -> dict[str, Any]:
+def step_openbeken_check(ctx: Context, wait: float = ARRIVAL_WAIT, *, interim: bool = False) -> dict[str, Any]:
     """K1 - OpenBeken started from the image, and on the home Wi-Fi: it
     answers at the plug's address (or wherever its hardware address is now)
-    as the OpenBeken the tool installs on this kind of plug."""
+    as the OpenBeken the tool installs on this kind of plug - and, as its
+    import module says, not as the interim firmware; J1 (`interim`) the
+    same, as the interim firmware, which it is named to the person as.  One
+    that says otherwise is told what it is: the plug's own OpenBeken, then
+    restarted, so the name it keeps follows; the interim firmware (the
+    marker B2 sends after it cut off, say) not restarted, so it is never
+    named wrongly on the network, only not renamed for its few minutes."""
     if ctx.dry_run:
         return {"dry_run": True}
+    shown = images.INTERIM_NAME if interim else "OpenBeken"
     kind = kinds.of_run(ctx.state)
     started = time.monotonic()
 
     def check(host: str) -> dict[str, Any] | None:
         found = openbeken.info(host, timeout=3.0)
         if found and openbeken.kind(host, found, timeout=3.0) is kind:
-            return found
+            answer = openbeken.is_interim(host, timeout=3.0)
+            if answer is not None:
+                return {**found, "interim": answer}
         return None
 
     def look() -> dict[str, Any]:
         nonlocal started
         started = time.monotonic()
         try:
-            return join.wait_for(ctx, check, "OpenBeken on your Wi-Fi", timeout=wait)
+            return join.wait_for(ctx, check, f"{shown} on your Wi-Fi", timeout=wait)
         except Abort as exc:
             raise NotBack from exc
 
-    found = until_back(ctx, look, "OpenBeken", (
-        "OpenBeken has not answered on your Wi-Fi. The device installs it as it restarts, then reads "
-        "its Wi-Fi from the device's own store and joins; if it has not, switch the device off and on, "
-        "then run the same command again to check it"))
+    title = shown[0].upper() + shown[1:]
+    found = until_back(ctx, look, title, (
+        f"{title} has not answered on your Wi-Fi. The device installs it as it restarts, then reads its "
+        "Wi-Fi from the device's own store and joins; if it has not, switch the device off and on, then run "
+        "the same command again to check it"))
     seconds = round(time.monotonic() - started, 1)
     version = openbeken.version(found)
-    ctx.state.set_input("device_name", str(found.get("shortName") or ""))
-    output.say(f"    OpenBeken {version} answered after {seconds}s, named {found.get('shortName')!r}.")
-    return {"seconds": seconds, "version": version, "name": found.get("shortName")}
+    settled = found["interim"] == interim
+    if interim:
+        # Not the plug's name for good: the firmware chosen names it.
+        output.say(f"    {title} {version} answered after {seconds}s.")
+    if not settled:
+        onward.set_interim(ctx, interim, (
+            "It started without the marker sent after it (its update cut off at the very end): it is the "
+            "interim firmware now, under the name it started with." if interim else
+            "It had the interim firmware's name: given its own."), restart=not interim)
+    if interim:
+        return {"seconds": seconds, "version": version, **({} if settled else {"told": "interim"})}
+    if not settled:
+        found = openbeken.info(ctx.state.input("plug_ip")) or {}
+    name = str(found.get("shortName") or "")
+    ctx.state.set_input("device_name", name)
+    output.say(f"    OpenBeken {version} answered after {seconds}s, named {name!r}.")
+    return {"seconds": seconds, "version": version, "name": name, **({} if settled else {"told": "not interim"})}
+
+
+def step_interim_check(ctx: Context, wait: float = ARRIVAL_WAIT) -> dict[str, Any]:
+    """J1 - the interim firmware (OpenBeken, images.INTERIM) started and on
+    the home Wi-Fi, as K1 - there only to back the plug up, then fetch the
+    firmware chosen - and saying it is the interim firmware (AutoflashInterim)."""
+    return step_openbeken_check(ctx, wait, interim=True)
 
 
 def step_backup(ctx: Context) -> dict[str, Any]:
-    """B4 - the plug's own data, read out of it through its new firmware -
-    OpenBeken's /api/flash, or our ESPHome's backup reader, open through its
-    first start only: the factory record with its MAC and radio calibration,
-    the stock store with its Wi-Fi, meter calibration and eWeLink identity,
-    and the system store - and, with them, Sonoff's firmware as the image
-    that puts it back (from the public dump).  Kept on this computer, never
-    overwritten; the plug keeps its own.  ESPHome's reader is then shut for
-    good, so nothing can read the plug out later; one left open by a read
-    that failed shuts by itself.
+    """B4 - the plug's own data, read out of it through OpenBeken's
+    /api/flash - the firmware chosen, or the interim one: the factory record
+    with its MAC and radio calibration, the stock store with its Wi-Fi, meter
+    calibration and eWeLink identity, and the system store - and, with them,
+    Sonoff's firmware as the image that puts it back (from the public dump).
+    Kept on this computer, never overwritten; the plug keeps its own.
     """
     mac = ctx.state.input("plug_mac")
     if ctx.dry_run or not mac:
         return {"dry_run": True} if ctx.dry_run else {"outcome": "not taken", "stage_outcome": "skipped"}
     outcome = _back_up(ctx, mac)
-    if runs.run_firmware(ctx.state) == "esphome" and outcome != "failed":
-        esphome.api_close_backup(ctx.state.input("plug_ip"))
     ctx.state.set_input("backup_outcome", outcome)
     return {"outcome": outcome, "stage_outcome": plugs.BACKUP_OUTCOMES[outcome][0]}
 
 
-def _read_region(ctx: Context, host: str) -> tuple[bytes | None, str]:
-    """The plug's own data, read through the firmware it now runs, and how;
-    None from an ESPHome without the backup reader."""
+def _read_region(host: str) -> bytes:
+    """The plug's own data, read through OpenBeken."""
     start, size = plugs.BEKEN_REGION
 
     def progress(done: int, total: int) -> None:
         output.progress(f"reading the device's own data: {100 * done // total}%")
-    if runs.run_firmware(ctx.state) == "esphome":
-        return (esphome.api_read_backup(host, size, progress=progress),
-                "ESPHome's backup reader on its first start after conversion")
-    return openbeken.read_flash(host, start, size, progress=progress), "OpenBeken GET /api/flash after conversion"
+    return openbeken.read_flash(host, start, size, progress=progress)
 
 
 def _back_up(ctx: Context, mac: str) -> str:
@@ -159,11 +181,7 @@ def _back_up(ctx: Context, mac: str) -> str:
     kind = kinds.of_run(ctx.state)
     host = ctx.state.input("plug_ip")
     try:
-        region, source = _read_region(ctx, host)
-    except esphome.BackupShut:
-        output.tell("    ESPHome's backup reader had shut already: no backup taken. The device keeps its own "
-                    "data, and a run to OpenBeken backs it up.")
-        return "reader shut"
+        region = _read_region(host)
     except OSError as exc:
         output.progress_clear()
         output.tell(f"    The device's own data could not be read ({exc}); carrying on without a backup. "
@@ -171,10 +189,6 @@ def _back_up(ctx: Context, mac: str) -> str:
         return "failed"
     finally:
         output.progress_clear()
-    if region is None:
-        output.tell("    This ESPHome cannot read out the device's own data: no backup taken. The device keeps "
-                    "it, and a run to OpenBeken backs it up.")
-        return "openbeken only"
     try:
         found = backup.factory_mac(region)
     except ValueError as exc:
@@ -188,7 +202,7 @@ def _back_up(ctx: Context, mac: str) -> str:
     except Abort as exc:
         output.tell(f"    {exc}: the device's data is kept, without Sonoff's firmware beside it.")
         stock, stock_version = None, str(ctx.state.input("stock_version") or "")
-    directory, saved = plugs.save_beken_backup(mac, region, stock, stock_version, kind=kind.name, source=source)
+    directory, saved = plugs.save_beken_backup(mac, region, stock, stock_version, kind=kind.name)
     if not saved:
         return "existing"
     output.say(f"    Backed up the device's own data ({len(region):,} bytes) and Sonoff's firmware to "
@@ -236,7 +250,7 @@ def step_sonoff_check(ctx: Context, wait: float = CLOUD_WAIT) -> dict[str, Any]:
     def look() -> dict[str, Any]:
         started = time.monotonic()
         while time.monotonic() - started < wait:
-            if host and detect.identify(host, timeout=3.0) in ("openbeken", "esphome"):
+            if host and detect.identify(host, timeout=3.0) in ("openbeken", "interim", "esphome"):
                 output.progress(f"the device still runs the firmware it is leaving... {time.monotonic() - started:.0f}s")
             else:
                 devices = ctx.account_devices() if device_id else None
@@ -251,11 +265,11 @@ def step_sonoff_check(ctx: Context, wait: float = CLOUD_WAIT) -> dict[str, Any]:
                 output.progress(f"waiting for eWeLink to show the device online... {time.monotonic() - started:.0f}s")
             time.sleep(10)
         output.progress_clear()
-        if host and detect.identify(host, timeout=3.0) in ("openbeken", "esphome"):
+        if host and detect.identify(host, timeout=3.0) in ("openbeken", "interim", "esphome"):
             raise Abort("the device still answers as the firmware it was to leave: Sonoff's firmware was not "
                         "installed. Run the same command again to send it again")
         if not device_id:
-            output.tell("    The device no longer answers as OpenBeken or ESPHome. Its eWeLink device id is not "
+            output.tell("    The device no longer answers as the firmware it left. Its eWeLink device id is not "
                         "known here, so whether it is back in the app is for the app to show.")
             return {"seconds": round(time.monotonic() - started, 1), "confirmed_by": "nothing answering"}
         raise NotBack

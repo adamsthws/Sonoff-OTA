@@ -14,8 +14,8 @@ conversion files its Sonoff backup:
         backup.json           what this is: model, offsets, hashes, when
 
 With these a plug can be put back to stock later whatever happens: stage the
-stock RBL (S61RevertToStock), and if the config region were ever lost, rewrite
-it from the copy. The backup is never overwritten once made.
+stock RBL (AutoflashRevertToStock), and if the config region were ever lost,
+rewrite it from the copy. The backup is never overwritten once made.
 
   python3 backup.py --plug http://192.168.1.100 [--stock-rbl stock_app_1.0.2.rbl]
 """
@@ -116,7 +116,7 @@ def main() -> int:
                             "elecCalibCoef, eWeLink keys) @0x3e2000; EasyFlash system ENV @0x3f6000",
             }
         },
-        "restore": "stage stock-app-*.rbl in the download slot (S61RevertToStock); "
+        "restore": "stage stock-app-*.rbl in the download slot (AutoflashRevertToStock); "
                    "rewrite config-0x3e0000.bin at 0x3e0000 only if that region was lost",
     }
     if a.stock_rbl:

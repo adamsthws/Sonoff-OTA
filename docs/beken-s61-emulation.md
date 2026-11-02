@@ -960,8 +960,8 @@ exactly as the OpenBeken build does —
 `rt_ota_packaging_tool_cli -f app.bin -o app.rbl -p app -c gzip -s aes -k
 0123456789ABCDEF0123456789ABCDEF -i 0123456789ABCDEF -v 1.0.2` — using the same
 public default AES key as every other RBL, which the bootloader accepts.
-`S61RevertToStock <url>` in the import module checks the OTA slot is `0x286000`
-in both the SDK table and `START_ADR_OF_BK_PARTITION_OTA` (the constant the REST
+`S61RevertToStock <url>` (now `AutoflashRevertToStock`) in the import module
+checks the OTA slot is `0x286000` in both the SDK table and `START_ADR_OF_BK_PARTITION_OTA` (the constant the REST
 OTA path uses), refusing on a 2 MB-table build where the download would land at
 `0x132000`, and hands the URL to OpenBeken's normal OTA download. Run end to end in
 the emulator against a host HTTP server: `init OTA, startaddr 0x286000` → reboot →
@@ -977,7 +977,9 @@ emulator. With the generic stock app and this region, a plug can always be put
 back to stock.
 
 **The robust, update-proof mechanism (ship this): an OpenBeken import module**
-([`devices/sonoff-s61/drv_sonoff_s61_import.c`](../devices/sonoff-s61/drv_sonoff_s61_import.c)).
+(now the driver [`tools/beken/openbeken/drv_autoflash.c`](../tools/beken/openbeken/drv_autoflash.c)
+and the S61's table for it,
+[`devices/sonoff-s61/drv_autoflash_sonoff_s61.c`](../devices/sonoff-s61/drv_autoflash_sonoff_s61.c)).
 On first boot (only when no SSID is set) it reads the stock EF40 store with
 `beken_hal_flash_read`, finds the newest CRC-valid `wifi-ssid`/`wifi-pass`, and
 calls OpenBeken's own `CFG_SetWiFiSSID()`/`CFG_SetWiFiPass()`. Because it uses the

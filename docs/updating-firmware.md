@@ -177,18 +177,21 @@ python3 tools/repo/update_firmware.py esphome 2026.10.0 --plug sonoff-s61
 
 `openbeken` clones [OpenBK7231T_App](https://github.com/openshwprojects/OpenBK7231T_App)
 at the commit pinned (or `--commit`; with none pinned, `main`'s head) and its
-SDK, applies this project's 4 MB-table patches
-([`tools/beken/openbeken/`](../tools/beken/openbeken/), offered upstream),
-adds the plug's import module (`devices/sonoff-s61/drv_sonoff_s61_import.c`)
-to the build and to start-up as [openbeken.md](../devices/sonoff-s61/openbeken.md)
+SDK, applies this project's patches
+([`tools/beken/openbeken/`](../tools/beken/openbeken/): the 4 MB table,
+offered upstream, and the hook before an OTA's restart the driver uses),
+adds this project's OpenBeken driver
+(`tools/beken/openbeken/drv_autoflash.c` and `drv_autoflash.h`) and the
+plug's table for it (`devices/sonoff-s61/drv_autoflash_sonoff_s61.c`) to
+the build and to start-up as [openbeken.md](../devices/sonoff-s61/openbeken.md)
 says, and builds `OpenBK7238` with `FLASH_SIZE=4M` in this project's build
 image (`tools/beken/openbeken/build.Dockerfile`, Ubuntu 24.04: the SDK's own
 toolchain wants a newer GLIBC than OpenBeken's image has). It checks the
 image is an rt_ota app of the version asked, fits the download slot, and
-holds each command the module registers; then it publishes it, recording the
-OpenBeken and SDK commits, the module's and patches' hashes and the build
-image. OpenBeken has no releases, so nothing takes it by itself: update it
-by hand, on a commit that has been out a while. The version is this
+holds each command the driver registers; then it publishes it, recording the
+OpenBeken and SDK commits, the hashes of the driver, the table and the
+patches, and the build image. OpenBeken has no releases, so nothing takes it
+by itself: update it by hand, on a commit that has been out a while. The version is this
 project's for the image (`--image-version`, the next minor by default), not
 OpenBeken's.
 

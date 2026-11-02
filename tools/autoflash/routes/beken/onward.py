@@ -1,7 +1,8 @@
 """From one converted firmware to another, or back to Sonoff's: each firmware
 takes the next as an update of its own kind.  OpenBeken fetches an rt_ota
-image by URL into the download slot (O1, O2); an ESPHome on LibreTiny takes
-a UF2 carrying one through ESPHome's OTA (E1, E2).  The stock bootloader
+image by URL into the download slot (O1, O2, and J2 as the interim
+firmware); an ESPHome on LibreTiny takes a UF2 carrying one through ESPHome's
+OTA (E1, E2).  The stock bootloader
 applies whichever is there on the restart that follows, and the new firmware
 reads the plug's Wi-Fi from the stock store.
 """
@@ -30,6 +31,8 @@ FETCH_WAIT = 240.0
 # mid-download) refuses another until it restarts: restarted, and asked again.
 FIRST_BYTE_WAIT = 30.0
 IMAGE_NAME = "firmware.rbl"
+# What the go-ahead says is replaced: "the device's interim firmware".
+INTERIM_FIRMWARE = images.INTERIM_NAME.removeprefix("the ")
 
 
 def serve_to_plug(ctx: Context, image: bytes, what: str, fetch: Callable[[str], None],
@@ -97,21 +100,70 @@ def step_openbeken_to_esphome(ctx: Context) -> dict[str, Any]:
     """O1 - ESPHome, fetched by OpenBeken into the download slot."""
     signal = read_signal(ctx, "OpenBeken")
     handover.consent_to_leave(ctx, "OpenBeken")
+    return {**_fetch_esphome(ctx), "signal_dbm": signal}
+
+
+def step_interim_to_esphome(ctx: Context) -> dict[str, Any]:
+    """J2 - ESPHome, fetched by the interim firmware as O1, once it has
+    backed the plug up: the run's go-ahead was given before Sonoff's firmware
+    was replaced (B2), and the signal read there - or, on a run that found
+    the plug left on the interim firmware, asked for here, as O1 asks."""
+    if runs.run_source(ctx.state) != "interim":
+        return _fetch_esphome(ctx)
+    signal = read_signal(ctx, "OpenBeken")
+    handover.consent_to_leave(ctx, INTERIM_FIRMWARE)
+    return {**_fetch_esphome(ctx), "signal_dbm": signal}
+
+
+def step_interim_to_openbeken(ctx: Context) -> dict[str, Any]:
+    """J3 - a plug found on the interim firmware, on a run to OpenBeken: the
+    interim firmware is the OpenBeken the run would install, so it is made
+    the plug's own (openbeken.leave_interim, named as OpenBeken names it) in
+    place, nothing sent - then restarted, so its network knows it by its new
+    name: OpenBeken asks for its address under it only as it starts."""
+    if ctx.dry_run:
+        return {"dry_run": True}
+    return {"restarted": set_interim(ctx, False, "The device is set up on OpenBeken.")}
+
+
+def set_interim(ctx: Context, interim: bool, why: str, *, restart: bool = True) -> bool:
+    """The OpenBeken on the plug made the interim firmware, or the plug's own
+    (openbeken.set_interim), saying `why` - then restarted, so its network knows
+    it by its new name: the name it keeps.  Not the interim firmware's
+    (`restart` false), which it has only until the next firmware replaces it:
+    the record is what matters there, and its network keeps the name it has.
+    Whether it answered again."""
+    host = ctx.state.input("plug_ip")
+    try:
+        openbeken.set_interim(host, interim)
+    except openbeken.CommandError as exc:
+        raise Abort(f"the device's firmware would not take its new name: {exc}") from exc
+    if not restart:
+        output.say(f"    {why}")
+        return False
+    output.say(f"    {why} Restarting it, so your network knows it by its new name...")
+    restarted = openbeken.restart(host)
+    if not restarted:
+        output.tell("    It has not answered again yet; it keeps its new name either way.")
+    return restarted
+
+
+def _fetch_esphome(ctx: Context) -> dict[str, Any]:
     image, version = images.image(ctx, "esphome")
     if ctx.dry_run:
         return {"dry_run": True, "version": version}
     host = ctx.state.input("plug_ip")
     seconds = serve_to_plug(ctx, image, f"ESPHome {version}", lambda url: openbeken.ota_http(host, url),
                             unstick=lambda: openbeken.restart(host))
-    return {"seconds": seconds, "version": version, "signal_dbm": signal}
+    return {"seconds": seconds, "version": version}
 
 
-def step_openbeken_to_sonoff(ctx: Context) -> dict[str, Any]:
+def step_openbeken_to_sonoff(ctx: Context, leaving: str = "OpenBeken") -> dict[str, Any]:
     """O2 - Sonoff's firmware, fetched by OpenBeken into the download slot:
-    through the plug's import module, which checks the slot is the stock
-    bootloader's before it fetches."""
+    through the tool's OpenBeken driver, which checks the slot is the stock
+    bootloader's before it fetches.  Named to the person as `leaving`."""
     signal = read_signal(ctx, "OpenBeken")
-    handover.consent_to_leave(ctx, "OpenBeken")
+    handover.consent_to_leave(ctx, leaving)
     kind = kinds.of_run(ctx.state)
     stock, version = images.stock_rbl(kind)
     if ctx.dry_run:
@@ -131,6 +183,12 @@ def step_openbeken_to_sonoff(ctx: Context) -> dict[str, Any]:
     seconds = serve_to_plug(ctx, stock, f"Sonoff's firmware {version}", fetch,
                             unstick=lambda: openbeken.restart(host))
     return {"seconds": seconds, "version": version, "signal_dbm": signal}
+
+
+def step_interim_to_sonoff(ctx: Context) -> dict[str, Any]:
+    """J4 - Sonoff's firmware, fetched by the interim firmware as O2, on a run
+    that found the plug left on it."""
+    return step_openbeken_to_sonoff(ctx, INTERIM_FIRMWARE)
 
 
 def step_esphome_to_openbeken(ctx: Context) -> dict[str, Any]:
@@ -178,13 +236,17 @@ def still_installed(ctx: Context, wait: float = ANSWER_WAIT) -> tuple[bool, str]
 
 def evidence_installed(ctx: Context) -> tuple[bool | None, str]:
     """Whether a step cut off got its image onto the plug: the plug answers as
-    the firmware the run installs, or still as the one it left."""
+    the firmware the run installs, or still as the one it left - the interim
+    firmware, on a run from Sonoff's that has one (J2)."""
     host = ctx.state.input("plug_ip")
     firmware, source = runs.run_firmware(ctx.state), runs.run_source(ctx.state)
+    if source == "sonoff" and firmware in images.INTERIM:
+        source = "interim"
+    leaving = detect.NAMES.get(source, source)
     running = detect.identify(host, timeout=3.0) if host else None
     if running == firmware or (firmware == "sonoff" and running is None and not detect.answers_as_tasmota(host)):
         return (True, f"The device answers as {detect.NAMES[firmware]}." if running == firmware
                 else "The device answers as neither OpenBeken nor ESPHome: Sonoff's firmware is back.")
     if running == source:
-        return False, f"The device still answers as {detect.NAMES[source]}: the image was not applied."
+        return False, f"The device still answers as {leaving}: the image was not applied."
     return None, "The device does not answer as the new firmware yet - it may still be installing it."

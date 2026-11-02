@@ -61,9 +61,10 @@ class Kind:
     esphome_legacy_prefix: str
     # Its ESPHome's friendly name in releases before its comment said the kind.
     esphome_legacy_friendly_name: str = ""
-    # For a Beken plug: the command its OpenBeken (built with the plug's import
-    # module) takes to fetch and apply Sonoff's firmware again, checking the
-    # slot it goes to first; "" for a kind that has none.
+    # For a Beken plug: the command its OpenBeken (built with this project's
+    # driver, tools/beken/openbeken/) takes to fetch and apply Sonoff's
+    # firmware again, checking the slot it goes to first; "" for a kind that
+    # has none.
     openbeken_revert: str = ""
     # Whether its conversion uses eWeLink's LAN API, so the plug must answer
     # eWeLink's discovery on the network (LAN Control on in the app). The S61's
@@ -151,7 +152,7 @@ SONOFF_S61 = Kind(
     # devices/sonoff-s61/esphome.yaml; no earlier builds, so no older names.
     esphome_legacy_setup_prefix="",
     esphome_legacy_prefix="",
-    openbeken_revert="S61RevertToStock",
+    openbeken_revert="AutoflashRevertToStock",
     uses_lan_control=False,
 )
 

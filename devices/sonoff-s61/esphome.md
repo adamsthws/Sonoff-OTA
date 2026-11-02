@@ -39,23 +39,14 @@ handling and energy totals, so the two plugs look alike in Home Assistant.
   update from, so ESPHome's own updates (which LibreTiny writes there) go
   through it too - the radio calibration at `0x3e0000`, ESPHome's preferences
   (FlashDB) in the empty 32 KB at `0x3ee000`, and the unused LittleFS in the
-  empty sector at `0x3e1000`. The stock EasyFlash stores at `0x3e2000` and
+  sector at `0x3e1000`, where the interim firmware left its settings. The stock EasyFlash stores at `0x3e2000` and
   `0x3f6000` are left alone, so the plug can always go back to stock.
-- **A backup reader, open once.** The S60's tool backs a plug up from its
-  stock firmware; the S61's stock firmware has no way to read its store out,
-  so the tool takes the backup through the new firmware. OpenBeken reads any
-  flash (`/api/flash`); ESPHome reads none, so the config has an action for
-  it: `autoflash_backup_read` gives the plug's own data - the 128 KB at
-  `0x3e0000`, the region OpenBeken's backup takes, nothing else - in pieces of
-  up to 2 KB, base64. It answers only through the image's first start: a
-  global (`backup_reader`, kept in the preferences) goes from 0 to open as
-  that start begins, and to shut for good on any later start, when the tool
-  calls `autoflash_backup_close` once the backup is kept (or found already
-  there), or 30 minutes in, read or not. Shut, it answers `shut` and opens
-  again only on a plug whose preferences are erased - so nothing on the
-  network can read the plug out after the conversion. Its state is kept by
-  the global's id, so an image built later from this config - in Home
-  Assistant, say - finds it shut.
+- **No backup reader.** The S60's tool backs a plug up from its stock
+  firmware; the S61's stock firmware has no way to read its store out, and
+  ESPHome reads no flash. So the tool installs OpenBeken first, as the
+  interim firmware, takes the backup through its flash reads (`/api/flash`),
+  and has it fetch this image: nothing in it reads the plug out, and nothing
+  on the network can after the conversion.
 
 Nothing in the S61 route needs a LibreTiny or ESPHome change: ESPHome 2026.10.0
 pins LibreTiny 1.13.0, which has the BK7238.
@@ -159,7 +150,7 @@ interrupt watchdog from a 10 s channel of that group, and a first version
 that raised every channel on every tick ran that feed back to back and
 starved OpenBeken instead.
 
-ESPHome 2026.10.0 built the current image, `artifacts/esphome-sonoff-s61-1.0.0.rbl`,
+ESPHome 2026.10.0 built the current image, `artifacts/esphome-sonoff-s61-1.1.0.rbl`,
 with `tools/repo/update_firmware.py esphome 2026.10.0 --plug sonoff-s61`
 ([docs/updating-firmware.md](../../docs/updating-firmware.md)).
 

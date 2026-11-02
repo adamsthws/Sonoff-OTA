@@ -27,15 +27,24 @@ check.
   update the plug installs as it restarts; the plug's own Wi-Fi and meter
   calibration stay on the plug for each firmware to read. Its backup (the
   plug's own data, and Sonoff's firmware from the public dump) is taken
-  through OpenBeken after the first conversion, the only firmware that can
-  read it. Tested against stand-ins so far: not in the emulator end to end,
-  nor on a real plug.
+  through OpenBeken's flash reads after the first conversion: a run to
+  ESPHome installs OpenBeken first, as the interim firmware, backs the plug
+  up through it, then has it fetch ESPHome, so ESPHome keeps no way to read
+  the plug out. The interim firmware is sent with a marker after it, naming
+  the app it installs, by which it knows itself - a marker for any other app
+  never counts, and is erased: it is named `autoflash-recovery-CDEF` from its first
+  start, as the S60's interim firmwares are, and once it has fetched the next
+  firmware it erases its own settings, so ESPHome - or a later OpenBeken -
+  finds nothing of it. A run that lost its record recognises a plug left on
+  it, and goes on from there. Run end to end in the emulator in every
+  direction; not yet on a real plug.
 - From Sonoff's firmware the run finds the plug in eWeLink before it asks
   which firmware: which firmware a plug can have depends on what plug it is.
   The question is a stage of its own (Choosing the firmware), after
   Discovering the plug; a run given `--firmware` is not asked.
-- The S61's firmware is published: OpenBeken 1.0.0 (OpenBK7231T_App at
-  `ce1abad` with the 4 MB table and the S61 import module) and ESPHome 1.0.0
+- The S61's firmware is published: OpenBeken 1.1.0 (OpenBK7231T_App at
+  `ce1abad` with the 4 MB table, a hook before an OTA's restart, the tool's
+  OpenBeken driver and the S61's table for it) and ESPHome 1.1.0
   for the S61 (built with ESPHome
   [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0) on
   LibreTiny 1.13.0), built and pinned by `tools/repo/update_firmware.py

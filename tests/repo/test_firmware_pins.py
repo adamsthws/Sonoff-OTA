@@ -6,12 +6,13 @@ hand (docs/updating-firmware.md), and these say what was missed.
 
 import io
 import json
+import re
 import unittest
 from pathlib import Path
 
 from tools.beken import rbl, uf2
 from tools.repo import update_firmware as uf
-from tools.autoflash import tasmota_settings
+from tools.autoflash import kinds, tasmota_settings
 from tools.espressif.safeboot.safeboot_migration import OFFICIAL_URLS, PINNED_ARTIFACTS, sha256_bytes
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -113,10 +114,15 @@ class BekenPinTests(unittest.TestCase):
             if "openbeken" in section:
                 pin = section["openbeken"]
                 self.assertEqual(rbl.header((ROOT / pin["file"]).read_bytes()).version, pin["version"])
-                module = (ROOT / pin["module"]).read_text(encoding="utf-8")
-                self.assertEqual(sha256_bytes(module.encode("utf-8")), pin["module_sha256"], plug)
+                # Built with the driver and the plug's table, each as it is now.
+                self.assertEqual(list(pin["sources"]), uf.openbeken_sources(plug), plug)
+                for path, digest in pin["sources"].items():
+                    self.assertEqual(sha256_bytes((ROOT / path).read_bytes()), digest, path)
                 for patch, digest in pin["patches"].items():
                     self.assertEqual(sha256_bytes((uf.OPENBEKEN_DIR / patch).read_bytes()), digest, patch)
+                # Built with every patch kept there - the module needs the hook one.
+                self.assertEqual(set(pin["patches"]), set(uf.OPENBEKEN_PATCHES), plug)
+                self.assertEqual({path.name for path in uf.OPENBEKEN_DIR.glob("*.patch")}, set(uf.OPENBEKEN_PATCHES))
             if "esphome" in section:
                 pin = section["esphome"]
                 config = (ROOT / pin["config"]).read_text(encoding="utf-8")
@@ -151,42 +157,64 @@ class BekenPinTests(unittest.TestCase):
 class OpenBekenModuleTests(unittest.TestCase):
     MAKEFILE = "OBKM_SRC  += $(OBK_SRCS)driver/drv_main.c\nOBKM_SRC  += $(OBK_SRCS)driver/drv_sdcard.c\n"
     MAIN = "\tbSafeMode = 1;\n\tCFG_InitAndLoad();\n\n#if ENABLE_LITTLEFS\n"
-    MODULE = ('void Sonoff_S61_Import_Init(void) {\n'
-              '\tCMD_RegisterCommand("S61ImportWiFi", Cmd_Import, NULL);\n'
-              '\tCMD_RegisterCommand("S61RevertToStock", Cmd_Revert, NULL);\n}\n')
+    MODULE = ('void Autoflash_Init(void) {\n'
+              '\tCMD_RegisterCommand("AutoflashImportWiFi", Cmd_Import, NULL);\n'
+              '\tCMD_RegisterCommand("AutoflashRevertToStock", Cmd_Revert, NULL);\n}\n')
 
-    def test_the_module_is_built_and_started_after_the_config_is_loaded(self):
-        makefile, main = uf.with_module(self.MAKEFILE, self.MAIN, "drv_sonoff_s61_import.c", "Sonoff_S61_Import_Init")
+    def test_the_driver_and_table_are_built_and_started_after_the_config_is_loaded(self):
+        makefile, main = uf.with_module(self.MAKEFILE, self.MAIN, ["drv_autoflash.c", "drv_autoflash_sonoff_s61.c"],
+                                        "Autoflash_Init")
         self.assertEqual(makefile, "OBKM_SRC  += $(OBK_SRCS)driver/drv_main.c\n"
-                                   "OBKM_SRC  += $(OBK_SRCS)driver/drv_sonoff_s61_import.c\n"
+                                   "OBKM_SRC  += $(OBK_SRCS)driver/drv_autoflash.c\n"
+                                   "OBKM_SRC  += $(OBK_SRCS)driver/drv_autoflash_sonoff_s61.c\n"
                                    "OBKM_SRC  += $(OBK_SRCS)driver/drv_sdcard.c\n")
         self.assertEqual(main, "\tbSafeMode = 1;\n\tCFG_InitAndLoad();\n\n"
-                               "\textern void Sonoff_S61_Import_Init(void);\n\tSonoff_S61_Import_Init();\n"
+                               "\textern void Autoflash_Init(void);\n\tAutoflash_Init();\n"
                                "\n#if ENABLE_LITTLEFS\n")
+
+    def test_a_plug_is_built_with_the_driver_and_its_own_table(self):
+        self.assertEqual(uf.openbeken_sources("sonoff-s61"),
+                         ["tools/beken/openbeken/drv_autoflash.c", "tools/beken/openbeken/drv_autoflash.h",
+                          "devices/sonoff-s61/drv_autoflash_sonoff_s61.c"])
+        for path in uf.openbeken_sources("sonoff-s61"):
+            self.assertTrue((ROOT / path).is_file(), path)
 
     def test_an_upstream_without_the_anchors_is_refused(self):
         with self.assertRaisesRegex(uf.UpdateError, "drv_main.c"):
-            uf.with_module("OBKM_SRC =\n", self.MAIN, "m.c", "M_Init")
+            uf.with_module("OBKM_SRC =\n", self.MAIN, ["m.c"], "M_Init")
         with self.assertRaisesRegex(uf.UpdateError, "CFG_InitAndLoad"):
-            uf.with_module(self.MAKEFILE, self.MAIN * 2, "m.c", "M_Init")
+            uf.with_module(self.MAKEFILE, self.MAIN * 2, ["m.c"], "M_Init")
 
     def test_the_modules_start_and_commands_are_read_from_its_source(self):
-        self.assertEqual(uf.module_init(self.MODULE), "Sonoff_S61_Import_Init")
-        self.assertEqual(uf.module_commands(self.MODULE), ["S61ImportWiFi", "S61RevertToStock"])
+        self.assertEqual(uf.module_init(self.MODULE), "Autoflash_Init")
+        self.assertEqual(uf.module_commands(self.MODULE), ["AutoflashImportWiFi", "AutoflashRevertToStock"])
         with self.assertRaises(uf.UpdateError):
             uf.module_init("static void helper(void) {}\n")
-        # The S61's own module, as published.
-        module = (ROOT / "devices/sonoff-s61/drv_sonoff_s61_import.c").read_text(encoding="utf-8")
-        self.assertEqual(uf.module_init(module), "Sonoff_S61_Import_Init")
-        self.assertIn("S61RevertToStock", uf.module_commands(module))
+        # The driver, as published: its start, and the command the tool reverts with.
+        driver = (uf.OPENBEKEN_DIR / uf.OPENBEKEN_DRIVER[0]).read_text(encoding="utf-8")
+        self.assertEqual(uf.module_init(driver), "Autoflash_Init")
+        self.assertIn(kinds.SONOFF_S61.openbeken_revert, uf.module_commands(driver))
+
+    def test_the_driver_names_no_plug(self):
+        # What is one plug's is in its table: the driver and its header hold
+        # no Beken kind's names and none of a table's addresses.
+        for name in uf.OPENBEKEN_DRIVER:
+            driver = (uf.OPENBEKEN_DIR / name).read_text(encoding="utf-8").lower()
+            for kind in kinds.ALL:
+                if kind.family != "beken":
+                    continue
+                table = (ROOT / uf.BEKEN_BUILDS[kind.key]["openbeken"][0]).read_text(encoding="utf-8")
+                for word in (kind.key, kind.short, kind.name, kind.stock_model, *re.findall(r"0x[0-9a-f]+", table)):
+                    self.assertNotIn(word.lower(), driver, (name, word))
 
     def test_an_image_is_checked_against_what_it_was_to_hold(self):
-        image = rbl.pack(b"firmware with S61ImportWiFi in it", version="1.0.0")
-        self.assertEqual(uf.check_rbl(image, "it", "1.0.0", [b"S61ImportWiFi"]), b"firmware with S61ImportWiFi in it")
+        image = rbl.pack(b"firmware with AutoflashImportWiFi in it", version="1.0.0")
+        self.assertEqual(uf.check_rbl(image, "it", "1.0.0", [b"AutoflashImportWiFi"]),
+                         b"firmware with AutoflashImportWiFi in it")
         with self.assertRaisesRegex(uf.UpdateError, "1.0.1"):
             uf.check_rbl(image, "it", "1.0.1", [])
-        with self.assertRaisesRegex(uf.UpdateError, "S61RevertToStock"):
-            uf.check_rbl(image, "it", None, [b"S61RevertToStock"])
+        with self.assertRaisesRegex(uf.UpdateError, "AutoflashRevertToStock"):
+            uf.check_rbl(image, "it", None, [b"AutoflashRevertToStock"])
         with self.assertRaisesRegex(uf.UpdateError, "not an rt_ota image"):
             uf.check_rbl(b"not an image", "it", None, [])
         with self.assertRaisesRegex(uf.UpdateError, "not an app"):

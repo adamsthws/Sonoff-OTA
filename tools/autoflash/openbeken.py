@@ -64,6 +64,27 @@ def kind(host: str, found: dict[str, Any], timeout: float = 4.0) -> kinds.Kind |
     return None
 
 
+def is_interim(host: str, timeout: float = 4.0) -> bool | None:
+    """Whether the OpenBeken at `host` - one the tool installed (kind) - is
+    the interim firmware: its import module answers AutoflashInterim for
+    that alone (an OpenBeken whose module predates it does not know the
+    command).  None where it does not answer."""
+    try:
+        command(host, "AutoflashInterim", timeout)
+    except CommandError:
+        return False
+    except OSError:
+        return None
+    return True
+
+
+def set_interim(host: str, interim: bool, timeout: float = 10.0) -> None:
+    """The OpenBeken at `host` made the interim firmware (autoflash-recovery-CDEF),
+    or the plug's OpenBeken for good (openbeken-abcdef), as its import module
+    names each; its DHCP and mDNS names follow on its next start."""
+    command(host, f"AutoflashInterim {'on' if interim else 'off'}", timeout)
+
+
 def is_openbeken(host: str, timeout: float = 4.0) -> bool:
     return info(host, timeout) is not None
 

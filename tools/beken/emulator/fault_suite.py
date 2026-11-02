@@ -64,11 +64,12 @@ RESULTS = OUT / "results.jsonl"
 ACCOUNT = "EWELINK_EMAIL=someone@example.invalid\nEWELINK_PASSWORD=made-up-password\n"
 
 # Each direction's steps that write to or wait on the plug, with how long each
-# took in passing runs (2026-10-30, seconds): a fault lands at a share of it.
+# took in passing runs (2026-10-30; sonoff>esphome 2026-11-02, seconds): a fault
+# lands at a share of it.
 ROUTES = {
     "sonoff>openbeken": {"B2": 30, "K1": 27, "B4": 12},
-    "sonoff>esphome": {"B2": 30, "K2": 31},
-    "openbeken>esphome": {"O1": 12, "K2": 31},
+    "sonoff>esphome": {"B2": 32, "J1": 28, "B4": 12, "J2": 14, "K2": 30},
+    "openbeken>esphome": {"B4": 12, "O1": 12, "K2": 31},
     "openbeken>sonoff": {"O2": 24, "K3": 75},
     "esphome>openbeken": {"E1": 6, "K1": 27, "B4": 12},
     "esphome>sonoff": {"E2": 15, "K3": 80},

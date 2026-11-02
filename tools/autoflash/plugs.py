@@ -164,8 +164,6 @@ BACKUP_OUTCOMES = {
     "not taken": ("skipped", "Not taken"),
     # An S61 converted straight to ESPHome: only OpenBeken reads its own data
     # out, and the plug keeps it, untouched.
-    "openbeken only": ("skipped", "Not taken (this ESPHome cannot read it out; OpenBeken can)"),
-    "reader shut": ("skipped", "Not taken (ESPHome's backup reader had shut; OpenBeken can read it out)"),
 }
 
 

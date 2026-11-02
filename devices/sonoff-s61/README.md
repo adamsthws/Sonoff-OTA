@@ -18,8 +18,10 @@ worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-e
 | Stock stores | EasyFlash V4 at `0x3e2000` (Wi-Fi, `elecCalibCoef`) and `0x3f6000`; never written by a conversion |
 | Stock bootloader table | app `0x11000`, download slot `0x286000` (where it applies an rt_ota update), radio calibration `0x3e0000` |
 
-- **OpenBeken**: [`drv_sonoff_s61_import.c`](drv_sonoff_s61_import.c), the
-  module that reads the stock Wi-Fi and meter calibration on first boot and
+- **OpenBeken**: [`drv_autoflash_sonoff_s61.c`](drv_autoflash_sonoff_s61.c),
+  the S61's table for the tool's OpenBeken driver
+  ([`tools/beken/openbeken/drv_autoflash.c`](../../tools/beken/openbeken/drv_autoflash.c)),
+  which reads the stock Wi-Fi and meter calibration on first boot and
   applies the wiring; the build recipe, the 4 MB table and reverting to stock:
   [`openbeken.md`](openbeken.md). The 4 MB patches offered
   upstream are [`tools/beken/openbeken/`](../../tools/beken/openbeken/).
@@ -36,7 +38,7 @@ worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-e
 - **The conversion tool's route**: [`tools/autoflash/routes/beken/`](../../tools/autoflash/routes/beken/)
   - the push through eWeLink from Sonoff's firmware, OpenBeken and ESPHome each
   taking the next firmware as an update of its own, Sonoff's firmware back
-  from the public dump, the backup through the new firmware after the first
-  conversion (OpenBeken's flash reads, or ESPHome's backup reader, open
-  through its first start only). Run end to end in the emulator in every direction, faults and
+  from the public dump, the backup through OpenBeken's flash reads after the
+  first conversion (a run to ESPHome installs OpenBeken first, as the interim
+  firmware, to take it). Run end to end in the emulator in every direction, faults and
   all ([its fault suite](../../docs/testing.md#the-s61s-fault-suite)); never yet on a real plug.

@@ -4,10 +4,12 @@ A plug still on Sonoff's firmware is found through eWeLink, as ever; one this
 tool converted is found here, by what answers: Tasmota's command interface
 naming the template of a kind of plug this tool converts (kinds), ESPHome's
 page with the relay the ESPHome made for it names - each, behind its web
-login, once given that - or OpenBeken's /api/info giving the name the
-OpenBeken the tool installs on a kind of plug gives itself.  Midway through a conversion a plug can also be running the mover (an
-ESPHome with no page, only its update service) or the startup firmware (a
-Tasmota safeboot), which a run carrying on recognises.
+login, once given that - or OpenBeken whose import module, built in by
+this tool, says what kind of plug it is on.  Midway through a conversion a
+plug can also be running the mover (an ESPHome with no page, only its update
+service), the startup firmware (a Tasmota safeboot), or the interim firmware
+(the OpenBeken a run to ESPHome on a Beken plug installs first, which its
+module says it is), which a run carrying on recognises.
 """
 
 from __future__ import annotations
@@ -27,6 +29,9 @@ NAMES = {
     "tasmota": "Tasmota",
     "esphome": "ESPHome",
     "openbeken": "OpenBeken",
+    # OpenBeken as a run to ESPHome installs it first (routes/beken/images.INTERIM):
+    # never called OpenBeken, which the person did not choose.
+    "interim": "the interim firmware",
     "midway": "a firmware part way through a conversion",
     "untemplated": "Tasmota without the device's template",
     "installer": "this tool's installer, part way from Sonoff's firmware",
@@ -181,9 +186,11 @@ def _esphome(host: str, timeout: float, login: tuple[str, str] | None) -> str | 
     return "esphome" if esphome.relay(host) is not None else "other"
 
 
-def _openbeken(host: str, timeout: float) -> Found | None:
+def openbeken_plug(host: str, timeout: float = 3.0) -> Found | None:
     """An OpenBeken at `host` the tool installed on a kind of plug, as it says
-    (openbeken.kind); None for no OpenBeken, or another."""
+    (openbeken.kind): "interim" for the interim firmware, a run to ESPHome's
+    part way, as it says too (openbeken.is_interim); None for no OpenBeken,
+    another, or one that would not say which."""
     found = openbeken.info(host, timeout)
     if found is None:
         return None
@@ -191,7 +198,10 @@ def _openbeken(host: str, timeout: float) -> Found | None:
     kind = openbeken.kind(host, found, timeout)
     if kind is None:
         return None  # an OpenBeken, but not on a plug this tool converts
-    return Found(host, "openbeken", name=name, kind=kind.key)
+    interim = openbeken.is_interim(host, timeout)
+    if interim is None:
+        return None  # asked again later, never taken for the plug's own OpenBeken
+    return Found(host, "interim" if interim else "openbeken", name=name, kind=kind.key)
 
 
 def answers_as_tasmota(host: str, timeout: float = 3.0) -> bool:
@@ -211,7 +221,8 @@ def tasmota(host: str, *, timeout: float = 3.0,
 
 def identify(host: str, *, timeout: float = 3.0, password: str | None = None,
              esphome_login: tuple[str, str] | None = None) -> str | None:
-    """sonoff, tasmota, esphome; mover, startup or hub midway; locked, a
+    """sonoff, tasmota, esphome, openbeken; interim, the interim firmware
+    part way to ESPHome; mover, startup or hub midway; locked, a
     Tasmota whose web password `password` is not; esphome-login, an ESPHome
     whose web login `esphome_login` is not - or None if nothing known
     answers."""
@@ -219,8 +230,9 @@ def identify(host: str, *, timeout: float = 3.0, password: str | None = None,
     if found:
         return None if found == "other" else found
     if _port_open(host, 80, timeout):
-        if _openbeken(host, timeout):
-            return "openbeken"
+        on_openbeken = openbeken_plug(host, timeout)
+        if on_openbeken:
+            return on_openbeken.firmware
         if _is_installer(host, timeout):
             return "installer"
         try:
@@ -300,7 +312,7 @@ def _ask_neighbours(seen: dict[str, str], known_macs: set[str], timeout: float, 
         found = _esphome(host, timeout, esphome_login)
         if found:
             return None if found == "other" else Found(host, found, mac)
-        on_openbeken = _openbeken(host, timeout)
+        on_openbeken = openbeken_plug(host, timeout)
         if on_openbeken:
             on_openbeken.mac = mac
             return on_openbeken

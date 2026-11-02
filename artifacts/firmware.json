@@ -80,29 +80,33 @@
   "beken": {
     "sonoff-s61": {
       "openbeken": {
-        "file": "artifacts/openbeken-sonoff-s61-1.0.0.rbl",
-        "version": "1.0.0",
+        "file": "artifacts/openbeken-sonoff-s61-1.1.0.rbl",
+        "version": "1.1.0",
         "app_commit": "ce1abad8dc931720167a7628840adae30b92afaf",
         "sdk_commit": "f5a64d4cda03bac6d885f4f30c27bbd3435c5e3a",
-        "module": "devices/sonoff-s61/drv_sonoff_s61_import.c",
-        "module_sha256": "48b9ca1e8f852814a6e124425d8b8ef8dd378ee32ad3893e83deb2821a5850a0",
+        "sources": {
+          "tools/beken/openbeken/drv_autoflash.c": "d13081fa1478b4567f2c1de9b897aa80805099b266d770fb81a6a0b3b17bb469",
+          "tools/beken/openbeken/drv_autoflash.h": "2218efb6dca42e52ad92ec42afbeef8d43b33c6fee27006cf1c9025376d0c381",
+          "devices/sonoff-s61/drv_autoflash_sonoff_s61.c": "b7b0e311cd7b7d17dc0d74fa287824447ddee2c81da8875a08436063c620bb40"
+        },
         "patches": {
           "openbk7231t_app-bk7238-4m-flash.patch": "257b02a72a217d1644d35051dc3ba97f8522154fa25b4f67e6c0b44e63aada58",
+          "openbk7231t_app-ota-before-reboot-hook.patch": "cb1575c22da2a2e4e0a071e107e9db064d4b5bec57925ee1ee2f5d501a22ed1a",
           "beken_freertos_sdk-4m-pack-profile.patch": "9d9e35179e947107b8664da51f1e75c3dbc5a575682f7fe5e59792222e2e7fe8"
         },
-        "builder": "ubuntu@sha256:24737cef17f4e22b1977df7d9a05e77c4e28b7da5b8911f8d8ccda136bf3573c with tools/beken/openbeken/build.Dockerfile 4b04244bb63658a1",
-        "size": 508576,
-        "sha256": "48b72a69b1cbac8869ad30f5cdcb06f23dbafc94832bff93f073fea49d3b85ce"
+        "builder": "ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 with tools/beken/openbeken/build.Dockerfile 4b04244bb63658a1",
+        "size": 510288,
+        "sha256": "07f45d62f32b8f89f782ae6460253c7dc17fdbaceb20b2521e6db2e59a254687"
       },
       "esphome": {
-        "file": "artifacts/esphome-sonoff-s61-1.0.0.rbl",
+        "file": "artifacts/esphome-sonoff-s61-1.1.0.rbl",
         "config": "devices/sonoff-s61/esphome.yaml",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "esphome": "2026.10.0",
         "libretiny": "1.13.0",
         "builder": "ghcr.io/esphome/esphome:2026.10.0@sha256:1dff19a59070cdb523b76576cdc74d200f862d43c1407809088855920cf57145",
-        "size": 507264,
-        "sha256": "b901d5f3964579d975dae2d7121da623a98ca52253b15a8180d18ab11eaa07ff"
+        "size": 505168,
+        "sha256": "b412da4e337b01ac1a9623fd5275d2a61e945d5aba206a8bc2eb9c940baf200e"
       }
     }
   }

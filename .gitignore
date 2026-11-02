@@ -42,8 +42,8 @@ __pycache__/
 !artifacts/esphome-sonoff-s60-imprintable-1.5.0.bin
 !artifacts/autoflash-mover-1.1.0.bin
 !artifacts/sonoff-s60-partition-table.bin
-!artifacts/openbeken-sonoff-s61-1.0.0.rbl
-!artifacts/esphome-sonoff-s61-1.0.0.rbl
+!artifacts/openbeken-sonoff-s61-1.1.0.rbl
+!artifacts/esphome-sonoff-s61-1.1.0.rbl
 
 # Answers for unattended runs: the eWeLink password, perhaps sudo's (see .env.example).
 .env

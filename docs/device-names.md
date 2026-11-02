@@ -28,6 +28,7 @@ lower case. Each plug works its own out, so no two plugs share a name.
 | L1-M1 | the mover (ESPHome) | `autoflash-recovery-CDEF` | compiled in, written over ESPHome's name at boot |
 | after M1/I2 | ESPHome, converted | `esphome-abcdef` | compiled in (ESPHome's own MAC suffix) |
 | S61, converted | OpenBeken | `openbeken-abcdef` | set by its import module at its first start |
+| S61, J1-J2 | the interim firmware (OpenBeken), on a run to ESPHome | `autoflash-recovery-CDEF` | set by its import module at its first start, from the marker B2 sends after the image |
 | S61, converted | ESPHome | `esphome-abcdef` | compiled in, as the S60's |
 
 Every converted plug's name is its firmware's and the MAC's last three
@@ -185,6 +186,12 @@ All in [`tools/autoflash/names.py`](../tools/autoflash/names.py) unless said:
   a name, which the user may change: Tasmota by its template, ESPHome by its
   comment, OpenBeken by its import module's answer to `AutoflashKind`
   ([`devices/sonoff-s61/openbeken.md`](../devices/sonoff-s61/openbeken.md)).
+- [`tools/beken/openbeken/drv_autoflash.c`](../tools/beken/openbeken/drv_autoflash.c):
+  `autoflash_name()`, both the Beken plugs' OpenBeken names - `openbeken-%02x%02x%02x`, and
+  `autoflash-recovery-%02X%02X` as the interim firmware, which is also how
+  the driver knows itself the interim firmware (`AutoflashInterim`): a new
+  interim name is a new OpenBeken build, and a plug left on the old one is
+  no longer taken for the interim firmware.
 - [`tools/autoflash/prompts.py`](../tools/autoflash/prompts.py):
   `find_ssid()` takes a network by the names in the order given, with
   `PROVISIONAL_PREFIX` (`ESP_`) last and looked at again.

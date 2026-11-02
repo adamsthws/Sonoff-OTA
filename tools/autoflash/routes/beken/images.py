@@ -29,6 +29,11 @@ if TYPE_CHECKING:
 PINS = json.loads((ROOT / "artifacts" / "firmware.json").read_text(encoding="utf-8")).get("beken", {})
 # The version the FOTA container says it is (the S60's bridge is sent the same way).
 FOTA_VERSION = fota_wrap.ANNOUNCED_VERSION
+# The firmware a run to these installs from Sonoff's first, to back the plug
+# up through (only OpenBeken reads it out), then has fetch the one chosen.
+# The person, who did not choose it, is told of the interim firmware alone.
+INTERIM = {"esphome": "openbeken"}
+INTERIM_NAME = "the interim firmware"
 # Each kind's stock flash, as another project publishes it: where, and what it
 # is, by hash.  Fetched once into the directory the emulator keeps dumps in.
 PUBLIC_DUMPS = {
@@ -39,6 +44,11 @@ PUBLIC_DUMPS = {
     ),
 }
 DUMPS = ROOT / "captures" / "emulation" / "beken-firmwares"
+
+
+def first_firmware(firmware: str) -> str:
+    """The firmware a run to `firmware` sends from Sonoff's: the interim one, if it has one."""
+    return INTERIM.get(firmware, firmware)
 
 
 def pin(kind: kinds.Kind, firmware: str) -> dict:

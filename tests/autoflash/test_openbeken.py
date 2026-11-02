@@ -22,6 +22,8 @@ class FakeOpenBeken(http.server.ThreadingHTTPServer):
         self.uptime = 42
         self.restarts_on_reboot = True
         self.kind = "sonoff-s61"   # what its import module answers AutoflashKind for; None: no module
+        self.interim = False   # whether its module says it is the interim firmware (AutoflashInterim)
+        self.short_name = "openbeken-abcdef"
 
     @property
     def host(self):
@@ -44,7 +46,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, json.dumps({
                 "uptime_s": self.server.uptime, "build": "Built on Oct 30 2026 12:00:00 version 1.0.0", "ip": "192.168.0.50",
                 "mac": "12:34:56:AB:CD:EF", "flags": "0", "mqtthost": ":1883", "mqtttopic": "obk",
-                "chipset": "BK7238", "webapp": "", "shortName": "openbeken-abcdef", "startcmd": "",
+                "chipset": "BK7238", "webapp": "", "shortName": self.server.short_name, "startcmd": "",
                 "supportsSSDP": 0, "supportsClientDeviceDB": True}).encode())
         elif self.path == "/api/channels":
             self._send(200, b'{"1":1,"2":0}')
@@ -67,9 +69,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         name = body.split()[0]
         if name == "reboot" and self.server.restarts_on_reboot:
             self.server.uptime = 1
-        if name in self.server.unknown or (name == "AutoflashKind" and self.server.kind is None):
+        if name == "AutoflashInterim" and body.split()[1:] in (["on"], ["off"]) and self.server.kind:
+            self.server.interim = body.split()[1] == "on"
+            self.server.short_name = "autoflash-recovery-CDEF" if self.server.interim else "openbeken-abcdef"
+        if name in self.server.unknown or (name.startswith("Autoflash") and self.server.kind is None):
             self._send(200, json.dumps({"error": 501, "msg": "command not found", "res": ""}).encode())
         elif name == "AutoflashKind" and body.split()[1:] != [self.server.kind]:
+            self._send(400, json.dumps({"error": 400, "msg": "bad argument", "res": ""}).encode())
+        elif name == "AutoflashInterim" and not body.split()[1:] and not self.server.interim:
+            self._send(400, json.dumps({"error": 400, "msg": "error", "res": ""}).encode())
+        elif name == "AutoflashInterim" and body.split()[1:] not in ([], ["on"], ["off"]):
             self._send(400, json.dumps({"error": 400, "msg": "bad argument", "res": ""}).encode())
         else:
             self._send(200, json.dumps({"success": 200, "msg": f"{name} done", "res": ""}).encode())
@@ -109,6 +118,26 @@ class OpenBekenTests(unittest.TestCase):
         found = {**openbeken.info(self.server.host), "chipset": "BK7231N"}
         self.assertIsNone(openbeken.kind(self.server.host, found))
         self.assertEqual(self.server.commands, [])
+
+    def test_the_interim_firmware_is_what_its_import_module_says(self):
+        self.assertIs(openbeken.is_interim(self.server.host), False)
+        self.assertEqual(self.server.commands, ["AutoflashInterim"])
+        self.server.interim = True
+        self.assertIs(openbeken.is_interim(self.server.host), True)
+        # A module from before the command: never taken for the interim firmware.
+        self.server.kind = None
+        self.assertIs(openbeken.is_interim(self.server.host), False)
+        # Not answering: it cannot say.
+        self.assertIsNone(openbeken.is_interim("127.0.0.1:1", timeout=0.5))
+
+    def test_it_is_told_to_be_the_interim_firmware_or_not(self):
+        openbeken.set_interim(self.server.host, False)
+        openbeken.set_interim(self.server.host, True)
+        self.assertEqual(self.server.commands, ["AutoflashInterim off", "AutoflashInterim on"])
+        self.assertEqual(openbeken.info(self.server.host)["shortName"], "autoflash-recovery-CDEF")
+        self.server.kind = None
+        with self.assertRaisesRegex(openbeken.CommandError, "not a command"):
+            openbeken.set_interim(self.server.host, False)
 
     def test_nothing_else_is_taken_for_openbeken(self):
         class Other(http.server.BaseHTTPRequestHandler):

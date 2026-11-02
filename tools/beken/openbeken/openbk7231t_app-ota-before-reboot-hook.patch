@@ -1,0 +1,72 @@
+diff --git a/src/hal/bk7231/hal_ota_bk7231.c b/src/hal/bk7231/hal_ota_bk7231.c
+index b00872f1..9d5df1c0 100644
+--- a/src/hal/bk7231/hal_ota_bk7231.c
++++ b/src/hal/bk7231/hal_ota_bk7231.c
+@@ -114,6 +114,8 @@ static void store_sector(unsigned int addr, unsigned char *data){
+ 
+ 
+ httprequest_t httprequest;
++// Whether the download under way has seen an error (HAL_OTA_BeforeReboot).
++static int ota_failed = 0;
+ 
+ int myhttpclientcallback(httprequest_t* request){
+ 
+@@ -125,6 +127,10 @@ int myhttpclientcallback(httprequest_t* request){
+   OTA_SetTotalBytes(OTA_GetTotalBytes() + request->client_data.response_buf_filled);
+ 
+   switch(request->state){
++    case -1: // could not connect or send the request
++    case -2: // the response was cut off
++      ota_failed = 1;
++      break;
+     case 0: // start
+       //init_ota(0xff000);
+ 
+@@ -157,6 +163,7 @@ int myhttpclientcallback(httprequest_t* request){
+ #endif
+ 	  DRV_SavePowerMeterDriverStatistics();
+       rtos_delay_milliseconds(1000);
++      HAL_OTA_BeforeReboot(!ota_failed);
+       bk_reboot();
+       break;
+   }
+@@ -192,6 +199,7 @@ void otarequest(const char *urlin){
+ 
+   strncpy(url, urlin, sizeof(url));
+ 
++  ota_failed = 0;
+   OTA_SetTotalBytes(0);
+   memset(request, 0, sizeof(*request));
+   httpclient_t *client = &request->client;
+diff --git a/src/hal/generic/hal_ota_generic.c b/src/hal/generic/hal_ota_generic.c
+index 38dfa5a3..95091356 100644
+--- a/src/hal/generic/hal_ota_generic.c
++++ b/src/hal/generic/hal_ota_generic.c
+@@ -11,6 +11,9 @@ int __attribute__((weak)) HAL_FlashRead(char*buffer, int readlen, int startaddr)
+ 	return res;
+ }
+ 
++void __attribute__((weak)) HAL_OTA_BeforeReboot(int ok) {
++}
++
+ int __attribute__((weak)) http_rest_post_flash(http_request_t* request, int startaddr, int maxaddr)
+ {
+ 	int total = 0;
+diff --git a/src/hal/hal_ota.h b/src/hal/hal_ota.h
+index a2f9fb79..e779e9ce 100644
+--- a/src/hal/hal_ota.h
++++ b/src/hal/hal_ota.h
+@@ -42,5 +42,13 @@ void OTA_SetTotalBytes(int value);
+ 
+ int HAL_FlashRead(char*buffer, int readlen, int startaddr);
+ 
++/// @brief Called once an HTTP OTA download has ended and what it received is
++/// written, just before the restart that applies it. Does nothing unless a
++/// driver defines it: a driver can leave the device as the new firmware should
++/// find it. The download can end early without an error being seen, so a
++/// hook that acts on it checks the image it was to write.
++/// @param ok 1 when no error was seen during the download
++void HAL_OTA_BeforeReboot(int ok);
++
+ #endif /* __OTA_H__ */
+ 

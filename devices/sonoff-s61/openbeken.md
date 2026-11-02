@@ -1,9 +1,23 @@
 # OpenBeken Sonoff S61 stock Wi-Fi import
 
-`drv_sonoff_s61_import.c` is an OpenBeken module that, on first boot of a freshly
-converted S61, reads the plug's **stock** Wi-Fi credentials from the untouched
-EasyFlash store and applies them through OpenBeken's own config API, so the plug
-rejoins the user's network with no typing and no second device.
+The tool's OpenBeken driver,
+[`tools/beken/openbeken/drv_autoflash.c`](../../tools/beken/openbeken/drv_autoflash.c),
+on first boot of a freshly converted S61, reads the plug's **stock** Wi-Fi
+credentials from the untouched EasyFlash store and applies them through
+OpenBeken's own config API, so the plug rejoins the user's network with no
+typing and no second device.
+
+The driver serves any eWeLink plug on a Beken chip that keeps its stock
+rt_ota bootloader: what is one plug's own it reads from that plug's table
+([`drv_autoflash.h`](../../tools/beken/openbeken/drv_autoflash.h) has its
+fields). The S61's is [`drv_autoflash_sonoff_s61.c`](drv_autoflash_sonoff_s61.c):
+its kind and stock model, where its stock store (`0x3e0000`-`0x3ec000`),
+download slot (`0x286000`) and OpenBeken's settings (`0x3e1000`) sit, its
+wiring, and its BL0937 meter's calibration - how its `elecCalibCoef` record
+reads, the datasheet constants, the 3840 W rating. A build carries one table,
+the plug's it is built for; the driver itself names no plug. Telling the
+plug from its stock store's model at run time, to carry several tables in
+one image, waits for a second Beken plug.
 
 It goes through `CFG_SetWiFiSSID()` / `CFG_SetWiFiPass()` rather than writing the
 config blob itself, so it keeps working across OpenBeken releases that change the
@@ -15,11 +29,14 @@ in [beken-s61-emulation.md](../../docs/beken-s61-emulation.md#carrying-wi-fi-acr
 
 Three edits against `openshwprojects/OpenBK7231T_App`:
 
-1. Copy `drv_sonoff_s61_import.c` to `src/driver/`.
-2. Add it to the build list in `platforms/obk_main.mk`, beside the other drivers:
+1. Copy `drv_autoflash.c`, `drv_autoflash.h` and `drv_autoflash_sonoff_s61.c`
+   to `src/driver/`.
+2. Add the two `.c` files to the build list in `platforms/obk_main.mk`,
+   beside the other drivers:
 
    ```
-   OBKM_SRC  += $(OBK_SRCS)driver/drv_sonoff_s61_import.c
+   OBKM_SRC  += $(OBK_SRCS)driver/drv_autoflash.c
+   OBKM_SRC  += $(OBK_SRCS)driver/drv_autoflash_sonoff_s61.c
    ```
 
 3. Call it once from `Main_Init()` in `src/user_main.c`, right after
@@ -29,16 +46,16 @@ Three edits against `openshwprojects/OpenBK7231T_App`:
    ```c
    CFG_InitAndLoad();
 
-   extern void Sonoff_S61_Import_Init(void);
-   Sonoff_S61_Import_Init();
+   extern void Autoflash_Init(void);
+   Autoflash_Init();
    ```
 
-`Sonoff_S61_Import_Init()` registers the manual command `S61ImportWiFi` and runs
+`Autoflash_Init()` registers the manual command `AutoflashImportWiFi` and runs
 the import. Both are no-ops once a Wi-Fi SSID is set, so they are safe on every
-boot. (Upstreaming the module is the long-term home — then OpenBeken maintains it
+boot. (Upstreaming the driver is the long-term home — then OpenBeken maintains it
 across its own refactors.)
 
-## What the module does on first boot
+## What the driver does on first boot
 
 Only when OpenBeken has no Wi-Fi SSID yet (so a user's later changes are never
 touched), it reads the stock EasyFlash store and:
@@ -51,10 +68,86 @@ touched), it reads the stock EasyFlash store and:
 3. applies the **S61 wiring** from the OpenBeken device database (S61STPF,
    board `WBBK_01P_V1.3`): relay P26, button P9, LED P0, Wi-Fi LED P1, BL0937
    CF P8 / CF1 P6 / SEL P24 — and `SetStartValue 1 -1`, so the relay restores
-   its last state after a power cut.
+   its last state after a power cut; and names the plug as the conversion does
+   on every firmware, `openbeken-abcdef` (the last three bytes of its MAC),
+   both its short name (its mDNS hostname and its name in Home Assistant) and
+   its full one (its DHCP hostname).
 
-Commands: `S61ImportWiFi` (run the above by hand) and `S61RevertToStock <url>`
-(below).
+The driver also registers `AutoflashKind`, by which the tool tells what plug
+an OpenBeken is on, since every firmware it installs is named alike and the
+user may rename it: `AutoflashKind sonoff-s61` answers OK, any other kind an
+error, and an OpenBeken without the driver does not know the command. It
+changes nothing. The tool asks only an OpenBeken on a chip one of its kinds
+has (BK7238).
+
+Commands: `AutoflashImportWiFi` (run the above by hand),
+`AutoflashRevertToStock <url>` (below) and `AutoflashInterim` (next). Its log
+lines begin `AutoflashImport:`, or `AutoflashRevert:` for reverting. Before
+the driver was split from the S61's table it was `drv_sonoff_s61_import.c`,
+with the commands `S61ImportWiFi` and `S61RevertToStock` and log lines
+beginning `S61Import:` and `S61Revert:`, as the runs quoted below show.
+
+## The interim firmware
+
+A run to ESPHome from Sonoff's firmware installs this same OpenBeken first,
+to back the plug up through it, then has it fetch ESPHome. The tool tells it
+which it is with a marker sent in the same update: B2 sends the image, `0xff`
+to the next 4 KB boundary (from the image's start) and one 4 KB sector -
+`AFINTERM`, a format version, the image's size, the size and FNV-1a hash of
+the app it installs (its RBL header's `size_raw` and `raw_hash`) and a CRC-32
+([`tools/beken/interim_marker.py`](../../tools/beken/interim_marker.py) has
+the layout). Sonoff's updater writes the whole file into the download slot,
+and the stock bootloader, having applied the image, erases only the slot's
+first sector (the image's header), so the marker is still there on the first
+boot. A run to OpenBeken sends the image alone.
+
+On every start, after the first-boot import and before Wi-Fi starts, the
+driver looks at each 4 KB boundary of the slot past the first for a valid
+marker (its magic, version and CRC, and at the boundary after the image size
+it gives): 345 reads of 28 bytes. Found, it checks the marker is for the app
+running: the FNV-1a hash of the app partition's first `size_raw` bytes, read
+raw from `0x11000` with its CRC stripes (32 bytes, then 2 of CRC) skipped -
+the hash the bootloader checked the app against once it wrote it. For that
+app, it names the plug `autoflash-recovery-CDEF` (the MAC's last two bytes,
+upper case, as the S60's interim firmwares are named), short and full name,
+saves the config, and only then erases the marker, so a power cut between
+leaves it to be found again. The plug asks for its first address under that
+name. A marker for any other app - from an update that did not install, sent
+with another image, left by anything but the install it came with - is erased
+and changes nothing: the bootloader installs an image before any app starts,
+so a marker whose app is not running never will be. With no marker nothing
+changes, and the app is not read.
+
+That name is the record of it being the interim firmware: no field of
+OpenBeken's config is the driver's to keep a flag in - its flags and unused
+bytes are upstream's to give a meaning, and a config from a later OpenBeken
+could then read as interim - while a name set through the setters survives
+any change of the config's layout. A plug renamed is the user's own, and no
+longer the interim firmware.
+
+`AutoflashInterim` answers OK on the interim firmware and an error on any
+other; an OpenBeken without the driver, or with one from before it, does not
+know the command. `AutoflashInterim off` makes it the plug's OpenBeken for
+good (`openbeken-abcdef`), for a run that finds a plug left on it and is to
+end on OpenBeken; `AutoflashInterim on` makes it the interim firmware, for the
+run that sent it as one when the marker did not arrive (its update cut off in
+its last few kilobytes, after the whole image). The DHCP and mDNS names follow
+on its next start, so the tool restarts it.
+
+Once the interim firmware has fetched the next firmware, ESPHome or Sonoff's
+own, it leaves nothing of itself: OpenBeken's HTTP OTA calls
+`HAL_OTA_BeforeReboot` just before the restart that applies the download (the
+hook patch below), and the driver, only when it is the interim firmware and
+the slot holds a whole rt_ota app image (its header's CRC-32 and its body's),
+erases OpenBeken's settings (`0x3e1000`), its flash variables (OpenBeken's
+EasyFlash at `0x1e5000`-`0x1ed000`: boot counts, kept channel values, energy
+totals) and any marker past the image. A download cut off leaves it the
+interim firmware, to be sent the image again; a power cut after the erase
+still applies the image, which is whole in the slot. A later move back to
+OpenBeken starts afresh, named by its first boot's import. Any other
+OpenBeken - a user's own, updating itself - is left as it is. OpenBeken's
+LittleFS, which would sit at the top of the download slot, is never made on
+the interim firmware, so there is none to erase.
 
 ## Building (BK7238, 4 MB table)
 
@@ -68,7 +161,8 @@ work through the ordinary `ota_http` — its config moves to the dedicated empty
 Two patches, kept in [`tools/beken/openbeken/`](../../tools/beken/openbeken/) and offered upstream as
 [OpenBK7231T_App#2290](https://github.com/openshwprojects/OpenBK7231T_App/pull/2290)
 and [beken_freertos_sdk#13](https://github.com/NonPIayerCharacter/beken_freertos_sdk/pull/13),
-add a `FLASH_SIZE=4M` build switch:
+add a `FLASH_SIZE=4M` build switch, and a third gives the driver its hook
+before an OTA's restart:
 
 - [`openbk7231t_app-bk7238-4m-flash.patch`](../../tools/beken/openbeken/openbk7231t_app-bk7238-4m-flash.patch)
   (against `openshwprojects/OpenBK7231T_App`): `make FLASH_SIZE=4M` builds with
@@ -90,6 +184,16 @@ add a `FLASH_SIZE=4M` build switch:
   into its tail, which is byte for byte the S61's factory bootloader. The pull
   request ships that file; the patch here has `make_bootloader_4m.py` generate
   it on the first pack.
+- [`openbk7231t_app-ota-before-reboot-hook.patch`](../../tools/beken/openbeken/openbk7231t_app-ota-before-reboot-hook.patch)
+  (against `openshwprojects/OpenBK7231T_App`, alone or after the first):
+  `HAL_OTA_BeforeReboot(ok)`, weak and empty unless a driver defines it, called
+  in the Beken HTTP OTA path once the download is written and the config saved,
+  just before `bk_reboot()` - `ok` when no error was seen while it downloaded.
+  OpenBeken's HTTP client ends a download the same way whether it finished or
+  failed, and can take a connection closed early for the end, so a hook that
+  acts on it checks the image too; this driver's does
+  ([the interim firmware](#the-interim-firmware)). Written so it can be offered
+  upstream; not offered yet.
 
 The Beken SDK bundles its own `arm-none-eabi-gcc` that needs **GLIBC ≥ 2.34**, so
 build in a current environment (Ubuntu 24.04 / 22.04 — OpenBeken's own Docker
@@ -101,7 +205,8 @@ git clone https://github.com/openshwprojects/OpenBK7231T_App
 cd OpenBK7231T_App
 cp <this repo>/tools/beken/openbeken/*.patch .
 git apply openbk7231t_app-bk7238-4m-flash.patch
-# ...the three module edits from the section above...
+git apply openbk7231t_app-ota-before-reboot-hook.patch
+# ...the three driver edits from the section above...
 docker run --rm -v "$(pwd)":/app ubuntu:24.04 bash -c '
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq && apt-get install -y -qq \
@@ -113,7 +218,7 @@ docker run --rm -v "$(pwd)":/app ubuntu:24.04 bash -c '
 ```
 
 `tools/repo/update_firmware.py openbeken` does all of the above - clone, patches,
-module, build in `build.Dockerfile` - and publishes the image as
+driver and table, build in `build.Dockerfile` - and publishes the image as
 `artifacts/openbeken-sonoff-s61-<version>.rbl`, the OpenBeken and SDK commits
 pinned in `firmware.json` ([docs/updating-firmware.md](../../docs/updating-firmware.md)).
 By hand, `output/s61/OpenBK7238_4M_s61.rbl` is the `rt_ota` image for the **OTA
@@ -148,11 +253,12 @@ S61Import: applied the S61 pin template (Rel P26, Btn P9, LED P0, WifiLED P1, BL
 Info:MAIN:Started BL0937.
 ```
 
-and the config OpenBeken then saved at `0x3e1000` decodes to: name `S61`; P26
+and the config OpenBeken then saved at `0x3e1000` decodes to: name `S61` (the module's name then; now `openbeken-abcdef`); P26
 `IOR_Relay` ch 1, P9 `IOR_Button_ToggleAll` ch 1, P0 `IOR_LED_n` ch 1, P1
 `IOR_LED_WIFI_n` ch 2, P8 `IOR_BL0937_CF`, P6 `IOR_BL0937_CF1`, P24
 `IOR_BL0937_SEL`; `startChannelValues[1] = -1`; cal `V=0.128238 I=0.011095
-P=1.334562 PowerMax=3840`. On a 2 MB-table build `S61RevertToStock` refuses
+P=1.334562 PowerMax=3840`. On a 2 MB-table build `S61RevertToStock` (now
+`AutoflashRevertToStock`) refuses
 (`OTA slot is 0x132000, not the stock download slot 0x286000 - refusing`), and
 on the first 4 MB-table build without the `hal_ota.h` patch the downloader still
 wrote to `0x132000` and the stock bootloader rebooted straight back into
@@ -198,7 +304,7 @@ build that is OpenBeken's own OTA slot, so reversion is an ordinary OTA download
 of a **stock app RBL**:
 
 ```
-S61RevertToStock http://<tool>/stock_app_1.0.2.rbl
+AutoflashRevertToStock http://<tool>/stock_app_1.0.2.rbl
 ```
 
 The command first checks the OTA slot really is `0x286000` and refuses otherwise

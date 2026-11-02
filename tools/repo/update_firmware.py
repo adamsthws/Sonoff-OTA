@@ -27,9 +27,10 @@
     python3 tools/repo/update_firmware.py openbeken [--plug sonoff-s61] [--commit SHA]
                                      [--image-version X.Y.Z]
         build OpenBeken for a Beken plug - upstream at that commit (default: the
-        one pinned, else main's head), this project's 4 MB-table patches and
-        the plug's import module - in this project's build image, check it,
-        and publish it in artifacts/
+        one pinned, else main's head), this project's patches (the 4 MB
+        table, the hook before an OTA's restart), its driver and the plug's
+        table for it - in this project's build image, check it, and publish it
+        in artifacts/
 
 Each writes firmware.json, the published files and SHA256SUMS, and lists what
 is left to do by hand. Nothing is pushed or committed. docs/updating-firmware.md
@@ -96,19 +97,28 @@ BUILD_CACHE = ROOT / "captures" / "esphome-build"
 # The Beken plugs' firmware: each ends on OpenBeken or on ESPHome built on
 # LibreTiny, both rt_ota images the stock bootloader applies from the download
 # slot (devices/sonoff-s61/). OpenBeken is built from upstream at a pinned
-# commit with this project's 4 MB-table patches (tools/beken/openbeken/, offered
-# upstream) and the plug's import module, in a build image of this project's
-# (build.Dockerfile): the SDK's own toolchain wants a newer GLIBC than OpenBeken's
-# image has. Each plug: its module and its ESPHome config, and the files their
-# builds are published as.
+# commit with this project's patches (tools/beken/openbeken/: the 4 MB table,
+# offered upstream, and a hook before an OTA's restart, which the driver uses),
+# this project's driver (OPENBEKEN_DRIVER, beside the patches) and the plug's
+# table for it, in a build image of this project's (build.Dockerfile): the
+# SDK's own toolchain wants a newer GLIBC than OpenBeken's image has. Each
+# plug: its table and its ESPHome config, and the files their builds are
+# published as.
 OPENBEKEN_REPO = "openshwprojects/OpenBK7231T_App"
 OPENBEKEN_DIR = ROOT / "tools" / "beken" / "openbeken"
-OPENBEKEN_PATCHES = ("openbk7231t_app-bk7238-4m-flash.patch", "beken_freertos_sdk-4m-pack-profile.patch")
+# Each patch, and where in the clone it applies: OpenBeken's own tree, or the SDK it clones.
+OPENBEKEN_PATCHES = {
+    "openbk7231t_app-bk7238-4m-flash.patch": ".",
+    "openbk7231t_app-ota-before-reboot-hook.patch": ".",
+    "beken_freertos_sdk-4m-pack-profile.patch": "sdk/beken_freertos_sdk",
+}
+# The driver's source and its header, the first the one with its start-up and commands.
+OPENBEKEN_DRIVER = ("drv_autoflash.c", "drv_autoflash.h")
 OPENBEKEN_BUILDER = "autoflash-openbeken-build"
 OPENBEKEN_BUILD_CACHE = ROOT / "captures" / "openbeken-build"
 BEKEN_BUILDS = {
     "sonoff-s61": {
-        "openbeken": ("devices/sonoff-s61/drv_sonoff_s61_import.c", "artifacts/openbeken-sonoff-s61-{version}.rbl"),
+        "openbeken": ("devices/sonoff-s61/drv_autoflash_sonoff_s61.c", "artifacts/openbeken-sonoff-s61-{version}.rbl"),
         "esphome": ("devices/sonoff-s61/esphome.yaml", "artifacts/esphome-sonoff-s61-{version}.rbl"),
     },
 }
@@ -596,36 +606,44 @@ def git(*args: str, cwd: Path) -> str:
     return result.stdout.strip()
 
 
+def openbeken_sources(plug: str) -> list[str]:
+    """What a plug's OpenBeken is built with beyond upstream and the patches:
+    the driver, then the plug's table for it."""
+    return ([(OPENBEKEN_DIR / name).relative_to(ROOT).as_posix() for name in OPENBEKEN_DRIVER]
+            + [BEKEN_BUILDS[plug]["openbeken"][0]])
+
+
 def module_init(source: str) -> str:
-    """The module's one start-up function, `void Something_Init(void)`."""
+    """The driver's one start-up function, `void Something_Init(void)`."""
     found = re.findall(r"^void (\w+_Init)\(void\)", source, re.MULTILINE)
     if len(found) != 1:
-        raise UpdateError("the module must define one `void <Name>_Init(void)` to be called at start-up")
+        raise UpdateError("the driver must define one `void <Name>_Init(void)` to be called at start-up")
     return found[0]
 
 
 def module_commands(source: str) -> list[str]:
-    """The commands the module registers: each must be in the image built."""
+    """The commands the driver registers: each must be in the image built."""
     return re.findall(r'CMD_RegisterCommand\("(\w+)"', source)
 
 
-def with_module(makefile: str, main: str, module: str, init: str) -> tuple[str, str]:
-    """platforms/obk_main.mk and src/user_main.c with the plug's module built
-    and run at start-up, as devices/sonoff-s61/openbeken.md says to add it:
-    listed beside the other drivers, and called once the config is loaded."""
+def with_module(makefile: str, main: str, sources: list[str], init: str) -> tuple[str, str]:
+    """platforms/obk_main.mk and src/user_main.c with the driver and the plug's
+    table (`sources`, in src/driver/) built and run at start-up, as
+    devices/sonoff-s61/openbeken.md says to add them: listed beside the other
+    drivers, and called once the config is loaded."""
     anchor = "OBKM_SRC  += $(OBK_SRCS)driver/drv_main.c\n"
     if makefile.count(anchor) != 1:
-        raise UpdateError("platforms/obk_main.mk no longer lists driver/drv_main.c once: where the module goes")
+        raise UpdateError("platforms/obk_main.mk no longer lists driver/drv_main.c once: where the driver goes")
     call = "\tCFG_InitAndLoad();\n"
     if main.count(call) != 1:
-        raise UpdateError("src/user_main.c no longer calls CFG_InitAndLoad() once: where the module's start goes")
-    return (makefile.replace(anchor, anchor + f"OBKM_SRC  += $(OBK_SRCS)driver/{module}\n"),
+        raise UpdateError("src/user_main.c no longer calls CFG_InitAndLoad() once: where the driver's start goes")
+    return (makefile.replace(anchor, anchor + "".join(f"OBKM_SRC  += $(OBK_SRCS)driver/{name}\n" for name in sources)),
             main.replace(call, call + f"\n\textern void {init}(void);\n\t{init}();\n"))
 
 
 def openbeken_source(commit: str) -> Path:
     """A fresh clone of OpenBeken at `commit`, its SDK with it, with this
-    project's 4 MB-table patches applied (tools/beken/openbeken/)."""
+    project's patches applied (tools/beken/openbeken/, OPENBEKEN_PATCHES)."""
     source = OPENBEKEN_BUILD_CACHE / "OpenBK7231T_App"
     if source.exists():
         # The SDK's toolchain unpacks read-only: made writable as it is removed.
@@ -638,8 +656,8 @@ def openbeken_source(commit: str) -> Path:
     git("clone", "--quiet", f"https://github.com/{OPENBEKEN_REPO}.git", str(source), cwd=OPENBEKEN_BUILD_CACHE)
     git("checkout", "--quiet", commit, cwd=source)
     git("submodule", "update", "--init", "--depth=1", "sdk/beken_freertos_sdk", cwd=source)
-    for patch, where in zip(OPENBEKEN_PATCHES, (source, source / "sdk" / "beken_freertos_sdk")):
-        git("apply", str(OPENBEKEN_DIR / patch), cwd=where)
+    for patch, where in OPENBEKEN_PATCHES.items():
+        git("apply", str(OPENBEKEN_DIR / patch), cwd=source / where)
     return source
 
 
@@ -689,35 +707,39 @@ def check_rbl(image: bytes, label: str, version: str | None, needles: list[bytes
 
 
 def command_openbeken(args: argparse.Namespace) -> int:
-    module_path, file_pattern = BEKEN_BUILDS[args.plug]["openbeken"]
+    file_pattern = BEKEN_BUILDS[args.plug]["openbeken"][1]
+    sources = openbeken_sources(args.plug)
     pins = load_pins()
     section = beken_section(pins, args.plug)
     current = section.get("openbeken", {})
     commit = args.commit or current.get("app_commit") or github(f"repos/{OPENBEKEN_REPO}/commits/main")["sha"]
     version = args.image_version or (next_minor(current["version"]) if current else "1.0.0")
-    module = (ROOT / module_path).read_text(encoding="utf-8")
-    init, commands = module_init(module), module_commands(module)
+    driver = (ROOT / sources[0]).read_text(encoding="utf-8")
+    init, commands = module_init(driver), module_commands(driver)
     builder = openbeken_builder()
     print(f"OpenBeken {version} for the {args.plug}: {OPENBEKEN_REPO} at {commit[:7]}, built in {builder}")
     source = openbeken_source(commit)
-    name = Path(module_path).name
-    shutil.copyfile(ROOT / module_path, source / "src" / "driver" / name)
+    for path in sources:
+        target = source / "src" / "driver" / Path(path).name
+        if target.exists():
+            raise UpdateError(f"OpenBeken has a src/driver/{target.name} of its own: the driver's would replace it")
+        shutil.copyfile(ROOT / path, target)
     makefile_path, main_path = source / "platforms" / "obk_main.mk", source / "src" / "user_main.c"
     makefile, main = with_module(makefile_path.read_text(encoding="utf-8"), main_path.read_text(encoding="utf-8"),
-                                 name, init)
+                                 [Path(path).name for path in sources if path.endswith(".c")], init)
     makefile_path.write_text(makefile, encoding="utf-8")
     main_path.write_text(main, encoding="utf-8")
     image = build_openbeken(source, version)
     firmware = check_rbl(image, "the OpenBeken built", version, [command.encode("ascii") for command in commands])
     sdk_commit = git("rev-parse", "HEAD", cwd=source / "sdk" / "beken_freertos_sdk")
-    print(f"  OpenBeken {version}: {len(image):,} bytes ({len(firmware):,} unpacked), the module's "
+    print(f"  OpenBeken {version}: {len(image):,} bytes ({len(firmware):,} unpacked), the driver's "
           f"{', '.join(commands)} in it, {uf2.DOWNLOAD_SIZE - len(image):,} bytes to spare in the download slot")
     if args.dry_run:
         print("\nBuilt and checked; nothing published (--dry-run).")
         return 0
     publish(section, "openbeken", file_pattern.format(version=version), image, {
         "version": version, "app_commit": commit, "sdk_commit": sdk_commit,
-        "module": module_path, "module_sha256": sha256_bytes(module.encode("utf-8")),
+        "sources": {path: sha256_bytes((ROOT / path).read_bytes()) for path in sources},
         "patches": {patch: sha256_bytes((OPENBEKEN_DIR / patch).read_bytes()) for patch in OPENBEKEN_PATCHES},
         "builder": builder})
     save_pins(pins)
@@ -759,8 +781,7 @@ def command_esphome_beken(args: argparse.Namespace) -> int:
     image, board, libretiny = build_libretiny(builder, ROOT / config_path, version, BUILD_CACHE)
     project = re.search(r"^    name: (\S+)", config, re.MULTILINE).group(1)
     check_rbl(image, "the ESPHome built", None,
-              [version.encode("ascii"), project.encode("ascii"), release.encode("ascii"), b"autoflash_wifi",
-               b"autoflash_backup_read"])
+              [version.encode("ascii"), project.encode("ascii"), release.encode("ascii"), b"autoflash_wifi"])
     layout = board.get("flash", {})
     if layout.get("download") != f"0x{uf2.DOWNLOAD_OFFSET:06X}+0x{uf2.DOWNLOAD_SIZE:X}":
         raise UpdateError(f"the build's download partition is {layout.get('download')}, not the stock "

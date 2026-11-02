@@ -332,10 +332,11 @@ case "${1:-}" in
         read -r _ _ lease named _ < <(docker exec "$PLUG" sh -c 'sort -n /run/autoflash-s61/leases | tail -1' 2>/dev/null)
         [ -n "${lease:-}" ] || { echo "No plug on its Wi-Fi yet: start it (bk-emu.sh plug) and give it a minute" >&2; exit 1; }
         # Which firmware, by the name it gave its router: esphome-abcdef, or
-        # openbeken-abcdef (OpenBK7238_ABCDEF before its first start's naming).
+        # openbeken-abcdef (OpenBK7238_ABCDEF before its first start's naming;
+        # autoflash-recovery-CDEF as the interim firmware).
         case "${named:-}" in
             esphome*) firmware=esphome ;;
-            openbeken-*|OpenBK*) firmware=openbeken ;;
+            openbeken-*|OpenBK*|autoflash-recovery-*) firmware=openbeken ;;
             *) echo "The plug at $lease runs neither OpenBeken nor ESPHome (it calls itself ${named:-nothing}): Sonoff's firmware has no page" >&2; exit 1 ;;
         esac
         exec python3 -I "$HERE/ui_proxy.py" --device "$lease" --firmware "$firmware" --listen "127.0.0.1:${2:-8088}" ;;

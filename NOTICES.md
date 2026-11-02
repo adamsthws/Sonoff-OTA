@@ -47,7 +47,7 @@ ESP-IDF. Their corresponding source is the
 [ESPHome 2026.9.1 release](https://github.com/esphome/esphome/tree/2026.9.1)
 and those configs (the S60's at 1.2.0 is in this repository's history).
 
-`artifacts/esphome-sonoff-s61-1.0.0.rbl` is built with ESPHome 2026.10.0 and
+`artifacts/esphome-sonoff-s61-1.1.0.rbl` is built with ESPHome 2026.10.0 and
 LibreTiny 1.13.0 from this project's config
 [`devices/sonoff-s61/esphome.yaml`](devices/sonoff-s61/esphome.yaml), with
 `esphome compile`, the rt_ota image LibreTiny's build makes. Its corresponding
@@ -61,7 +61,7 @@ How they are built and published is in
 
 ## OpenBeken firmware
 
-`artifacts/openbeken-sonoff-s61-1.0.0.rbl` is OpenBeken
+`artifacts/openbeken-sonoff-s61-1.1.0.rbl` is OpenBeken
 ([openshwprojects/OpenBK7231T_App](https://github.com/openshwprojects/OpenBK7231T_App))
 at commit
 [`ce1abad8dc931720167a7628840adae30b92afaf`](https://github.com/openshwprojects/OpenBK7231T_App/tree/ce1abad8dc931720167a7628840adae30b92afaf)
@@ -70,9 +70,12 @@ with its Beken SDK
 at commit
 [`f5a64d4cda03bac6d885f4f30c27bbd3435c5e3a`](https://github.com/NonPIayerCharacter/beken_freertos_sdk/tree/f5a64d4cda03bac6d885f4f30c27bbd3435c5e3a),
 built for the BK7238 with a 4 MB flash. This project's changes to each are
-the patches in [`tools/beken/openbeken/`](tools/beken/openbeken/) (offered
-upstream as OpenBK7231T_App#2290 and beken_freertos_sdk#13) and the module
-[`devices/sonoff-s61/drv_sonoff_s61_import.c`](devices/sonoff-s61/drv_sonoff_s61_import.c),
+the patches in [`tools/beken/openbeken/`](tools/beken/openbeken/) (the 4 MB
+table, offered upstream as OpenBK7231T_App#2290 and beken_freertos_sdk#13,
+and a hook before an OTA's restart), the driver
+[`tools/beken/openbeken/drv_autoflash.c`](tools/beken/openbeken/drv_autoflash.c)
+and the S61's table for it,
+[`devices/sonoff-s61/drv_autoflash_sonoff_s61.c`](devices/sonoff-s61/drv_autoflash_sonoff_s61.c),
 built into the image; `firmware.json` records the commits and each file's
 hash.
 

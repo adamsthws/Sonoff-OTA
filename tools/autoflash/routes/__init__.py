@@ -244,7 +244,7 @@ def ask_firmware(source: str, choices: list[str]) -> str:
     no backup to go back to Sonoff's firmware from."""
     output.transient_begin()
     body = (["This device was left part way through a conversion; it can go on to any",
-             "of these from where it is."] if source in ("midway", "committed", "installer") else
+             "of these from where it is."] if source in ("midway", "committed", "installer", "interim") else
             ["Its Tasmota goes back on first, with its settings; choosing Tasmota",
              "stops there. Or it can go on to either of the others."] if source == "safeboot" else
             ["It runs Tasmota without the device's template, so it switches nothing;",

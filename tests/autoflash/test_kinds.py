@@ -1,5 +1,6 @@
 """The kinds of plug the tool converts, and what is each one's own."""
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from tools.autoflash import kinds
 from tools.autoflash.state import RunState
 
 S60 = kinds.SONOFF_S60
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class KnownByTests(unittest.TestCase):
@@ -68,6 +70,25 @@ class NamesTests(unittest.TestCase):
         self.assertEqual(kinds.on_chip("BK7238"), (kinds.SONOFF_S61,))
         self.assertEqual(kinds.on_chip("BK7231N"), ())
         self.assertEqual(kinds.on_chip(None), ())
+
+    def test_each_kinds_firmware_says_what_the_tool_looks_for(self):
+        # What each firmware says it is, in the plug's own files, against what
+        # the tool tells the kind by: a kind added with one of them missed is
+        # never recognised once converted.
+        for kind in kinds.ALL:
+            with self.subTest(kind=kind.key):
+                config = (ROOT / "devices" / kind.key / "esphome.yaml").read_text(encoding="utf-8")
+                self.assertRegex(config, rf"(?m)^  comment: {re.escape(kind.display_name)}$")
+                self.assertIs(kinds.for_esphome("esphome abcdef", kind.display_name), kind)
+                if kind.family != "beken":
+                    continue
+                # Its OpenBeken answers AutoflashKind by its table for the driver.
+                tables = list((ROOT / "devices" / kind.key).glob("drv_autoflash_*.c"))
+                self.assertEqual(len(tables), 1, tables)
+                table = tables[0].read_text(encoding="utf-8")
+                self.assertIn(f'.kind = "{kind.key}",', table)
+                self.assertIn(f'.stock_model = "{kind.stock_model}",', table)
+                self.assertIn(kind, kinds.on_chip(kind.chip.upper()))
 
     def test_before_the_plug_is_known_every_kind_is_named(self):
         self.assertEqual(kinds.names(), "Sonoff S60 or Sonoff S61")

@@ -165,6 +165,7 @@ turned out to be, byte for byte, the S61's factory bootloader.
 |---|---|---|
 | beken_freertos_sdk (NonPIayerCharacter) | [#13](https://github.com/NonPIayerCharacter/beken_freertos_sdk/pull/13) | Packing a 4 MB BK7238 image failed on a `_2M` filename, the 4 MB app profile overran the OTA partition, and no 4 MB bootloader was shipped |
 | OpenBeken (OpenBK7231T_App) | [#2290](https://github.com/openshwprojects/OpenBK7231T_App/pull/2290) | No way to build for a 4 MB flash; the REST/web-UI OTA slot, the flash-read and flash-write bounds and LittleFS's bounds were 2 MB constants whatever table the firmware used (on 4 MB, LittleFS inside the app partition) |
+| OpenBeken (OpenBK7231T_App) | [#2293](https://github.com/openshwprojects/OpenBK7231T_App/pull/2293) | No way for a driver to act before an HTTP OTA restarts the device: a weak `HAL_OTA_BeforeReboot(ok)` hook, by which the S61's interim firmware erases its own settings so the firmware it fetched starts clean |
 
 Proven in the BekenEmulator on a dump of the owner's own S61: the default
 2 MB build unchanged, and the 4 MB build saving its config at `0x3e1000`,
