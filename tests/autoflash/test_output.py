@@ -194,13 +194,13 @@ class ConciseTests(OutputTestCase):
                 output.stage_begin(5, "Installing the installer firmware")
                 output.transient_begin()          # the underway line: 1 row
                 prompts.warning_box("Before going on", ["One line."])  # 3 rows
-                output.before_input("Type PROCEED to go ahead: ")
+                output.before_input("Type PROCEED to go ahead: ")  # a blank row before it
                 output.answered("proceed")        # prompt and answer: 1 row
                 output.transient_end()
                 output.stage_end("complete")
         screen, log = self.run_with(FakeTerminal(), False, body)
-        self.assertIn("\x1b[1F\x1b[2K" * 5, screen)
-        self.assertNotIn("\x1b[1F\x1b[2K" * 6, screen)
+        self.assertIn("\x1b[1F\x1b[2K" * 6, screen)
+        self.assertNotIn("\x1b[1F\x1b[2K" * 7, screen)
         self.assertNotIn("\x1b[J", screen)   # never an erase that could clear the whole screen
         self.assertIn("Before going on", log)
         self.assertIn("-> proceed", log)
@@ -561,6 +561,21 @@ class InputTests(OutputTestCase):
         _, log = self.run_with(io.StringIO(), False, body)
         self.assertIn("eWeLink password", log)
         self.assertNotIn("Secret-9x", log)
+
+    def test_a_blank_line_stands_between_a_question_and_what_is_above_it(self):
+        answers = iter(["1", "y", "y"])
+
+        def body():
+            prompts.section("Choose the device's new firmware")
+            with mock.patch("builtins.input", side_effect=lambda prompt: print(prompt) or next(answers)):
+                prompts.ask_choice("Which firmware would you like", ["OpenBeken", "ESPHome"])
+                prompts.ask_yes_no("Is it plugged in")   # straight after the answer above
+                output.show("")
+                prompts.ask_yes_no("Go on")              # a blank line already: not two
+        screen, _ = self.run_with(io.StringIO(), False, body)
+        self.assertIn("3. Quit - stop here\n\n Which firmware would you like: \n", screen)
+        self.assertIn("would you like: \n\n Is it plugged in", screen)
+        self.assertNotIn("\n\n\n", screen)
 
 
 

@@ -71,6 +71,7 @@ class _State:
     live_is_stage = False
     stream_fresh = True               # a helper's output is at the start of a row
     after_stage = False               # a stage line was the last on screen: a gap before what follows
+    after_blank = False               # a blank line was the last on screen
     paused = False                    # waiting for the keyboard: draw nothing
     held = False                      # between questions that belong together: no clock
     ticker: threading.Thread | None = None
@@ -187,6 +188,7 @@ def finish() -> None:
         _s.transient_rows = None
         _s.name_width = 0
         _s.after_stage = False
+        _s.after_blank = False
 
 
 def move_log(move: Callable[[], Path]) -> None:
@@ -347,6 +349,12 @@ def before_input(prompt: str = "") -> None:
         _break()
         _show_keys()
         _gap("?")
+        # A question stands apart from the options or text above it.
+        if not _s.after_blank:
+            print("", flush=True)
+            _s.after_blank = True
+            if _s.transient_rows is not None:
+                _s.transient_rows += 1
         _s.paused = True
         if _s.waiting_since is None:
             _s.waiting_since = time.monotonic()
@@ -378,6 +386,7 @@ def after_input() -> None:
             # The question and the answer echoed after it, then Enter.
             _s.transient_rows += _rows(_s.pending_prompt + _s.pending_answer)
         _s.pending_prompt, _s.pending_answer = None, ""
+        _s.after_blank = False  # the answer's line
         _s.paused = False
         if _s.concise:
             _hide_keys()
@@ -565,6 +574,7 @@ def stage_end(outcome: str) -> None:
                 sys.stdout.flush()
                 _s.live = 0
                 _s.after_stage = True
+                _s.after_blank = False
             else:
                 _print(text, stage=True)
         _s.stage = None
@@ -851,6 +861,7 @@ def _break() -> None:
             if _s.transient_rows is not None:
                 _s.transient_rows += 1
             _s.after_stage = True
+            _s.after_blank = False
         else:
             sys.stdout.write("\r" + " " * _s.live + "\r")
         sys.stdout.flush()
@@ -865,6 +876,7 @@ def _print(text: str, *, stage: bool = False) -> None:
         _gap(text)
     text = _fit(text)
     print(text, flush=True)
+    _s.after_blank = not ANSI_RE.sub("", text).strip()
     if _s.transient_rows is not None:
         _s.transient_rows += _rows(text)
     if stage:
@@ -950,6 +962,7 @@ def _gap(text: str) -> None:
     _s.after_stage = False
     if ANSI_RE.sub("", text).strip("\r\n\t "):
         print("", flush=True)
+        _s.after_blank = True
         if _s.transient_rows is not None:
             _s.transient_rows += 1
 
