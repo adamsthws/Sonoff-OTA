@@ -245,23 +245,32 @@ class ResumeTests(unittest.TestCase):
 class ConfirmSkipTests(unittest.TestCase):
     """A step recorded as done is skipped only as far as the plug agrees."""
 
-    def skip(self, verifier, rerun=False):
+    def skip(self, verifier):
         from types import SimpleNamespace
         verifiers = {} if verifier is None else {"D1": verifier}
         with mock.patch.dict(tasmota.STEP_VERIFIERS, verifiers, clear=True), \
-             mock.patch.object(prompts, "ask_yes_no", return_value=rerun) as asked, \
+             mock.patch.object(prompts, "ask_yes_no") as asked, \
              mock.patch.object(output, "say") as said, mock.patch.object(output, "transient_begin"), \
              mock.patch.object(output, "transient_end"):
             skipped = runner.confirm_skip(SimpleNamespace(), "D1", "Install Tasmota")
         return skipped, asked, said.call_args.args[0] if said.called else ""
 
-    def test_the_question_defaults_to_no_but_for_the_familys_redo_steps(self):
-        _, asked, _ = self.skip(lambda ctx: (False, "the plug says otherwise"))
-        self.assertFalse(asked.call_args.kwargs["default"])
-        from tools.autoflash import routes
-        with mock.patch.object(routes.espressif, "REDO_STEPS", {"D1"}):
-            _, asked, _ = self.skip(lambda ctx: (False, "the plug says otherwise"))
-        self.assertTrue(asked.call_args.kwargs["default"])
+    def test_a_plug_that_disagrees_has_the_step_done_again_unasked(self):
+        # Asked "run E3 again?", a person converting their plug could not
+        # answer better than the step's own checks of the plug.
+        skipped, asked, said = self.skip(lambda ctx: (False, "the plug says otherwise"))
+        self.assertFalse(skipped)
+        asked.assert_not_called()
+        self.assertIn("the plug says otherwise: doing it again", said)
+
+    def test_f2_is_doubted_only_on_the_recovery_firmware_where_doing_it_again_helps(self):
+        # Anywhere else F2 would wait for a recovery firmware that never comes.
+        from types import SimpleNamespace
+        self.assertIs(tasmota.STEP_VERIFIERS["F2"], tasmota.verify_canonical)
+        on = SimpleNamespace(device=SimpleNamespace(is_safeboot=lambda: True))
+        off = SimpleNamespace(device=SimpleNamespace(is_safeboot=lambda: False))
+        self.assertFalse(tasmota.verify_canonical(on)[0])
+        self.assertEqual(tasmota.verify_canonical(off), (True, ""))
 
     def test_a_step_with_no_check_is_taken_at_its_record(self):
         skipped, asked, said = self.skip(None)
@@ -284,14 +293,6 @@ class ConfirmSkipTests(unittest.TestCase):
             asked.assert_not_called()
             self.assertIn("could not re-check", said)
 
-    def test_a_plug_that_disagrees_is_asked_about_and_kept_by_default(self):
-        skipped, asked, _ = self.skip(lambda ctx: (False, "the plug runs Sonoff"))
-        self.assertTrue(skipped)
-        self.assertFalse(asked.call_args.kwargs["default"])
-
-    def test_the_step_runs_again_when_asked(self):
-        skipped, _, _ = self.skip(lambda ctx: (False, "the plug runs Sonoff"), rerun=True)
-        self.assertFalse(skipped)
 
 
 class RunStepsTests(unittest.TestCase):
@@ -394,27 +395,28 @@ class RunStepsTests(unittest.TestCase):
         self.assertTrue(RunState.open(self.root).is_done("S2"))
         stand_ins["ask_choice"].assert_not_called()
 
-    def test_an_interrupted_step_shown_unfinished_is_recommended_again(self):
+    def test_an_interrupted_step_shown_unfinished_is_done_again_without_asking(self):
+        # Seen: asked, "it did finish" for a B2 that had not left the run
+        # waiting for good on an interim firmware never sent.
         self.state.mark("S2", ATTEMPTED)
         _, ran, stand_ins = self.run_steps(check=lambda ctx: (False, "it still runs Sonoff"))
         self.assertEqual(ran, ["S1", "S2", "S3"])
-        self.assertIn("recommended", stand_ins["ask_choice"].call_args.args[1][0])
+        stand_ins["ask_choice"].assert_not_called()
 
-    def test_an_interrupted_step_the_operator_says_finished_is_moved_past(self):
-        self.state.mark("S2", ATTEMPTED)
-        _, ran, stand_ins = self.run_steps(answer=1)
-        self.assertEqual(ran, ["S1", "S3"])
-        self.assertEqual(RunState.open(self.root).data["steps"]["S2"]["note"], "operator confirmed it completed")
-        self.assertNotIn("recommended", stand_ins["ask_choice"].call_args.args[1][0])
-
-    def test_an_interrupted_step_whose_check_fails_is_asked_about(self):
+    def test_an_interrupted_step_whose_check_fails_is_done_again_without_asking(self):
         self.state.mark("S2", ATTEMPTED)
 
         def check(ctx):
             raise device.DeviceError("no answer")
         _, ran, stand_ins = self.run_steps(check=check)
         self.assertEqual(ran, ["S1", "S2", "S3"])
-        stand_ins["ask_choice"].assert_called_once()
+        stand_ins["ask_choice"].assert_not_called()
+
+    def test_an_interrupted_step_with_no_check_is_done_again_without_asking(self):
+        self.state.mark("S2", ATTEMPTED)
+        _, ran, stand_ins = self.run_steps()
+        self.assertEqual(ran, ["S1", "S2", "S3"])
+        stand_ins["ask_choice"].assert_not_called()
 
     def test_unattended_an_interrupted_step_is_done_again_without_asking(self):
         self.state.mark("S2", ATTEMPTED)

@@ -54,7 +54,8 @@ With `--unattended`:
   `--firmware esphome`, or the run stops there;
 - PROCEED, before the point of no return, is taken as typed;
 - an unfinished run is carried on, as the menu's first option would (`--new`
-  starts afresh instead), and an interrupted step is done again;
+  starts afresh instead), and an interrupted step is done again (as in
+  any run, where the plug does not show it finished);
 - a yes/no question takes its default, the cautious answer: a weak Wi-Fi
   signal, for one, stops the run;
 - any other question stops the run, saying which question it was. Two plugs

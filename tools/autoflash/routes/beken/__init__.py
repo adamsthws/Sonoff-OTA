@@ -149,7 +149,6 @@ ATTEMPTED_EVIDENCE: dict[str, Callable[["Context"], tuple[bool | None, str]]] = 
 # The check steps ask the plug afresh anyway.
 STEP_VERIFIERS: dict[str, Callable[["Context"], tuple[bool, str]]] = {
     step: onward.still_installed for step in ("J2", "J4", "O1", "O2", "E1", "E2")}
-REDO_STEPS = set(STEP_VERIFIERS)
 # Sonoff's firmware goes back on from the public dump (images.stock_rbl), not
 # the plug's backup - which B4 takes first, from OpenBeken, where there is none.
 SONOFF_FROM_BACKUP = False

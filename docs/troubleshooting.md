@@ -318,9 +318,10 @@ fast" entry above.
 **A step says it was interrupted**
 
 The tool marks a step before it starts writing, so an interrupted run is
-visible rather than silent. It will check the plug and tell you whether the
-step got far enough, then let you choose. Take the recommendation unless you
-know better.
+visible rather than silent. It checks the plug: where the plug shows the step
+finished, the run moves on; otherwise it does the step again by itself, which
+is safe, as every step checks the plug before it writes anything and refuses
+if it is not as expected.
 
 ## After the rebuild
 

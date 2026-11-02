@@ -14,8 +14,8 @@ steps_for(firmware, source) for its routes, none of them beginning with the
 steps shared here, and what the runner needs to know of each step:
 POINT_OF_NO_RETURN, DESTRUCTIVE_STEPS, RETRY_STEPS, ERASED_CHECK_STEPS,
 STAGE_NAMES, TARGET_STAGE_NAMES, PLAIN_DESCRIPTION, ATTEMPTED_EVIDENCE,
-STEP_VERIFIERS, REDO_STEPS (those its verifiers' doubt sends round again
-unasked), SONOFF_FROM_BACKUP (whether going back to Sonoff's firmware needs
+STEP_VERIFIERS (each step its verifier doubts is done again, unasked),
+SONOFF_FROM_BACKUP (whether going back to Sonoff's firmware needs
 the plug's own backup), and RESUME_CHECK, what a resumed run checks first (or None).
 """
 

@@ -12,8 +12,6 @@ from tools.autoflash.routes.espressif import bundle, hub, installer, mover, sono
 from tools.autoflash.routes.espressif.evidence import ATTEMPTED_EVIDENCE, DESTRUCTIVE_STEPS  # noqa: F401
 from tools.autoflash.routes.espressif.tasmota import STEP_VERIFIERS  # noqa: F401
 
-# Where a step recorded done is doubted, it is run again only when asked to.
-REDO_STEPS: set[str] = set()
 # Sonoff's firmware goes back on from the plug's own backup: there is no other.
 SONOFF_FROM_BACKUP = True
 

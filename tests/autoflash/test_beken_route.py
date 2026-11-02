@@ -635,10 +635,8 @@ class StillInstalledTests(unittest.TestCase):
         waiting = (None, "The plug does not answer as the new firmware yet.")
         self.assertTrue(self.judge(waiting, waiting, waiting)[0])
 
-    def test_the_onward_steps_are_run_again_unasked(self):
+    def test_the_onward_steps_are_checked_on_resume(self):
         self.assertEqual(set(beken.STEP_VERIFIERS), {"J2", "J4", "O1", "O2", "E1", "E2"})
-        self.assertEqual(beken.REDO_STEPS, set(beken.STEP_VERIFIERS))
-        self.assertEqual(routes.espressif.REDO_STEPS, set())
 
 
 class ArrivedTests(unittest.TestCase):

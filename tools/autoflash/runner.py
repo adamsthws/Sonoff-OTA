@@ -256,7 +256,11 @@ def wait_for_plug_back(ctx: Context, step: str | None = None) -> None:
 
 
 def confirm_skip(ctx: Context, step: str, title: str) -> bool:
-    """Trust the checklist only as far as the plug agrees with it."""
+    """Trust the checklist only as far as the plug agrees with it: a step the
+    plug disagrees with is done again, unasked, as an interrupted step not
+    shown finished is - every step checks the plug before it writes anything,
+    and refuses if it is not as expected, and the plug's own record of what a
+    step wrote changes under no later step.  Asked, nobody could answer better."""
     verifier = routes.FAMILY.STEP_VERIFIERS.get(step)
     if verifier is None:
         output.say(f"[skip] {step} {title} (recorded as done)")
@@ -269,14 +273,8 @@ def confirm_skip(ctx: Context, step: str, title: str) -> bool:
     if ok:
         output.say(f"[skip] {step} {title} (done, and the device still agrees)")
         return True
-    output.transient_begin()  # the note and its question, gone once answered
-    output.say("")
-    output.tell(f"{step} is recorded as done, but {message}.")
-    output.tell("The record and the device disagree, so the checklist cannot be trusted here.")
-    # Yes, where doing it again is plainly what is wanted (the family's REDO_STEPS).
-    again = prompts.ask_yes_no(f"Run {step} again", default=step in routes.FAMILY.REDO_STEPS)
-    output.transient_end()
-    return not again
+    output.say(f"{step} is recorded as done, but {message}: doing it again.")
+    return False
 
 
 def tell_how_to_carry_on() -> None:
@@ -400,27 +398,13 @@ def run_steps(ctx: Context) -> int:
                 ctx.state.mark(step, DONE, note="the device showed it had completed")
                 output.stage_end("already done")
                 continue
-            prompts.section("The last step was interrupted", [
-                f"The step that {routes.plain_description(step, title)} was",
-                "stopped part way through, and the device does not show whether it",
-                "finished. Doing it again is normally safe: every step checks the",
-                "device before writing anything and refuses if it is not as expected.",
-            ])
-            options = [
-                "Do that step again" + ("   <- recommended" if finished is False else ""),
-                "It did finish - move on to the next step",
-            ]
-            if prompts.UNATTENDED:
-                choice = 0  # doing it again is the safe answer, as above
-                prompts.answered_unattended("What would you like to do", options[0])
-            else:
-                choice = prompts.ask_choice("What would you like to do", options)
+            # Not shown to have finished: it is done again, unasked, attended
+            # or not - every step checks the device before it writes anything
+            # and refuses if it is not as expected.  Asked, "it did finish"
+            # for a step that had not left the run waiting for good on a
+            # firmware never sent.
+            output.say(f"    Doing {step} again: the device does not show it finished.")
             output.transient_end()
-            if choice == 1:
-                ctx.state.mark(step, DONE, note="operator confirmed it completed")
-                output.say(f"{step} marked done on your say-so.")
-                output.stage_end("already done")
-                continue
         code = execute_with_retries(ctx, step)
         if code == 0 and stop_here_after_ctrl_c(step):
             firewall.close_firewall_rules(ctx)

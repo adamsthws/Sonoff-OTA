@@ -104,7 +104,7 @@ class FamilyTests(unittest.TestCase):
                 for attribute in ("FIRMWARES", "SOURCES", "steps_for", "POINT_OF_NO_RETURN",
                                   "DESTRUCTIVE_STEPS", "RETRY_STEPS", "ERASED_CHECK_STEPS", "STAGE_NAMES",
                                   "TARGET_STAGE_NAMES", "PLAIN_DESCRIPTION", "ATTEMPTED_EVIDENCE",
-                                  "STEP_VERIFIERS", "REDO_STEPS", "SONOFF_FROM_BACKUP", "RESUME_CHECK"):
+                                  "STEP_VERIFIERS", "SONOFF_FROM_BACKUP", "RESUME_CHECK"):
                     self.assertTrue(hasattr(family, attribute), attribute)
                 # Every step of every route has a name for its stage line and a plain description.
                 steps = {step for firmware in family.FIRMWARES for source in family.SOURCES

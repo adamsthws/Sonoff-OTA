@@ -951,6 +951,16 @@ def verify_app(ctx: "Context") -> tuple[bool, str]:
     return _hash_matches(ctx, "app0", APP0_OFFSET, "app")
 
 
+def verify_canonical(ctx: "Context") -> tuple[bool, str]:
+    """F2 doubted only where doing it again helps: the plug on the recovery
+    firmware, which F2 uploads the official app to.  Running anything else,
+    F2 would wait for a recovery firmware that does not come; the record
+    stands there, and G1's gate (verify_app) and H1 check app0 for themselves."""
+    if ctx.device.is_safeboot():
+        return False, "the device runs the recovery firmware, not the official app"
+    return True, ""
+
+
 def verify_safeboot(ctx: "Context") -> tuple[bool, str]:
     return _hash_matches(ctx, "safeboot", SAFEBOOT_OFFSET, "safeboot")
 
@@ -960,6 +970,6 @@ def verify_safeboot(ctx: "Context") -> tuple[bool, str]:
 STEP_VERIFIERS: dict[str, Callable[["Context"], tuple[bool, str]]] = {
     "D4": verify_high_slot,
     "E3": verify_table,
-    "F2": verify_app,
+    "F2": verify_canonical,
     "G1": verify_safeboot,
 }

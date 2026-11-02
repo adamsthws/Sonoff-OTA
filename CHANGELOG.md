@@ -118,6 +118,18 @@ check.
   where it starts at the top of the window elsewhere: VS Code pins a command
   scrolled out of sight over the window's top rows, which covered the run's
   first.
+- An S61 that, switched off and on after its new firmware was sent, starts
+  Sonoff's firmware again did not install it: the run sends it again by
+  itself (twice at most), where it asked to switch the device off and on
+  again and again. PROCEED is asked once a run, not again for it. A run
+  that stopped to ask for the switch off and on takes it as done when run
+  again. The S61's fault suite has the case, an image its bootloader
+  refuses, for each route from Sonoff's firmware.
+- A step recorded done that the device disagrees with is done again by
+  itself, where the run asked whether to: on an S61, a plug still on the
+  firmware it was leaving; on an S60, a high slot, partition table or
+  Safeboot not as the step left them, or the recovery firmware where the
+  official app should be.
 - A blank line stands between every question and the options or text above
   it.
 - A first Ctrl-C asks "! Are you sure?", under the stage line where it was
