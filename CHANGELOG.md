@@ -109,6 +109,15 @@ check.
 - A question cut short by Ctrl-C or q - PROCEED, say - is taken off the
   screen with its note when the run stops, as an answered one is, where it
   stayed, with its stage shown twice: underway above it, stopped below.
+- A step interrupted last time that the device does not show finished is
+  done again by itself, where the run asked; answered "it did finish" for a
+  step that had not, the run waited for good on a firmware never sent.
+- Never two blank lines in a row: one left above something taken off the
+  screen - "Looking for supported devices..." - no longer doubles the next.
+- In VS Code's terminal a run starts under the command that started it,
+  where it starts at the top of the window elsewhere: VS Code pins a command
+  scrolled out of sight over the window's top rows, which covered the run's
+  first.
 - A blank line stands between every question and the options or text above
   it.
 - A first Ctrl-C asks "! Are you sure?", under the stage line where it was

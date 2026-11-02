@@ -62,6 +62,7 @@ class _State:
     name_width = 0                    # the longest stage name, so the columns line up
     most_stages = 0                   # the most the run may have, its numbers' column as wide
     transient_rows: int | None = None  # rows on screen since transient_begin()
+    transient_blank = False           # a blank row was last on screen when it began
     pending_prompt: str | None = None  # a question on screen, waiting for its answer
     pending_answer = ""
     stage_started = 0.0
@@ -439,6 +440,7 @@ def transient_begin(*, before_start: bool = False) -> None:
             return
         _s.transient_rows = 0
         _break()  # the stage line, if drawn, is taken away and drawn again too
+        _s.transient_blank = _s.after_blank
 
 
 def transient_end() -> None:
@@ -463,6 +465,7 @@ def transient_end() -> None:
         # into the scrollback - the block would stay there.
         sys.stdout.write("\x1b[1F\x1b[2K" * rows)
         sys.stdout.flush()
+        _s.after_blank = _s.transient_blank  # the screen as the block found it
         if _s.stage is not None and not _s.paused:
             _draw_stage()
 
@@ -470,6 +473,26 @@ def transient_end() -> None:
 # Rows a window needs for the run's questions to be taken off the screen once
 # answered: a block taller than the window has to stay (transient_end).
 MIN_ROWS = 20
+
+
+def start_at_top() -> None:
+    """The run starts at the top of the window, with all of it to use: what
+    the window showed is scrolled up into its scrollback, one row a newline,
+    not cleared, so it can still be scrolled back to.  A blank row is left
+    at the top, as above everything else the run shows.  Only on a terminal
+    that can move the cursor back up.
+
+    Not in VS Code's terminal: once the command that started the run is out
+    of sight it pins that command over the window's top rows (its sticky
+    scroll), covering the run's first.  There the run starts under it, after
+    the blank row alone."""
+    if not (sys.stdout.isatty() and colour_ok()):
+        return
+    vscode = os.environ.get("TERM_PROGRAM") == "vscode"
+    with _lock:
+        sys.stdout.write("\n" if vscode else "\n" * terminal_size((100, 24)).lines + "\x1b[H\n")
+        sys.stdout.flush()
+        _s.after_blank = True
 
 
 def short_window(*, before_start: bool = False) -> int | None:
@@ -553,14 +576,6 @@ def working(text: str):
                     sys.stdout.write("\r" + " " * _s.live + "\r")
                     sys.stdout.flush()
                     _s.live = 0
-
-
-def blank() -> None:
-    """A blank row, unless the screen ends with one already (working()'s)."""
-    with _lock:
-        _write_log("")
-        if not _s.after_blank:
-            _print("")
 
 
 def set_stage_width(width: int, most: int = 0) -> None:
@@ -710,6 +725,7 @@ def stream(process: subprocess.Popen) -> int:
                     _gap(text)
                     sys.stdout.write(_margin_stream(text))
                     sys.stdout.flush()
+                    _s.after_blank = text.endswith("\n\n")
                 pending += text
                 while "\n" in pending:
                     line, pending = pending.split("\n", 1)
@@ -974,6 +990,10 @@ def _break() -> None:
 
 def _print(text: str, *, stage: bool = False) -> None:
     _break()
+    if _s.after_blank and not ANSI_RE.sub("", text).strip():
+        # Never two blank rows in a row: a block taken off the screen leaves
+        # the blank row above it, and what comes next may start with its own.
+        return
     if stage:
         _s.after_stage = False  # stage lines follow one another with no gap
     else:

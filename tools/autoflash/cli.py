@@ -418,6 +418,8 @@ def _main() -> int:
     try:
         given = credentials.load(args.env_file)
         adopt_older_runs()
+        if args.command == "run" and not args.unattended:
+            output.start_at_top()
         if args.command == "run" and not args.verbose and not args.unattended:
             prompts.wait_for_taller_window()  # before anything else is shown
         if args.command == "list":

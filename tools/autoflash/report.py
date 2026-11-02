@@ -384,7 +384,7 @@ def invite_stopped_report(ctx: Context, ending: str) -> None:
 def offer_report(ctx: Context, fields: list[tuple[str, str]], heading: str) -> None:
     ctx.reported = True
     copied = hostsys.copy_to_clipboard(report_markdown(fields))
-    output.blank()
+    output.tell("")
     output.show(heading, output.GREEN)
     if copied:
         output.tell("Paste your results into the thread (they're already on your clipboard):")

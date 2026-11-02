@@ -1273,6 +1273,74 @@ def rendered(text):
     return rows
 
 
+class StartAtTopTests(OutputTestCase):
+    def test_what_the_window_showed_is_scrolled_away_not_cleared(self):
+        screen = FakeTerminal()
+        with mock.patch("sys.stdout", screen), mock.patch.object(output, "colour_ok", return_value=True), \
+                mock.patch.dict(os.environ, {"TERM_PROGRAM": "gnome-terminal"}), \
+                mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 30))):
+            output.start_at_top()
+        # A newline a row scrolls it all into the scrollback; then the top,
+        # a blank row left there.
+        self.assertEqual(screen.getvalue(), "\n" * 30 + "\x1b[H\n")
+        self.assertNotIn("\x1b[2J", screen.getvalue())
+
+    def test_in_vscodes_terminal_the_run_starts_under_its_command(self):
+        # Seen: VS Code pinned the command, once scrolled away, over the
+        # window's top rows - the run's first two were under it.
+        screen = FakeTerminal()
+        with mock.patch("sys.stdout", screen), mock.patch.object(output, "colour_ok", return_value=True), \
+                mock.patch.dict(os.environ, {"TERM_PROGRAM": "vscode"}):
+            output.start_at_top()
+        self.assertEqual(screen.getvalue(), "\n")   # the blank row alone
+
+    def test_a_resumed_run_has_one_blank_row_at_the_top_as_a_new_one_does(self):
+        # Seen: the question of which run to continue, asked before the run
+        # starts, sat on the window's top row; a new run had a blank one.
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True), \
+                 mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 30))):
+                output.start_at_top()     # its blank row: the test above
+                output.transient_begin(before_start=True)
+                with mock.patch("builtins.input", side_effect=typed):
+                    prompts.ask_choice("What now", ["Continue the device"])
+                output.transient_end()
+                output.tell("")         # the run's own, before its first words
+                output.show("Converting a device usually takes under 10 minutes.")
+        def typed(prompt):
+            screen.write(prompt + "1\n")   # as the terminal shows it: the question, the answer
+            return "1"
+        screen = FakeTerminal()
+        with mock.patch("sys.stdout", screen), mock.patch("sys.stdin", io.StringIO()):
+            body()
+        self.assertEqual(rendered(screen.getvalue())[30:],
+                         ["", "Converting a device usually takes under 10 minutes."])   # one, not two
+
+    def test_nothing_where_the_cursor_cannot_move_or_there_is_no_terminal(self):
+        for stdout in (FakeTerminal(), io.StringIO()):   # NO_COLOR is set; not a terminal
+            with mock.patch("sys.stdout", stdout):
+                output.start_at_top()
+            self.assertEqual(stdout.getvalue(), "")
+
+
+class BlankRowTests(OutputTestCase):
+    def test_never_two_blank_rows_in_a_row(self):
+        # Seen: "Looking for supported devices..." taken off the screen left
+        # the blank row above it, and the firmware's heading added its own.
+        def body():
+            with mock.patch.object(output, "colour_ok", return_value=True), \
+                 mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 30))):
+                output.show("Converting a device usually takes under 10 minutes.")
+                output.tell("")
+                output.transient_begin()
+                output.show("Looking for supported devices on your network...")
+                output.transient_end()
+                prompts.section("Choose the device's new firmware", ["1. ESPHome"])
+        text, _ = self.run_with(FakeTerminal(), False, body)
+        self.assertEqual(rendered(text), ["Converting a device usually takes under 10 minutes.", "",
+                                          "-- Choose the device's new firmware", "1. ESPHome"])
+
+
 class WorkingTests(OutputTestCase):
     """A wait outside any stage shows what it is, with the stages' spinner,
     and goes again once it is over."""
@@ -1285,7 +1353,7 @@ class WorkingTests(OutputTestCase):
                     output.say("Checking the relay through eWeLink...")   # logged only
                     output._tick()
                     seen.append(rendered(screen.getvalue()))
-                output.blank()
+                output.tell("")
                 output.show("Please share how it went!")
 
         seen = []
@@ -1300,7 +1368,7 @@ class WorkingTests(OutputTestCase):
         def body():
             with output.working("Generating your report..."):
                 pass
-            output.blank()
+            output.tell("")
             output.show("Please share how it went!")
         text, _ = self.run_with(io.StringIO(), False, body)
         self.assertEqual(text, "\n Please share how it went!\n")

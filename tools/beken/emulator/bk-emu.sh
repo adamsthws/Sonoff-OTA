@@ -357,11 +357,13 @@ case "${1:-}" in
         mkdir -p "$WORK/captures"
         rsync -a --delete --exclude /captures --exclude /.venv --exclude /.python --exclude /.git \
               --exclude /.env --exclude __pycache__/ "$ROOT/" "$WORK/"
-        # The plug's power switch too, so a run can offer to switch it off and on.
+        # The plug's power switch too, so a run can offer to switch it off and on;
+        # and which terminal it is shown in (VS Code's: output.start_at_top).
         [ -f "$PLUG_STATE/power" ] || echo on > "$PLUG_STATE/power"
         CONTAINER_OPTIONS=(${AUTOFLASH_BEKEN_COMPUTER:+--name "$AUTOFLASH_BEKEN_COMPUTER"}
                            --network "$NETWORK" -v "$PLUG_STATE/ca.crt:/plug/ca.crt:ro"
                            -v "$PLUG_STATE/power:/plug/power" -e AUTOFLASH_EMULATOR_POWER=/plug/power
+                           -e TERM_PROGRAM
                            -e AUTOFLASH_EWELINK_API_BASE="https://$(subnet).1" --entrypoint bash)
         container /work/tools/beken/emulator/computer.sh "$@" ;;
     test) shift; ensure; firmwares; container /opt/beken-emulator/tests/self_test.py "$@" ;;
