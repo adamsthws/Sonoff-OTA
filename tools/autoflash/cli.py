@@ -436,7 +436,8 @@ def _main() -> int:
         ctx = Context(args)
         routes.apply_target(routes.recorded_firmware(ctx.state), runs.run_source(ctx.state),
                             routes.family_of(ctx.state))  # a run settles it at its start
-    except QuitRun:
+    except (QuitRun, KeyboardInterrupt):
+        # q, or Ctrl-C, at a question before the run starts: which run, say.
         output.say("Stopped. Nothing was changed.")
         return 130
     except (Abort, ValueError, OSError) as exc:
