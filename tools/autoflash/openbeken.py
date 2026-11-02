@@ -16,6 +16,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from . import kinds
+
 PORT = 80
 # One request per 16 KiB, paced: the plug's HTTP server is single-threaded and
 # its TCP stack keeps each closed connection a while, so few, larger, spaced
@@ -45,6 +47,21 @@ def info(host: str, timeout: float = 4.0) -> dict[str, Any] | None:
     except (OSError, ValueError, urllib.error.URLError):
         return None
     return found if isinstance(found, dict) and "chipset" in found and "build" in found else None
+
+
+def kind(host: str, found: dict[str, Any], timeout: float = 4.0) -> kinds.Kind | None:
+    """The kind of plug the OpenBeken at `host` (its /api/info `found`) is
+    on, when the tool installed it: its import module answers AutoflashKind
+    for its own kind alone - its name says nothing, being alike on every
+    firmware and the user's to change.  None for an OpenBeken the tool did
+    not install, which knows no such command, or one that cannot say."""
+    for candidate in kinds.on_chip(str(found.get("chipset") or "")):
+        try:
+            command(host, f"AutoflashKind {candidate.key}", timeout)
+        except (CommandError, OSError):
+            continue
+        return candidate
+    return None
 
 
 def is_openbeken(host: str, timeout: float = 4.0) -> bool:

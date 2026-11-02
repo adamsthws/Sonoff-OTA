@@ -21,6 +21,7 @@ class FakeOpenBeken(http.server.ThreadingHTTPServer):
         self.flash_failures = 0   # the first this many flash reads come back short
         self.uptime = 42
         self.restarts_on_reboot = True
+        self.kind = "sonoff-s61"   # what its import module answers AutoflashKind for; None: no module
 
     @property
     def host(self):
@@ -43,7 +44,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, json.dumps({
                 "uptime_s": self.server.uptime, "build": "Built on Oct 30 2026 12:00:00 version 1.0.0", "ip": "192.168.0.50",
                 "mac": "12:34:56:AB:CD:EF", "flags": "0", "mqtthost": ":1883", "mqtttopic": "obk",
-                "chipset": "BK7238", "webapp": "", "shortName": "S61", "startcmd": "",
+                "chipset": "BK7238", "webapp": "", "shortName": "openbeken-abcdef", "startcmd": "",
                 "supportsSSDP": 0, "supportsClientDeviceDB": True}).encode())
         elif self.path == "/api/channels":
             self._send(200, b'{"1":1,"2":0}')
@@ -66,8 +67,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         name = body.split()[0]
         if name == "reboot" and self.server.restarts_on_reboot:
             self.server.uptime = 1
-        if name in self.server.unknown:
+        if name in self.server.unknown or (name == "AutoflashKind" and self.server.kind is None):
             self._send(200, json.dumps({"error": 501, "msg": "command not found", "res": ""}).encode())
+        elif name == "AutoflashKind" and body.split()[1:] != [self.server.kind]:
+            self._send(400, json.dumps({"error": 400, "msg": "bad argument", "res": ""}).encode())
         else:
             self._send(200, json.dumps({"success": 200, "msg": f"{name} done", "res": ""}).encode())
 
@@ -84,9 +87,28 @@ class OpenBekenTests(unittest.TestCase):
 
     def test_info_says_what_it_is(self):
         found = openbeken.info(self.server.host)
-        self.assertEqual((found["chipset"], found["shortName"]), ("BK7238", "S61"))
+        self.assertEqual((found["chipset"], found["shortName"]), ("BK7238", "openbeken-abcdef"))
         self.assertEqual(openbeken.version(found), "1.0.0")
         self.assertTrue(openbeken.is_openbeken(self.server.host))
+
+    def test_its_kind_is_what_its_import_module_says_whatever_its_name(self):
+        from tools.autoflash import kinds
+        found = openbeken.info(self.server.host)
+        self.assertIs(openbeken.kind(self.server.host, found), kinds.SONOFF_S61)
+        self.assertIn("AutoflashKind sonoff-s61", self.server.commands)
+        # Renamed by its user: the same kind.
+        self.assertIs(openbeken.kind(self.server.host, {**found, "shortName": "kitchen"}), kinds.SONOFF_S61)
+
+    def test_an_openbeken_the_tool_did_not_install_is_no_kind(self):
+        self.server.kind = None   # no import module: AutoflashKind unknown
+        self.assertIsNone(openbeken.kind(self.server.host, openbeken.info(self.server.host)))
+        self.server.kind = "another-plug"
+        self.assertIsNone(openbeken.kind(self.server.host, openbeken.info(self.server.host)))
+
+    def test_only_an_openbeken_on_a_chip_of_ours_is_asked(self):
+        found = {**openbeken.info(self.server.host), "chipset": "BK7231N"}
+        self.assertIsNone(openbeken.kind(self.server.host, found))
+        self.assertEqual(self.server.commands, [])
 
     def test_nothing_else_is_taken_for_openbeken(self):
         class Other(http.server.BaseHTTPRequestHandler):

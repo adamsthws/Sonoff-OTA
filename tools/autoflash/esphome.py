@@ -234,20 +234,23 @@ def page(host: str, timeout: float = 4.0) -> str | None:
     return None
 
 
-def title(host: str, timeout: float = 4.0) -> str | None:
-    """The plug's ESPHome name, as its web page shows it: the friendly name,
-    and the MAC suffix name_add_mac_suffix adds (Sonoff S61 abcdef) - in the
-    first event its page is sent (/events, "ping"); None if none comes."""
+def title(host: str, timeout: float = 4.0) -> tuple[str | None, str | None]:
+    """The plug's ESPHome name and comment, as its web page shows them: the
+    friendly name with the MAC suffix name_add_mac_suffix adds (esphome
+    abcdef), and what plug it is (Sonoff-S61) - in the first event its page
+    is sent (/events, "ping"); None for either that does not come."""
+    def text(value: object) -> str | None:
+        return value if isinstance(value, str) and value else None
     try:
         with _opener().open(f"http://{host}/events", timeout=timeout) as events:
             for _ in range(20):
                 line = events.readline().decode("utf-8", errors="replace").strip()
                 if line.startswith("data:") and '"title"' in line:
-                    found = json.loads(line[5:]).get("title")
-                    return found if isinstance(found, str) else None
+                    found = json.loads(line[5:])
+                    return text(found.get("title")), text(found.get("comment"))
     except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError):
-        return None
-    return None
+        pass
+    return None, None
 
 
 def is_esphome(host: str, timeout: float = 4.0) -> bool:

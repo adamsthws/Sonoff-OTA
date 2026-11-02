@@ -15,7 +15,7 @@ def a_kind(key, family):
     """A made-up kind of plug of `family`, for a run to record."""
     return kinds.Kind(key=key, family=family, chip="made-up", ecosystem="ewelink", name="Made Up",
                       maker="Nobody", short="MU", product=re.compile("MU"),
-                      stock_model="MU-01", wrapper_model="MU", tasmota_gpio=(), esphome_name="Made Up",
+                      stock_model="MU-01", wrapper_model="MU", tasmota_gpio=(),
                       esphome_legacy_setup_prefix="", esphome_legacy_prefix="")
 
 

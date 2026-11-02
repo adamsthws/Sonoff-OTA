@@ -297,9 +297,9 @@ def adopt_plug(ctx: Context, found: "detect.Found") -> None:
         runs.file_plug(ctx, mac, None)
     kind = found.kind
     if kind is None and found.firmware == "esphome":
-        # Every kind's ESPHome looks the same but for its name: an S61's run
-        # must never take the S60's way.
-        named = kinds.for_esphome(esphome.title(found.host))
+        # Every kind's ESPHome looks the same but for its comment: an S61's
+        # run must never take the S60's way.
+        named = kinds.for_esphome(*esphome.title(found.host))
         kind = named.key if named else None
     if kind:
         ctx.state.set_input("plug_kind", kind)

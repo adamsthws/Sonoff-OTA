@@ -49,14 +49,14 @@
   },
   "esphome": {
     "image": {
-      "file": "artifacts/esphome-sonoff-s60-imprintable-1.4.0.bin",
+      "file": "artifacts/esphome-sonoff-s60-imprintable-1.5.0.bin",
       "config": "devices/sonoff-s60/esphome.yaml",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "esphome": "2026.10.0",
       "esp_idf": "5.5.6",
       "builder": "ghcr.io/esphome/esphome:2026.10.0@sha256:1dff19a59070cdb523b76576cdc74d200f862d43c1407809088855920cf57145",
-      "size": 966576,
-      "sha256": "137da99ba6737d61d78a2c57a390f97c5a010a0e96c730d476a754c55cf4d49d"
+      "size": 966560,
+      "sha256": "ed66892c269f50c484438d893ff18c45a62fe5ebbb0450b6186df7fa8c9666f7"
     },
     "bootloader": {
       "file": "artifacts/esphome-sonoff-s60-bootloader-1.2.0.bin",

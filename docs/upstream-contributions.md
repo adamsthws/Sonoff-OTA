@@ -179,6 +179,7 @@ serving flash reads at the top of the chip, and `ota_http` downloading to
 | Tasmota | [#25163](https://github.com/arendst/Tasmota/pull/25163) | Berry's `webclient` logged a connection timeout's error code as its time: "Connection timeout after -1 ms" |
 | Tasmota | [#25169](https://github.com/arendst/Tasmota/pull/25169) | Its setup network went out under the chip's default name (`ESP_` and its MAC) for its first tenth of a second, which phones and computers then list beside the real one |
 | ESPHome | [#21672](https://github.com/esphome/esphome/pull/21672) | An `api` action with an array variable that also responds did not compile; our calibration action, which takes a list of floats, had to go without an answer |
+| ESPHome | [#22163](https://github.com/esphome/esphome/pull/22163) | A friendly name always joined the MAC suffix with a space: an option to choose, so ours can read `esphome-abcdef` as the hostname does |
 
 ## Other people's reports, reproduced on the emulator
 

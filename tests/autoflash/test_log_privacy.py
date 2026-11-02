@@ -26,6 +26,9 @@ class ScrubTests(PrivacyTestCase):
                 '"GET /user1.bin?deviceid=<device-id>&ts=4708736&sign=<signature> HTTP/1.1"',
             "Tasmota is at 192.168.0.50 as tasmota-1A2B3C-4567.": "Tasmota is at 192.168.0.50 as <device-name>.",
             "Join tasmota-1a2b3c or esphome-1a2b3c.": "Join <device-name> or <device-name>.",
+            "ESPHome 1.4.0 is Sonoff S60 1a2b3c.": "ESPHome 1.4.0 is <device-name>.",
+            "OpenBeken answered, named 'openbeken-1a2b3c'; ESPHome is esphome 1a2b3c.":
+                "OpenBeken answered, named '<device-name>'; ESPHome is <device-name>.",
             "the plug's address is AA:BB:CC:12:34:56": "the plug's address is <mac>",
             '{"apikey": "abc-123", "at": "token", "action": "update"}':
                 '{"apikey": "<redacted>", "at": "<redacted>", "action": "update"}',

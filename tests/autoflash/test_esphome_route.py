@@ -167,8 +167,6 @@ class EndingTests(RouteTestCase):
     def test_the_report_says_esphome(self):
         fields = dict(report.report_fields(self.ctx(firmware="esphome"), 300, False))
         self.assertEqual(fields["Firmware"], "ESPHome")
-        self.assertEqual(fields["Name in ESPHome"], "Sonoff S60")
-        self.assertNotIn("Name in Tasmota", fields)
         tasmota = dict(report.report_fields(self.ctx(run="tasmota-run"), 300, False))
         self.assertEqual(tasmota["Firmware"], "Tasmota")
 
@@ -309,22 +307,22 @@ class ESPHomeTitleTests(unittest.TestCase):
         return f"127.0.0.1:{server.server_address[1]}"
 
     def test_the_title_comes_from_the_first_ping_without_the_stream_ending(self):
-        host = self.serve(b'retry: 30000\nid: 1\nevent: ping\ndata: {"title":"Sonoff S61 abcdef",'
-                          b'"comment":"","ota":true,"log":true,"lang":"en","uptime":12}\n\n')
+        host = self.serve(b'retry: 30000\nid: 1\nevent: ping\ndata: {"title":"esphome abcdef",'
+                          b'"comment":"Sonoff-S61","ota":true,"log":true,"lang":"en","uptime":12}\n\n')
         started = time.monotonic()
-        self.assertEqual(esphome.title(host, timeout=10), "Sonoff S61 abcdef")
+        self.assertEqual(esphome.title(host, timeout=10), ("esphome abcdef", "Sonoff-S61"))
         self.assertLess(time.monotonic() - started, 5)
 
     def test_a_stream_with_no_title_says_none(self):
         host = self.serve(b"event: state\ndata: {}\n\n" * 25, then_hold=False)
-        self.assertIsNone(esphome.title(host, timeout=5))
+        self.assertEqual(esphome.title(host, timeout=5), (None, None))
 
     def test_nothing_listening_says_none(self):
         import socket
         with socket.socket() as spare:
             spare.bind(("127.0.0.1", 0))
             port = spare.getsockname()[1]
-        self.assertIsNone(esphome.title(f"127.0.0.1:{port}", timeout=2))
+        self.assertEqual(esphome.title(f"127.0.0.1:{port}", timeout=2), (None, None))
 
 
 class SignalSensorTests(unittest.TestCase):

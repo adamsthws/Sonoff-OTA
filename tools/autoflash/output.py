@@ -101,10 +101,14 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"[\w.%+-]+@[\w-]+(?:\.[\w-]+)+"), "<email>"),
     (re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"), "<mac>"),
     # An eWeLink device id; and a converted plug's name, which ends with the
-    # MAC's (tasmota-abcdef, esphome-abcdef), and Tasmota's default one.
+    # MAC's (tasmota-abcdef, esphome-abcdef, openbeken-abcdef, ESPHome's
+    # friendly name as its page shows it: esphome abcdef), and Tasmota's
+    # default one; and ESPHome's friendly name as earlier builds gave it
+    # (Sonoff S60 abcdef).
     (re.compile(r"\b100[0-9a-f]{7}\b"), "<device-id>"),
     (re.compile(r"\btasmota-[0-9A-Fa-f]{6}-\d{4}\b"), "<device-name>"),
-    (re.compile(r"\b(?:tasmota|esphome)-[0-9a-f]{6}\b"), "<device-name>"),
+    (re.compile(r"\b(?:tasmota|esphome|openbeken)[- ][0-9a-f]{6}\b", re.I), "<device-name>"),
+    (re.compile(r"\bSonoff[- ]S\d+[- ][0-9a-f]{6}\b", re.I), "<device-name>"),
     (re.compile(r"(\[sudo\] password for )\S+?(:)"), r"\1<user>\2"),
 ]
 _IPV4 = re.compile(r"(?<![\w.-])\d{1,3}(?:\.\d{1,3}){3}(?![\w.(-])")

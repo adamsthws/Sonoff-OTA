@@ -601,7 +601,7 @@ def configure_tasmota(ctx: Context) -> dict[str, Any]:
         install_official(ctx, ROOT / "captures/safeboot-recovery-migration/tasmota32c3.bin")
         device = ctx.device
         device.wait_reachable(timeout=300)
-    template = kinds.of_run(ctx.state).tasmota_template(ctx.state.input("product_model"))
+    template = kinds.of_run(ctx.state).tasmota_template()
     hostname = names.final_name(ctx, "tasmota")
     if template_in_place(device, template, hostname):
         # Tried again after the plug took the template but its answer was slow
@@ -622,7 +622,7 @@ def configure_tasmota(ctx: Context) -> dict[str, Any]:
     # (SaveData 1 is a default the reset puts back, and a command that saves
     # cannot go in there: see at_next_save.)
     if runs.run_source(ctx.state) != "untemplated":
-        hooked = device.at_next_save([*([f"Hostname {hostname}"] if hostname else []),
+        hooked = device.at_next_save([*([f"Hostname {hostname}", f"DeviceName {hostname}"] if hostname else []),
                                       f"Template {template}", "Module2 0", "Module 0"],
                                      timeout=SLOW_COMMAND)
         booted, uptime = device.started_at(), device.uptime_seconds()
@@ -639,22 +639,24 @@ def configure_tasmota(ctx: Context) -> dict[str, Any]:
     # would not have it: put in after the reset, at the cost of a restart.
     # Or a Tasmota in use that lost its template: put in without the reset,
     # its other settings (its MQTT, say) kept.
-    give_template(device, template, hostname)
+    give_template(device, template, hostname, named=runs.run_source(ctx.state) != "untemplated")
     return {"template": "applied", "wifi_route": route,
             "restarts": 1 if runs.run_source(ctx.state) == "untemplated" else 2}
 
 
-def give_template(device: device.Device, template: str, hostname: str | None) -> None:
+def give_template(device: device.Device, template: str, hostname: str | None, *, named: bool = False) -> None:
     """The plug's template and name put in, its other settings kept, at the
     cost of a restart - and asked for after it.  Left without them, the plug
     switches nothing (seen: a user's Home Assistant showed only its restart
-    button and Wi-Fi)."""
+    button and Wi-Fi).  `named`: its device name too, as on a plug just
+    converted; a Tasmota in use keeps the one it was given."""
     booted, uptime = device.started_at(), device.uptime_seconds()
     device.command("SaveData 1", timeout=SLOW_COMMAND)
     device.command(f"Template {template}", timeout=SLOW_COMMAND)
     # Named as every converted Tasmota is (tasmota-abcdef), and its own network
     # with it; one restart for both, as each would restart the plug alone.
-    device.command(f"Backlog {f'Hostname {hostname}; ' if hostname else ''}Module2 0; Module 0",
+    names = (f"Hostname {hostname}; " + (f"DeviceName {hostname}; " if named else "")) if hostname else ""
+    device.command(f"Backlog {names}Module2 0; Module 0",
                    timeout=SLOW_COMMAND)
     output.say(f"Template applied as {json.loads(template)['NAME']}"
         + (f", and named {hostname}" if hostname else "") + "; the device restarts")
@@ -882,7 +884,7 @@ def step_verify(ctx: Context) -> dict[str, Any]:
         raise Abort("device does not match the pinned artifacts")
     output.say("")
     output.say(f"All {'four' if len(expected) == 4 else 'three'} regions match the pinned artifacts.")
-    template = kinds.of_run(ctx.state).tasmota_template(ctx.state.input("product_model"))
+    template = kinds.of_run(ctx.state).tasmota_template()
     hostname = names.final_name(ctx, "tasmota")
     if not template_in_place(device, template, hostname):
         if template_in_place(device, template, hostname, fallback=False):

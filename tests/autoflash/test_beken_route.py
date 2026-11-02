@@ -431,12 +431,12 @@ class ArrivedTests(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def test_k1_finds_openbeken_named_as_the_s61s(self):
+    def test_k1_finds_the_openbeken_that_says_it_is_on_an_s61(self):
         with tempfile.TemporaryDirectory() as tmp:
             ctx = a_context(tmp, plug_ip=self.server.host)
             result = arrived.step_openbeken_check(ctx)
-            self.assertEqual((result["version"], result["name"]), ("1.0.0", "S61"))
-            self.assertEqual(ctx.state.input("device_name"), "S61")
+            self.assertEqual((result["version"], result["name"]), ("1.0.0", "openbeken-abcdef"))
+            self.assertEqual(ctx.state.input("device_name"), "openbeken-abcdef")
             with mock.patch.object(openbeken, "info", return_value=None), \
                     mock.patch.object(arrived.join.time, "sleep"), \
                     mock.patch.object(arrived.prompts, "UNATTENDED", True), \
@@ -613,14 +613,9 @@ class DetectTests(unittest.TestCase):
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
         found = detect._openbeken(server.host, 2.0)
-        self.assertEqual((found.firmware, found.name, found.kind), ("openbeken", "S61", "sonoff-s61"))
-        self.assertIs(kinds.for_openbeken("S61"), S61)
-        self.assertIsNone(kinds.for_openbeken("OpenBK7238_ABCD"))  # OpenBeken's default name: not a plug of ours
-        self.assertIs(kinds.for_esphome("Sonoff S61"), S61)
-        self.assertIs(kinds.for_esphome("sonoff s60"), kinds.SONOFF_S60)
-        # As its page shows it: with the MAC suffix name_add_mac_suffix adds.
-        self.assertIs(kinds.for_esphome("Sonoff S61 abcdef"), S61)
-        self.assertIsNone(kinds.for_esphome("Sonoff S61 kitchen"))
+        self.assertEqual((found.firmware, found.name, found.kind), ("openbeken", "openbeken-abcdef", "sonoff-s61"))
+        server.kind = None   # an OpenBeken the tool did not install: not a plug of ours
+        self.assertIsNone(detect._openbeken(server.host, 2.0))
 
 
 if __name__ == "__main__":

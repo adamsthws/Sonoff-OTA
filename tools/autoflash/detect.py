@@ -119,11 +119,11 @@ def _tasmota(host: str, timeout: float,
     # Tasmota, so leaving it carries on (the plan finds its writes done).
     if sonoff_layout and "bluetooth" in version:
         return "hub", name, None
-    template = _template(device)
+    template = _template_name(device)
     if template is None:
         # Not a Tasmota without the plug's template: one too busy to say.
         raise Unreadable(host)
-    kind = kinds.for_tasmota(f"{status.get('Status', {}).get('Module')} {template}")
+    kind = kinds.for_tasmota(template)
     if kind is None:
         return None  # a Tasmota, but not on a plug this tool converts
     return "tasmota", name, kind.key
@@ -137,15 +137,22 @@ class Locked(RuntimeError):
     """A Tasmota that wants a web password: none was given, or not its own."""
 
 
-def _template(device: Device) -> str | None:
-    """The template Tasmota runs, or None if it would not say.  Asked again,
-    then as its module, which names the template too: a plug just started, or
-    answering other questions, can take longer than one ask allows."""
+def _template_name(device: Device) -> str | None:
+    """The name of the template Tasmota runs ("" for none), or None if it would
+    not say.  Asked again, then as its module, which names the template too
+    ({"Module": {"0": name}}): a plug just started, or answering other
+    questions, can take longer than one ask allows."""
     for command in ("Template", "Template", "Module", "Module"):
         try:
-            return str(device.command(command))
+            answer = device.command(command)
         except Exception:  # noqa: BLE001
             continue
+        if not isinstance(answer, dict):
+            return ""
+        if command == "Module":
+            answer = answer.get("Module")
+            return str(next(iter(answer.values()), "")) if isinstance(answer, dict) else ""
+        return str(answer.get("NAME") or "")
     return None
 
 
@@ -175,13 +182,13 @@ def _esphome(host: str, timeout: float, login: tuple[str, str] | None) -> str | 
 
 
 def _openbeken(host: str, timeout: float) -> Found | None:
-    """An OpenBeken at `host` named as the one the tool installs on a kind of
-    plug names itself; None for no OpenBeken, or another."""
+    """An OpenBeken at `host` the tool installed on a kind of plug, as it says
+    (openbeken.kind); None for no OpenBeken, or another."""
     found = openbeken.info(host, timeout)
     if found is None:
         return None
     name = str(found.get("shortName") or "") or None
-    kind = kinds.for_openbeken(name)
+    kind = openbeken.kind(host, found, timeout)
     if kind is None:
         return None  # an OpenBeken, but not on a plug this tool converts
     return Found(host, "openbeken", name=name, kind=kind.key)

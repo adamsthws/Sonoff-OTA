@@ -54,6 +54,21 @@ check.
   paths. A plug on ESPHome 1.4.0 or earlier names the old path, which no
   longer exists, so Home Assistant cannot adopt it until it is updated to the
   image built from the moved config; the plug itself runs as before.
+- ESPHome for the S60 is 1.5.0: a change to its config, built with ESPHome
+  [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0) as
+  1.4.0 was. Its bootloader is unchanged, so a plug on ESPHome already is
+  not given a new one. It is the image built from the moved config, and
+  names the plug as every firmware does (below).
+- Every firmware the tool installs names the plug alike, in lower case as
+  ESPHome requires: the firmware and the last three bytes of its MAC, as its
+  hostname and its name inside the firmware - `tasmota-abcdef` (Tasmota's
+  device name too), `esphome-abcdef` (its friendly name `esphome abcdef`) and
+  `openbeken-abcdef` (both of OpenBeken's names, its mDNS and DHCP
+  hostnames), where OpenBeken was named `S61`. What plug it is goes in
+  Tasmota's template, `Sonoff-S60` where it was the product model (`Sonoff
+  S60TPG`), and ESPHome's comment: one for every model, so one image serves
+  them all. The report gives neither the name nor the plug type and region:
+  the model line says both.
 
 ## 2.2.0
 

@@ -7,14 +7,17 @@ a person calls it.  The firmware published for a kind is pinned where it is
 used, each file named for the kind it is for: its installer
 (tools.autoflash.routes.espressif.installer.BRIDGE_OTA, wrapped for its updater), its ESPHome and the
 bootloader built with it (esphome.IMAGE, esphome.BOOTLOADER), and its maker's
-partition table (esphome.SONOFF_TABLE).  The final firmware's network names
-are the same for every kind: tasmota-abcdef and esphome-abcdef.
+partition table (esphome.SONOFF_TABLE).  The final firmware's names are the
+same for every kind - tasmota-abcdef, esphome-abcdef, openbeken-abcdef - so the
+kind is told by what else each firmware says, which renaming the plug
+leaves alone: Tasmota's template, ESPHome's comment, and the answer
+OpenBeken's import module gives (openbeken.kind).
 
 A run keeps the kind it converts (its "plug_kind"): from the eWeLink account
 (A1), from what the stock firmware says it is (A2), or from a converted
 Tasmota's template.  The kind names its chip family, which is whose steps the
-run takes (tools/autoflash/routes).  Official Tasmota ends up named after the kind, by its
-template, and ESPHome by the image made for it; every firmware part way
+run takes (tools/autoflash/routes).  Official Tasmota's template is named after the kind,
+and ESPHome's comment by the image made for it; every firmware part way
 through a conversion is the tool's own, the same for every kind.
 
 Two kinds: the Sonoff S60, an Espressif plug, and the Sonoff S61, a Beken one.
@@ -52,12 +55,12 @@ class Kind:
     wrapper_model: str
     # Its wiring, as a Tasmota template gives it; none for a kind Tasmota does not run on.
     tasmota_gpio: tuple[int, ...]
-    # Its ESPHome's friendly name (the image made for it is named as every
-    # final ESPHome is, esphome-abcdef), and the names its own network had in
-    # earlier builds: the first with the last two bytes of the plug's MAC.
-    esphome_name: str
+    # The names its own network had in earlier ESPHome builds: the first with
+    # the last two bytes of the plug's MAC.
     esphome_legacy_setup_prefix: str
     esphome_legacy_prefix: str
+    # Its ESPHome's friendly name in releases before its comment said the kind.
+    esphome_legacy_friendly_name: str = ""
     # For a Beken plug: the command its OpenBeken (built with the plug's import
     # module) takes to fetch and apply Sonoff's firmware again, checking the
     # slot it goes to first; "" for a kind that has none.
@@ -73,33 +76,40 @@ class Kind:
         product = (product_model or "").strip().upper()
         return product if self.product.fullmatch(product) else ""
 
-    def template_name(self, product_model: str | None) -> str:
-        """Tasmota's name for it: after its own product model where eWeLink gave
-        that (Sonoff S60TPG), else the kind's (Sonoff S60).  Nothing but one of
-        this kind's product models ever reaches a Tasmota command."""
-        product = self.product_of(product_model)
-        return f"{self.maker} {product}" if product else self.name
+    @property
+    def display_name(self) -> str:
+        """What the firmware the tool installs says the plug is (Sonoff-S60):
+        Tasmota's template and ESPHome's comment.  One for every model of the
+        kind, so one image serves them all."""
+        return f"{self.maker}-{self.short}"
 
-    def tasmota_template(self, product_model: str | None) -> str:
+    def tasmota_template(self) -> str:
         """Its Tasmota template, as the Template command takes it."""
-        return json.dumps({"NAME": self.template_name(product_model), "GPIO": list(self.tasmota_gpio),
+        return json.dumps({"NAME": self.display_name, "GPIO": list(self.tasmota_gpio),
                            "FLAG": 0, "BASE": 1}, separators=(",", ":"))
 
-    def names_its_tasmota(self, named: str) -> bool:
-        """Whether a Tasmota's module and template, as it names them, are this
-        kind's: its template is named after it, whichever product model."""
-        return bool(self.tasmota_gpio) and self.short in named
+    def names_its_tasmota(self, template_name: str | None) -> bool:
+        """Whether a Tasmota's template, by its name, is the one the tool gives
+        this kind (Sonoff-S60) - or one an earlier release gave: the kind's
+        name, or its maker and product model (Sonoff S60, Sonoff S60TPG)."""
+        name = (template_name or "").strip().upper()
+        if not self.tasmota_gpio or not name:
+            return False
+        maker, _, product = name.partition(" ")
+        return (name in (self.display_name.upper(), self.name.upper())
+                or (maker == self.maker.upper() and bool(self.product_of(product))))
 
-    def names_its_openbeken(self, named: str | None) -> bool:
-        """Whether an OpenBeken's short device name is this kind's: the import
-        module built into the OpenBeken the tool installs names it so."""
-        return self.family == "beken" and (named or "").strip().upper() == self.short
-
-    def names_its_esphome(self, named: str | None) -> bool:
-        """Whether an ESPHome's friendly name is this kind's (devices/<kind>/esphome.yaml),
-        alone or with the MAC suffix its page shows (Sonoff S61 abcdef)."""
-        return re.fullmatch(re.escape(self.esphome_name.lower()) + r"( [0-9a-f]{6})?",
-                            (named or "").strip().lower()) is not None
+    def names_its_esphome(self, title: str | None, comment: str | None) -> bool:
+        """Whether an ESPHome, by its page's comment and title, is the one the
+        tool installs on this kind: its comment is the kind's
+        (devices/<kind>/esphome.yaml: Sonoff-S61), whatever the plug was
+        renamed - or, from a release before the comment, its friendly name
+        is, alone or with the MAC suffix its page shows (Sonoff S60 abcdef)."""
+        if (comment or "").strip().lower() == self.display_name.lower():
+            return True
+        return bool(self.esphome_legacy_friendly_name) and re.fullmatch(
+            re.escape(self.esphome_legacy_friendly_name.lower()) + r"( [0-9a-f]{6})?",
+            (title or "").strip().lower()) is not None
 
 
 SONOFF_S60 = Kind(
@@ -119,9 +129,9 @@ SONOFF_S60 = Kind(
     tasmota_gpio=(1, 1, 1, 1, 224, 544, 1, 3104, 1, 32, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1),
     # devices/sonoff-s60/esphome.yaml. 1.1.0 raised Sonoff-Setup-CDEF; builds before
     # that sonoff-s60- and the MAC's last three bytes.
-    esphome_name="Sonoff S60",
     esphome_legacy_setup_prefix="Sonoff-Setup-",
     esphome_legacy_prefix="sonoff-s60-",
+    esphome_legacy_friendly_name="Sonoff S60",
 )
 
 SONOFF_S61 = Kind(
@@ -139,7 +149,6 @@ SONOFF_S61 = Kind(
     wrapper_model="FWSW-01-S61-BK7238",
     tasmota_gpio=(),  # Tasmota does not run on the BK7238: OpenBeken does
     # devices/sonoff-s61/esphome.yaml; no earlier builds, so no older names.
-    esphome_name="Sonoff S61",
     esphome_legacy_setup_prefix="",
     esphome_legacy_prefix="",
     openbeken_revert="S61RevertToStock",
@@ -167,19 +176,21 @@ def for_stock_model(stock_model: str | None) -> Kind | None:
     return next((kind for kind in ALL if stock_model == kind.stock_model), None)
 
 
-def for_tasmota(named: str) -> Kind | None:
-    """The kind of a converted Tasmota, by its module and template as it names them."""
-    return next((kind for kind in ALL if kind.names_its_tasmota(named)), None)
+def for_tasmota(template_name: str | None) -> Kind | None:
+    """The kind of a converted Tasmota, by its template's name."""
+    return next((kind for kind in ALL if kind.names_its_tasmota(template_name)), None)
 
 
-def for_openbeken(named: str | None) -> Kind | None:
-    """The kind of a converted OpenBeken, by its short device name."""
-    return next((kind for kind in ALL if kind.names_its_openbeken(named)), None)
+def on_chip(chipset: str | None) -> tuple[Kind, ...]:
+    """The kinds an OpenBeken on this chip (as /api/info names it: BK7238)
+    could be on: the ones to ask it about (openbeken.kind)."""
+    chip = (chipset or "").strip().lower()
+    return tuple(kind for kind in ALL if kind.family == "beken" and kind.chip == chip)
 
 
-def for_esphome(named: str | None) -> Kind | None:
-    """The kind of a converted ESPHome, by its friendly name."""
-    return next((kind for kind in ALL if kind.names_its_esphome(named)), None)
+def for_esphome(title: str | None, comment: str | None) -> Kind | None:
+    """The kind of a converted ESPHome, by its page's title and comment."""
+    return next((kind for kind in ALL if kind.names_its_esphome(title, comment)), None)
 
 
 def names(attribute: str = "name") -> str:

@@ -90,8 +90,10 @@ appears more than once.
 
 The plug is named `esphome` and ESPHome's MAC suffix (`esphome-abcdef`), as
 every ESPHome the conversion installs is, whatever the plug, and its own
-network has that name too; the friendly name says what plug it is. Up to 1.1.0
-it was `sonoff-s60-abcdef`, its network `Sonoff-Setup-CDEF`.
+network has that name too; its friendly name is `esphome` and the same suffix
+(`esphome abcdef`: ESPHome joins them with a space). Its comment, `Sonoff-S60`,
+says what plug it is, which the tool tells it by. Up to 1.1.0 it was
+`sonoff-s60-abcdef`, its network `Sonoff-Setup-CDEF`.
 
 [`archive/esphome-prototype/FINDINGS.md`](../../archive/esphome-prototype/FINDINGS.md) records how this route was
 worked out and tested.

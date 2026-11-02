@@ -7,15 +7,18 @@
 # Assistant can adopt the plug from it (dashboard_import) and build it there.
 
 esphome:
-  # Named as every ESPHome the conversion installs is, whatever the plug:
-  # esphome- and the last three bytes of its MAC (esphome-abcdef), its own
-  # network too. The friendly name says what plug it is.
+  # Named as every firmware the conversion installs is, whatever the plug:
+  # the firmware and the last three bytes of its MAC (esphome-abcdef), its
+  # own network too; ESPHome adds them to the friendly name with a space
+  # (esphome abcdef). The comment says what plug it is, which the tool tells
+  # it by - one for every model of the S60.
   name: esphome
-  friendly_name: Sonoff S60
+  friendly_name: esphome
+  comment: Sonoff-S60
   name_add_mac_suffix: true
   project:
     name: adamsthws.sonoff-s60
-    version: "1.4.0"
+    version: "1.5.0"
   # System headers only: adoption takes this one file
   includes:
     - <nvs.h>

@@ -203,7 +203,7 @@ def set_up_if_erased(ctx: Context, step: str) -> bool:
     if ctx.state.is_done("F4"):
         device = ctx.device
         device.wait_reachable(timeout=120)
-        template = kinds.of_run(ctx.state).tasmota_template(ctx.state.input("product_model"))
+        template = kinds.of_run(ctx.state).tasmota_template()
         if not tasmota.template_in_place(device, template, names.final_name(ctx, "tasmota")):
             output.tell("    Its template went with its settings: Tasmota is set up again (F4).")
             ctx.state.capture("F4.again_after_erase", True)

@@ -93,7 +93,7 @@ def step_openbeken_check(ctx: Context, wait: float = ARRIVAL_WAIT) -> dict[str, 
 
     def check(host: str) -> dict[str, Any] | None:
         found = openbeken.info(host, timeout=3.0)
-        if found and kinds.for_openbeken(found.get("shortName")) is kind:
+        if found and openbeken.kind(host, found, timeout=3.0) is kind:
             return found
         return None
 

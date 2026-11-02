@@ -3081,22 +3081,26 @@ class AdoptPlugTests(unittest.TestCase):
             source.adopt_plug(ctx, found)
         self.assertEqual(inputs["plug_kind"], "sonoff-s60")
 
-    def adopt_esphome(self, title):
+    def adopt_esphome(self, title, comment=None):
         from types import SimpleNamespace
         inputs = {}
         ctx = SimpleNamespace(state=SimpleNamespace(set_input=inputs.__setitem__, input=inputs.get),
                               set_plug_ip=lambda ip: inputs.__setitem__("plug_ip", ip))
         with mock.patch.object(hostsys, "mac_of", return_value=None), \
-             mock.patch.object(source.esphome, "title", return_value=title), \
+             mock.patch.object(source.esphome, "title", return_value=(title, comment)), \
              mock.patch.object(output, "say"):
             source.adopt_plug(ctx, detect.Found("192.168.0.137", "esphome"))
         return inputs.get("plug_kind")
 
     def test_an_esphome_is_the_kind_its_name_says(self):
-        # Every kind's ESPHome looks the same but for its name: an S61's was
-        # once taken for an S60, and sent the S60's startup firmware.
-        self.assertEqual(self.adopt_esphome("Sonoff S61 abcdef"), "sonoff-s61")
-        self.assertEqual(self.adopt_esphome("Sonoff S60 123456"), "sonoff-s60")
+        # Every kind's ESPHome looks the same but for its comment (its name in
+        # earlier builds): an S61's was once taken for an S60, and sent the
+        # S60's startup firmware.
+        self.assertEqual(self.adopt_esphome("esphome abcdef", "Sonoff-S61"), "sonoff-s61")
+        self.assertEqual(self.adopt_esphome("esphome 123456", "Sonoff-S60"), "sonoff-s60")
+        self.assertEqual(self.adopt_esphome("Kitchen", "Sonoff-S61"), "sonoff-s61")   # renamed
+        self.assertEqual(self.adopt_esphome("Sonoff S60 123456", ""), "sonoff-s60")   # released before the comment
+        self.assertIsNone(self.adopt_esphome("esphome abcdef"))
         self.assertIsNone(self.adopt_esphome(None))
 
 
@@ -4048,9 +4052,9 @@ class ConfigureStepTests(unittest.TestCase):
         """A Tasmota's console, recording what it is `sent`: set up as F4 sets
         it once the commands after the reset are in (if it `takes` them)."""
         import json
-        settled = {"Template": json.loads(kinds.SONOFF_S60.tasmota_template("S60TPF")),
-                   "Module": {"Module": {"0": "Sonoff S60TPF"}}, "SaveData": {"SaveData": "ON"},
-                   "Hostname": {"Hostname": hostname}, "Module2": {"Module2": {"0": "Sonoff S60TPF"}}}
+        settled = {"Template": json.loads(kinds.SONOFF_S60.tasmota_template()),
+                   "Module": {"Module": {"0": "Sonoff-S60"}}, "SaveData": {"SaveData": "ON"},
+                   "Hostname": {"Hostname": hostname}, "Module2": {"Module2": {"0": "Sonoff-S60"}}}
 
         def command(c, timeout=None):
             sent.append(c)
@@ -4072,8 +4076,8 @@ class ConfigureStepTests(unittest.TestCase):
             result = tasmota.step_configure(ctx)
         writes = [command for command in sent if " " in command]  # not the questions first
         self.assertEqual(writes[0], "Reset 4")
-        self.assertEqual(writes[1:3], ["SaveData 1", f"Template {kinds.SONOFF_S60.tasmota_template('S60TPF')}"])
-        self.assertIn("Sonoff S60TPF", " ".join(str(c.args[0]) for c in said.call_args_list))
+        self.assertEqual(writes[1:3], ["SaveData 1", f"Template {kinds.SONOFF_S60.tasmota_template()}"])
+        self.assertIn("Sonoff-S60", " ".join(str(c.args[0]) for c in said.call_args_list))
         self.assertEqual(result["wifi_route"], "joined by itself")
         self.assertIn("joined your Wi-Fi by itself", " ".join(str(c.args[0]) for c in said.call_args_list))
 
@@ -4091,7 +4095,7 @@ class ConfigureStepTests(unittest.TestCase):
                               state=SimpleNamespace(input=inputs.get))
         with mock.patch.object(output, "say"):
             result = tasmota.step_configure(ctx)
-        self.assertIn("Backlog Hostname tasmota-abcdef; Module2 0; Module 0", sent)
+        self.assertIn("Backlog Hostname tasmota-abcdef; DeviceName tasmota-abcdef; Module2 0; Module 0", sent)
         self.assertEqual(result["restarts"], 2)
 
     def test_a_tasmota_in_use_that_lost_its_template_keeps_its_settings(self):
@@ -4109,6 +4113,7 @@ class ConfigureStepTests(unittest.TestCase):
         with mock.patch.object(output, "say"):
             result = tasmota.step_configure(ctx)
         self.assertNotIn("Reset 4", sent)
+        # Its name too: the one it was given since is kept.
         self.assertIn("Backlog Hostname tasmota-abcdef; Module2 0; Module 0", sent)
         self.assertEqual(result["template"], "applied")
 
@@ -4116,13 +4121,13 @@ class ConfigureStepTests(unittest.TestCase):
         # Generic as the fallback: six quick restarts and the plug switches nothing.
         import json
         from types import SimpleNamespace
-        template = kinds.SONOFF_S60.tasmota_template("S60TPF")
-        answers = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
+        template = kinds.SONOFF_S60.tasmota_template()
+        answers = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff-S60"}},
                    "SaveData": {"SaveData": "ON"}, "Module2": {"Module2": {"1": "ESP32C3"}}}
         device = SimpleNamespace(command=lambda c, timeout=None: answers.get(c))
         self.assertFalse(tasmota.template_in_place(device, template))
         self.assertTrue(tasmota.template_in_place(device, template, fallback=False))
-        answers["Module2"] = {"Module2": {"0": "Sonoff S60TPF"}}
+        answers["Module2"] = {"Module2": {"0": "Sonoff-S60"}}
         self.assertTrue(tasmota.template_in_place(device, template))
 
     def test_a_template_not_kept_stops_the_step(self):
@@ -4148,11 +4153,11 @@ class ConfigureStepTests(unittest.TestCase):
         import json
         from types import SimpleNamespace
         from unittest import mock
-        template = kinds.SONOFF_S60.tasmota_template("S60TPF")
+        template = kinds.SONOFF_S60.tasmota_template()
         hooked, sent, reset = [], [], []
-        settled = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
+        settled = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff-S60"}},
                    "SaveData": {"SaveData": "ON"}, "Hostname": {"Hostname": "tasmota-abcdef"},
-                   "Module2": {"Module2": {"0": "Sonoff S60TPF"}}}
+                   "Module2": {"Module2": {"0": "Sonoff-S60"}}}
 
         def command(c, timeout=None):
             sent.append(c)
@@ -4170,7 +4175,8 @@ class ConfigureStepTests(unittest.TestCase):
         with mock.patch.object(output, "say"), mock.patch.object(tasmota, "back_after_reset") as back, \
              mock.patch.object(tasmota, "calibrate_tasmota_meter", return_value={}):
             result = tasmota.step_configure(ctx)
-        self.assertEqual(hooked, [["Hostname tasmota-abcdef", f"Template {template}", "Module2 0", "Module 0"]])
+        self.assertEqual(hooked, [["Hostname tasmota-abcdef", "DeviceName tasmota-abcdef",
+                                   f"Template {template}", "Module2 0", "Module 0"]])
         self.assertEqual([c for c in sent if " " in c], ["Reset 4"])  # nothing after it
         back.assert_called_once()
         self.assertEqual(result["restarts"], 1)
@@ -4182,10 +4188,10 @@ class ConfigureStepTests(unittest.TestCase):
         import json
         from types import SimpleNamespace
         from unittest import mock
-        template = kinds.SONOFF_S60.tasmota_template("S60TPF")
-        answers = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff S60TPF"}},
+        template = kinds.SONOFF_S60.tasmota_template()
+        answers = {"Template": json.loads(template), "Module": {"Module": {"0": "Sonoff-S60"}},
                    "SaveData": {"SaveData": "ON"}, "Hostname": {"Hostname": "tasmota-abcdef"},
-                   "Module2": {"Module2": {"0": "Sonoff S60TPF"}}}
+                   "Module2": {"Module2": {"0": "Sonoff-S60"}}}
         sent = []
 
         def command(c, timeout=None):
@@ -4966,26 +4972,13 @@ class PhasePortTests(unittest.TestCase):
 
 
 class TemplateNameTests(unittest.TestCase):
-    """Tasmota names the plug after its own model, and never trusts the field blindly."""
-
-    def template(self, product):
-        import json
-        return json.loads(kinds.SONOFF_S60.tasmota_template(product))
-
-    def test_each_region_gets_its_own_name(self):
-        self.assertEqual(self.template("S60TPG")["NAME"], "Sonoff S60TPG")
-        self.assertEqual(self.template("S60TPF")["NAME"], "Sonoff S60TPF")
-        self.assertEqual(self.template(" s60tpf ")["NAME"], "Sonoff S60TPF")
-
-    def test_anything_else_gets_the_series_name(self):
-        for product in (None, "", "S60", "S60ZBTPF", "S60TPGX", 'S60TPG","GPIO":[0]'):
-            self.assertEqual(self.template(product)["NAME"], "Sonoff S60", product)
+    """Tasmota's template is named as every firmware names the plug."""
 
     def test_the_wiring_is_the_tested_s60tpg_template(self):
         # Byte for byte the template proven on the UK plugs, apart from the name.
         self.assertEqual(
-            kinds.SONOFF_S60.tasmota_template("S60TPG"),
-            '{"NAME":"Sonoff S60TPG","GPIO":[1,1,1,1,224,544,1,3104,1,32,1,0,0,0,0,0,0,0,'
+            kinds.SONOFF_S60.tasmota_template(),
+            '{"NAME":"Sonoff-S60","GPIO":[1,1,1,1,224,544,1,3104,1,32,1,0,0,0,0,0,0,0,'
             '1,1,1,1],"FLAG":0,"BASE":1}',
         )
 

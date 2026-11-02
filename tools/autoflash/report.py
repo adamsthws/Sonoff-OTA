@@ -157,12 +157,6 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Converted from", CONVERTED_FROM[runs.run_source(ctx.state)]),
         ("Tool version", __version__),
         ("Device model", model or "__"),
-        # What the new firmware calls the device: Tasmota's template, ESPHome's
-        # friendly name, OpenBeken's short name as it answered.
-        *([("Name in ESPHome", kind.esphome_name)] if firmware == "esphome"
-          else [("Name in Tasmota", kind.template_name(product))] if firmware == "tasmota"
-          else [("Name in OpenBeken", ctx.state.input("device_name") or kind.short)]
-          if firmware == "openbeken" else []),
         ("Stock firmware", ctx.state.input("stock_version") or "__"),
         # How it went, never where it is or which plug: the path holds the MAC.
         # A run from a converted plug takes none: one is there or not.
