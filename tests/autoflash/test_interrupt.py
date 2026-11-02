@@ -71,8 +71,106 @@ class CtrlCTests(unittest.TestCase):
             self.press()
         self.assertTrue(interrupt.pending())
 
+    def test_the_notice_counts_down_and_goes_once_a_second_press_would_not_stop(self):
+        self.assertEqual(interrupt.notice(), [])
+        self.press()
+        self.assertEqual(interrupt.notice(), ["! Are you sure?", "Press Ctrl-C again within 10 seconds to stop now."])
+        self.clock[0] += 3.5
+        self.assertEqual(interrupt.notice()[-1], "Press Ctrl-C again within 7 seconds to stop now.")
+        self.clock[0] += 6
+        self.assertEqual(interrupt.notice()[-1], "Press Ctrl-C again within 1 second to stop now.")
+        self.clock[0] += interrupt.GRACE
+        self.assertEqual(interrupt.notice(), [])
+        self.assertTrue(interrupt.pending())   # still asked at the end of the stage
+
+    def test_the_notice_is_written_out_only_where_the_screen_does_not_draw_it(self):
+        self.addCleanup(interrupt.shown_by, None)
+        interrupt.shown_by(lambda: None)
+        self.press()
+        interrupt._say.assert_not_called()
+        interrupt.clear()
+        interrupt.shown_by(lambda: "laid out\n")
+        self.press()
+        interrupt._say.assert_called_once_with("laid out\n")
+        interrupt.clear()
+        interrupt.shown_by(None)   # before a run's output starts: a blank line, then the notice
+        self.press()
+        interrupt._say.assert_called_with("\n\n ! Are you sure?\n     Press Ctrl-C again within 10 seconds to stop now.\n")
+
     def test_helpers_are_kept_out_of_the_terminals_ctrl_c(self):
         self.assertTrue(interrupt.child_group())
+
+
+class NoticeOnScreenTests(unittest.TestCase):
+    """The notice is drawn under the stage line, not after a copy of it, and
+    taken off again once its seconds are up."""
+
+    def test_the_notice_sits_under_the_stage_line_and_goes(self):
+        import io
+        import os
+        import tempfile
+        from pathlib import Path
+
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+
+        interrupt.clear()
+        interrupt._state.update(asking=0)
+        clock = [1000.0]
+        screen = Terminal()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("sys.stdout", screen), \
+                mock.patch("sys.stdin", io.StringIO()), mock.patch.dict(os.environ, {"NO_COLOR": ""}), \
+                mock.patch.object(interrupt.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(interrupt, "_say") as said, \
+                mock.patch.object(output, "_tick_forever"):    # drawn here, not by the ticker
+            os.environ.pop("NO_COLOR")
+            output.start(Path(tmp) / "run.log", verbose=False)
+            try:
+                output.stage_begin(2, "Discovering the device")
+                interrupt._on_interrupt(signal.SIGINT, None)
+                output.tick()
+                output.tick()
+                drawn = screen.getvalue()
+                clock[0] += interrupt.GRACE + 1
+                output.tick()
+                cleared = screen.getvalue()[len(drawn):]
+            finally:
+                output.finish()
+                interrupt.clear()
+        said.assert_not_called()
+        self.assertEqual(drawn.count("Stage 2 - Discovering the device"), 5)   # each draw on its own row
+        self.assertNotIn("\x1b[2K", drawn)                        # written over, never erased: no flicker
+        self.assertNotIn("\n Stage 2", drawn)                     # never a second copy below
+        # A blank row, then laid out as a warning: its title highlighted.
+        self.assertIn(f"\n\x1b[K\n{output.BOLD}{output.YELLOW} ! Are you sure?{output.RESET}\x1b[K"
+                      "\n     Press Ctrl-C again within 10 seconds to stop now.", drawn)
+        self.assertIn("\x1b[3A\r", drawn)                         # back up to the stage line
+        self.assertTrue(cleared.startswith("\x1b[1E\x1b[2K" * 3 + "\x1b[3F"))
+        self.assertNotIn("Ctrl-C", cleared)
+        self.assertNotIn("\x1b[J", drawn + cleared)
+
+
+class NoticeWrittenTests(unittest.TestCase):
+    def test_where_the_ticker_draws_nothing_the_notice_is_written_with_a_blank_line_above(self):
+        # In an open block (a note and its question) the stage line is not
+        # drawn, so the notice is written out, laid out as the drawn one.
+        with mock.patch.object(output, "colour_ok", return_value=True), \
+                mock.patch.object(interrupt.time, "monotonic", return_value=1000.0), \
+                mock.patch.multiple(output._s, draws_notice=True, concise=True, ticker=object(),
+                                    stage="Stage 1 - Confirming prerequisites", transient_rows=0, live=0):
+            interrupt._state["first"] = 1000.0
+            try:
+                self.assertEqual(output._notice_text(),
+                                 f"\n{output.BOLD}{output.YELLOW} ! Are you sure?{output.RESET}\n"
+                                 "     Press Ctrl-C again within 10 seconds to stop now.\n")
+                output._s.live = 20   # an unfinished line is ended first
+                self.assertTrue(output._notice_text().startswith("\n\n"))
+                output._s.transient_rows = None
+                output._s.live = 0
+                self.assertIsNone(output._notice_text())   # the ticker draws it
+            finally:
+                interrupt.clear()
 
 
 class StageEndTests(unittest.TestCase):

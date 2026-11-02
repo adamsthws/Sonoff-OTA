@@ -23,13 +23,14 @@ first Ctrl-C leaves them working, and the run stops them itself when it stops.
 
 from __future__ import annotations
 
+import math
 import os
 import signal
 import sys
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Callable
 
 # A second Ctrl-C within this long stops at once.
 GRACE = 10.0
@@ -38,7 +39,8 @@ CARRY_ON_AFTER = 30.0
 
 _lock = threading.Lock()
 _state: dict[str, Any] = {"first": None, "asking": 0, "closed": False, "installed": False,
-                         "deferring": 0, "deferred": False}
+                         "deferring": 0, "deferred": False, "shown_by": None}
+NOTICE_TITLE = "! Are you sure?"
 
 
 def install() -> None:
@@ -74,8 +76,30 @@ def _on_interrupt(signum: int, frame: Any) -> None:
             return
         raise KeyboardInterrupt
     _state["first"] = now
-    _say(f"\n  Ctrl-C: the run stops at the end of this stage, if you say so then."
-         f"\n  Press Ctrl-C again within {GRACE:.0f} seconds to stop at once.\n")
+    shown_by = _state["shown_by"]
+    title, line = notice()
+    text = shown_by() if shown_by else f"\n\n {title}\n     {line}\n"
+    if text:
+        _say(text)
+
+
+def shown_by(where: Callable[[], str | None] | None) -> None:
+    """`where` gives what a first Ctrl-C writes out - notice() laid out for
+    the screen as it is - or None when the screen draws it itself."""
+    _state["shown_by"] = where
+
+
+def notice() -> list[str]:
+    """What a first Ctrl-C says while a second would stop at once, its
+    seconds counting down; nothing once they are up."""
+    first = _state["first"]
+    if first is None or _state["asking"]:
+        return []
+    left = GRACE - (time.monotonic() - first)
+    if left <= 0:
+        return []
+    seconds = math.ceil(left)
+    return [NOTICE_TITLE, f"Press Ctrl-C again within {seconds} second{'s' if seconds != 1 else ''} to stop now."]
 
 
 def _on_closed(signum: int, frame: Any) -> None:

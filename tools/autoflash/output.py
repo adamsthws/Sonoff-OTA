@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 from typing import IO, Callable
 
-from . import __version__
+from . import __version__, interrupt
 
 IS_WINDOWS = platform.system() == "Windows"
 
@@ -72,6 +72,8 @@ class _State:
     stream_fresh = True               # a helper's output is at the start of a row
     after_stage = False               # a stage line was the last on screen: a gap before what follows
     after_blank = False               # a blank line was the last on screen
+    draws_notice = False              # a first Ctrl-C's notice is drawn under the stage line
+    notice_rows = 0                   # rows of it on screen now
     paused = False                    # waiting for the keyboard: draw nothing
     held = False                      # between questions that belong together: no clock
     ticker: threading.Thread | None = None
@@ -166,12 +168,16 @@ def start(log_path: Path | None, *, verbose: bool) -> None:
             _s.stop_ticker.clear()
             _s.ticker = threading.Thread(target=_tick_forever, daemon=True)
             _s.ticker.start()
+        _s.draws_notice = _s.concise and sys.stdout.isatty() and colour_ok()
+        interrupt.shown_by(_notice_text)
         if _s.concise:
             _hide_keys()
 
 
 def finish() -> None:
     """End cleanly: no half-drawn line left behind, and the log closed."""
+    interrupt.shown_by(None)
+    _s.draws_notice = False
     _s.stop_ticker.set()
     if _s.ticker is not None:
         _s.ticker.join(2.0)
@@ -570,7 +576,7 @@ def stage_end(outcome: str) -> None:
                 # Replace the "underway" line in place.
                 first, _, rest = _fit(text).partition("\n")
                 pad = " " * max(0, _s.live - len(ANSI_RE.sub("", first)))
-                sys.stdout.write("\r" + first + pad + ("\n" + rest if rest else "") + "\n")
+                sys.stdout.write(_clear_notice() + "\r" + first + pad + ("\n" + rest if rest else "") + "\n")
                 sys.stdout.flush()
                 _s.live = 0
                 _s.after_stage = True
@@ -752,6 +758,33 @@ def _tick_forever() -> None:
         _tick()
 
 
+def _notice_drawn() -> bool:
+    """Whether the ticker draws a Ctrl-C notice now: read from the signal
+    handler, so without the lock the interrupted code may hold."""
+    return (_s.concise and _s.ticker is not None and _s.stage is not None and not _s.paused
+            and not _s.held and _s.transient_rows is None)
+
+
+def _notice_rows() -> list[str]:
+    """A first Ctrl-C's notice as rows for the screen, laid out as the other
+    notes to read before going on (prompts.warning_box): a blank row, the
+    title highlighted, the text set in under it."""
+    rows = interrupt.notice()
+    if not rows:
+        return []
+    title, *rest = rows
+    return ["", styled(_clip(f"{MARGIN}{title}"), BOLD, YELLOW), *(_clip(f"{MARGIN}    {row}") for row in rest)]
+
+
+def _notice_text() -> str | None:
+    """What a first Ctrl-C writes out where the ticker does not draw it: an
+    unfinished line ended first.  Called from the signal handler, so it
+    takes no lock."""
+    if _notice_drawn():
+        return None
+    return ("\n" if _s.live else "") + "".join(f"{row}\n" for row in _notice_rows())
+
+
 def _tick() -> None:
     """The stage's spinner, a turn on.  Not while a block is open to be taken
     away again: drawn under its rows - while what it shows is still being
@@ -793,9 +826,26 @@ def _draw_stage() -> None:
         line = shown = _clip(line)
     if _s.live and not _s.live_is_stage:
         _break()
-    sys.stdout.write("\r" + shown + " " * max(0, _s.live - len(line)))
+    # Below it, a first Ctrl-C's notice while it lasts (interrupt.notice),
+    # the cursor back at the end of the stage line after it.
+    # Each row written over the last draw's, not erased first, so it does
+    # not flicker; the rows go once it has fewer.
+    rows = _notice_rows() if _s.draws_notice else []
+    notice = "".join(f"\n{row}\x1b[K" for row in rows)
+    if rows:
+        notice += f"\x1b[{len(rows)}A\r" + shown
+    clear = _clear_notice() if len(rows) < _s.notice_rows else ""
+    sys.stdout.write(clear + "\r" + shown + " " * max(0, _s.live - len(line)) + notice)
     sys.stdout.flush()
     _s.live, _s.live_is_stage = len(line), True
+    _s.notice_rows = len(rows)
+
+
+def _clear_notice() -> str:
+    """What takes the Ctrl-C notice off the rows under the stage line, row
+    by row: an erase to the end of the screen could take more."""
+    rows, _s.notice_rows = _s.notice_rows, 0
+    return "\x1b[1E\x1b[2K" * rows + f"\x1b[{rows}F" if rows else ""
 
 
 def _hide_keys() -> None:
@@ -857,7 +907,7 @@ def _break() -> None:
             shown = f"{MARGIN}{_s.stage_screen} - {styled('Underway', BOLD)}"
             if _clip(line) != line:
                 line = shown = _clip(line)
-            sys.stdout.write("\r" + shown + " " * max(0, _s.live - len(line)) + "\n")
+            sys.stdout.write(_clear_notice() + "\r" + shown + " " * max(0, _s.live - len(line)) + "\n")
             if _s.transient_rows is not None:
                 _s.transient_rows += 1
             _s.after_stage = True

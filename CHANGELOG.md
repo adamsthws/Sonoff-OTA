@@ -93,6 +93,9 @@ check.
   plug at its first conversion, where it gave `__` for both.
 - A blank line stands between every question and the options or text above
   it.
+- A first Ctrl-C asks "! Are you sure?", under the stage line where it was
+  shown after a second copy of it, counts down the seconds a second Ctrl-C
+  stops the run at once, and goes when they are up.
 
 ## 2.2.0
 
