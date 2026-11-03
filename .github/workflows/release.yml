@@ -6,7 +6,8 @@
 # Only once the unit tests, the final firmware on the emulator, the lint and
 # the leak scan pass on that commit: on a push, the runs the push started
 # rather than the same again; started any other way, it runs them. The
-# release carries the firmware files the tool installs and SHA256SUMS; with
+# release carries the firmware files the tool installs and SHA256SUMS, and
+# what the README's one line fetches (liberate.sh, liberate.ps1); with
 # the repository's immutable releases, GitHub signs an attestation of them
 # and of the tag (`gh release verify`).
 name: Release
@@ -144,5 +145,12 @@ jobs:
           # bare, so a download checks with sha256sum -c in one directory.
           mapfile -t files < <(awk '{ print "artifacts/" $2 }' artifacts/SHA256SUMS)
           (cd artifacts && sha256sum --check --strict SHA256SUMS)
+          # What the README's one line fetches, from releases/latest/download/:
+          # liberate.sh and .ps1, the tag, and the tool (.gitattributes leaves out
+          # what it does not need).
+          git archive --format=tar.gz --prefix="Sonoff-OTA-${TAG#v}/" -o autoflash.tar.gz "$GITHUB_SHA"
+          git archive --format=zip --prefix="Sonoff-OTA-${TAG#v}/" -o autoflash.zip "$GITHUB_SHA"
+          echo "$TAG" > autoflash-version
           gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md \
-              artifacts/SHA256SUMS "${files[@]}"
+              artifacts/SHA256SUMS "${files[@]}" \
+              liberate.sh liberate.ps1 autoflash.tar.gz autoflash.zip autoflash-version

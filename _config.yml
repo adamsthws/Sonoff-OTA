@@ -22,6 +22,8 @@ exclude:
   - archive/tests/
   - archive/tools/
   - artifacts/
+  - liberate.ps1
+  - liberate.sh
   - requirements/
   - start.cmd
   - start.sh

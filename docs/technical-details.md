@@ -2,8 +2,9 @@
 
 This page covers what the [README](../README.md) leaves out. You don't need it
 to convert a plug. It covers what the firmware bundle holds, how your Wi-Fi
-details and eWeLink account are handled, the finished memory layout, and where
-the developer and research material lives.
+details and eWeLink account are handled, where the one-line start keeps the
+tool, the finished memory layout, and where the developer and research
+material lives.
 
 For a plain-English account of what happens to the plug, read
 [what-happens.md](what-happens.md) instead.
@@ -49,6 +50,22 @@ live, and checks them, before anything is written.
 The published images remove the need to compile Tasmota locally. They do not
 remove the safety checks: every image and every live flash readback still has
 to match its pinned provenance.
+
+## Where the one-line start keeps the tool
+
+The README's one line runs `liberate.sh` (macOS, Linux) or `liberate.ps1`
+(Windows), taken from the latest release. They unpack the release's
+`autoflash.tar.gz` or `.zip` into `~/Sonoff-OTA` (`%USERPROFILE%\Sonoff-OTA` on
+Windows) and start the tool there, as `start.sh` and `start.cmd` do. Arguments
+pass through: `sh -c "$(curl -fsSL ...)" sh run --verbose`.
+
+Run again, the line looks for a newer release, and if there is one it updates
+the folder in place: the files the installed release put there, listed in
+`.installed-release`, are replaced or removed, and nothing else is touched -
+not `captures/` (below), not `.python/`, not a file of your own. Offline, it
+starts the version already there. Another folder is chosen with
+`AUTOFLASH_HOME`; a git clone in the folder is started as it is, and a folder
+holding something else is left alone.
 
 ## How your Wi-Fi details are handled
 

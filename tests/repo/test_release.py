@@ -1,6 +1,8 @@
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -51,3 +53,33 @@ class PortablePythonTests(unittest.TestCase):
         tested = versions(".github/workflows/emulator-check.yml", r'python-version: "(3\.\d+\.\d+)"')
         self.assertEqual(len(installed), 1, installed)
         self.assertEqual(tested, installed)
+
+
+class OneLineTests(unittest.TestCase):
+    """What the README's one line fetches from a release (liberate.sh,
+    liberate.ps1) is what the release workflow attaches to it."""
+
+    def test_every_file_fetched_from_a_release_is_attached_to_it(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        attached = set(workflow[workflow.index("gh release create"):].split())   # the workflow's last step
+        fetched = set()
+        for path in ("README.md", "liberate.sh", "liberate.ps1"):
+            text = (ROOT / path).read_text(encoding="utf-8")
+            fetched |= set(re.findall(r"releases/(?:latest/download|download/\$\w+)/([\w.-]+)", text))
+        self.assertTrue({"liberate.sh", "liberate.ps1", "autoflash-version"} <= fetched, fetched)
+        self.assertEqual(fetched - attached, set())
+
+    @unittest.skipIf(shutil.which("git") is None or not (ROOT / ".git").exists(), "not a git checkout")
+    def test_the_release_archive_holds_a_tool_that_starts(self):
+        """autoflash.tar.gz is `git archive`: what .gitattributes leaves out of
+        it must be nothing the tool needs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = subprocess.run(["git", "-C", str(ROOT), "archive", "--worktree-attributes", "HEAD"],
+                                     capture_output=True, check=True, timeout=120).stdout
+            subprocess.run(["tar", "-x", "-C", tmp], input=archive, check=True, timeout=120)
+            self.assertFalse(Path(tmp, "archive").exists())
+            self.assertFalse(Path(tmp, "tests").exists())
+            done = subprocess.run([sys.executable, "-I", str(Path(tmp, "tools/autoflash/cli.py")), "--version"],
+                                  capture_output=True, text=True, cwd=tmp, timeout=120)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn("Autoflash", done.stdout)

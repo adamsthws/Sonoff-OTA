@@ -46,7 +46,7 @@ And every route between them.
 
 ### Fully automated 'Over The Air' firmware conversion
 
-Turn your stock Sonoff S60 or S61S smart plug into one running **Tasmota**, **OpenBeken** or **ESPHome** using OTA method - no soldering, no taking the plug apart. Move the plug between the two, or back to Sonoff's own firmware.
+Turn your stock Sonoff S60 smart plug into one running **Tasmota** or **ESPHome** using OTA method - no soldering, no taking the plug apart. Move the plug between the two, or back to Sonoff's own firmware. The S61S, with **OpenBeken** too, is coming soon.
 
 > Conversion with this tool is fully automated end to end, with checks at every stage. It is resumable and can be restarted at any point.
 
@@ -113,23 +113,36 @@ The S61S (iPlug Gen2, model **S61STPF**) is being worked on: see [devices/sonoff
 
 ## Let's go
 
-> You're walked through every step of the conversion.
+Simply paste this one line into your terminal...
 
-**Linux / MacOS**  (Terminal)
+>You're walked through every step of the conversion. It downloads the latest release into your home folder and starts it.
+
+**Windows**
+```
+powershell -c "irm https://github.com/adamsthws/Sonoff-OTA/releases/latest/download/liberate.ps1 | iex"
+```
+
+**macOS**
+```sh
+sh -c "$(curl -fsSL https://github.com/adamsthws/Sonoff-OTA/releases/latest/download/liberate.sh)"
+```
+**Linux**
+```sh
+sh -c "$(wget -qO- https://github.com/adamsthws/Sonoff-OTA/releases/latest/download/liberate.sh)"
+```
+> If that says `wget: not found`, use the macOS line instead.
+
+<details>
+<summary>Or with git, or a zip</summary>
+
 ```sh
 git clone https://github.com/adamsthws/Sonoff-OTA.git
 cd Sonoff-OTA
-sh start.sh
+sh start.sh       # Linux / macOS
+.\start.cmd       # Windows
 ```
-**Windows** (Terminal)
-
-```sh
-git clone https://github.com/adamsthws/Sonoff-OTA.git
-cd Sonoff-OTA
-.\start.cmd
-```
-  -- or -- 
-  [download as a zip](https://github.com/adamsthws/Sonoff-OTA/archive/refs/heads/main.zip), double-click `start.cmd`  
+-- or -- [download as a zip](https://github.com/adamsthws/Sonoff-OTA/archive/refs/heads/main.zip), and double-click `start.cmd`
+</details>
 
 <br>
 
@@ -148,7 +161,7 @@ cd Sonoff-OTA
 ## If you have to stop
 
 E.g. you close the window, lose your Wi-Fi, run out of time - it doesn't matter. Run the
-same command again - `start.cmd` or `sh start.sh`.
+same command again - the one line above, or `start.cmd` / `sh start.sh` in the folder.
 
 > It remembers which plug it was working on and what it had done. Where a step
 was interrupted, it checks the plug to work out where to resume from.
@@ -215,20 +228,71 @@ report back on how it went here:
 
 <br>
 
+## Roadmap
+
+This project has big ambitions. The difficult groundwork has been laid down
+to support devices built on both **Espressif** and **Beken** chips.
+
+> Next is expanding the list of supported devices - more Espressif-based
+> and more Beken-based ones alike.
+
+Also being considered: support for **Supla** firmware, **Zamel** modules and
+**Tuya** devices.
+
+<br>
+
 ## Thanks
-
-A big thank you to [HG0161](https://github.com/HG0161) and the
-[SonoffS60OTA](https://github.com/HG0161/SonoffS60OTA) repository for laying the groundwork; working out the update mechanism, decoding the firmware format
-and proving the OTA route on real plugs. This repository carries that work on.
-
-Thanks to [p1otr](https://github.com/p1otr) for the ESPHome option and its
-S60 config.
 
 Thanks too to everyone in the Tasmota threads for the
 [UK](https://github.com/arendst/Tasmota/discussions/22554) and
 [EU](https://github.com/arendst/Tasmota/discussions/21255) S60, whose
 open-the-case method came first.
 
-Worked out with the Tasmota community's discussion of this device.
+A big thank you to [HG0161](https://github.com/HG0161) and the
+[SonoffS60OTA](https://github.com/HG0161/SonoffS60OTA) repository for working out the update mechanism, decoding the firmware format and proving the OTA update route. (Worked out with the Tasmota community's discussion of this device).
+
+Thanks to [lcgamboa](https://github.com/lcgamboa) for the
+[QEMU fork](https://github.com/lcgamboa/qemu) that emulates the ESP32, and to [openshwprojects](https://github.com/openshwprojects) for the
+[Beken emulator](https://github.com/openshwprojects/BekenEmulator). Every conversion is tested against them before it reaches a real plug.
+
+Thanks to [p1otr](https://github.com/p1otr) for the ESPHome option and its
+S60 config.
 
 See [`LICENSE`](LICENSE) and [`NOTICES.md`](NOTICES.md).
+
+<br>
+
+## To Sonoff and eWeLink
+
+Thankyou for making such excellent devices. Please keep this update method open. Letting owners run their own firmware is a win for you as well as
+for them.
+
+**It sells plugs.**
+> Tasmota began life as *Sonoff-Tasmota*: a great many people first bought
+> Sonoff because they could reflash it, and the home-automation community
+> still recommends the brand for that reason. Every plug this tool supports
+> is one more reason to choose Sonoff over a sealed alternative - and the
+> sale is yours either way.
+
+**It costs you less.**
+> A converted plug never calls your servers again. You keep the sale and drop
+> the years of cloud traffic, accounts and app support that would have come
+> with it. Sell more, support less.
+
+**The owners support themselves.**
+> Someone who installs their own firmware takes on its upkeep. Tasmota,
+> ESPHome and OpenBeken are maintained by their own communities, at no cost
+> to you.
+
+**Nothing is lost.**
+> The tool needs the owner's own plug, added to their own eWeLink account.
+> It touches no one else's device, and it keeps the plug's Sonoff firmware so
+> it can be put back at any time.
+
+**It earns goodwill.**
+> Your own DIY mode once let owners flash their own firmware over Wi-Fi: you
+> have seen the value in this before. A device that outlives
+> its app, or its cloud service, stays out of a landfill and keeps its
+> owner's trust in the brand that made it.
+
+<br>

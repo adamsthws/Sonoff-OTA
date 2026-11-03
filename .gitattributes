@@ -5,3 +5,8 @@
 tools/espressif/emulator/container/** text eol=lf
 # Run by cmd.exe, which expects CRLF.
 *.cmd text eol=crlf
+# Left out of the release's autoflash.tar.gz and .zip (and GitHub's own source
+# archives): the tool needs none of it, and archive/ is half the download.
+/archive/ export-ignore
+/tests/ export-ignore
+/.github/ export-ignore
