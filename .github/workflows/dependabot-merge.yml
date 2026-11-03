@@ -1,0 +1,65 @@
+# Dependabot's pull requests (.github/dependabot.yml), merged once each has
+# been open MERGE_AFTER_DAYS with the checks main requires passed. With
+# Dependabot's own cooldown, a release is two weeks old before it is used:
+# time for a broken or compromised one to be found and pulled first. One
+# labelled `hold` is left alone.
+#
+# A merge by this workflow's token starts no workflow, so it starts main's
+# checks and the website's deploy itself.
+name: Dependabot merge
+
+on:
+  schedule:
+    - cron: "0 7 * * *"   # daily, 07:00 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: dependabot-merge
+
+env:
+  MERGE_AFTER_DAYS: "7"
+
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write        # merge
+      pull-requests: write   # merge, comment
+      actions: write         # start main's checks and the deploy
+    steps:
+      - name: Merge what has been open long enough, its checks passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cutoff=$(date -u -d "-${MERGE_AFTER_DAYS} days" +%Y-%m-%dT%H:%M:%SZ)
+          merged=0
+          for number in $(gh pr list -R "$GITHUB_REPOSITORY" --state open --author app/dependabot \
+                  --json number,createdAt,labels \
+                  --jq ".[] | select(.createdAt <= \"$cutoff\") | select([.labels[].name] | index(\"hold\") | not) | .number"); do
+              state=$(gh pr view -R "$GITHUB_REPOSITORY" "$number" --json mergeStateStatus --jq .mergeStateStatus)
+              case $state in
+              CLEAN)
+                  gh pr merge -R "$GITHUB_REPOSITORY" "$number" --squash --delete-branch
+                  merged=1 ;;
+              DIRTY)
+                  # Dependabot rebases its own pull request on a conflict.
+                  echo "#$number: conflicts with main; waiting for Dependabot to rebase it." ;;
+              BLOCKED|UNSTABLE)
+                  if gh pr checks -R "$GITHUB_REPOSITORY" "$number" --required --json bucket --jq '.[].bucket' \
+                          | grep -qx fail; then
+                      echo "::warning::#$number: a check main requires failed; not merged."
+                  else
+                      echo "#$number: its checks have not all finished; looked at again tomorrow."
+                  fi ;;
+              *)
+                  echo "#$number: GitHub cannot say yet whether it merges ($state); looked at again tomorrow." ;;
+              esac
+          done
+          if [ "$merged" = 1 ]; then
+              for workflow in emulator-check.yml lint.yml leak-scan.yml website.yml; do
+                  gh workflow run -R "$GITHUB_REPOSITORY" "$workflow" --ref main
+              done
+          fi
