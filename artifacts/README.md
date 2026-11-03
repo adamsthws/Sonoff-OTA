@@ -66,10 +66,12 @@ The imprintable Safeboot contains reserved placeholder bytes instead of real
 Wi-Fi credentials. It **must not be flashed as published**: the private
 bundle-preparation path must imprint and validate a per-device copy first.
 
-From 4.4.1 on, a bridge is named by one version: the one the stock updater is
-given, the one in its app description, and the one its status page reports
+From 4.4.1 on, a bridge is named by one version: the one its file is wrapped
+with, the one in its app description, and the one its status page reports
 (`bridge 4.4.4`). `tools/espressif/build_vendor_ota.py` takes it from the image and
-refuses any other. The next bridge is 4.4.5. 4.4.1 has the Wi-Fi behaviour tried on a
+refuses any other. The stock updater is not given it: the sender wraps the
+same app again as 9.9.9 (`ANNOUNCED_VERSION`), above any Sonoff release, as
+the S61's images are sent. The next bridge is 4.4.5. 4.4.1 has the Wi-Fi behaviour tried on a
 stock plug as "v6" on 8 October 2026; beyond that only its version, its name
 and a larger buffer for the status reply differ. 4.4.2 is 4.4.1 with the
 read-only `GET /flash` and `GET /efuse` of the research readout build, and

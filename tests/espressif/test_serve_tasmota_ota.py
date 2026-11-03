@@ -182,6 +182,37 @@ class FailureTests(unittest.TestCase):
         self.assertTrue(sender.NOT_SENT.startswith(installer.BRIDGE_NOT_SENT))
 
 
+class AnnouncedVersionTests(unittest.TestCase):
+    def test_the_bridge_is_sent_as_the_announced_version(self):
+        # Its own version (4.4.4) stays in the published file; the plug's
+        # updater is told the fixed one, in the command and the wrapper.
+        import sys
+        from pathlib import Path
+        from unittest import mock
+        import tools.espressif.serve_tasmota_ota as sender
+        from tools.autoflash.runs import ROOT
+        from tools.espressif.analyze_vendor_ota import analyze
+        from tools.espressif.build_vendor_ota import ANNOUNCED_VERSION
+        from tools.ewelink.ota_push import Delivery
+        bridge = ROOT / installer.BRIDGE_OTA
+        exists = Path.exists
+        argv = ["serve_tasmota_ota.py", "--listen-ip", "192.168.1.2", "--device-ip", "192.168.1.3",
+                "--firmware", str(bridge), "--email", "someone@example.com",
+                "--expected-current-version", "1.2.0", "--mdns-capture", "mdns.json", sender.SAFETY_FLAG]
+        with mock.patch.object(sys, "argv", argv), \
+             mock.patch.object(Path, "exists", autospec=True,
+                               side_effect=lambda path: path.name != "RECOVERY_LOCK" and exists(path)), \
+             mock.patch.dict("os.environ", {"EWELINK_PASSWORD": "pw"}), \
+             mock.patch.object(sender, "target_id_from_mdns", return_value="1000000000"), \
+             mock.patch.object(sender, "deliver", return_value=Delivery(sent=True, complete=True)) as deliver, \
+             mock.patch("builtins.print"):
+            self.assertEqual(sender.main(), 0)
+        sent = deliver.call_args.kwargs
+        self.assertEqual(sent["version"], ANNOUNCED_VERSION)
+        self.assertEqual(analyze(sent["firmware"])["wrapper"]["header_version"], ANNOUNCED_VERSION)
+        self.assertEqual(sent["firmware"][100:], bridge.read_bytes()[100:])
+
+
 class DescribeCloudTests(unittest.TestCase):
     def test_offline_and_online(self):
         from tools.ewelink.ota_push import describe_cloud

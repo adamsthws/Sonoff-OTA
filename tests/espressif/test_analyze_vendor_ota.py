@@ -58,6 +58,29 @@ class VendorOtaAnalysisTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "slot limit"):
             build_wrapper(make_esp_image(), version="9.9.9", max_payload_size=8)
 
+    def test_announce_wraps_the_same_payload_as_the_fixed_version(self):
+        # The updater is told one high version whatever the image's own, as
+        # the S61's is: a Sonoff release above the bridge's must not stop it.
+        from tools.espressif.build_vendor_ota import ANNOUNCED_VERSION, announce
+        payload = make_esp_image()
+        result = analyze(announce(build_wrapper(payload, version="4.4.4", model="TEST-MODEL")))
+        self.assertEqual(result["wrapper"]["header_version"], ANNOUNCED_VERSION)
+        self.assertEqual(result["wrapper"]["record_version"], ANNOUNCED_VERSION)
+        self.assertEqual(result["wrapper"]["model"], "TEST-MODEL")
+        self.assertTrue(all(passed for _, passed in validation_checks(result)))
+        self.assertEqual(announce(build_wrapper(payload, version="4.4.4"))[100:], payload)
+
+    def test_the_announced_version_is_above_any_sonoff_release(self):
+        # Above the newest S60 release seen (1.2.0) and the bridge's own, as
+        # text and as numbers, whichever the updater compares; one with the S61's.
+        from tools.beken import fota_wrap
+        from tools.espressif.build_vendor_ota import ANNOUNCED_VERSION
+        for version in ("1.2.0", "4.4.4"):
+            self.assertGreater(ANNOUNCED_VERSION, version)
+            self.assertGreater(tuple(map(int, ANNOUNCED_VERSION.split("."))),
+                               tuple(map(int, version.split("."))))
+        self.assertEqual(ANNOUNCED_VERSION, fota_wrap.ANNOUNCED_VERSION)
+
 
 if __name__ == "__main__":
     unittest.main()

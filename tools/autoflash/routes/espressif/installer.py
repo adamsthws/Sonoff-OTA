@@ -42,8 +42,9 @@ if TYPE_CHECKING:
 # flash be read first, for the backup - and starts even once an upload into
 # Sonoff's slot was cut off (from 4.4.3), where 4.4.2 would not, leaving a plug
 # only a serial cable could recover; named, from 4.4.4, as the tool's.  Named,
-# like every bridge from 4.4.1 on, by the version the stock updater is given;
-# the file by the kind of plug its wrapper is for (kinds.SONOFF_S60's).
+# like every bridge from 4.4.1 on, by the version its file is wrapped with
+# (the updater is told build_vendor_ota.ANNOUNCED_VERSION); the file by the
+# kind of plug its wrapper is for (kinds.SONOFF_S60's).
 BRIDGE_OTA = Path("artifacts/autoflash-bridge-sonoff-s60-4.4.4.ota")
 
 
@@ -99,16 +100,18 @@ def step_bridge(ctx: Context) -> dict[str, Any]:
         kept = "No backup of its Sonoff firmware is kept (--no-backup)."
     else:
         kept = "Its Sonoff firmware is backed up to this computer first, in full."
-    output.transient_begin()
-    prompts.warning_box("Before going on", [
-        "From here the device's Sonoff firmware is replaced, so the eWeLink app",
-        "will no longer control it. DO NOT UNPLUG IT during the process.",
-        kept,
-        "Only go ahead with a device you can afford to lose.",
-    ])
-    if not prompts.require_word(prompts.CONSENT_WORD):
-        raise NothingWritten("not confirmed - nothing has been written to the device")
-    output.transient_end()  # agreed: the note and the question have done their job
+    if not getattr(ctx, "consented", False):  # once a run: not again when sent again (resend_if_back_on_sonoff)
+        output.transient_begin()
+        prompts.warning_box("Before going on", [
+            "From here the device's Sonoff firmware is replaced, so the eWeLink app",
+            "will no longer control it. DO NOT UNPLUG IT during the process.",
+            kept,
+            "Only go ahead with a device you can afford to lose.",
+        ])
+        if not prompts.require_word(prompts.CONSENT_WORD):
+            raise NothingWritten("not confirmed - nothing has been written to the device")
+        output.transient_end()  # agreed: the note and the question have done their job
+        ctx.consented = True
 
     started = time.monotonic()
     with safety_locks.lifted(ROOT, "RECOVERY_LOCK"):

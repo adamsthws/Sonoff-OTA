@@ -31,6 +31,11 @@ APP_DESC_MAGIC = 0xABCD5432
 APP_DESC_OFFSET = 32
 DOTTED_VERSION = re.compile(r"\d+\.\d+\.\d+")
 DEFAULT_MAX_PAYLOAD_SIZE = 0x1F0000
+# The version a file is sent as, in its wrapper and the upgrade command
+# (announce()): above any Sonoff release, so an updater that takes only a newer
+# version takes it whatever the image's own, as the S61's is sent
+# (tools/beken/fota_wrap.ANNOUNCED_VERSION).
+ANNOUNCED_VERSION = "9.9.9"
 
 
 def _fixed_ascii(value: str, size: int, field: str) -> bytes:
@@ -87,10 +92,18 @@ def build_wrapper(
     return bytes(wrapper) + payload
 
 
+def announce(wrapped: bytes) -> bytes:
+    """A wrapped file wrapped again as ANNOUNCED_VERSION: the same model and
+    payload, so the published file keeps the bridge's own version."""
+    return build_wrapper(wrapped[WRAPPER_SIZE:], version=ANNOUNCED_VERSION,
+                         model=wrapped[0x18:0x38].split(b"\0", 1)[0].decode("ascii"))
+
+
 def app_version(payload: bytes) -> str | None:
     """The version in the image's app description, when it is an x.y.z one.
 
-    From bridge 4.4.1 on, that is also the version the updater is given.
+    From bridge 4.4.1 on, that is also the version its file is wrapped with;
+    the updater is given ANNOUNCED_VERSION (announce()).
     """
     if len(payload) < APP_DESC_OFFSET + 48:
         return None

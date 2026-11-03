@@ -31,8 +31,9 @@ Where stock saved no Wi-Fi it raises its own network at once, as v3 did.
 
 From 4.4.1 on, a bridge is named by one version: `BRIDGE_VERSION` in
 `main/main.c` and `PROJECT_VER` in `CMakeLists.txt` (a test keeps them equal)
-are the version the stock updater is given and the one `/status` reports.
-Change both for the next bridge, 4.4.5.
+are the version its file is wrapped with and the one `/status` reports.
+Change both for the next bridge, 4.4.5. The stock updater is told 9.9.9
+instead: the sender wraps the app again as that, above any Sonoff release.
 
 Bridge 4.4.3 starts even when Sonoff's slot is no longer bootable - an upload
 of Tasmota into it (D1) cut off part way, by a power cut or the computer

@@ -22,7 +22,7 @@ if __package__ in (None, ""):  # run as a script: the repository root, for `tool
 from tools.autoflash import kinds  # noqa: E402
 from tools.autoflash.prompts import ask_secret
 from tools.espressif.analyze_vendor_ota import analyze
-from tools.espressif.build_vendor_ota import DEFAULT_MAX_PAYLOAD_SIZE
+from tools.espressif.build_vendor_ota import ANNOUNCED_VERSION, DEFAULT_MAX_PAYLOAD_SIZE, announce
 from tools.ewelink.get_device_key import EwelinkError, target_id_from_mdns
 from tools.ewelink.ota_push import NOT_SENT, FirmwareServer, deliver, parse_single_range  # noqa: F401  (the server, for its tests)
 
@@ -92,7 +92,9 @@ def main():
     if not valid:
         print("Refusing: firmware failed the complete wrapper/native-image preflight", file=sys.stderr)
         return 2
-    print(f"Firmware: {args.firmware} ({len(firmware):,} bytes), SHA-256 {hashlib.sha256(firmware).hexdigest()}")
+    firmware = announce(firmware)
+    print(f"Firmware: {args.firmware} ({len(firmware):,} bytes), sent as {ANNOUNCED_VERSION}, "
+          f"SHA-256 {hashlib.sha256(firmware).hexdigest()}")
 
     password = os.environ.get("EWELINK_PASSWORD") or ask_secret("eWeLink password: ")
 
@@ -118,7 +120,7 @@ def main():
 
     delivered = deliver(email=args.email, password=password, country_code=args.country_code, region=args.region,
                         device_id=target_id_from_mdns(args.mdns_capture), firmware=firmware,
-                        version=wrapper["header_version"], listen_ip=args.listen_ip, listen_port=args.listen_port,
+                        version=ANNOUNCED_VERSION, listen_ip=args.listen_ip, listen_port=args.listen_port,
                         device_ip=args.device_ip, wait=args.wait, check_device=check)
     password = ""
     if delivered.error and not delivered.interrupted:

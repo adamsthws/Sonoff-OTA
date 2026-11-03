@@ -5025,7 +5025,7 @@ class StartupSettingsReportTests(unittest.TestCase):
 class DeliveryPortTests(unittest.TestCase):
     """The bridge is served on 8088 unless something else has it."""
 
-    def run_bridge(self, busy):
+    def run_bridge(self, busy, sends=1):
         from types import SimpleNamespace
         from unittest import mock
         with tempfile.TemporaryDirectory() as directory:
@@ -5045,20 +5045,29 @@ class DeliveryPortTests(unittest.TestCase):
                  mock.patch.object(firewall, "ensure_firewall",
                                    lambda c: opened.append(firewall.firewall_ports(c))), \
                  mock.patch.object(prompts, "warning_box"), \
-                 mock.patch.object(prompts, "require_word", return_value=True), \
+                 mock.patch.object(prompts, "require_word", return_value=True) as asked, \
                  mock.patch.object(hostsys, "run_tool", return_value=0) as run_tool, \
                  mock.patch.object(output, "say"):
                 try:
-                    installer.step_bridge(ctx)
+                    for _ in range(sends):
+                        installer.step_bridge(ctx)
                     error = None
                 except errors.Abort as exc:
                     error = str(exc)
+            self.asked = asked.call_count
             command = run_tool.call_args.args[0] if run_tool.called else None
             port = command[command.index("--listen-port") + 1] if command else None
             if command:
                 # Lifted here, under this root: its record says so.
                 self.assertTrue((root / "captures" / ".safety-locks" / "RECOVERY_LOCK.guard").exists())
             return port, opened, state.input("delivery_port"), error
+
+    def test_sent_again_in_the_same_run_the_go_ahead_is_not_asked_again(self):
+        # The plug back on Sonoff's firmware after a power cut, the installer is
+        # sent again by itself (resend_if_back_on_sonoff): asked again, an
+        # unattended run's PROCEED was typed twice (the suite's FAIL-ASKED-AGAIN).
+        self.run_bridge(busy=set(), sends=2)
+        self.assertEqual(self.asked, 1)
 
     def test_8088_is_used_when_free(self):
         port, opened, recorded, _ = self.run_bridge(busy=set())
