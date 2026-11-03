@@ -101,8 +101,10 @@ def step_leave_tasmota(ctx: Context) -> dict[str, Any]:
     except Abort:
         # Sonoff's table is the plan's last write, there only if every write
         # before it read back right: with it in place, all that is missing is
-        # the restart into the mover.  Not left waiting for one.
-        if not table_written(ctx):
+        # the restart into the mover.  Not left waiting for one.  A plan
+        # refused on a plug that already had it - the interim Tasmota, on
+        # slot 1 - wrote nothing, and has no mover to restart into.
+        if not table_written(ctx) or ctx.device.current_ota() != plan.running:
             raise
         output.say("    Everything was written before the plan stopped; restarting the device into the mover.")
         ctx.device.command("Restart 99")

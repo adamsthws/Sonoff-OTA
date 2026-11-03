@@ -607,6 +607,51 @@ class EsphomeSignalTests(unittest.TestCase):
         self.assertEqual(self.run_plan.call_count, 2)
 
 
+class LeaveTasmotaStoppedTests(unittest.TestCase):
+    """L1's plan stopped with Sonoff's table in place: the plug is restarted
+    into the mover only if the plan got as far as writing it."""
+
+    def setUp(self):
+        from types import SimpleNamespace
+        self.run_plan = mock.Mock(side_effect=errors.Abort("plan leave_tasmota did not pass"))
+        for patch in (mock.patch.object(output, "say"),
+                      mock.patch.object(hub, "run_plan", self.run_plan),
+                      mock.patch.object(handover, "consent_to_leave"),
+                      mock.patch.object(join, "note_signal"),
+                      mock.patch.object(join, "plug_signal"),
+                      mock.patch.object(mover, "wait_for_mover"),
+                      mock.patch.object(mover, "table_written", return_value=True),
+                      mock.patch.object(esphome_ota, "probe", return_value=None),
+                      mock.patch.object(esphome, "mover_for", return_value=b""),
+                      mock.patch.object(esphome, "sonoff_table", return_value=b""),
+                      mock.patch.object(esphome, "published_bootloader", return_value=b""),
+                      mock.patch.object(plans, "leave_tasmota",
+                                        return_value=SimpleNamespace(name="leave_tasmota", running=0))):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def ctx(self, slot):
+        from types import SimpleNamespace
+        device = mock.Mock(current_ota=mock.Mock(return_value=slot))
+        inputs = {"plug_ip": "192.168.60.50"}
+        state = SimpleNamespace(input=inputs.get)
+        return SimpleNamespace(state=state, wifi=lambda: ("Home-2G", "pass"), dry_run=False,
+                                     device=device)
+
+    def test_a_plan_stopped_after_its_writes_restarts_the_plug_into_the_mover(self):
+        ctx = self.ctx(0)
+        self.assertEqual(mover.step_leave_tasmota(ctx)["restarted_after"], "a stopped report")
+        ctx.device.command.assert_called_once_with("Restart 99")
+
+    def test_a_plan_refused_on_the_interim_tasmota_is_not_taken_for_one_that_wrote(self):
+        # Seen in the fault suite: the hub, on slot 1 with Sonoff's table
+        # already, was restarted "into the mover", and L1 recorded as done.
+        ctx = self.ctx(1)
+        with self.assertRaisesRegex(errors.Abort, "did not pass"):
+            mover.step_leave_tasmota(ctx)
+        ctx.device.command.assert_not_called()
+
+
 class AdvertSignalTests(unittest.TestCase):
     """From Sonoff's firmware the signal is read at A2, before anything is
     written, from the plug's own eWeLink advert, opened with its LAN key."""
