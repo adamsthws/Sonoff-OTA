@@ -1375,7 +1375,7 @@ class Scenario:
 
     def go_notemplate(self):
         """A converted plug on Tasmota whose template a person replaced with
-        Tasmota's generic one - which switches nothing (Sonoff-OTA discussion
+        Tasmota's generic one - which switches nothing (firmware-liberator discussion
         #8) - having set it up for themselves (an MQTT host). Then the tool:
         to Tasmota it gives the template alone, the MQTT host kept; to the
         others it leaves Tasmota as from any converted plug, never by X1."""
@@ -1404,7 +1404,7 @@ class Scenario:
         at the sixth start in a row within 10 s of the last: taking that for
         a boot loop, it goes over to its fallback module - Generic, unless
         the plug's own template is set there - keeping its Wi-Fi. Left on
-        Generic, the plug switches nothing (Sonoff-OTA discussion #8).
+        Generic, the plug switches nothing (firmware-liberator discussion #8).
 
         Done here as Tasmota would, by `Module` to the fallback `Module2`
         names: Tasmota counts those starts in RTC memory, which the emulator

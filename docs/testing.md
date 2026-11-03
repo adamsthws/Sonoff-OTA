@@ -436,7 +436,7 @@ Five had the Wi-Fi drop more than once in one Berry phase: the phase's 20
 seconds of retries are counted from its first failure and never begun again,
 so a later drop found them spent and the phase stopped. The run tried the
 step again, and each plug converted; but a phase should ride out short drops
-by itself. [#5](https://github.com/adamsthws/Sonoff-OTA/pull/5) fixed it: the
+by itself. [#5](https://github.com/adamsthws/firmware-liberator/pull/5) fixed it: the
 retries now count only time spent failing. With it, 38 scenarios of drops,
 packet loss and a weak signal at every phase that moves data, run three times
 over, all passed but one, whose drops came just before its phase began - as

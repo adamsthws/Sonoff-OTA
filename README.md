@@ -1,4 +1,4 @@
-# Smart Device Liberator
+# Firmware Liberator
 **Sonoff eWeLink → Tasmota, OpenBeken, ESPHome**
 > **Your Firmware Flasher Tool**  
 (Fully OTA - 'Over The Air' - I.e Flash over Wi-Fi)
@@ -7,11 +7,11 @@
 
 [![Runs on Linux, macOS and Windows](https://img.shields.io/badge/Runs%20on-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#what-it-supports)
 
-[![Installs ESPHome](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Fartifacts%2Ffirmware.json&query=%24.esphome.image.esphome&label=Installs%20ESPHome&color=blue)](docs/updating-firmware.md) [![Installs Tasmota](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2FSonoff-OTA%2Fmain%2Fartifacts%2Ffirmware.json&query=%24.tasmota.version&label=Installs%20Tasmota&color=blue)](docs/updating-firmware.md) [![Installs OpenBeken](https://img.shields.io/badge/Installs%20OpenBeken-Coming%20Soon-blue)](docs/updating-firmware.md)
+[![Installs ESPHome](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2Ffirmware-liberator%2Fmain%2Fartifacts%2Ffirmware.json&query=%24.esphome.image.esphome&label=Installs%20ESPHome&color=blue)](docs/updating-firmware.md) [![Installs Tasmota](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fadamsthws%2Ffirmware-liberator%2Fmain%2Fartifacts%2Ffirmware.json&query=%24.tasmota.version&label=Installs%20Tasmota&color=blue)](docs/updating-firmware.md) [![Installs OpenBeken](https://img.shields.io/badge/Installs%20OpenBeken-Coming%20Soon-blue)](docs/updating-firmware.md)
 
-[![Release](https://img.shields.io/github/v/release/adamsthws/Sonoff-OTA?label=Release)](https://github.com/adamsthws/Sonoff-OTA/releases/latest) [![Tests](https://img.shields.io/github/actions/workflow/status/adamsthws/Sonoff-OTA/emulator-check.yml?branch=main&label=Tests)](https://github.com/adamsthws/Sonoff-OTA/actions/workflows/emulator-check.yml) [![License: GPL-3.0](https://img.shields.io/github/license/adamsthws/Sonoff-OTA?label=License)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/adamsthws/firmware-liberator?label=Release)](https://github.com/adamsthws/firmware-liberator/releases/latest) [![Tests](https://img.shields.io/github/actions/workflow/status/adamsthws/firmware-liberator/emulator-check.yml?branch=main&label=Tests)](https://github.com/adamsthws/firmware-liberator/actions/workflows/emulator-check.yml) [![License: GPL-3.0](https://img.shields.io/github/license/adamsthws/firmware-liberator?label=License)](LICENSE)
 
-[![Discussions](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fimg.shields.io%2Fgithub%2Fdiscussions%2Fadamsthws%2FSonoff-OTA.json&search=(%5Cd%2B)%20total&replace=%241&label=Discussions&color=blue)](https://github.com/adamsthws/Sonoff-OTA/discussions) [![Issues](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fimg.shields.io%2Fgithub%2Fissues%2Fadamsthws%2FSonoff-OTA.json&search=(%5Cd%2B)%20open&replace=%241&label=Issues&color=blue)](https://github.com/adamsthws/Sonoff-OTA/issues) [![Pull Requests](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fimg.shields.io%2Fgithub%2Fissues-pr%2Fadamsthws%2FSonoff-OTA.json&search=(%5Cd%2B)%20open&replace=%241&label=Pull%20Requests&color=blue)](https://github.com/adamsthws/Sonoff-OTA/pulls) [![Downloads](https://img.shields.io/github/downloads/adamsthws/Sonoff-OTA/total?label=Downloads&color=blue)](https://github.com/adamsthws/Sonoff-OTA/releases)
+[![Discussions](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fimg.shields.io%2Fgithub%2Fdiscussions%2Fadamsthws%2Ffirmware-liberator.json&search=(%5Cd%2B)%20total&replace=%241&label=Discussions&color=blue)](https://github.com/adamsthws/firmware-liberator/discussions) [![Issues](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fimg.shields.io%2Fgithub%2Fissues%2Fadamsthws%2Ffirmware-liberator.json&search=(%5Cd%2B)%20open&replace=%241&label=Issues&color=blue)](https://github.com/adamsthws/firmware-liberator/issues) [![Pull Requests](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fimg.shields.io%2Fgithub%2Fissues-pr%2Fadamsthws%2Ffirmware-liberator.json&search=(%5Cd%2B)%20open&replace=%241&label=Pull%20Requests&color=blue)](https://github.com/adamsthws/firmware-liberator/pulls) [![Downloads](https://img.shields.io/github/downloads/adamsthws/firmware-liberator/total?label=Downloads&color=blue)](https://github.com/adamsthws/firmware-liberator/releases)
 
 <br>
 
@@ -119,16 +119,16 @@ Simply paste this one line into your terminal...
 
 **Windows**
 ```
-powershell -c "irm https://github.com/adamsthws/Sonoff-OTA/releases/latest/download/liberate.ps1 | iex"
+powershell -c "irm https://github.com/adamsthws/firmware-liberator/releases/latest/download/liberate.ps1 | iex"
 ```
 
 **macOS**
 ```sh
-sh -c "$(curl -fsSL https://github.com/adamsthws/Sonoff-OTA/releases/latest/download/liberate.sh)"
+sh -c "$(curl -fsSL https://github.com/adamsthws/firmware-liberator/releases/latest/download/liberate.sh)"
 ```
 **Linux**
 ```sh
-sh -c "$(wget -qO- https://github.com/adamsthws/Sonoff-OTA/releases/latest/download/liberate.sh)"
+sh -c "$(wget -qO- https://github.com/adamsthws/firmware-liberator/releases/latest/download/liberate.sh)"
 ```
 > If that says `wget: not found`, use the macOS line instead.
 
@@ -136,12 +136,12 @@ sh -c "$(wget -qO- https://github.com/adamsthws/Sonoff-OTA/releases/latest/downl
 <summary>Or with git, or a zip</summary>
 
 ```sh
-git clone https://github.com/adamsthws/Sonoff-OTA.git
-cd Sonoff-OTA
+git clone https://github.com/adamsthws/firmware-liberator.git
+cd firmware-liberator
 sh start.sh       # Linux / macOS
 .\start.cmd       # Windows
 ```
--- or -- [download as a zip](https://github.com/adamsthws/Sonoff-OTA/archive/refs/heads/main.zip), and double-click `start.cmd`
+-- or -- [download as a zip](https://github.com/adamsthws/firmware-liberator/archive/refs/heads/main.zip), and double-click `start.cmd`
 </details>
 
 <br>
@@ -191,7 +191,7 @@ the problems that actually came up while this was being built.
 
 Whether it worked first time or stopped partway, please
 report back on how it went here:  
-- **[Conversions In The Wild (Conversion Reports)](https://github.com/adamsthws/Sonoff-OTA/discussions/1)**
+- **[Conversions In The Wild (Conversion Reports)](https://github.com/adamsthws/firmware-liberator/discussions/1)**
 
 > A clean conversion, a run that stopped partway, or only the read-only checks - all of it is useful. 
 

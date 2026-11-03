@@ -61,7 +61,7 @@ from (`bk-emu.sh tag`: `UPSTREAM`, `patches/`, `requirements.txt`,
 which the `beken-emulator-image` workflow publishes for every version pushed,
 or built where it is not published - from the upstream source archive on this
 repository's release
-[`emulator-source-beken-d9a3772`](https://github.com/adamsthws/Sonoff-OTA/releases/tag/emulator-source-beken-d9a3772),
+[`emulator-source-beken-d9a3772`](https://github.com/adamsthws/firmware-liberator/releases/tag/emulator-source-beken-d9a3772),
 one archive named after its commit and never changed (`git archive` of the
 pinned commit, which `bk-emu.sh source` reproduces byte for byte), downloaded
 once into `captures/emulation/cache/` and checked against the SHA-256

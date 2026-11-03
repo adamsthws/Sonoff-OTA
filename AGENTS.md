@@ -51,8 +51,8 @@ and plugs' identities.
 
 ## GitHub
 
-- **The repository is `adamsthws/Sonoff-OTA`**: always pass
-  `-R adamsthws/Sonoff-OTA` to `gh`, which otherwise picks the upstream
+- **The repository is `adamsthws/firmware-liberator`**: always pass
+  `-R adamsthws/firmware-liberator` to `gh`, which otherwise picks the upstream
   `HG0161/SonoffS60OTA`.
 - **Its settings** live in `tools/repo/github_settings.py` and are set with
   it, never by hand. Renaming a job a required check names: `apply`, push,

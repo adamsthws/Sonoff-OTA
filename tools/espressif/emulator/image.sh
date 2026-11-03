@@ -37,7 +37,7 @@ tag() {
 # this repository - and again without a network once it is there.
 QEMU_SOURCE=qemu-lcgamboa-e39508f.tar.xz
 QEMU_COMMIT=${QEMU_SOURCE%.tar.xz}; QEMU_COMMIT=${QEMU_COMMIT##*-}
-QEMU_SOURCE_URL=${AUTOFLASH_QEMU_SOURCE_URL:-https://github.com/adamsthws/Sonoff-OTA/releases/download/emulator-source-qemu-$QEMU_COMMIT/$QEMU_SOURCE}
+QEMU_SOURCE_URL=${AUTOFLASH_QEMU_SOURCE_URL:-https://github.com/adamsthws/firmware-liberator/releases/download/emulator-source-qemu-$QEMU_COMMIT/$QEMU_SOURCE}
 qemu_source() {
     local want cache=$EMU/cache/$QEMU_SOURCE
     want=$(sed -n 's/^ARG QEMU_SOURCE_SHA256=//p' "$ROOT/tools/espressif/emulator/emu.Dockerfile")
@@ -67,7 +67,7 @@ build() {
     qemu_source "$context/qemu-source.tar.xz"
     echo "Building the emulator image (the first time takes a few minutes)..." >&2
     docker build -q -t "$1" --label "autoflash.built-from=$(tag)" \
-        --label "org.opencontainers.image.source=https://github.com/adamsthws/Sonoff-OTA" \
+        --label "org.opencontainers.image.source=https://github.com/adamsthws/firmware-liberator" \
         -f "$context/emu.Dockerfile" "$context" >/dev/null
 }
 

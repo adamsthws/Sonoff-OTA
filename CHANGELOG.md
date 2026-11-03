@@ -159,7 +159,7 @@ check.
   [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0) as
   1.3.0 was. It corrects the meter as Sonoff's firmware does: by the 1.02
   its board calls for, and by the plug's factory calibration
-  ([#7](https://github.com/adamsthws/Sonoff-OTA/pull/7)) - from Sonoff's
+  ([#7](https://github.com/adamsthws/firmware-liberator/pull/7)) - from Sonoff's
   settings where the plug still has them, or, on a plug converted through
   Tasmota, which lost them, from its Sonoff backup, which the tool now
   gives it. Energy, and the daily, monthly, yearly and total energy, are
@@ -180,7 +180,7 @@ check.
 - A plug converted to Tasmota went on to switch nothing after Tasmota had
   restarted six times in a row, each within 10 seconds of starting: taking
   that for a boot loop, Tasmota goes over to its fallback module, Generic,
-  keeping only its Wi-Fi ([#8](https://github.com/adamsthws/Sonoff-OTA/discussions/8)).
+  keeping only its Wi-Fi ([#8](https://github.com/adamsthws/firmware-liberator/discussions/8)).
   The plug's template is now its fallback too. The final check (H1) makes it
   so on a plug converted by an earlier version, and puts the template back
   on one that has already gone over to Generic.
@@ -199,7 +199,7 @@ not meant for release; its number cannot be used again. 2.1.3 is the tool
 - A plug converted to Tasmota could finish without the plug's template -
   when it did not go in with Tasmota's reset and the second try did not take
   either - and so switch nothing: Home Assistant showed only its restart
-  button and Wi-Fi ([#8](https://github.com/adamsthws/Sonoff-OTA/discussions/8)).
+  button and Wi-Fi ([#8](https://github.com/adamsthws/firmware-liberator/discussions/8)).
   The run now checks the template is in place before it calls the plug
   converted, and puts it back if not. The final check (H1) does the same, so
   running it on a finished plug puts a missing template back, keeping the
@@ -253,7 +253,7 @@ not meant for release; its number cannot be used again. 2.1.3 is the tool
   failure and never begun again, so after one short Wi-Fi drop a later one
   found them spent, and the step stopped ("returned HTTP -1 after 1
   attempts"). They now count only the time spent failing
-  ([#5](https://github.com/adamsthws/Sonoff-OTA/pull/5)).
+  ([#5](https://github.com/adamsthws/firmware-liberator/pull/5)).
 - The plug or the network dropping a request part way through a step - a
   connection reset in a Wi-Fi outage, say - was put as "something unexpected
   went wrong", though the step was tried again as for any other network

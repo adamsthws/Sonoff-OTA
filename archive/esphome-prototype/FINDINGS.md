@@ -1,6 +1,6 @@
 # ESPHome route: findings
 
-Notes from reviewing and testing [PR #4, "add ESPHome support"](https://github.com/adamsthws/Sonoff-OTA/pull/4)
+Notes from reviewing and testing [PR #4, "add ESPHome support"](https://github.com/adamsthws/firmware-liberator/pull/4)
 (October 2026). PR #4 was merged into this branch, `esphome`, where the work
 continues. The prototype of a pre-built image described here became
 `ESPHome/sonoff_s60.yaml`, which p1otr extended (overload
@@ -108,7 +108,7 @@ plug to confirm.
   until someone builds a config.
 - **The power meter is a CSE7766 on GPIO7 in both models.** The tool's Tasmota
   template is the same for the S60TPG and the S60TPF, and two S60TPF test
-  reports in [discussion #1](https://github.com/adamsthws/Sonoff-OTA/discussions/1)
+  reports in [discussion #1](https://github.com/adamsthws/firmware-liberator/discussions/1)
   read 236 V and 232 V with it.
 - **Firmware choice prompt:** `firmware_choice_mockup.py` shows the question
   with the tool's own `section()` and `ask_choice()`.

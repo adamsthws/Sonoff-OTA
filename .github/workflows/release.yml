@@ -148,8 +148,8 @@ jobs:
           # What the README's one line fetches, from releases/latest/download/:
           # liberate.sh and .ps1, the tag, and the tool (.gitattributes leaves out
           # what it does not need).
-          git archive --format=tar.gz --prefix="Sonoff-OTA-${TAG#v}/" -o autoflash.tar.gz "$GITHUB_SHA"
-          git archive --format=zip --prefix="Sonoff-OTA-${TAG#v}/" -o autoflash.zip "$GITHUB_SHA"
+          git archive --format=tar.gz --prefix="Firmware-Liberator-${TAG#v}/" -o autoflash.tar.gz "$GITHUB_SHA"
+          git archive --format=zip --prefix="Firmware-Liberator-${TAG#v}/" -o autoflash.zip "$GITHUB_SHA"
           echo "$TAG" > autoflash-version
           gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md \
               artifacts/SHA256SUMS "${files[@]}" \

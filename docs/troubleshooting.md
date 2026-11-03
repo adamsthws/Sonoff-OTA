@@ -54,11 +54,11 @@ cannot connect:
 
 Windows and macOS have not been through a real conversion yet, so a problem
 there may be new. Please post it in the
-[Test reports](https://github.com/adamsthws/Sonoff-OTA/discussions/1) thread - see
+[Test reports](https://github.com/adamsthws/firmware-liberator/discussions/1) thread - see
 [Reporting how it went](../README.md#reporting-how-it-went) - and the fix
 will help everyone after you. To ask for help, start a
-[discussion](https://github.com/adamsthws/Sonoff-OTA/discussions)
-of your own or open an [issue](https://github.com/adamsthws/Sonoff-OTA/issues)
+[discussion](https://github.com/adamsthws/firmware-liberator/discussions)
+of your own or open an [issue](https://github.com/adamsthws/firmware-liberator/issues)
 rather than asking in the thread.
 
 On Linux, blocked connections show in the kernel log:
@@ -123,7 +123,7 @@ at two points rather than assuming:
   Leave it as it is and report it rather than forcing past the check.
 
 Either way, or if it converts cleanly, please post in the
-[Test reports](https://github.com/adamsthws/Sonoff-OTA/discussions/1) thread - see
+[Test reports](https://github.com/adamsthws/firmware-liberator/discussions/1) thread - see
 [Reporting how it went](../README.md#reporting-how-it-went) for what to
 include. Reports from other regions are very welcome.
 

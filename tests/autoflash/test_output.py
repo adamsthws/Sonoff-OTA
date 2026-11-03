@@ -1148,7 +1148,7 @@ class ReportTests(OutputTestCase):
                 report.invite_report(self.ctx(), 441, False)
         screen, _ = self.run_with(io.StringIO(), False, body)
         self.assertIn(report.REPORTS_URL, screen)
-        self.assertIn("adamsthws/Sonoff-OTA/discussions", report.REPORTS_URL)
+        self.assertIn("adamsthws/firmware-liberator/discussions", report.REPORTS_URL)
         self.assertIn("Please share how it went", screen)
         self.assertIn("already on your clipboard", screen)
         self.assertIn(f"Test reports: {report.REPORTS_URL}", screen)
@@ -1167,7 +1167,7 @@ class ReportTests(OutputTestCase):
 
 
 class LinkTests(OutputTestCase):
-    URL = "https://github.com/adamsthws/Sonoff-OTA/discussions/1"
+    URL = "https://github.com/adamsthws/firmware-liberator/discussions/1"
 
     def test_a_terminal_gets_a_clickable_link_and_the_log_the_plain_url(self):
         def body():
@@ -1496,7 +1496,7 @@ class MarginTests(OutputTestCase):
         self.assertEqual(rows[0].index("switches"), rows[1].index(rows[1].strip()))
 
     def test_a_url_is_never_broken(self):
-        url = "https://github.com/adamsthws/Sonoff-OTA/discussions/1"
+        url = "https://github.com/adamsthws/firmware-liberator/discussions/1"
         rows = self.narrow(lambda: output.show_link(url, "Test reports"))
         self.assertIn(url, [row.strip() for row in rows])
 

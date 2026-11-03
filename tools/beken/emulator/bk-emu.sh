@@ -101,7 +101,7 @@ ARCHIVE=$(pin archive)
 ARCHIVE_SHA256=$(pin sha256)
 [ -n "$UPSTREAM_REPO" ] && [ -n "$UPSTREAM_COMMIT" ] && [ -n "$ARCHIVE" ] && [ -n "$ARCHIVE_SHA256" ] \
     || { echo "$HERE/UPSTREAM: needs repo, commit, archive and sha256" >&2; exit 2; }
-ARCHIVE_URL=${AUTOFLASH_BEKEN_SOURCE_URL:-https://github.com/adamsthws/Sonoff-OTA/releases/download/emulator-source-beken-${UPSTREAM_COMMIT:0:7}/$ARCHIVE}
+ARCHIVE_URL=${AUTOFLASH_BEKEN_SOURCE_URL:-https://github.com/adamsthws/firmware-liberator/releases/download/emulator-source-beken-${UPSTREAM_COMMIT:0:7}/$ARCHIVE}
 
 tag() {
     (cd "$HERE" && find UPSTREAM requirements.txt bk-emu.Dockerfile patches -type f -print0 \
@@ -139,7 +139,7 @@ build() {
     echo "Building the S61 emulator image (the first time takes a minute or two)..." >&2
     docker build -q -t "$1" --build-arg SOURCE_SHA256="$ARCHIVE_SHA256" \
         --label "autoflash.built-from=$(tag)" \
-        --label "org.opencontainers.image.source=https://github.com/adamsthws/Sonoff-OTA" \
+        --label "org.opencontainers.image.source=https://github.com/adamsthws/firmware-liberator" \
         -f "$context/bk-emu.Dockerfile" "$context" >/dev/null
 }
 

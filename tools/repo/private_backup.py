@@ -61,7 +61,7 @@ from tools.autoflash import credentials, plugs  # noqa: E402
 KEY_NAME = "AUTOFLASH_BACKUP_KEY"
 OWNER, PACKAGE, TAG = "adamsthws", "autoflash-private", "sonoff-backup"
 REFERENCE = f"ghcr.io/{OWNER}/{PACKAGE}:{TAG}"
-REPOSITORY = "adamsthws/Sonoff-OTA"
+REPOSITORY = "adamsthws/firmware-liberator"
 ARTIFACT_TYPE = "application/vnd.autoflash.sealed-backup.v1"
 SEALED_NAME = "sonoff-backup.sealed"
 # ORAS, which keeps a file in a container registry, run from its own image:

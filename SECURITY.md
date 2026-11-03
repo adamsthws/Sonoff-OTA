@@ -3,7 +3,7 @@
 ## Reporting a problem
 
 Please report a security problem privately, through GitHub:
-**[Report a vulnerability](https://github.com/adamsthws/Sonoff-OTA/security/advisories/new)**
+**[Report a vulnerability](https://github.com/adamsthws/firmware-liberator/security/advisories/new)**
 - not as an issue or in the discussions, where it would be public before it
 can be fixed. Say what you found, how to see it, and what it lets someone do.
 

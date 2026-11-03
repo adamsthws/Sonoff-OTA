@@ -5,7 +5,7 @@
 title: FirmwareLiberator
 description: Sonoff S60 to Tasmota or ESPHome, over the air - flash it, don't smash it.
 url: https://firmwareliberator.com
-repository: adamsthws/Sonoff-OTA
+repository: adamsthws/firmware-liberator
 plugins:
   - jekyll-sitemap
 exclude:

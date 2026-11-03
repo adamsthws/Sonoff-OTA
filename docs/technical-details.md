@@ -55,9 +55,10 @@ to match its pinned provenance.
 
 The README's one line runs `liberate.sh` (macOS, Linux) or `liberate.ps1`
 (Windows), taken from the latest release. They unpack the release's
-`autoflash.tar.gz` or `.zip` into `~/Sonoff-OTA` (`%USERPROFILE%\Sonoff-OTA` on
-Windows) and start the tool there, as `start.sh` and `start.cmd` do. Arguments
-pass through: `sh -c "$(curl -fsSL ...)" sh run --verbose`.
+`autoflash.tar.gz` or `.zip` into `~/Firmware-Liberator`
+(`%USERPROFILE%\Firmware-Liberator` on Windows) and start the tool there, as
+`start.sh` and `start.cmd` do. Arguments pass through:
+`sh -c "$(curl -fsSL ...)" sh run --verbose`.
 
 Run again, the line looks for a newer release, and if there is one it updates
 the folder in place: the files the installed release put there, listed in

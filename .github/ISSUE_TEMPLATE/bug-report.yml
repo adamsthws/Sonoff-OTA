@@ -5,9 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for reporting it. [docs/troubleshooting.md](https://github.com/adamsthws/Sonoff-OTA/blob/main/docs/troubleshooting.md) covers what has happened before - worth a look first.
+        Thank you for reporting it. [docs/troubleshooting.md](https://github.com/adamsthws/firmware-liberator/blob/main/docs/troubleshooting.md) covers what has happened before - worth a look first.
 
-        A run that **worked**, or one you only want to tell about, is just as welcome in [Conversions In The Wild](https://github.com/adamsthws/Sonoff-OTA/discussions/1).
+        A run that **worked**, or one you only want to tell about, is just as welcome in [Conversions In The Wild](https://github.com/adamsthws/firmware-liberator/discussions/1).
   - type: textarea
     id: what
     attributes:

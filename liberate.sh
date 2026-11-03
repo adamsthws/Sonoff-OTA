@@ -2,8 +2,8 @@
 # Fetch or update Autoflash, the conversion tool, and start it, on macOS or
 # Linux - with curl or wget, no git. The README's one line:
 #
-#   sh -c "$(curl -fsSL https://github.com/adamsthws/Sonoff-OTA/releases/latest/download/liberate.sh)"   macOS, which has curl
-#   sh -c "$(wget -qO- https://github.com/adamsthws/Sonoff-OTA/releases/latest/download/liberate.sh)"    most Linux, which has wget
+#   sh -c "$(curl -fsSL https://github.com/adamsthws/firmware-liberator/releases/latest/download/liberate.sh)"   macOS, which has curl
+#   sh -c "$(wget -qO- https://github.com/adamsthws/firmware-liberator/releases/latest/download/liberate.sh)"    most Linux, which has wget
 #
 # It, the release's files and its tag are assets of every release
 # (.github/workflows/release.yml), so only a released, tested version is
@@ -13,16 +13,16 @@
 # be the script.) Arguments after it - sh -c "$(...)" sh run --verbose - pass
 # through to start.sh.
 #
-# The latest release is unpacked into ~/Sonoff-OTA and started there. Run
+# The latest release is unpacked into ~/Firmware-Liberator and started there. Run
 # again, the folder is updated in place: the files the release it holds put
 # there are replaced or removed, nothing else - captures/, with the plugs'
 # Sonoff backups and an unfinished conversion, and the portable Python in
 # .python/ stay as they are. A git clone there is left to git.
 set -eu
 
-REPO=adamsthws/Sonoff-OTA
+REPO=adamsthws/firmware-liberator
 GITHUB=${AUTOFLASH_GITHUB:-https://github.com}
-FOLDER=${AUTOFLASH_HOME:-$HOME/Sonoff-OTA}
+FOLDER=${AUTOFLASH_HOME:-$HOME/Firmware-Liberator}
 # The installed release's tag, then every file it put in the folder.
 MANIFEST=$FOLDER/.installed-release
 

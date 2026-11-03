@@ -44,7 +44,7 @@ the project adds. See [legal.md](legal.md).
 - It comes with this repository as a container image, as the S60's QEMU does:
   its source at the commit `../tools/beken/emulator/UPSTREAM` pins, unmodified, is
   an archive of the
-  [`emulator-source-beken-d9a3772`](https://github.com/adamsthws/Sonoff-OTA/releases/tag/emulator-source-beken-d9a3772)
+  [`emulator-source-beken-d9a3772`](https://github.com/adamsthws/firmware-liberator/releases/tag/emulator-source-beken-d9a3772)
   release - named after the commit, holding that one archive, never changed;
   a new pin is a new release - and this project's changes to it are the patches in
   [`../tools/beken/emulator/patches/`](../tools/beken/emulator/patches/).
@@ -857,7 +857,7 @@ x_cal = a·x²/1e7 + b·x/1e6 + c/1e6
 ```
 
 — the same CoolKit quadratic mvoss96 found in the S60's `calib_coefficient0`
-(adamsthws/Sonoff-OTA PR #7). Currents below 3 mA zero current and power. On the
+(adamsthws/firmware-liberator PR #7). Currents below 3 mA zero current and power. On the
 dump: `a = c = 0` for all three, `b = 954547 / 879893 / 930747` (I/V/P): a pure
 linear trim.
 

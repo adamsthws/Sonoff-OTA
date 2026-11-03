@@ -51,7 +51,7 @@ SAVED = ROOT / "captures/emulation/saved"
 # its hash, in the release below. Made again only with what runs before the
 # final firmware (an interim firmware, or what a run keeps of itself).
 RELEASE = "emulator-public-plugs"
-REPOSITORY = "adamsthws/Sonoff-OTA"
+REPOSITORY = "adamsthws/firmware-liberator"
 PUBLISHED = {
     "file": "public-plugs-bdd2a0878b28.tar.xz",
     "sha256": "bdd2a0878b28248c23ab59166197a33fbaec13baa40e041270f542a90104ff3d",

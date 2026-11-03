@@ -2,13 +2,13 @@
 Fetch or update Autoflash, the conversion tool, and start it, on Windows -
 no git. The README's one line, in a terminal (or the Run box):
 
-    powershell -c "irm https://github.com/adamsthws/Sonoff-OTA/releases/latest/download/liberate.ps1 | iex"
+    powershell -c "irm https://github.com/adamsthws/firmware-liberator/releases/latest/download/liberate.ps1 | iex"
 
 It, the release's files and its tag are assets of every release
 (.github/workflows/release.yml), so only a released, tested version is ever
 run - and no GitHub API, with its hourly limit, is asked.
 
-The latest release is unpacked into %USERPROFILE%\Sonoff-OTA and started there,
+The latest release is unpacked into %USERPROFILE%\Firmware-Liberator and started there,
 as start.cmd starts it. Run again, the folder is updated in place: the files
 the release it holds put there are replaced or removed, nothing else -
 captures\, with the plugs' Sonoff backups and an unfinished conversion, and
@@ -23,9 +23,9 @@ function Start-Autoflash {
     # Windows PowerShell 5.1 on an older Windows 10 offers GitHub no TLS it takes.
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-    $repo = "adamsthws/Sonoff-OTA"
+    $repo = "adamsthws/firmware-liberator"
     $github = if ($env:AUTOFLASH_GITHUB) { $env:AUTOFLASH_GITHUB } else { "https://github.com" }
-    $folder = if ($env:AUTOFLASH_HOME) { $env:AUTOFLASH_HOME } else { Join-Path $env:USERPROFILE "Sonoff-OTA" }
+    $folder = if ($env:AUTOFLASH_HOME) { $env:AUTOFLASH_HOME } else { Join-Path $env:USERPROFILE "Firmware-Liberator" }
     # The installed release's tag, then every file it put in the folder.
     $manifest = Join-Path $folder ".installed-release"
 

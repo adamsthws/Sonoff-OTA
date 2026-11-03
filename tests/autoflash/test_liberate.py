@@ -18,7 +18,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-REPO = "adamsthws/Sonoff-OTA"
+REPO = "adamsthws/firmware-liberator"
 # Windows PowerShell where there is no PowerShell 7: what every Windows runs the line on.
 POWERSHELL = shutil.which("pwsh") or (shutil.which("powershell") if os.name == "nt" else None)
 # The fake releases' start scripts: they write down how they were started.
@@ -73,7 +73,7 @@ class FakeGitHub:
         if not self.online:
             return None
         for tag, files in self.releases.items():
-            top = "Sonoff-OTA-" + tag.lstrip("v")
+            top = "Firmware-Liberator-" + tag.lstrip("v")
             for script in ("liberate.sh", "liberate.ps1"):
                 if path == f"/{REPO}/releases/download/{tag}/{script}":
                     return (ROOT / script).read_bytes()
@@ -114,7 +114,7 @@ class LiberateTests:
         self.addCleanup(self.github.close)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.folder = Path(tmp.name, "Sonoff-OTA")
+        self.folder = Path(tmp.name, "Firmware-Liberator")
         self.env = {**os.environ, "AUTOFLASH_GITHUB": self.github.url, "AUTOFLASH_HOME": str(self.folder), "HOME": tmp.name, "USERPROFILE": tmp.name}
 
     def readme_line(self, pattern):

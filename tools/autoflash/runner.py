@@ -39,8 +39,8 @@ if TYPE_CHECKING:
 
 # Where people ask for help: a discussion or issue of their own, so the
 # reports thread stays a record of runs.
-DISCUSSIONS_URL = "https://github.com/adamsthws/Sonoff-OTA/discussions"
-ISSUES_URL = "https://github.com/adamsthws/Sonoff-OTA/issues/new"
+DISCUSSIONS_URL = "https://github.com/adamsthws/firmware-liberator/discussions"
+ISSUES_URL = "https://github.com/adamsthws/firmware-liberator/issues/new"
 
 
 def execute(ctx: Context, step: str) -> int:

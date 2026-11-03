@@ -265,7 +265,7 @@ They are made again only when what runs before the final firmware changes: an
 interim firmware, or what a run keeps of itself. Then `public_plugs.py publish
 --stock <backup>` shows them public once more and uploads them, as one
 tarball named by its hash, to the repository's
-[`emulator-public-plugs`](https://github.com/adamsthws/Sonoff-OTA/releases/tag/emulator-public-plugs)
+[`emulator-public-plugs`](https://github.com/adamsthws/firmware-liberator/releases/tag/emulator-public-plugs)
 pre-release, and prints the pin for `PUBLISHED` in `public_plugs.py`;
 `public_plugs.py fetch` puts the pinned ones in `captures/`, checked - which
 is how a checkout with no backup, such as a GitHub Actions runner, tests from
@@ -506,7 +506,7 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
   source at the pinned commit (`e39508f`), with the subprojects its build
   fetches, is an archive on a release of this repository named after that
   commit
-  ([`emulator-source-qemu-e39508f`](https://github.com/adamsthws/Sonoff-OTA/releases/tag/emulator-source-qemu-e39508f));
+  ([`emulator-source-qemu-e39508f`](https://github.com/adamsthws/firmware-liberator/releases/tag/emulator-source-qemu-e39508f));
   `emu.sh` downloads it once into `captures/emulation/cache/`, checks it
   against the SHA-256 in `emu.Dockerfile`, and the image is built from it with
   no network - so building needs nothing outside this repository. Releases

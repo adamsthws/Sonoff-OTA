@@ -3285,7 +3285,7 @@ class PastTheCommitTests(unittest.TestCase):
     def test_a_tasmota_without_its_template_is_never_sent_the_hubs_steps(self):
         # Seen: a converted plug that had lost its template, taken for part
         # way, was sent X1 - an ESPHome update - and waited 4 minutes for an
-        # update service no Tasmota has (Sonoff-OTA discussion #8).
+        # update service no Tasmota has (firmware-liberator discussion #8).
         self.assertEqual(self.source([(["E3", "F2", "F4", "G1", "H1"], None)], running="untemplated"),
                          "untemplated")
         self.assertEqual(self.source([], running="untemplated"), "untemplated")

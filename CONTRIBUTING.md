@@ -6,8 +6,8 @@ code: what worked, what did not, and on which plug and computer.
 ## Reporting
 
 - **How a conversion went** - clean, stopped part way, or only the read-only
-  checks: [Conversions In The Wild](https://github.com/adamsthws/Sonoff-OTA/discussions/1).
-- **A conversion that went wrong**: an [issue](https://github.com/adamsthws/Sonoff-OTA/issues/new/choose),
+  checks: [Conversions In The Wild](https://github.com/adamsthws/firmware-liberator/discussions/1).
+- **A conversion that went wrong**: an [issue](https://github.com/adamsthws/firmware-liberator/issues/new/choose),
   with the run's log attached. The log is safe to share - your account,
   network and plug are already written in it as `<email>`, `<wifi-name>` and
   so on - but its folder is named after the plug's MAC address: attach the

@@ -19,7 +19,7 @@ import subprocess
 import sys
 from typing import Any
 
-REPOSITORY = "adamsthws/Sonoff-OTA"
+REPOSITORY = "adamsthws/firmware-liberator"
 GITHUB_ACTIONS = 15368   # the GitHub Actions app: only its runs may pass a required check
 ADMIN_ROLE = 5           # the repository's admin role, in a ruleset's bypass list
 

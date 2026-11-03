@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from tools.autoflash.context import Context
 
 # Where people share how their conversion went: the pinned "Test reports" thread.
-REPORTS_URL = "https://github.com/adamsthws/Sonoff-OTA/discussions/1"
+REPORTS_URL = "https://github.com/adamsthws/firmware-liberator/discussions/1"
 # Shown once a conversion has succeeded, after the report, in this order.
 SPONSORS_URL = "https://github.com/sponsors/adamsthws"
 KOFI_URL = "https://ko-fi.com/adamsthws"

@@ -111,7 +111,7 @@ class PublishedESPHomeTests(unittest.TestCase):
         config = (ROOT / "devices" / "sonoff-s60" / "esphome.yaml").read_text()
         for key in ("password:", "encryption:", "auth:", "key:"):
             self.assertNotIn(key, config.replace("password: !lambda", ""), key)
-        self.assertIn("package_import_url: github://adamsthws/Sonoff-OTA/devices/sonoff-s60/esphome.yaml@main", config)
+        self.assertIn("package_import_url: github://adamsthws/firmware-liberator/devices/sonoff-s60/esphome.yaml@main", config)
         # Adoption takes this one file: system headers (<...>) only, no local files
         for entry in include_entries(config):
             self.assertTrue(entry.startswith("<"), entry)
