@@ -161,6 +161,27 @@ class BekenTargetTests(unittest.TestCase):
                 mock.patch.object(routes.output, "say"):
             self.assertEqual(routes.settle_route(ctx), ("sonoff", "esphome"))
 
+    def test_the_run_says_where_it_goes_from_whatever_the_plug_runs(self):
+        # Left on the startup firmware past E3 ("committed"), a plug's run to
+        # ESPHome crashed saying so: KeyError 'committed' (the fault suite's
+        # esphome>tasmota:E3:cancel-switch). Part way, there is no firmware to
+        # name, only where it goes.
+        from tools.autoflash.routes import espressif
+        for running in set(espressif.SOURCES) - {"sonoff", "esphome"}:
+            with self.subTest(running=running):
+                state = RunState.open(Path(self.tmp.name) / running)
+                state.set_input("plug_kind", "sonoff-s60")
+                state.set_input("plug_mac", "12:34:56:ab:cd:ef")
+                ctx = SimpleNamespace(state=state, firmware_given="esphome", esphome_firmware=None)
+                with mock.patch.object(routes.source, "find_current_firmware", return_value=running), \
+                        mock.patch.object(routes.plugs, "find_backup", return_value=object()), \
+                        mock.patch.object(routes.output, "say") as said:
+                    self.assertEqual(routes.settle_route(ctx), ("esphome", running))
+                line = said.call_args.args[0]
+                self.assertTrue(line.startswith("Converting the device ") and line.endswith(" to ESPHome."), line)
+                if running in ("midway", "committed", "installer"):
+                    self.assertEqual(line, "Converting the device to ESPHome.")
+
     def test_an_s60_still_needs_its_backup(self):
         ctx = SimpleNamespace(state=self.state(plug_kind="sonoff-s60", plug_mac="12:34:56:ab:cd:ef"),
                               firmware_given="sonoff", esphome_firmware=None)

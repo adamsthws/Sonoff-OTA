@@ -234,7 +234,10 @@ def settle_route(ctx: Context) -> tuple[str | None, str]:
             nothing_to_convert(ctx, running)
     ctx.state.set_input("source", running)
     ctx.state.set_input("firmware", firmware)
-    output.say(f"Converting the device from {detect.NAMES[running]} to {FIRMWARES[firmware]}.")
+    # Part way, there is no firmware to name: only where the run goes.
+    output.say(f"Converting the device from {detect.NAMES[running]} to {FIRMWARES[firmware]}."
+               if running not in ("midway", "committed", "installer")
+               else f"Converting the device to {FIRMWARES[firmware]}.")
     return firmware, running
 
 
