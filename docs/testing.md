@@ -329,7 +329,9 @@ or `ESP_` and the access-point MAC for a moment as Tasmota names its own.
 To run the suite on another plug - so that names made from the MAC can be
 seen to follow it - make a test copy of a backed-up one with another MAC, and
 give that to `--plug`; its saved starting plugs are its own (the MAC's last
-four digits after the name):
+four digits after the name). Against the stub only: the real eWeLink closes
+a copy's connection as soon as it registers with a MAC its record of the
+plug does not have, so it is never seen online:
 
 ```sh
 python -I tools/espressif/emulator/copy_plug.py --from MAC --to 12:34:56:ab:cd:ef
@@ -339,10 +341,16 @@ python -I tools/espressif/emulator/copy_plug.py --remove 12:34:56:ab:cd:ef
 ```sh
 tools/espressif/emulator/fault_suite.py --plug=MAC prep           # the starting plugs (eWeLink)
 tools/espressif/emulator/fault_suite.py list > all.txt            # every scenario, cloud or not
-AUTOFLASH_CLOUD_WORKERS=3 AUTOFLASH_ANY_WORKERS=3 \
+AUTOFLASH_CLOUD_WORKERS=1 AUTOFLASH_ANY_WORKERS=3 \
     tools/espressif/emulator/fault_suite.py --plug=MAC batch all.txt   # what has not passed yet
 tools/espressif/emulator/fault_suite.py report
 ```
+
+Against the real cloud, one cloud scenario at a time. The plugs take turns
+at eWeLink, but a run waiting for its turn still talks to it: it sees the
+plug whose turn it is as its own and sends it the installer, which that
+plug then gives up, and each run's login ends the one before. Three at once
+failed three in a row that way.
 
 Add `--stub-cloud` to `prep` and `batch` to give each emulator its own local
 eWeLink stand-in instead of the shared real cloud: no cloud lock, so every
