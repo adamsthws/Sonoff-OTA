@@ -115,6 +115,21 @@ def describe_run(directory: Path) -> str:
     return f"the device at {where} ({', '.join(details)})"
 
 
+def run_to_look_at(plug_ip: str | None) -> str | None:
+    """The run `status` and `cleanup` report on: the latest one of the device
+    at `plug_ip` when one is given, else the current run, else the latest."""
+    directories = runs.run_directories()
+    if plug_ip:
+        def at_address(directory: Path) -> bool:
+            try:
+                return RunState.open(directory).input("plug_ip") == plug_ip
+            except (OSError, ValueError):
+                return False
+        matching = [d for d in directories if at_address(d)]
+        return runs.run_name(matching[-1]) if matching else None
+    return runs.read_current() or (runs.run_name(directories[-1]) if directories else None)
+
+
 def start_new_run(plug_ip: str | None) -> str:
     name = runs.new_run_name(plug_ip)
     runs.remember_current(name)
@@ -430,9 +445,10 @@ def _main() -> int:
             args.run = args.run or "-"
         elif args.command in ("status", "cleanup") and not args.run:
             # Report on the latest run; never start a new one just to look.
-            args.run = runs.read_current() or (runs.run_name(runs.run_directories()[-1]) if runs.run_directories() else None)
+            args.run = run_to_look_at(args.plug_ip)
             if not args.run:
-                output.say("No conversions recorded yet.")
+                output.say(f"No conversion recorded for the device at {args.plug_ip}."
+                           if args.plug_ip else "No conversions recorded yet.")
                 return 0
         else:
             args.run = resolve_run_name(args.run, args.new, args.plug_ip,
