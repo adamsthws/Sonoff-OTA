@@ -146,3 +146,7 @@ mark on the web page's GitHub button (the `mark-github` icon of GitHub's
 Octicons, MIT) links to the repository, as GitHub's logo guidelines allow. This project is
 independent and is not an official Sonoff, eWeLink, Tasmota or ESPHome
 installer.
+
+`docs/PublicSponsor.png` is GitHub's Public Sponsor achievement badge, a copy
+of GitHub's own image, shown in the README to point to GitHub Sponsors. GitHub
+and GitHub Sponsors are trademarks of GitHub, Inc.

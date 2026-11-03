@@ -1,0 +1,67 @@
+# Keeps docs/PublicSponsor.png, the README's copy of GitHub's Public Sponsor
+# badge, the same as GitHub's: if GitHub changes it, a pull request with the
+# new one (tools/repo/sponsor_badge.py). Weekly, or by hand.
+name: Sponsor badge
+
+on:
+  schedule:
+    - cron: "0 6 * * 3"   # Wednesdays, 06:00 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: sponsor-badge
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write        # push the branch
+      pull-requests: write   # open the pull request
+      actions: write         # start the checks on it
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PROFILE: ${{ github.repository_owner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: GitHub's badge
+        id: badge
+        run: |
+          python3 tools/repo/sponsor_badge.py "$PROFILE" | tee badge.txt
+          if git diff --quiet -- docs/PublicSponsor.png; then
+              exit 0
+          fi
+          url=$(sed -n 's/^Changed: //p' badge.txt)
+          name=${url##*/}
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "branch=badge/${name%.png}" >> "$GITHUB_OUTPUT"
+      - name: The pull request
+        if: steps.badge.outputs.branch != ''
+        env:
+          BRANCH: ${{ steps.badge.outputs.branch }}
+          URL: ${{ steps.badge.outputs.url }}
+        run: |
+          if [ -n "$(gh pr list --state open --head "$BRANCH" --json number --jq '.[].number')" ]; then
+              echo "A pull request for $BRANCH is open already."
+              exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add docs/PublicSponsor.png
+          git commit -q -m "README: GitHub's new Public Sponsor badge" \
+              -m "GitHub changed its Public Sponsor achievement badge; docs/PublicSponsor.png is now $URL. Made by the sponsor-badge workflow."
+          python3 tools/repo/leak_scan.py range origin/main..HEAD
+          gh auth setup-git   # the checkout keeps no credentials
+          git push -q origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" --title "README: GitHub's new Public Sponsor badge" \
+              --body "GitHub changed its Public Sponsor achievement badge: this takes the new one, $URL, into docs/PublicSponsor.png, which the README shows. Made by the [sponsor-badge workflow]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+          # A pull request opened with this workflow's token starts no workflow
+          # (GitHub's rule), so the checks main requires are started on its branch.
+          for workflow in lint.yml leak-scan.yml emulator-check.yml; do
+              gh workflow run "$workflow" --ref "$BRANCH"
+          done
