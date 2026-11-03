@@ -2,6 +2,7 @@
 moved to another depth (the 2026-10 reorganisation moved tools/emulator/ two
 levels down) must count its parents again."""
 
+import os
 import re
 import subprocess
 import tempfile
@@ -48,6 +49,21 @@ class RepositoryRootTests(unittest.TestCase):
                     if not (ROOT / path.replace("\\", "/")).is_file():
                         wrong.append("%s: %s" % (file.relative_to(ROOT), path))
         self.assertEqual(wrong, [])
+
+    def test_every_script_the_docs_run_as_a_command_can_be_run(self):
+        """`tools/.../name.py args` at the start of a line in a shell block - after
+        any `NAME=value` settings - is run as it is, so it must be executable."""
+        command = re.compile(r"^\s*(?:\\\s*)?(?:[A-Z_0-9]+=\S+\s+)*(tools/\S+\.(?:py|sh))\b", re.M)
+        block = re.compile(r"^```(?:sh|bash)\n(.*?)^```", re.M | re.S)
+        wrong = []
+        for file in sorted(ROOT.rglob("*.md")):
+            if any(part in ("archive", "captures", ".git", ".venv") for part in file.relative_to(ROOT).parts):
+                continue
+            for code in block.findall(file.read_text(encoding="utf-8")):
+                for path in set(command.findall(code)):
+                    if (ROOT / path).is_file() and not os.access(ROOT / path, os.X_OK):
+                        wrong.append("%s: %s" % (file.relative_to(ROOT), path))
+        self.assertEqual(sorted(set(wrong)), [])
 
     def test_every_helper_the_tool_launches_runs_on_a_bare_python(self):
         """The scripts the tool starts in a process of their own (hostsys.python_script),

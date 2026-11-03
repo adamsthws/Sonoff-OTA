@@ -32,7 +32,8 @@ class BadImageScenarioTests(unittest.TestCase):
     def test_each_step_that_sends_an_image_the_bootloader_installs_has_one_it_refuses(self):
         found = {sc["id"] for sc in fault_suite.scenarios() if sc["fault"] == "badimage"}
         self.assertEqual(found, {"sonoff>openbeken:B2:badimage-once", "sonoff>esphome:B2:badimage-once",
-                                 "sonoff>esphome:J2:badimage-once", "openbeken>esphome:O1:badimage-once"})
+                                 "sonoff>esphome:J2:badimage-once", "openbeken>esphome:O1:badimage-once",
+                                 "interim>esphome:J2:badimage-once"})
 
     def test_it_hears_the_run_send_the_image_again(self):
         # Matched against what the run says as it goes back (arrived.until_back).
@@ -49,9 +50,11 @@ class BadImageScenarioTests(unittest.TestCase):
 
 
 class NewScenarioTests(unittest.TestCase):
-    def test_every_route_has_its_apply_cut_and_the_writing_steps_their_double_and_readdress(self):
+    def test_every_route_that_writes_has_its_apply_cut_and_the_writing_steps_their_double_and_readdress(self):
         ids = {sc["id"] for sc in fault_suite.scenarios()}
         for route, steps in fault_suite.ROUTES.items():
+            if not set(steps) & fault_suite.beken.DESTRUCTIVE_STEPS:
+                continue
             for at in (10, 50, 90):
                 self.assertIn(f"{route}:apply@{at}:plugoff-1", ids)
             for step in set(steps) & fault_suite.beken.DESTRUCTIVE_STEPS:
@@ -122,6 +125,53 @@ class RecoverTests(unittest.TestCase):
         self.assertTrue(fault_suite.wait_for_step(instance, "O1", run, limit=5))
         self.assertFalse(fault_suite.wait_for_step(SimpleNamespace(last_log=lambda: log[0]), "O1",
                                                    SimpleNamespace(poll=lambda: None), limit=0.6))
+
+
+class InterimTests(unittest.TestCase):
+    CLEAN = bytes([0xFF]) * 0x400000
+
+    def test_a_new_openbeken_is_checked_with_scenarios_the_suite_has(self):
+        self.assertLessEqual(set(fault_suite.OPENBEKEN_CHECK), {sc["id"] for sc in fault_suite.scenarios()})
+
+    def test_every_way_from_the_interim_firmware(self):
+        self.assertLessEqual({"interim>esphome", "interim>openbeken", "interim>sonoff"}, set(fault_suite.ROUTES))
+
+    def test_kept_as_openbeken_nothing_is_written_and_j3_waits_for_its_restart(self):
+        # J3 sends no image, so there is no bootloader write to cut; and it
+        # waits for the restart itself, so K1 finds the plug answering at once.
+        ids = {sc["id"] for sc in fault_suite.scenarios() if sc["route"] == "interim>openbeken"}
+        self.assertFalse({i for i in ids if ":apply@" in i or ":K1:" in i})
+
+    def test_the_names_a_plug_asked_dhcp_for(self):
+        log = ("Nov  3 10:00:01 dnsmasq-dhcp[7]: 3126 DHCPACK(br0) 198.18.0.50 12:34:56:ab:cd:ef\n"
+               "Nov  3 10:01:02 dnsmasq-dhcp[7]: 3127 DHCPACK(br0) 198.18.0.50 12:34:56:ab:cd:ef "
+               "autoflash-recovery-CDEF\n")
+        self.assertEqual([m.group(1) for m in fault_suite.DHCP_NAME.finditer(log)], ["autoflash-recovery-CDEF"])
+
+    def test_through_the_interim_firmware_by_its_own_name_and_left_clean(self):
+        self.assertEqual(fault_suite.interim_problems(
+            "sonoff>esphome", ["autoflash-recovery-CDEF", "esphome-abcdef"], self.CLEAN), [])
+
+    def test_the_interim_firmware_by_openbekens_name(self):
+        problems = fault_suite.interim_problems(
+            "sonoff>esphome", ["openbeken-abcdef", "esphome-abcdef"], self.CLEAN)
+        self.assertEqual(len(problems), 2)   # never its own name, and OpenBeken's
+
+    def test_its_settings_left_behind(self):
+        flash = bytearray(self.CLEAN)
+        flash[0x1E5000 + 0x10] = 0
+        problems = fault_suite.interim_problems(
+            "interim>esphome", ["autoflash-recovery-CDEF", "esphome-abcdef"], bytes(flash))
+        self.assertEqual(problems, ["the interim firmware's settings at 0x1e5000 were not erased"])
+
+    def test_kept_as_openbeken_by_openbekens_name(self):
+        self.assertEqual(fault_suite.interim_problems(
+            "interim>openbeken", ["autoflash-recovery-CDEF", "openbeken-abcdef"], None), [])
+        self.assertTrue(fault_suite.interim_problems("interim>openbeken", ["autoflash-recovery-CDEF"], None))
+
+    def test_routes_that_never_run_it_ask_nothing_of_it(self):
+        self.assertEqual(fault_suite.interim_problems("sonoff>openbeken", ["openbeken-abcdef"], None), [])
+        self.assertEqual(fault_suite.interim_problems("openbeken>sonoff", ["openbeken-abcdef"], None), [])
 
 
 class ConvertedTests(unittest.TestCase):

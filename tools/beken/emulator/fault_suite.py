@@ -3,9 +3,12 @@
 on the plug, every fault - on emulated S61s side by side (bk-emu.sh plug), as
 tools/espressif/emulator/fault_suite.py does for the S60.
 
-    fault_suite.py prep                 the starting plugs: one on OpenBeken, one on
-                                        ESPHome, converted by the tool from the dump
+    fault_suite.py prep                 the starting plugs: one on the interim firmware,
+                                        one on OpenBeken, one on ESPHome, converted by
+                                        the tool from the dump
     fault_suite.py list                 every scenario
+    fault_suite.py list openbeken       those a new OpenBeken build is checked with
+                                        (docs/updating-firmware.md)
     fault_suite.py batch [FILE]         the scenarios in FILE (one id a line; every
                                         scenario without), skipping those passed
     fault_suite.py report               the latest result of each
@@ -31,6 +34,12 @@ refuses (badimage): the tool sends it spoilt once (--simulate-bad-image
 STEP), fetched whole but failing the bootloader's CRC check, so the plug
 starts the firmware it had again; the scenario passes when the tool sends
 it again by itself and the plug is converted.
+
+The routes from the interim firmware start from a plug a run to ESPHome left
+there, found by a new run. A plug converted through the interim firmware is
+also checked: by the names it asked DHCP for, it was autoflash-recovery-CDEF
+there from its first request and never OpenBeken's own name; and once ESPHome
+is on it, the interim's settings are erased from its flash (interim_problems).
 
 Each emulator is a plug of its own (autoflash-s61-N, on autoflash-beken-N),
 AUTOFLASH_S61_WORKERS of them at once (default 2: each takes a core, and the
@@ -78,6 +87,11 @@ ROUTES = {
     "openbeken>sonoff": {"O2": 24, "K3": 75},
     "esphome>openbeken": {"E1": 6, "K1": 27, "B4": 12},
     "esphome>sonoff": {"E2": 15, "K3": 80},
+    # A plug a run to ESPHome left on the interim firmware, found by a new run.
+    # Kept as OpenBeken, J3 waits for its restart: K1 finds it answering.
+    "interim>esphome": {"B4": 12, "J2": 14, "K2": 30},
+    "interim>openbeken": {"J3": 15, "B4": 12},
+    "interim>sonoff": {"B4": 12, "J4": 24, "K3": 75},
 }
 CORE = [("plugoff", 1), ("plugoff", 30), ("outage", 30), ("crash", 1), ("crash", 180), ("ctrlc", "once")]
 # At the steps that write, the riskiest moments too: just begun, nearly done.
@@ -89,6 +103,20 @@ POWER_CYCLE = re.compile(r"switch the (plug|device) off and on", re.IGNORECASE)
 # spoilt (--simulate-bad-image STEP): Sonoff's firmware's, and OpenBeken's
 # fetch of ESPHome.
 BAD_IMAGE_STEPS = {"B2", "J2", "O1"}
+# The interim firmware's settings, which it erases before the firmware it
+# fetched starts (devices/sonoff-s61/openbeken.md#the-interim-firmware): its
+# own sector, and the flash variables its Wi-Fi keeps.
+INTERIM_SETTINGS = ((0x3E1000, 0x1000), (0x1E5000, 0x8000))
+# The name a plug asks its router's DHCP for, by its firmware.
+DHCP_NAME = re.compile(r"DHCPACK\(\S+\) \S+ \S+ (\S+)")
+NAME_PREFIX = {"interim": "autoflash-recovery-", "openbeken": "openbeken-", "esphome": "esphome-"}
+# A new OpenBeken build's check: each thing this project's driver and patches
+# do on it, once - its Wi-Fi and settings taken from Sonoff's (B4 after B2),
+# the interim firmware named, fetching ESPHome and wiping itself (J2), kept
+# as OpenBeken (J3), each way back to Sonoff's firmware (J4, O2), and
+# installed from ESPHome (K1).
+OPENBEKEN_CHECK = ["sonoff>openbeken:B4:crash-1", "sonoff>esphome:J2:badimage-once", "interim>openbeken:J3:crash-1",
+                   "interim>sonoff:J4:crash-1", "openbeken>sonoff:O2:crash-1", "esphome>openbeken:K1:crash-1"]
 
 
 def sid(route: str, step: str, fault: str, arg, at: int = 40) -> str:
@@ -118,7 +146,7 @@ def scenarios() -> list[dict]:
                               fault="badimage", arg="once", at=40))
         # The plug switched off while its bootloader writes the new firmware in:
         # timed off the plug's own output, a share of the way through the write.
-        for at in (10, 50, 90):
+        for at in (10, 50, 90) if set(steps) & beken.DESTRUCTIVE_STEPS else ():
             found.append(dict(id=sid(route, "apply", "plugoff", 1, at), route=route, step="apply",
                               fault="plugoff", arg=1, at=at))
     return found
@@ -128,6 +156,28 @@ def route_steps(route: str) -> list[str]:
     """Every step a run of `route` records, after the start all routes share."""
     source, target = route.split(">")
     return [step for step, _, _ in beken.steps_for(target, source)]
+
+
+def interim_problems(route: str, names: list[str], flash: bytes | None) -> list[str]:
+    """What a converted plug shows wrong of the interim firmware: from the
+    names it asked DHCP for, in order, and its flash once stopped (None when
+    the route does not need it). On the interim firmware its name is
+    autoflash-recovery-CDEF from its first request - never OpenBeken's own -
+    and once it has fetched ESPHome its settings are gone."""
+    source, target = route.split(">")
+    steps = route_steps(route)
+    problems = []
+    if "J1" in steps and not any(name.startswith(NAME_PREFIX["interim"]) for name in names):
+        problems.append("the interim firmware never asked DHCP by its own name")
+    if "J2" in steps and any(name.startswith(NAME_PREFIX["openbeken"]) for name in names):
+        problems.append("the interim firmware asked DHCP by OpenBeken's own name")
+    if target in NAME_PREFIX and not (names and names[-1].startswith(NAME_PREFIX[target])):
+        problems.append(f"the plug's last name was {names[-1] if names else 'none'}, not {target}'s")
+    if "J2" in steps and flash is not None:
+        for start, size in INTERIM_SETTINGS:
+            if flash[start:start + size] != b"\xff" * size:
+                problems.append(f"the interim firmware's settings at {start:#x} were not erased")
+    return problems
 
 
 def converted(state: dict, route: str) -> bool:
@@ -175,6 +225,12 @@ class Instance:
         (self.state / "work/captures").mkdir(parents=True, exist_ok=True)
         (self.state / "work/captures/tool.env").write_text(ACCOUNT, encoding="utf-8")
         self.before = set(self.all_runs())
+
+    def dhcp_names(self) -> list[str]:
+        """The names the plug asked its router's DHCP for, in order."""
+        log = subprocess.run(["docker", "exec", self.plug, "cat", "/run/autoflash-s61/dnsmasq.log"],
+                             capture_output=True, text=True).stdout
+        return [found.group(1) for found in DHCP_NAME.finditer(log)]
 
     def lease(self) -> str | None:
         found = subprocess.run(["docker", "exec", self.plug, "sh", "-c",
@@ -372,6 +428,17 @@ def run_scenario(instance: Instance, sc: dict) -> dict:
         outcome = bad_image_scenario(instance, sc, target, log, notes)
     else:
         outcome = step_scenario(instance, sc, target, log, notes)
+    if outcome["result"] == "PASS":
+        names = instance.dhcp_names()
+        flash = None
+        if "J2" in route_steps(sc["route"]):
+            instance.stop()   # its flash kept as it stops
+            flash = (instance.state / "flash.bin").read_bytes()
+        notes["dhcp_names"] = names
+        problems = interim_problems(sc["route"], names, flash)
+        if problems:
+            outcome = dict(outcome, result="FAIL")
+            notes["interim"] = problems
     for index, path in enumerate(instance.runs()):
         shutil.copy(path, folder / f"run-{index + 1}.log")
     try:
@@ -523,10 +590,21 @@ def batch(ids_file: str | None = None) -> None:
 
 
 def prep() -> None:
-    """The starting plugs, converted by the tool from the dump: on OpenBeken,
+    """The starting plugs, converted by the tool from the dump: on the interim
+    firmware (a run to ESPHome stopped once that has started), on OpenBeken,
     then on ESPHome, each saved with the captures its runs left."""
     instance = Instance(1)
     try:
+        instance.reset("sonoff")
+        if not instance.start("sonoff"):
+            raise SystemExit("the plug did not come online")
+        log = OUT / "prep-interim.log"
+        OUT.mkdir(parents=True, exist_ok=True)
+        run = instance.tool("esphome", log, new=True)
+        if not wait_for_step(instance, "B4", run):
+            raise SystemExit(f"the plug did not start the interim firmware: see {log}")
+        subprocess.run(["docker", "kill", instance.computer], capture_output=True)
+        save(instance, "interim")
         instance.reset("sonoff")
         if not instance.start("sonoff"):
             raise SystemExit("the plug did not come online")
@@ -542,13 +620,17 @@ def prep() -> None:
                     instance.ready(target)
             else:
                 raise SystemExit(f"the plug was not converted to {target}: see {log}")
-            instance.stop()
-            shutil.rmtree(SAVED / target, ignore_errors=True)
-            shutil.copytree(instance.state, SAVED / target, ignore=keep_for_saving)
-            print(f"saved the plug on {target} in {SAVED / target}", flush=True)
+            save(instance, target)
             instance.start(target)
     finally:
         instance.stop()
+
+
+def save(instance: Instance, firmware: str) -> None:
+    instance.stop()
+    shutil.rmtree(SAVED / firmware, ignore_errors=True)
+    shutil.copytree(instance.state, SAVED / firmware, ignore=keep_for_saving)
+    print(f"saved the plug on {firmware} in {SAVED / firmware}", flush=True)
 
 
 def keep_for_saving(folder: str, names: list[str]) -> list[str]:
@@ -574,8 +656,8 @@ def main(argv: list[str]) -> int:
     if command == "prep":
         prep()
     elif command == "list":
-        for sc in scenarios():
-            print(sc["id"])
+        for i in (OPENBEKEN_CHECK if argv[1:] == ["openbeken"] else [sc["id"] for sc in scenarios()]):
+            print(i)
     elif command == "batch":
         batch(argv[1] if len(argv) > 1 else None)
     elif command == "report":

@@ -616,13 +616,14 @@ each its own plug on a home Wi-Fi of its own, with the local eWeLink stub, so
 nothing reaches the internet and every scenario can run side by side.
 
 ```sh
-tools/beken/emulator/fault_suite.py prep      # the starting plugs: on OpenBeken, on ESPHome
+tools/beken/emulator/fault_suite.py prep      # the starting plugs: on the interim firmware, OpenBeken, ESPHome
 tools/beken/emulator/fault_suite.py list > s61.txt
 AUTOFLASH_S61_WORKERS=2 tools/beken/emulator/fault_suite.py batch s61.txt   # what has not passed yet
 tools/beken/emulator/fault_suite.py report
 ```
 
-Every direction between Sonoff's firmware, OpenBeken and ESPHome; at each
+Every direction between Sonoff's firmware, OpenBeken and ESPHome, and from a
+plug a run to ESPHome left on the interim firmware to each of them; at each
 step that writes to or waits on the plug, at 40% of its usual length, the
 plug switched off for 1 or 30 s, this computer off the plug's Wi-Fi for
 30 s, the tool killed and run again after 1 or 180 s, and Ctrl-C - and at
@@ -636,7 +637,13 @@ stock bootloader installs - Sonoff's firmware's (B2), OpenBeken's fetch of
 ESPHome (J2, O1) - has one it refuses: sent spoilt once
 (`--simulate-bad-image STEP`, one byte of its body changed), the plug fetches
 it whole but starts the firmware it had again, and the scenario passes only
-when the tool saw that and sent the image again by itself. 172 scenarios.
+when the tool saw that and sent the image again by itself. A plug converted
+through the interim firmware passes only if, by the names it asked its
+router's DHCP for, it was `autoflash-recovery-CDEF` there from its first
+request and never OpenBeken's own name, and - once ESPHome is on it - the
+interim's settings are gone from its flash. 239 scenarios; `list openbeken`
+gives the six a new OpenBeken build must pass
+([updating-firmware.md](updating-firmware.md#5-test)).
 Then the
 tool is run again as a person would, switching the plug off and on where it
 says to, up to four times; the scenario passes when the run's record has

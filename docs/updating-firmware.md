@@ -265,6 +265,31 @@ say) or release notes touching its Wi-Fi, settings, updates or Berry, run
 those few scenarios of the fault suite too - F4's reset, G1, `seven-times`,
 and the network gone at L1 and X1 ([testing.md](testing.md#the-fault-suite)).
 
+**The S61's OpenBeken**, built anew - above all on a new OpenBeken commit -
+is run on the S61's emulator before it is published. This project's driver
+and its hook before an OTA's restart lean on OpenBeken's own workings: where
+it keeps its settings and its Wi-Fi's (`0x3e1000`, and its flash variables
+at `0x1e5000`), how its HTTP OTA ends in a restart. A commit can move either
+with the build still passing and the image still holding each command, and
+the interim firmware would then leave its settings behind for ESPHome or a
+later OpenBeken to find. The starting plugs are made again with the new
+image, then six scenarios run, each doing once something the driver or the
+hook does - the Wi-Fi taken from Sonoff's firmware, the interim firmware
+named, fetching ESPHome and erasing itself, kept as OpenBeken, each way back
+to Sonoff's firmware - where a pass also checks the names the plug asked
+DHCP for and, after ESPHome, that the interim's settings are gone
+([testing.md](testing.md#the-s61s-fault-suite)):
+
+```sh
+tools/beken/emulator/fault_suite.py prep
+tools/beken/emulator/fault_suite.py list openbeken > openbeken.txt
+rm -rf captures/emulation/s61-openbeken   # no pass on the image before counts
+AUTOFLASH_S61_SUITE_DIR=captures/emulation/s61-openbeken AUTOFLASH_S61_WORKERS=2 \
+    tools/beken/emulator/fault_suite.py batch openbeken.txt
+```
+
+All six must pass.
+
 **A real plug**, converted from Sonoff to each firmware and between them,
 before the release: an emulator does not show real flash, radios or timings
 ([testing.md](testing.md#real-plugs)).
