@@ -14,7 +14,7 @@ handling and energy totals, so the two plugs look alike in Home Assistant.
   patched in place, and does not need to be: the plug's Wi-Fi is still in the
   stock EasyFlash store at `0x3e2000`, which no conversion touches. At boot
   (priority 1000, before Wi-Fi) the config reads `wifi-ssid` / `wifi-pass` from
-  it with `lt_flash_read`, the way the OpenBeken import module does, and sets
+  it with `lt_flash_read`, the way the tool's OpenBeken driver does, and sets
   them as the station. After Wi-Fi is up (priority -100) they are saved the way
   the S60's are, under both keys ESPHome looks in.
 - **The factory meter calibration** is read from the same store (`elecCalibCoef`:
@@ -94,7 +94,7 @@ The same with OpenBeken's 4 MB-table `.rbl` moves the plug to OpenBeken, and
 OpenBeken's ordinary `ota_http <url of the ESPHome .rbl>` brings it back: its
 4 MB-table build downloads into the same slot. The stock EasyFlash store is
 never touched, so whichever firmware comes up reads its Wi-Fi, calibration
-and wiring from it on first boot - OpenBeken through its import module,
+and wiring from it on first boot - OpenBeken through its driver,
 ESPHome through its boot lambdas - and nothing is typed or copied across.
 Each firmware's own settings beyond those (names, thresholds, the relay's
 last state) are its own and start afresh; ESPHome's live in the 32 KB at
@@ -154,5 +154,5 @@ ESPHome 2026.10.0 built the current image, `artifacts/esphome-sonoff-s61-1.1.0.r
 with `tools/repo/update_firmware.py esphome 2026.10.0 --plug sonoff-s61`
 ([docs/updating-firmware.md](../../docs/updating-firmware.md)).
 
-Not yet done: a real plug, and the tool's route (the FOTA push, the first-boot
-checks).
+Not yet done: a real plug. The tool's route runs end to end in the emulator
+([its fault suite](../../docs/testing.md#the-s61s-fault-suite)).

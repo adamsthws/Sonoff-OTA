@@ -24,8 +24,7 @@ the plug's Wi-Fi for 30 s (outage), the tool killed and run again after 1 or
 another as the tool sends it again (double), and the router giving the plug
 a new address once the step is done (readdress); and at each route's
 "apply", the plug switched off 10, 50 or 90% of the way through its
-bootloader writing the new firmware in - timed off the plug's own output,
-across the switch off and on a route from Sonoff's firmware needs first.
+bootloader writing the new firmware in - timed off the plug's own output.
 And at each step that sends an image the stock bootloader installs - Sonoff's
 firmware's (B2) and OpenBeken's fetch of ESPHome (J2, O1) - an image it
 refuses (badimage): the tool sends it spoilt once (--simulate-bad-image
@@ -35,9 +34,9 @@ it again by itself and the plug is converted.
 
 Each emulator is a plug of its own (autoflash-s61-N, on autoflash-beken-N),
 AUTOFLASH_S61_WORKERS of them at once (default 2: each takes a core, and the
-tool's runs share what is left). Sonoff's firmware in the emulator does not
-restart once it has an update (tools/beken/emulator/README.md): a route from
-it takes the switch off and on the tool then asks for.
+tool's runs share what is left). Sonoff's firmware restarts by itself once
+it has an update, in the emulator as on a real plug
+(tools/beken/emulator/README.md).
 
 Results: captures/emulation/s61-suite/results.jsonl, and each scenario's run
 logs and the plug's serial output beside it.
@@ -426,8 +425,8 @@ def bad_image_scenario(instance: Instance, sc: dict, target: str, log: Path, not
 
 def step_scenario(instance: Instance, sc: dict, target: str, log: Path, notes: dict) -> dict:
     run = instance.tool(target, log, new=True)
-    # A route from Sonoff's firmware reaches its later steps only after the
-    # switch off and on the tool asks for: through runs again, as a person would.
+    # A run a fault ended reaches its later steps only through runs again, with
+    # the switch off and on the tool asks for, as a person would.
     reruns = 0
     while not wait_for_step(instance, sc["step"], run):
         run.wait(timeout=60)

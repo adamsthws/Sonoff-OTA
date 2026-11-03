@@ -57,8 +57,8 @@ def until_back(ctx: Context, look: Callable[[bool], T], what: str, advice: str,
     the plug is back on after a restart - `restarted` then True - until it
     finds the plug or they stop (q).  An unattended run stops at the first
     NotBack, with `advice` as the reason.  Each switch off and on is counted,
-    by whom (power_cycles), for the report: whether a real plug restarts by
-    itself, as the emulated one does not.
+    by whom (power_cycles), for the report: normally none is needed, as
+    every firmware restarts by itself once it has its update.
 
     `sent_by`: the step that sent the image.  A look after a restart that
     finds the plug on the firmware it was leaving (NotTaken) sends the run
@@ -118,7 +118,7 @@ def step_openbeken_check(ctx: Context, wait: float = ARRIVAL_WAIT, *, interim: b
     """K1 - OpenBeken started from the image, and on the home Wi-Fi: it
     answers at the plug's address (or wherever its hardware address is now)
     as the OpenBeken the tool installs on this kind of plug - and, as its
-    import module says, not as the interim firmware; J1 (`interim`) the
+    driver says, not as the interim firmware; J1 (`interim`) the
     same, as the interim firmware, which it is named to the person as.  One
     that says otherwise is told what it is: the plug's own OpenBeken, then
     restarted, so the name it keeps follows; the interim firmware (the

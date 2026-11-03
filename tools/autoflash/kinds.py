@@ -11,7 +11,7 @@ partition table (esphome.SONOFF_TABLE).  The final firmware's names are the
 same for every kind - tasmota-abcdef, esphome-abcdef, openbeken-abcdef - so the
 kind is told by what else each firmware says, which renaming the plug
 leaves alone: Tasmota's template, ESPHome's comment, and the answer
-OpenBeken's import module gives (openbeken.kind).
+OpenBeken's driver gives (openbeken.kind).
 
 A run keeps the kind it converts (its "plug_kind"): from the eWeLink account
 (A1), from what the stock firmware says it is (A2), or from a converted

@@ -118,10 +118,10 @@ check.
   where it starts at the top of the window elsewhere: VS Code pins a command
   scrolled out of sight over the window's top rows, which covered the run's
   first.
-- An S61 that, switched off and on after its new firmware was sent, starts
-  Sonoff's firmware again did not install it: the run sends it again by
-  itself (twice at most), where it asked to switch the device off and on
-  again and again. PROCEED is asked once a run, not again for it. A run
+- An S61 whose new firmware its bootloader would not install starts
+  Sonoff's firmware again: the run sends it again by itself (twice at
+  most), where it asked to switch the device off and on again and again.
+  PROCEED is asked once a run, not again for it. A run
   that stopped to ask for the switch off and on takes it as done when run
   again. The same for ESPHome fetched by OpenBeken (J2, O1), which restarts
   by itself to install it: back on OpenBeken since, by its uptime, ESPHome

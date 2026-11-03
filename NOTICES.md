@@ -72,7 +72,7 @@ at commit
 built for the BK7238 with a 4 MB flash. This project's changes to each are
 the patches in [`tools/beken/openbeken/`](tools/beken/openbeken/) (the 4 MB
 table, offered upstream as OpenBK7231T_App#2290 and beken_freertos_sdk#13,
-and a hook before an OTA's restart), the driver
+and a hook before an OTA's restart, offered as OpenBK7231T_App#2293), the driver
 [`tools/beken/openbeken/drv_autoflash.c`](tools/beken/openbeken/drv_autoflash.c)
 and the S61's table for it,
 [`devices/sonoff-s61/drv_autoflash_sonoff_s61.c`](devices/sonoff-s61/drv_autoflash_sonoff_s61.c),

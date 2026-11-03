@@ -1,9 +1,9 @@
 # Updating the firmware the tool installs
 
-A converted plug ends on official Tasmota or on this project's ESPHome. Both
-follow their projects' releases, a little behind: the repository's
-`firmware-update` workflow takes each once it has settled, tests it and
-releases it, by itself ([below](#by-itself)). By hand, it is the same steps
+A converted plug ends on official Tasmota, OpenBeken or this project's
+ESPHome. Tasmota and ESPHome follow their projects' releases, a little
+behind: the repository's `firmware-update` workflow takes each once it has
+settled, tests it and releases it, by itself ([below](#by-itself)). By hand, it is the same steps
 ([after that](#by-hand)).
 
 ## What follows a release, and what does not
@@ -30,7 +30,9 @@ on a plug. The Tasmota they are made from is `INTERIM_TASMOTA_COMMIT` in
 recovery Safeboot saves the Wi-Fi in its release's settings record, and the
 official release takes that record and moves it on to its own layout, as
 Tasmota does on any upgrade - as long as `CFG_HOLDER` is the same in both,
-which the update checks.
+which the update checks. The S61's interim firmware is its OpenBeken image
+itself, with a marker sent after it, so it changes with every OpenBeken
+update ([below](#3-openbeken-and-esphome-for-the-s61)).
 
 **The bootloader** is written in about a second, and a power cut in that
 second leaves a plug that has to be opened - the only step of a conversion

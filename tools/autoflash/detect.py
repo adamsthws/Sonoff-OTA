@@ -4,7 +4,7 @@ A plug still on Sonoff's firmware is found through eWeLink, as ever; one this
 tool converted is found here, by what answers: Tasmota's command interface
 naming the template of a kind of plug this tool converts (kinds), ESPHome's
 page with the relay the ESPHome made for it names - each, behind its web
-login, once given that - or OpenBeken whose import module, built in by
+login, once given that - or OpenBeken whose driver, built in by
 this tool, says what kind of plug it is on.  Midway through a conversion a
 plug can also be running the mover (an ESPHome with no page, only its update
 service), the startup firmware (a Tasmota safeboot), or the interim firmware

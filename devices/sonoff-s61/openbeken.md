@@ -50,9 +50,9 @@ Three edits against `openshwprojects/OpenBK7231T_App`:
    Autoflash_Init();
    ```
 
-`Autoflash_Init()` registers the manual command `AutoflashImportWiFi` and runs
-the import. Both are no-ops once a Wi-Fi SSID is set, so they are safe on every
-boot. (Upstreaming the driver is the long-term home — then OpenBeken maintains it
+`Autoflash_Init()` registers the driver's four commands, runs the import (a
+no-op once a Wi-Fi SSID is set) and looks for the interim marker, so it is
+safe on every boot. (Upstreaming the driver is the long-term home — then OpenBeken maintains it
 across its own refactors.)
 
 ## What the driver does on first boot
@@ -132,7 +132,9 @@ good (`openbeken-abcdef`), for a run that finds a plug left on it and is to
 end on OpenBeken; `AutoflashInterim on` makes it the interim firmware, for the
 run that sent it as one when the marker did not arrive (its update cut off in
 its last few kilobytes, after the whole image). The DHCP and mDNS names follow
-on its next start, so the tool restarts it.
+on its next start: after `off` the tool restarts it; after `on` it does not,
+and the interim firmware keeps the name it started with until the next
+firmware replaces it.
 
 Once the interim firmware has fetched the next firmware, ESPHome or Sonoff's
 own, it leaves nothing of itself: OpenBeken's HTTP OTA calls
@@ -192,8 +194,8 @@ before an OTA's restart:
   OpenBeken's HTTP client ends a download the same way whether it finished or
   failed, and can take a connection closed early for the end, so a hook that
   acts on it checks the image too; this driver's does
-  ([the interim firmware](#the-interim-firmware)). Written so it can be offered
-  upstream; not offered yet.
+  ([the interim firmware](#the-interim-firmware)). Offered upstream as
+  [OpenBeken #2293](https://github.com/openshwprojects/OpenBK7231T_App/pull/2293).
 
 The Beken SDK bundles its own `arm-none-eabi-gcc` that needs **GLIBC ≥ 2.34**, so
 build in a current environment (Ubuntu 24.04 / 22.04 — OpenBeken's own Docker

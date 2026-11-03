@@ -51,6 +51,9 @@ the other tools at it.
 
 ## Driving the emulator
 
+Those marked archived are in
+[archive/s61-research/](../../archive/s61-research/), and are run from there.
+
 - **`integrity_gate.py`** — lets the stock image boot under emulation past the
   flash-UID integrity gate that otherwise hangs the app layer (see the main doc).
   Forces the identity `memcmp` at `0x29c3c` to "equal" (the outcome it has on real
@@ -61,7 +64,7 @@ the other tools at it.
   run on a real plug.
   `python3 integrity_gate.py`
 
-- **`long_press.py`** — with the gate cleared, drive the button long-press end
+- **`long_press.py`** (archived) — with the gate cleared, drive the button long-press end
   to end through the firmware's own key stack. Two interventions: the integrity
   bypass, and raising Timer 5's interrupt status (`timer3_5_ctl` bit 9) each slow
   tick — the key-driver's periodic runs on the `bk_timer` = Timer 5, which the
@@ -70,7 +73,7 @@ the other tools at it.
   and a press-and-hold of pins 0/2 trips the real long-press action `0x42250`.
   `python3 long_press.py`
 
-- **`pair_drive.py`** — drive the firmware into pairing mode and watch the
+- **`pair_drive.py`** (archived) — drive the firmware into pairing mode and watch the
   emulated radio follow. With the gate cleared and the app framework cycling,
   nothing sets a pairing method, so the device idles; this tool calls the
   firmware's own pairing-method dispatcher `0x21eb4` from inside the appfw task's
@@ -113,7 +116,7 @@ the other tools at it.
   clears too. Env `SSID`/`PASS`/`CH`/`SECS`.
   `python3 seed_join.py`
 
-- **`ble_provision.py`** — synthesise the eWeLink **BLE provisioning session**
+- **`ble_provision.py`** (archived) — synthesise the eWeLink **BLE provisioning session**
   without a BLE radio: feed the provisioning messages (DEVICE_INFO, AUTH_TOKEN,
   HIDDEN_AP_CONNECT/Wi-Fi, SERVER_INFO) through the firmware's command dispatcher
   `0x72940`, so its own consumer task runs the handlers in context (driving them
@@ -153,18 +156,18 @@ the other tools at it.
   `python3 cloud_online.py`. Its set-up is a `CloudSession`, which `cloud_push.py`
   builds on.
 
-- **`button_sim.py`** — older button sim (predates the integrity-gate finding
+- **`button_sim.py`** (archived) — older button sim (predates the integrity-gate finding
   and natural registration; defaults to the wrong pin 3). Force-runs the block init
   and `key_add`, then presses by driving the GPIO low and latching the capture
   status in `state.pwmn_stat`, reaching the armed long-press timer.
   `python3 button_sim.py [pin]`
 
-- **`airkiss_capture.sh`** — put the laptop's Intel AX200 into monitor mode on
+- **`airkiss_capture.sh`** (archived) — put the laptop's Intel AX200 into monitor mode on
   the router's channel and capture a phone's eWeLink AirKiss/smartconfig broadcast
   to a pcap. Needs root; takes over the Wi-Fi adapter while capturing.
   `sudo ./airkiss_capture.sh <channel> [iface] [out.pcap]`
 
-- **`airkiss_replay.py`** — replay captured 802.11 frames into the emulated
+- **`airkiss_replay.py`** (archived) — replay captured 802.11 frames into the emulated
   S61's Wi-Fi MAC (monitor mode) so the firmware's own AirKiss decoder can consume
   them; an AP-role peer with the known SSID/pass then lets the device associate.
   Stdlib-only pcap/radiotap parsing (DLT 127/105).

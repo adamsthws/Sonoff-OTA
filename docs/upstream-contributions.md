@@ -35,7 +35,7 @@ several other HTTP clients, and following it led to a few more bugs nearby.
 - [OpenBeken on a 4 MB BK7238](#openbeken-on-a-4-mb-bk7238) - OpenBeken,
   beken_freertos_sdk
 - [Smaller fixes found along the way](#smaller-fixes-found-along-the-way) -
-  Tasmota, ESPHome
+  Tasmota, ESPHome, OpenBeken
 - [Other people's reports, reproduced on the emulator](#other-peoples-reports-reproduced-on-the-emulator) -
   Tasmota
 
@@ -165,7 +165,6 @@ turned out to be, byte for byte, the S61's factory bootloader.
 |---|---|---|
 | beken_freertos_sdk (NonPIayerCharacter) | [#13](https://github.com/NonPIayerCharacter/beken_freertos_sdk/pull/13) | Packing a 4 MB BK7238 image failed on a `_2M` filename, the 4 MB app profile overran the OTA partition, and no 4 MB bootloader was shipped |
 | OpenBeken (OpenBK7231T_App) | [#2290](https://github.com/openshwprojects/OpenBK7231T_App/pull/2290) | No way to build for a 4 MB flash; the REST/web-UI OTA slot, the flash-read and flash-write bounds and LittleFS's bounds were 2 MB constants whatever table the firmware used (on 4 MB, LittleFS inside the app partition) |
-| OpenBeken (OpenBK7231T_App) | [#2293](https://github.com/openshwprojects/OpenBK7231T_App/pull/2293) | No way for a driver to act before an HTTP OTA restarts the device: a weak `HAL_OTA_BeforeReboot(ok)` hook, by which the S61's interim firmware erases its own settings so the firmware it fetched starts clean |
 
 Proven in the BekenEmulator on a dump of the owner's own S61: the default
 2 MB build unchanged, and the 4 MB build saving its config at `0x3e1000`,
@@ -181,6 +180,7 @@ serving flash reads at the top of the chip, and `ota_http` downloading to
 | Tasmota | [#25169](https://github.com/arendst/Tasmota/pull/25169) | Its setup network went out under the chip's default name (`ESP_` and its MAC) for its first tenth of a second, which phones and computers then list beside the real one |
 | ESPHome | [#21672](https://github.com/esphome/esphome/pull/21672) | An `api` action with an array variable that also responds did not compile; our calibration action, which takes a list of floats, had to go without an answer |
 | ESPHome | [#22163](https://github.com/esphome/esphome/pull/22163) | A friendly name always joined the MAC suffix with a space: an option to choose, so ours can read `esphome-abcdef` as the hostname does |
+| OpenBeken | [#2293](https://github.com/openshwprojects/OpenBK7231T_App/pull/2293) | No way for a driver to act before an HTTP OTA restarts the device: a weak `HAL_OTA_BeforeReboot(ok)` hook, by which the S61's interim firmware erases its own settings so the firmware it fetched starts clean |
 
 ## Other people's reports, reproduced on the emulator
 

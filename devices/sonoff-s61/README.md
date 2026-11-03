@@ -31,7 +31,7 @@ worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-e
 - **Stock firmware**: the public dump upstream BekenEmulator publishes is
   what the emulator and its tests run; this repository holds no Sonoff
   firmware ([`tools/beken/emulator/`](../../tools/beken/emulator/)).
-- **The images the tool installs**: OpenBeken with the module and the 4 MB
+- **The images the tool installs**: OpenBeken with the driver and the 4 MB
   table (`artifacts/openbeken-sonoff-s61-<version>.rbl`) and ESPHome
   (`artifacts/esphome-sonoff-s61-<version>.rbl`), built and pinned by
   `tools/repo/update_firmware.py` ([docs/updating-firmware.md](../../docs/updating-firmware.md)).
@@ -42,3 +42,8 @@ worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-e
   first conversion (a run to ESPHome installs OpenBeken first, as the interim
   firmware, to take it). Run end to end in the emulator in every direction, faults and
   all ([its fault suite](../../docs/testing.md#the-s61s-fault-suite)); never yet on a real plug.
+  From Sonoff's firmware a run to OpenBeken is B1, B2 (sent through eWeLink),
+  K1, B4; a run to ESPHome is B1, B2 (OpenBeken as the interim firmware), J1,
+  B4 (the backup through it), J2 (it fetches ESPHome), K2. A run back to
+  Sonoff's firmware ends with K3: eWeLink shows the plug online, and it
+  answers there.

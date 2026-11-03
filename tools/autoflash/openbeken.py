@@ -51,7 +51,7 @@ def info(host: str, timeout: float = 4.0) -> dict[str, Any] | None:
 
 def kind(host: str, found: dict[str, Any], timeout: float = 4.0) -> kinds.Kind | None:
     """The kind of plug the OpenBeken at `host` (its /api/info `found`) is
-    on, when the tool installed it: its import module answers AutoflashKind
+    on, when the tool installed it: its driver answers AutoflashKind
     for its own kind alone - its name says nothing, being alike on every
     firmware and the user's to change.  None for an OpenBeken the tool did
     not install, which knows no such command, or one that cannot say."""
@@ -66,8 +66,8 @@ def kind(host: str, found: dict[str, Any], timeout: float = 4.0) -> kinds.Kind |
 
 def is_interim(host: str, timeout: float = 4.0) -> bool | None:
     """Whether the OpenBeken at `host` - one the tool installed (kind) - is
-    the interim firmware: its import module answers AutoflashInterim for
-    that alone (an OpenBeken whose module predates it does not know the
+    the interim firmware: its driver answers AutoflashInterim for
+    that alone (an OpenBeken whose driver predates it does not know the
     command).  None where it does not answer."""
     try:
         command(host, "AutoflashInterim", timeout)
@@ -80,7 +80,7 @@ def is_interim(host: str, timeout: float = 4.0) -> bool | None:
 
 def set_interim(host: str, interim: bool, timeout: float = 10.0) -> None:
     """The OpenBeken at `host` made the interim firmware (autoflash-recovery-CDEF),
-    or the plug's OpenBeken for good (openbeken-abcdef), as its import module
+    or the plug's OpenBeken for good (openbeken-abcdef), as its driver
     names each; its DHCP and mDNS names follow on its next start."""
     command(host, f"AutoflashInterim {'on' if interim else 'off'}", timeout)
 

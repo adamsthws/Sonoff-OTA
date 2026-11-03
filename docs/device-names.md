@@ -27,8 +27,8 @@ lower case. Each plug works its own out, so no two plugs share a name.
 | after F4 | official Tasmota, converted | `tasmota-abcdef` | given by F4 as its reset saves |
 | L1-M1 | the mover (ESPHome) | `autoflash-recovery-CDEF` | compiled in, written over ESPHome's name at boot |
 | after M1/I2 | ESPHome, converted | `esphome-abcdef` | compiled in (ESPHome's own MAC suffix) |
-| S61, converted | OpenBeken | `openbeken-abcdef` | set by its import module at its first start |
-| S61, J1-J2 | the interim firmware (OpenBeken), on a run to ESPHome | `autoflash-recovery-CDEF` | set by its import module at its first start, from the marker B2 sends after the image |
+| S61, converted | OpenBeken | `openbeken-abcdef` | set by the tool's OpenBeken driver at its first start |
+| S61, J1-J2 | the interim firmware (OpenBeken), on a run to ESPHome | `autoflash-recovery-CDEF` | set by the tool's OpenBeken driver at its first start, from the marker B2 sends after the image |
 | S61, converted | ESPHome | `esphome-abcdef` | compiled in, as the S60's |
 
 Every converted plug's name is its firmware's and the MAC's last three
@@ -184,7 +184,7 @@ All in [`tools/autoflash/names.py`](../tools/autoflash/names.py) unless said:
   `esphome_legacy_prefix`), and the friendly name its ESPHome had before its
   comment said the kind (`esphome_legacy_friendly_name`). No kind is told by
   a name, which the user may change: Tasmota by its template, ESPHome by its
-  comment, OpenBeken by its import module's answer to `AutoflashKind`
+  comment, OpenBeken by its driver's answer to `AutoflashKind`
   ([`devices/sonoff-s61/openbeken.md`](../devices/sonoff-s61/openbeken.md)).
 - [`tools/beken/openbeken/drv_autoflash.c`](../tools/beken/openbeken/drv_autoflash.c):
   `autoflash_name()`, both the Beken plugs' OpenBeken names - `openbeken-%02x%02x%02x`, and
