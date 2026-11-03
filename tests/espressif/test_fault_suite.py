@@ -61,6 +61,33 @@ class SavedPlugTests(unittest.TestCase):
         self.assertEqual(self.saved_as(None, MAC), "stub-suite-tasmota")
 
 
+class RunWordsTests(unittest.TestCase):
+    """The lines of a run the suite times its faults by, as the tool says them
+    now: reworded, a fault would never fire there (NOT-FIRED)."""
+
+    def test_c3_starts_at_the_line_the_backup_begins_with(self):
+        import re
+        source = (Path(__file__).resolve().parents[2] / "tools/autoflash/routes/espressif/installer.py")
+        self.assertRegex(source.read_text(encoding="utf-8"), re.compile(fs.STARTS["C3"][0]))
+        self.assertRegex("Backing up the plug's Sonoff firmware - about a minute...", fs.STARTS["C3"][0])  # legacy
+
+    def test_f4_without_the_driver_is_told_by_what_its_reset_says(self):
+        from types import SimpleNamespace
+        from tools.autoflash import output
+        from tools.autoflash.routes.espressif import tasmota
+        from tests.autoflash import test_autoflash
+        # A Tasmota that does not take the name and template at the reset's save.
+        device = SimpleNamespace(wait_reachable=lambda **_: None, started_at=lambda: "t",
+                                 uptime_seconds=lambda: 10, wait_for_reboot=lambda **_: 1.0,
+                                 command=test_autoflash.ConfigureStepTests.console([]), is_safeboot=lambda: False,
+                                 at_next_save=lambda commands, timeout=None: False)
+        state = SimpleNamespace(input=lambda key: {"product_model": "S60TPF"}.get(key))
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device, state=state)
+        with mock.patch.object(output, "say") as said:
+            tasmota.step_configure(ctx)
+        self.assertRegex(" ".join(str(c.args[0]) for c in said.call_args_list), fs.NOHOOK_RESET)
+
+
 class ScaledBatchTests(unittest.TestCase):
     def allowed_with(self, text):
         with tempfile.TemporaryDirectory() as out:
@@ -84,6 +111,15 @@ class ScaledBatchTests(unittest.TestCase):
 
 
 class ScenarioTests(unittest.TestCase):
+    def test_batch_takes_the_file_list_writes(self):
+        # `list > all.txt` then `batch all.txt`, as docs/testing.md runs them:
+        # each line an id and whether it needs the cloud.
+        with tempfile.TemporaryDirectory() as tmp:
+            listed = Path(tmp, "all.txt")
+            listed.write_text("sonoff>tasmota:C3:outage-5 cloud\ntasmota>esphome:L1:outage-5 any\n\n",
+                              encoding="utf-8")
+            self.assertEqual(fs.read_ids(listed), ["sonoff>tasmota:C3:outage-5", "tasmota>esphome:L1:outage-5"])
+
     def test_every_scenario_has_its_own_id(self):
         ids = [sc["id"] for sc in fs.scenarios()]
         self.assertEqual(len(ids), len(set(ids)))
@@ -198,6 +234,53 @@ class ScenarioTests(unittest.TestCase):
             self.assertIn(f"--code={tree}", old)
             self.assertNotIn("--firmware", old)
             self.assertEqual(new[-2:], ["--firmware", "tasmota"])
+
+    def test_a_legacy_tree_is_run_by_its_own_driver(self):
+        # unattended-test.sh --code: a release from before the reorganisation
+        # keeps its driver, and the tool it starts, directly in tools/.
+        import re
+        import subprocess
+        script = (fs.REPO / "tools/espressif/emulator/unattended-test.sh").read_text(encoding="utf-8")
+        choice = re.search(r"^driver=.*\n.*\|\| driver=.*\n", script, re.M).group(0)
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp, "work")
+            (work / "tools/repo").mkdir(parents=True)
+            (work / "tools/unattended_run.py").touch()
+            for tree, driver in (("old", "tools/unattended_run.py"), ("new", "tools/repo/unattended_run.py")):
+                if tree == "new":
+                    (work / driver).touch()
+                chosen = subprocess.run(["bash", "-c", choice + 'echo "$driver"'], env={"STATE": tmp},
+                                        capture_output=True, text=True, check=True).stdout.strip()
+                self.assertEqual(chosen, driver, tree)
+
+    def test_a_legacy_tree_goes_in_only_once_the_stub_has_started_from_this_checkout(self):
+        # Swapped in as the emulator started, a release from before the
+        # reorganisation took away what the stub reads the plug with: no stub,
+        # and every 2.0.2 run stopped at "Connection refused".
+        script = (fs.REPO / "tools/espressif/emulator/unattended-test.sh").read_text(encoding="utf-8")
+        self.assertLess(script.index("tmux has-session"), script.index('"$code/" "$STATE/work/"'))
+
+    @unittest.skipUnless(all(fs.subprocess.run(["git", "-C", str(fs.REPO), "rev-parse", "-q", "--verify",
+                                                f"refs/tags/{tag}"], capture_output=True).returncode == 0
+                             for tag in fs.LEGACY_STEPS), "no release tags in this checkout")
+    def test_each_legacy_release_takes_its_patch(self):
+        # The reorganisation moved 1.2.0's patch to tools/ewelink/, which 1.2.0
+        # never had: every 1.2.0 scenario was a HARNESS-ERROR.
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(fs, "LEGACY", Path(tmp)):
+            for tag in fs.LEGACY_STEPS:
+                with self.subTest(tag=tag):
+                    fs.legacy_tree(tag)
+
+    def test_a_legacy_run_is_killed_by_its_own_tools_name(self):
+        # 2.0.x's tool is tools/autoflash_cli.py, 1.2.0's tools/s60_autoflash.py.
+        import re
+        sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "D4", "fault": "legacy",
+                              "arg": "v2.0.2", "at": 40}, "/dev/null")
+        with mock.patch.object(sc, "ex") as ex:
+            sc.fault("legacy", "v2.0.2", 0, None)
+        patterns = [c.args[-1] for c in ex.call_args_list if c.args[0] == "pkill"]
+        for tool in ("tools/autoflash_cli.py", "tools/s60_autoflash.py"):
+            self.assertTrue(any(re.search(p, tool) for p in patterns), tool)
 
     def test_the_cut_in_the_g1_after_a_legacy_run_lands_in_this_checkouts_g1(self):
         # Timed by 1.2.0's G1 (33 s), it came after this one's (21 s from

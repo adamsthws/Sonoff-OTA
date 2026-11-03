@@ -136,8 +136,11 @@ OTHER = {"tasmota": "esphome", "esphome": "tasmota"}
 # F4tp is the restart after F4's fallback sent the template itself (the
 # reset's save did not take it): cut off before Tasmota saves, the plug comes
 # back without it.
-STARTS = {"C3": (r"Backing up the plug's Sonoff firmware", 12), "C3fb": (r"\] C3  ", 14),
+# The tool says "device"; the releases legacy runs use, "plug".
+STARTS = {"C3": (r"Backing up the (?:plug|device)'s Sonoff firmware", 12), "C3fb": (r"\] C3  ", 14),
           "F4rs": (r"Settings reset to Tasmota's defaults", 3), "F4tp": (r"Template applied as", 2)}
+# F4's reset without the Berry driver: the name and template not put in.
+NOHOOK_RESET = re.compile(r"Settings reset to Tasmota's defaults, keeping the Wi-Fi; the (?:plug|device)")
 STEP_OF = {"C3fb": "C3", "F4rs": "F4", "F4tp": "F4"}  # the tool's own name for a step
 
 # Each length where it can lead somewhere the others do not (2026-10-21): an
@@ -330,6 +333,7 @@ LEGACY_STARTS = {
 }
 LEGACY = EMU / "legacy"
 LEGACY_TOOL = "tools/s60_autoflash.py"  # its name until 2.0.0
+LEGACY_TOOLS = (LEGACY_TOOL, "tools/autoflash_cli.py")  # and until the reorganisation
 # What a run says when an error it did not expect stops it (tools.autoflash.cli._main).
 UNEXPECTED = "something unexpected went wrong"
 LEGACY_NAMED = {"G1", "H1"}  # killed past its F4: the plug keeps the name that release gave it
@@ -837,7 +841,7 @@ class Scenario:
         elif fault == "crash":
             self.signal("KILL", *HELPERS, TOOL)
         elif fault == "legacy":
-            self.signal("KILL", *HELPERS, LEGACY_TOOL, TOOL)
+            self.signal("KILL", *HELPERS, *LEGACY_TOOLS, TOOL)
         elif fault == "cancel":
             self.signal("INT"); time.sleep(1); self.signal("INT")
         elif fault == "ctrlc" and arg == "once":
@@ -1626,8 +1630,8 @@ class Scenario:
                 special = "FAIL-DISTURBED"  # the refused run must not disturb the first
             elif fault == "diskfull" and not self.backup_whole():
                 special = "FAIL-BAD-BACKUP"  # never on without the whole backup
-            elif fault == "nohook" and "Settings reset to Tasmota's defaults, keeping the Wi-Fi; the plug" \
-                    not in re.sub(r"\s+", " ", "".join(t for _, _, t in run_logs(self.state))):
+            elif fault == "nohook" and not NOHOOK_RESET.search(
+                    re.sub(r"\s+", " ", "".join(t for _, _, t in run_logs(self.state)))):
                 special = "NOT-FIRED"  # F4 took the name and template at the save after all
             elif any(len(re.findall(r"Type PROCEED to go ahead", run)) > 1
                      for m, p, t in run_logs(self.state) if m >= self.started
@@ -1770,6 +1774,12 @@ def worker(n, todo, lock, cloud=False, room=None):
         TUNER.finished(row, log, started)
 
 
+def read_ids(path) -> list[str]:
+    """The scenario ids in a file, one to a line - as `list` writes them, each
+    with whether it needs the cloud after it."""
+    return [line.split()[0] for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
 def batch(ids_file=None):
     """The scenarios in ids_file (every one without) not yet passed here: the
     cloud ones on AUTOFLASH_CLOUD_WORKERS emulators from instance 1, the rest on
@@ -1778,7 +1788,7 @@ def batch(ids_file=None):
     known = {sc["id"]: sc for sc in scenarios()}
     done = {i for i, row in latest().items() if row["verdict"] in ("PASS", "EMULATOR-LIMIT", "NO-TRAFFIC")}
     cloud, anywhere = queue.Queue(), queue.Queue()
-    ids = Path(ids_file).read_text(encoding="utf-8").split() if ids_file else list(known)
+    ids = read_ids(ids_file) if ids_file else list(known)
     for i in ids:
         if i in done:
             continue

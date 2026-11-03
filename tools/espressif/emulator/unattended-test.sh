@@ -136,25 +136,31 @@ keep_plug() {
 }
 [ "$keep" = 1 ] || trap 'keep_plug; docker stop "$NAME" >/dev/null 2>&1 || true' EXIT
 
-# Another tool over the same captures (--code), as emu.sh copies this checkout's.
-# Not tools/espressif/emulator: the emulator's own (its cloud stub, started from there)
-# stays this checkout's, whatever tool it runs.
-if [ -n "$code" ]; then
-    rsync -a --delete --exclude /captures --exclude /.venv --exclude /.python --exclude /.git \
-          --exclude /.env --exclude __pycache__/ --exclude /tools/espressif/emulator/ "$code/" "$STATE/work/"
-fi
-# A release from before the AUTOFLASH_ names reads the emulator's settings
-# under its own (S60_).
-legacy_env=()
-[ -f "$STATE/work/tools/s60_autoflash.py" ] && legacy_env=(-e S60_EMULATOR_URL="http://localhost:$PORT"
-                                                         -e S60_EMULATOR_SUDO_PASSWORD=autoflash)
-
 as_you=(docker exec -u "$(id -u):$(id -g)" -w /work)
 waited=0
 until "${as_you[@]}" "$NAME" tmux has-session -t autoflash >/dev/null 2>&1; do
     [ $((waited += 2)) -le 120 ] || { echo "The emulator did not start within 120s." >&2; exit 1; }
     sleep 2
 done
+
+# Another tool over the same captures (--code), as emu.sh copies this checkout's.
+# Not tools/espressif/emulator: the emulator's own (its cloud stub, started from there)
+# stays this checkout's, whatever tool it runs. Only once the emulator is up: the
+# stub starts by reading the plug with this checkout's tools (seen: an older
+# release's tree, swapped in first, had no tools/espressif/inspect_stock_nvs.py).
+if [ -n "$code" ]; then
+    rsync -a --delete --exclude /captures --exclude /.venv --exclude /.python --exclude /.git \
+          --exclude /.env --exclude __pycache__/ --exclude /tools/espressif/emulator/ "$code/" "$STATE/work/"
+fi
+# The tree's own driver, which knows where its tool is: a release from before
+# the reorganisation keeps both directly in tools/.
+driver=tools/repo/unattended_run.py
+[ -f "$STATE/work/$driver" ] || driver=tools/unattended_run.py
+# A release from before the AUTOFLASH_ names reads the emulator's settings
+# under its own (S60_).
+legacy_env=()
+[ -f "$STATE/work/tools/s60_autoflash.py" ] && legacy_env=(-e S60_EMULATOR_URL="http://localhost:$PORT"
+                                                         -e S60_EMULATOR_SUDO_PASSWORD=autoflash)
 # A plug off the network - on its own setup network after a power cut, say -
 # is one the run must find for itself: waited for, but not required.
 waited=0
@@ -206,7 +212,7 @@ stub_env=()
     -e AUTOFLASH_TASMOTA_PASSWORD="${AUTOFLASH_TASMOTA_PASSWORD:-}" -e AUTOFLASH_ESPHOME_OTA_PASSWORD="${AUTOFLASH_ESPHOME_OTA_PASSWORD:-}" \
     -e AUTOFLASH_ESPHOME_WEB_USER="${AUTOFLASH_ESPHOME_WEB_USER:-}" -e AUTOFLASH_ESPHOME_WEB_PASSWORD="${AUTOFLASH_ESPHOME_WEB_PASSWORD:-}" \
     -e AUTOFLASH_ESPHOME_API_KEY="${AUTOFLASH_ESPHOME_API_KEY:-}" \
-    -e HOME=/tmp "$NAME" /opt/venv/bin/python tools/repo/unattended_run.py --size 100x40 \
+    -e HOME=/tmp "$NAME" /opt/venv/bin/python "$driver" --size 100x40 \
     --save "captures/unattended/$stamp" -- --env-file "$answers" "${run_args[@]}" || status=$?
 
 echo "On this computer: ${STATE#"$ROOT/"}/work/captures/unattended/$stamp/"
