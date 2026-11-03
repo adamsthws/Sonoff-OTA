@@ -164,6 +164,16 @@ check.
 - A first Ctrl-C asks "! Are you sure?", under the stage line where it was
   shown after a second copy of it, counts down the seconds a second Ctrl-C
   stops the run at once, and goes when they are up.
+- A plug on an earlier release of this project's ESPHome is offered this
+  one as an update (`--firmware esphome` chooses it in advance): sent as an
+  ordinary ESPHome update, its settings kept, the Wi-Fi read from the plug.
+  So a fix reaches a plug no ESPHome dashboard builds for. Only an ESPHome
+  that says it is this project's for its kind, through its API, and whose
+  API is not encrypted is offered it: one adopted into a dashboard is that
+  dashboard's to update.
+- A device hanging up on the tool as it writes - a plug restarting under a
+  check - no longer ends the run on the spot, with nothing cleaned up: the
+  tool set SIGPIPE to end it, for quiet output into `head`.
 
 ## 2.2.0
 

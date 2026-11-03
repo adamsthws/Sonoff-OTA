@@ -338,11 +338,17 @@ def refused_for_another_run(command: str, ctx: Context) -> bool:
 
 def main() -> int:
     try:
-        return _main()
-    finally:
-        # However it ended - finished, failed, quit or Ctrl-C - leave a blank
-        # line between the last message and the shell's prompt.
-        print(flush=True)
+        try:
+            return _main()
+        finally:
+            # However it ended - finished, failed, quit or Ctrl-C - leave a blank
+            # line between the last message and the shell's prompt.
+            print(flush=True)
+    except BrokenPipeError:
+        # Piped into head or less, which stopped reading: quiet, as any command
+        # is.  Python writes what is left as it exits, so that goes nowhere.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 1
 
 
 def admin_password() -> str:
@@ -364,17 +370,21 @@ def admin_password() -> str:
     return prompts.ask_admin_password()
 
 
-def _main() -> int:
-    hostsys.password_asker = admin_password
-    # Keep piping into head/less quiet rather than raising BrokenPipeError.
-    if hasattr(signal, "SIGPIPE"):
-        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-    # Being stopped, or the terminal being closed, must still run the cleanup
-    # in the finally blocks: the stored secrets and the firewall rule.
+def handle_signals() -> None:
+    """Being stopped, or the terminal being closed, must still run the cleanup
+    in the finally blocks: the stored secrets and the firewall rule.  SIGPIPE
+    is left as Python sets it, so a plug that hangs up on a write raises
+    BrokenPipeError, which the code talking to it handles, rather than ending
+    the run with no cleanup (main handles a closed pipe on the output)."""
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     # Ctrl-C asks before it stops a run part way; the window closing stops it,
     # and is remembered (tools/autoflash/interrupt.py).
     interrupt.install()
+
+
+def _main() -> int:
+    hostsys.password_asker = admin_password
+    handle_signals()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", action="version", version=f"Autoflash {__version__}")
     parser.add_argument("command", choices=["run", "status", "step", "list", "cleanup"])

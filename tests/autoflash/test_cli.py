@@ -40,6 +40,46 @@ class BeforeTheRunTests(unittest.TestCase):
         self.assertIn("Stopped. Nothing was changed.", screen)
 
 
+class PipeTests(unittest.TestCase):
+    """Each in a process of its own: what it does to signals stays there."""
+
+    @staticmethod
+    def child(code, run=None, **kwargs):
+        import subprocess
+        import sys
+        from tools.autoflash.runs import ROOT
+        return (run or subprocess.run)([sys.executable, "-c", "from tools.autoflash import cli\n" + code],
+                                       cwd=ROOT, **kwargs)
+
+    def test_a_device_hanging_up_on_a_write_raises_rather_than_ending_the_run(self):
+        # A plug restarting under an update closes the connection a check of it
+        # is writing to; ended there, the run cleans up nothing.
+        done = self.child(
+            "import socket\n"
+            "cli.handle_signals()\n"
+            "ours, plugs = socket.socketpair()\n"
+            "plugs.close()\n"
+            "try:\n"
+            "    for _ in range(4):\n"
+            "        ours.sendall(bytes(65536))\n"
+            "except BrokenPipeError:\n"
+            "    raise SystemExit(7)\n", capture_output=True, timeout=60)
+        self.assertEqual(done.returncode, 7, done.stderr)
+
+    def test_piped_into_a_reader_that_stops_it_ends_quietly(self):
+        # As head does: a row read, then the pipe closed.
+        import subprocess
+        child = self.child("import sys\n"
+                           "cli._main = lambda: [print('a row of output') for _ in range(100_000)] and 0\n"
+                           "sys.exit(cli.main())\n", run=subprocess.Popen,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        child.stdout.readline()
+        child.stdout.close()
+        with child.stderr:
+            said = child.stderr.read()
+        self.assertEqual((child.wait(timeout=60), said), (1, b""))
+
+
 class RunToLookAtTests(unittest.TestCase):
     """`status` and `cleanup` report on a run without starting one."""
 
