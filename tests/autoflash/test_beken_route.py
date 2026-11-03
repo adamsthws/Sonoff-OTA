@@ -71,6 +71,7 @@ class RouteTests(unittest.TestCase):
         for step in beken.DESTRUCTIVE_STEPS:
             self.assertIn(step, beken.ATTEMPTED_EVIDENCE, step)
         self.assertFalse(beken.DESTRUCTIVE_STEPS & beken.RETRY_STEPS)
+        self.assertIn("J3", beken.RETRY_STEPS)   # the name set again, and a restart
 
     def test_an_s61_run_takes_these_steps(self):
         with tempfile.TemporaryDirectory() as tmp:

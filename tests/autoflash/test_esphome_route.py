@@ -127,6 +127,12 @@ class RouteTests(RouteTestCase):
         routes.apply_target("tasmota")
         self.assertEqual(routes.stage_name("D4"), "Preparing memory layout")
 
+    def test_the_steps_that_only_wait_or_repeat_what_they_did_are_tried_again(self):
+        # I2 waits for ESPHome and gives it the calibration again; T1 finds
+        # Tasmota back already, or uploads to Tasmota's safeboot only.
+        self.assertLessEqual({"I2", "T1"}, espressif.RETRY_STEPS)
+        self.assertFalse({"C2", "E3"} & espressif.RETRY_STEPS)   # these happen once
+
     def test_an_install_cut_short_by_the_network_is_tried_again(self):
         self.assertIn("I1", espressif.RETRY_STEPS)
         said = ("esphome did not pass: the device says: migration_refused: "

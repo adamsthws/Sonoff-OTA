@@ -91,9 +91,9 @@ def steps_for(firmware: str, source: str = "sonoff") -> Steps:
 
 # The steps that write to the plug, which happen once; and those tried again by
 # themselves when they fail for a reason that may pass: each only reads, or
-# waits.
+# waits - or, J3, sets the name it set again and restarts the plug.
 DESTRUCTIVE_STEPS = {"B2", "J2", "J4", "O1", "O2", "E1", "E2"}
-RETRY_STEPS = {"B1", "J1", "K1", "K2", "K3", "B4"}
+RETRY_STEPS = {"B1", "J1", "J3", "K1", "K2", "K3", "B4"}
 # No Tasmota here to lose its settings and raise a network of its own.
 ERASED_CHECK_STEPS: set[str] = set()
 STAGE_NAMES = {

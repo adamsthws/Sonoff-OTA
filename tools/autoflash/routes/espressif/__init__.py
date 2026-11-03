@@ -136,9 +136,11 @@ def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Cal
 # only over the recovery Safeboot), or sets what it sets again.  Not the steps that ask
 # for anything, nor C2 or E3, which must happen once.
 # I1 too: until the plug restarts it runs Tasmota from ota_1, and writes the
-# same checked image again; once it runs ESPHome, I1 finds it and stops.
-RETRY_STEPS = {"A2", "D1", "D4", "E1", "E2", "F4", "G1", "H1", "I1",
-               "L1", "M1", "X1", "X2", "D5", "R1"}
+# same checked image again; once it runs ESPHome, I1 finds it and stops.  I2
+# only waits for ESPHome and gives it the calibration again; T1 finds Tasmota
+# back already, or uploads to Tasmota's safeboot only.
+RETRY_STEPS = {"A2", "D1", "D4", "E1", "E2", "F4", "G1", "H1", "I1", "I2",
+               "L1", "M1", "X1", "X2", "D5", "R1", "T1"}
 # The steps run on a Tasmota given the Wi-Fi: one that has lost its settings
 # instead raises its own network (F4 looks for that itself, F2 starts on the
 # startup firmware).

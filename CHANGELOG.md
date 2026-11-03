@@ -133,7 +133,20 @@ check.
   firmware it was leaving; on an S60, a high slot, partition table or
   Safeboot not as the step left them, or the recovery firmware where the
   official app should be.
+- A device not seen on the network at the start is looked for twice more
+  by itself, 15 s apart, before the run asks what now: one just plugged in,
+  or on a busy Wi-Fi, answers a moment later.
+- A password or key check the device gives no answer to is asked again by
+  itself, with what was typed, before the person is asked to choose again.
+- On an S60, an upload cut off by the network is sent again by itself once
+  the device shows it did not take it, where it was left to the person to
+  upload through the device's page; one taken, its answer lost, is not sent
   again.
+- More steps are tried again by themselves after a network blip: ESPHome's
+  arrival check and Tasmota put back on an S60, and the interim firmware
+  made the plug's own OpenBeken on an S61.
+- On an S60, a backup whose two reads fail is read twice more by itself
+  before the run asks whether to try again or carry on without one.
 - A blank line stands between every question and the options or text above
   it.
 - A first Ctrl-C asks "! Are you sure?", under the stage line where it was

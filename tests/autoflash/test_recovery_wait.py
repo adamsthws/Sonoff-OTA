@@ -26,5 +26,27 @@ class RecoveryWaitTests(unittest.TestCase):
             self.assertFalse(tasmota.recovery_firmware_up(ctx, 0.0, within=300))
 
 
+class StepCanonicalWaitTests(unittest.TestCase):
+    """F2 asks what now once it has waited five minutes: ten with nothing to
+    see would be too long."""
+
+    def wait(self, seen):
+        ctx = types.SimpleNamespace(state=types.SimpleNamespace(data={}, input=lambda key, default=None: None),
+                                    device=types.SimpleNamespace(), dry_run=True)
+        with mock.patch.object(tasmota, "recovery_firmware_up", side_effect=seen), \
+                mock.patch.object(tasmota.runs, "run_source", return_value="sonoff"), \
+                mock.patch.object(tasmota, "startup_settings_report", return_value=None), \
+                mock.patch.object(tasmota.prompts, "section"), mock.patch.object(time, "sleep"), \
+                mock.patch.object(tasmota.prompts, "ask_choice", return_value=0) as asked, \
+                mock.patch.object(output, "say"), mock.patch.object(output, "transient_begin"), \
+                mock.patch.object(output, "transient_end"):
+            tasmota.step_canonical(ctx)
+        return asked.call_count
+
+    def test_the_person_is_asked_after_the_first_wait(self):
+        self.assertEqual(self.wait([True]), 0)
+        self.assertEqual(self.wait([False, True]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

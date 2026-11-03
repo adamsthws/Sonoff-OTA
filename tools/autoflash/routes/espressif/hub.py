@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from tools.autoflash import device, esphome, join, names, output, phases, plans, prompts
+from tools.autoflash import device, errors, esphome, join, names, output, phases, plans, prompts
 from tools.autoflash.device import DeviceError, UploadRefused
 from tools.autoflash.errors import Abort
 from tools.autoflash.runs import ROOT
@@ -28,6 +28,7 @@ def upload_or_prompt(ctx: "Context", path: Path, what: str) -> str:
     """
     device = ctx.device
     for attempt in range(1, UPLOAD_ATTEMPTS + 1):
+        booted = boot_of(device)
         try:
             started = time.monotonic()
             device.upload_firmware(path)
@@ -41,9 +42,43 @@ def upload_or_prompt(ctx: "Context", path: Path, what: str) -> str:
             output.tell(f"    The device refused the upload ({exc.reason}); sending it again "
                  f"(attempt {attempt + 1} of {UPLOAD_ATTEMPTS}).")
             time.sleep(5)
+        except errors.NETWORK_ERRORS as exc:
+            # Cut off on the way - the Wi-Fi going, say.  Sent again only once
+            # the plug shows it did not take it: an upload taken is booted, and
+            # another would write the other slot and boot that instead.
+            took = upload_took(device, booted)
+            if took:
+                output.say(f"{what} was taken, though its answer was lost ({exc}): the device restarted.")
+                return "http:answer lost"
+            if took is None or attempt == UPLOAD_ATTEMPTS:
+                return upload_or_prompt_by_hand(ctx, path, what, exc)
+            output.tell(f"    The upload was cut off ({exc}); sending it again "
+                        f"(attempt {attempt + 1} of {UPLOAD_ATTEMPTS}).")
         except Exception as exc:  # noqa: BLE001 - any failure falls back to the operator
             return upload_or_prompt_by_hand(ctx, path, what, exc)
     raise AssertionError("unreachable")
+
+
+def boot_of(device: device.Device) -> str | None:
+    """Which boot the plug is on (device.started_at), or None if it cannot say."""
+    try:
+        return device.started_at()
+    except (DeviceError, OSError):
+        return None
+
+
+def upload_took(device: device.Device, booted: str | None) -> bool | None:
+    """After an upload cut off: whether the plug took it - restarted, on
+    another boot than `booted` - once it answers again; None where that cannot
+    be told (it does not answer, or could not say which boot it was on)."""
+    if booted is None:
+        return None
+    try:
+        device.wait_reachable(timeout=120)
+        now = boot_of(device)
+    except DeviceError:
+        return None
+    return None if now is None else now != booted
 
 
 def upload_or_prompt_by_hand(ctx: "Context", path: Path, what: str, exc: Exception) -> str:

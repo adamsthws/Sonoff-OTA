@@ -125,15 +125,27 @@ class FindAccountPlugTests(unittest.TestCase):
         asked.assert_not_called()
         shown.assert_not_called()  # the stage line completing is all the screen needs
 
-    def test_looking_again_finds_it_once_it_answers(self):
+    def test_it_is_looked_for_again_by_itself_before_anyone_is_asked(self):
+        # Just plugged in, or a busy Wi-Fi: it answers a moment later.
         plug = account.account_plug(S60)
         with mock.patch.object(account, "sight_plugs", side_effect=[
                 [account.Sighting(plug, "192.168.0.50", False)],
                 [account.Sighting(plug, "192.168.0.50", True)]]), \
-             mock.patch.object(prompts, "ask_choice", return_value=0), \
+             mock.patch.object(prompts, "ask_choice") as asked, mock.patch.object(time, "sleep"), \
+             mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
+            self.assertEqual(account.find_account_plug(self.ctx(), [S60]), "192.168.0.50")
+        asked.assert_not_called()
+
+    def test_looking_again_finds_it_once_it_answers(self):
+        plug = account.account_plug(S60)
+        unseen = [account.Sighting(plug, "192.168.0.50", False)]
+        with mock.patch.object(account, "sight_plugs", side_effect=[unseen] * (account.LOOK_AGAIN + 1) + [
+                [account.Sighting(plug, "192.168.0.50", True)]]), \
+             mock.patch.object(prompts, "ask_choice", return_value=0) as asked, mock.patch.object(time, "sleep"), \
              mock.patch.object(prompts, "section") as shown, \
              mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
             self.assertEqual(account.find_account_plug(self.ctx(), [S60]), "192.168.0.50")
+        asked.assert_called_once()   # only once it had been looked for again by itself
         self.assertIn("turn on LAN Control", shown.call_args.args[1][0])
 
     def clock(self):
@@ -183,8 +195,21 @@ class FindAccountPlugTests(unittest.TestCase):
              mock.patch.object(output, "tell"), mock.patch.object(output, "say"):
             self.assertEqual(account.find_account_plug(ctx, [offline]), "192.168.0.99")
         self.assertIn("eWeLink shows it offline", shown.call_args.args[1][0])
-        # Looked again every 10 s for the minute before asking.
-        self.assertEqual(ctx.account_devices.call_count, int(account.CLOUD_CATCH_UP // 10))
+        # Looked again every 10 s for the minute, then LOOK_AGAIN times more, before asking.
+        self.assertEqual(ctx.account_devices.call_count, int(account.CLOUD_CATCH_UP // 10) + account.LOOK_AGAIN)
+
+    def test_without_ewelink_a_plug_not_answering_is_looked_for_again_before_asking(self):
+        with mock.patch.object(account, "find_ewelink_plugs", side_effect=[[], [], [("192.168.0.50", "S60")]]), \
+             mock.patch.object(prompts, "ask_choice") as asked, mock.patch.object(time, "sleep"), \
+             mock.patch.object(output, "say"):
+            self.assertEqual(account.find_any_plug(), "192.168.0.50")
+        asked.assert_not_called()
+        with mock.patch.object(account, "find_ewelink_plugs", side_effect=[[]] * (account.LOOK_AGAIN + 1)), \
+             mock.patch.object(prompts, "ask_choice", return_value=1) as asked, mock.patch.object(time, "sleep"), \
+             mock.patch.object(prompts, "ask_ipv4", return_value="192.168.0.99"), \
+             mock.patch.object(prompts, "section"), mock.patch.object(output, "say"):
+            self.assertEqual(account.find_any_plug(), "192.168.0.99")
+        asked.assert_called_once()
 
     def test_a_plug_without_internet_is_not_chosen(self):
         sighting = account.Sighting(account.account_plug({**S60, "online": False}), "192.168.0.50", True)

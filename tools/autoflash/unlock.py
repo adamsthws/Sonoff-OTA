@@ -5,6 +5,8 @@ in memory only.
 
 from __future__ import annotations
 
+import functools
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -53,6 +55,26 @@ def typed_secret(prompt: str, label: str) -> Callable[[], str]:
     return ask
 
 
+# A check the plug gave no answer to is asked again this many times, this far
+# apart, before the person is: a plug busy or slow to answer one moment
+# answers the next, and asking again is all they could choose.
+NO_ANSWER_TRIES = 3
+NO_ANSWER_PAUSE = 5.0
+
+
+def answered(check: Callable[[], bool | None]) -> bool | None:
+    """check(), asked again while the plug gives no answer (None), up to
+    NO_ANSWER_TRIES times more."""
+    answer = check()
+    for _ in range(NO_ANSWER_TRIES):
+        if answer is not None:
+            break
+        output.say(f"    The device did not answer; asking it again in {NO_ANSWER_PAUSE:.0f}s.")
+        time.sleep(NO_ANSWER_PAUSE)
+        answer = check()
+    return answer
+
+
 def secret_or_retry(title: str, lines: list[str], secrets: list[Secret],
                     retry: Callable[[], bool | None], *, still: str,
                     last: str | None = None) -> tuple[Secret | None, Any]:
@@ -70,10 +92,10 @@ def secret_or_retry(title: str, lines: list[str], secrets: list[Secret],
         secret = secrets[choice] if choice < len(secrets) else None
         try:
             if secret is None:
-                value, answer = None, retry()
+                value, answer = None, answered(retry)
             else:
                 value = secret.ask()
-                answer = secret.check(value) if value else True
+                answer = answered(functools.partial(secret.check, value)) if value else True
         except ValueError as exc:
             output.tell(f"    {exc}.")
             continue

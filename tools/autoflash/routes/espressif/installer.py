@@ -383,8 +383,11 @@ def backup_not_needed(ctx: Context) -> tuple[str, str] | None:
     return None
 
 
+# Rounds of two reads at the backup before the person is asked what now: the
+# reads only read, so another round is safe, and is what they would choose.
+BACKUP_ROUNDS = 2
 # Testing only (run --simulate-backup-failure): how many backup reads still
-# to fail.  Two fail one round, so the menu that follows can be tried.
+# to fail.  Every round's (2 * BACKUP_ROUNDS), so the menu that follows can be tried.
 SIMULATED_BACKUP_FAILURES = 0
 BACKUP_RETRY, BACKUP_WITHOUT = 0, 1
 
@@ -403,7 +406,7 @@ def backup_failed(problem: str) -> int:
     options = ["Try again", "Carry on without a backup"]
     output.transient_begin()
     prompts.section("The Sonoff firmware could not be backed up", [
-        f"Reading the device's memory failed twice: {problem}.",
+        f"Reading the device's memory failed {2 * BACKUP_ROUNDS} times: {problem}.",
         "",
         "The conversion can be performed without a backup, though that's not recommended.",
     ])
@@ -433,6 +436,7 @@ def back_up_stock(ctx: Context, host: str) -> str:
     known = ctx.state.input("plug_mac")
     output.say("Backing up the device's Sonoff firmware - about a minute...")
     first = True
+    rounds = 0
     while True:
         problem = ""
         for _ in range(2):
@@ -457,6 +461,11 @@ def back_up_stock(ctx: Context, host: str) -> str:
                 problem = str(exc)
             output.say(f"    The backup did not come through: {problem}")
         else:
+            rounds += 1
+            if rounds < BACKUP_ROUNDS:
+                output.say("    Trying the backup again...")
+                continue
+            rounds = 0
             if backup_failed(problem) == BACKUP_RETRY:
                 output.say("    Trying the backup again...")
                 continue

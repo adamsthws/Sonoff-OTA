@@ -2281,6 +2281,31 @@ class EsphomeSafeModeTests(unittest.TestCase):
             self.running([("esphome", ["D5", "I1", "I2"])], answers=["mover"] * 1000)
 
 
+class NoAnswerTests(unittest.TestCase):
+    """A password check the plug gives no answer to is asked again by itself,
+    with what was typed, before the person is asked again."""
+
+    def test_it_asks_the_plug_again_then_the_person(self):
+        answers = iter([None, None, False])
+        checks = []
+
+        def check(value):
+            checks.append(value)
+            return next(answers)
+        secret = unlock.Secret("web password", lambda: "typed-once", check)
+        with mock.patch.object(prompts, "ask_choice", return_value=0) as asked, \
+             mock.patch.object(unlock.time, "sleep"), mock.patch.object(prompts, "section"), \
+             mock.patch.object(output, "say"), mock.patch.object(output, "tell"), \
+             mock.patch.object(output, "transient_begin"), mock.patch.object(output, "transient_end"):
+            self.assertEqual(unlock.secret_or_retry("t", [], [secret], lambda: None, still="")[1], "typed-once")
+        asked.assert_called_once()                       # not again for the plug's silence
+        self.assertEqual(checks, ["typed-once"] * 3)     # nor typed again
+
+    def test_a_plug_that_never_answers_comes_back_to_the_person(self):
+        with mock.patch.object(unlock.time, "sleep"), mock.patch.object(output, "say"):
+            self.assertIsNone(unlock.answered(lambda: None))
+
+
 class ConsentTests(unittest.TestCase):
     """Only the word itself goes ahead, and q stops; anything else is asked again."""
 
@@ -3713,24 +3738,33 @@ class StockBackupTests(unittest.TestCase):
         self.assertEqual(self.back_up([missing]), [])
         self.assertNotIn("stock_backup", self.inputs)
 
-    def test_after_two_failures_the_person_may_carry_on_without(self):
-        (options,) = self.back_up([OSError("a"), OSError("b")])
+    def failing(self):
+        """Every read of a round of BACKUP_ROUNDS failing."""
+        return [OSError(str(n)) for n in range(2 * installer.BACKUP_ROUNDS)]
+
+    def test_a_failed_round_is_read_again_before_anyone_is_asked(self):
+        # The reads only read: another round is what the person would choose.
+        self.assertEqual(self.back_up([OSError("a"), OSError("b"), self.dump]), [])
+        self.assertIn("stock_backup", self.inputs)
+
+    def test_after_every_round_fails_the_person_may_carry_on_without(self):
+        (options,) = self.back_up(self.failing())
         self.assertEqual(options, ["Try again", "Carry on without a backup"])
         self.assertNotIn("stock_backup", self.inputs)
 
     def test_or_try_again(self):
-        self.back_up([OSError("a"), OSError("b"), self.dump], answers=(0,))
+        self.back_up(self.failing() + [self.dump], answers=(0,))
         self.assertIn("stock_backup", self.inputs)
 
     def test_an_unattended_run_carries_on_without(self):
         from tools.autoflash import prompts
         with mock.patch.object(prompts, "UNATTENDED", True), \
              mock.patch.object(prompts, "answered_unattended"):
-            self.assertEqual(self.back_up([OSError("a"), OSError("b")], answers=()), [])
+            self.assertEqual(self.back_up(self.failing(), answers=()), [])
         self.assertNotIn("stock_backup", self.inputs)
 
-    def test_a_simulated_failure_fails_one_round_only(self):
-        with mock.patch.object(installer, "SIMULATED_BACKUP_FAILURES", 2):
+    def test_a_simulated_failure_fails_until_the_question_only(self):
+        with mock.patch.object(installer, "SIMULATED_BACKUP_FAILURES", 2 * installer.BACKUP_ROUNDS):
             asked = self.back_up([self.dump], answers=(0,))
         self.assertEqual(len(asked), 1)
         self.assertIn("stock_backup", self.inputs)
@@ -3776,7 +3810,7 @@ class StockBackupTests(unittest.TestCase):
     def test_or_quit_before_tasmota_is_written(self):
         from tools.autoflash.prompts import QuitRun
         with self.assertRaises(QuitRun):
-            self.back_up([OSError("a"), OSError("b")], answers=("quit",))
+            self.back_up(self.failing(), answers=("quit",))
         self.assertNotIn("stock_backup", self.inputs)
 
 
@@ -4719,10 +4753,15 @@ class RefusedUploadTests(unittest.TestCase):
     """An upload Tasmota took whole and refused (damaged on the way, say) is
     sent again, three tries in all, before it is left to the person."""
 
-    def upload(self, outcomes):
+    def upload(self, outcomes, boots=None, answers=True):
+        """upload_or_prompt with each upload's outcome from `outcomes`, and the
+        boot the plug says it is on, in turn, from `boots` (one boot throughout
+        if not given)."""
         from types import SimpleNamespace
         from unittest import mock
+        from tools.autoflash.device import DeviceError
         tries = iter(outcomes)
+        boot = iter(boots or ["boot 1"] * 20)
         sent = []
 
         def upload_firmware(path, timeout=None):
@@ -4731,12 +4770,32 @@ class RefusedUploadTests(unittest.TestCase):
             if isinstance(outcome, Exception):
                 raise outcome
 
-        ctx = SimpleNamespace(device=SimpleNamespace(upload_firmware=upload_firmware))
+        def wait_reachable(timeout=None):
+            if not answers:
+                raise DeviceError("did not answer")
+
+        ctx = SimpleNamespace(device=SimpleNamespace(upload_firmware=upload_firmware, started_at=lambda: next(boot),
+                                                     wait_reachable=wait_reachable))
         with mock.patch.object(hub, "upload_or_prompt_by_hand", return_value="manual") as by_hand, \
              mock.patch.object(time, "sleep"), \
              mock.patch.object(output, "tell") as told, mock.patch.object(output, "say"):
             result = hub.upload_or_prompt(ctx, Path("berry.bin"), "Berry Tasmota")
         return result, len(sent), by_hand.called, " ".join(str(c.args[0]) for c in told.call_args_list)
+
+    def test_an_upload_cut_off_and_not_taken_is_sent_again(self):
+        result, sent, by_hand, told = self.upload([TimeoutError("timed out"), None])
+        self.assertTrue(result.startswith("http:"))
+        self.assertEqual((sent, by_hand), (2, False))
+        self.assertIn("cut off", told)
+
+    def test_an_upload_cut_off_but_taken_is_not_sent_again(self):
+        # Taken, it is booted: another would write the other slot and boot that.
+        result, sent, by_hand, _ = self.upload([ConnectionResetError("reset")], boots=["boot 1", "boot 2"])
+        self.assertEqual((result, sent, by_hand), ("http:answer lost", 1, False))
+
+    def test_an_upload_cut_off_from_a_plug_that_does_not_answer_is_left_to_the_person(self):
+        result, sent, by_hand, _ = self.upload([TimeoutError("timed out")], answers=False)
+        self.assertEqual((result, sent, by_hand), ("manual", 1, True))
 
     def test_one_refusal_is_sent_again(self):
         from tools.autoflash.device import UploadRefused

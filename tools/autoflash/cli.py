@@ -410,13 +410,13 @@ def _main() -> int:
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="show every action as it happens (it is all in the run's log either way)")
     parser.add_argument("--simulate-backup-failure", action="store_true",
-                        help=argparse.SUPPRESS)  # testing: the backup's first two reads fail
+                        help=argparse.SUPPRESS)  # testing: the backup's reads fail until it asks what now
     parser.add_argument("--simulate-bad-image", nargs="?", const="B2", metavar="STEP",
                         help=argparse.SUPPRESS)  # testing: the S61's image STEP sends is refused by its bootloader
     parser.add_argument("--bridge", help=argparse.SUPPRESS)  # research: archive/docs/reference/automatic-wifi.md
     args = parser.parse_args()
     prompts.UNATTENDED = args.unattended
-    installer.SIMULATED_BACKUP_FAILURES = 2 if args.simulate_backup_failure else 0
+    installer.SIMULATED_BACKUP_FAILURES = 2 * installer.BACKUP_ROUNDS if args.simulate_backup_failure else 0
     beken_images.SPOIL_STEP = args.simulate_bad_image
 
     try:

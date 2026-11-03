@@ -195,11 +195,29 @@ def sight_plugs(plugs: list[AccountPlug]) -> list[Sighting]:
 # A plug that has just started shows offline in eWeLink for a while, answering
 # here or not yet: how long to wait for it to catch up before asking.
 CLOUD_CATCH_UP = 60.0
+# A plug that did not answer is looked for again this many times, this far
+# apart, before the person is asked what now: one just plugged in, or a busy
+# Wi-Fi, answers a moment later, and looking again is what they would choose.
+LOOK_AGAIN = 2
+LOOK_AGAIN_PAUSE = 15.0
+
+
+def looking_again(looked: int) -> bool:
+    """Whether to look again by itself, having looked `looked` times more;
+    waits LOOK_AGAIN_PAUSE first, saying so."""
+    if looked >= LOOK_AGAIN:
+        return False
+    output.say(f"    Not found yet - looking again in {LOOK_AGAIN_PAUSE:.0f}s.")
+    output.progress("not found yet - looking again shortly...")
+    time.sleep(LOOK_AGAIN_PAUSE)
+    output.progress_clear()
+    return True
 
 
 def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
     """The address of the plug to convert, from the account's that answer here."""
     started = time.monotonic()
+    looked = 0
     while True:
         plugs = [plug for plug in map(account_plug, devices) if plug is not None]
         if not plugs:
@@ -252,6 +270,13 @@ def find_account_plug(ctx: Context, devices: list[dict[str, Any]]) -> str:
                     return find_any_plug()
                 devices = refreshed
                 continue
+            if looking_again(looked):
+                looked += 1
+                refreshed = ctx.account_devices()
+                if refreshed is None:
+                    return find_any_plug()
+                devices = refreshed
+                continue
             output.transient_begin()
             if all(map(cut_off, sightings)):
                 # Found here: only its own internet access is in the way.
@@ -290,6 +315,7 @@ def find_any_plug() -> str:
     """Without eWeLink: any plug answering on the network, asking only when
     it is ambiguous."""
     ip = None
+    looked = 0
     while not ip:
         output.say("Looking for supported devices on your network...")
         plugs = find_ewelink_plugs()
@@ -304,6 +330,8 @@ def find_any_plug() -> str:
             )
             output.transient_end()
             ip = plugs[choice][0]
+        elif looking_again(looked):
+            looked += 1
         else:
             # Taken off the screen once answered, so looking again does not
             # stack another copy under the stage line.
