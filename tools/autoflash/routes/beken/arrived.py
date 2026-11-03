@@ -19,6 +19,7 @@ from tools.autoflash import detect, esphome, join, kinds, openbeken, output, plu
 from tools.autoflash.errors import Abort, GoBack
 from tools.autoflash.routes.beken import images, onward
 from tools.beken import backup
+from tools.ewelink import relay as ewelink_relay
 
 if TYPE_CHECKING:
     from tools.autoflash.context import Context
@@ -299,7 +300,8 @@ def step_esphome_check(ctx: Context, wait: float = ARRIVAL_WAIT) -> dict[str, An
 
 def step_sonoff_check(ctx: Context, wait: float = CLOUD_WAIT) -> dict[str, Any]:
     """K3 - Sonoff's firmware started, and the plug back in eWeLink: the
-    account shows it online again, with its identity as before."""
+    account shows it online again, with its identity as before, and it
+    answers through eWeLink - so not online still from before it left."""
     if ctx.dry_run:
         return {"dry_run": True}
     device_id = str(plugs.read_plug(ctx.state.input("plug_mac") or "").get("ewelink_id") or "")
@@ -314,13 +316,16 @@ def step_sonoff_check(ctx: Context, wait: float = CLOUD_WAIT) -> dict[str, Any]:
                 devices = ctx.account_devices() if device_id else None
                 if devices is None and not device_id:
                     break
-                for device in devices or []:
-                    if device.get("deviceid") == device_id and device.get("online"):
-                        output.progress_clear()
-                        seconds = round(time.monotonic() - started, 1)
-                        output.say(f"    eWeLink shows the device online again after {seconds}s.")
-                        return {"seconds": seconds, "confirmed_by": "eWeLink"}
-                output.progress(f"waiting for eWeLink to show the device online... {time.monotonic() - started:.0f}s")
+                online = any(device.get("deviceid") == device_id and device.get("online") for device in devices or [])
+                if online and ewelink_relay.answers(
+                        email=ctx.email(), password=ctx.ewelink_env()["EWELINK_PASSWORD"], country_code="+44",
+                        region="eu", device_id=device_id):
+                    output.progress_clear()
+                    seconds = round(time.monotonic() - started, 1)
+                    output.say(f"    eWeLink shows the device online again, and it answers, after {seconds}s.")
+                    return {"seconds": seconds, "confirmed_by": "eWeLink"}
+                output.progress(f"waiting for eWeLink to show the device online"
+                                f"{', and for it to answer' if online else ''}... {time.monotonic() - started:.0f}s")
             time.sleep(10)
         output.progress_clear()
         if host and detect.identify(host, timeout=3.0) in ("openbeken", "interim", "esphome"):
@@ -333,6 +338,6 @@ def step_sonoff_check(ctx: Context, wait: float = CLOUD_WAIT) -> dict[str, Any]:
         raise NotBack
 
     return until_back(ctx, look, "Sonoff's firmware", (
-        "eWeLink has not shown the device online again. Sonoff's firmware rejoins the Wi-Fi the device was "
+        "eWeLink has not shown the device online again, answering there. Sonoff's firmware rejoins the Wi-Fi the device was "
         "on and reports to eWeLink by itself; if the app still shows it offline, switch the device off "
         "and on, then run the same command again to check it"))

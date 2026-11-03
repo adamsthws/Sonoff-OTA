@@ -953,13 +953,36 @@ class ArrivedTests(unittest.TestCase):
                 manifest = json.loads((plugs.find_backup(MAC).directory / plugs.BEKEN_MANIFEST).read_text())
                 self.assertEqual(manifest["source"], "OpenBeken GET /api/flash after conversion")
 
+    def k3_context(self, tmp):
+        ctx = a_context(tmp, plug_ip="192.0.2.50")
+        ctx.email = lambda: "someone@example.invalid"
+        ctx.ewelink_env = lambda: {"EWELINK_PASSWORD": "made-up-password"}
+        return ctx
+
+    def test_k3_takes_the_plug_back_only_once_it_answers_through_ewelink(self):
+        # Online from before it left - eWeLink keeps a plug that went silent
+        # online for minutes - until Sonoff's firmware is back and answers.
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self.k3_context(tmp)
+            ctx.account_devices = lambda: [{"deviceid": "1001234abc", "online": True}]
+            with mock.patch.object(plugs, "PLUGS", Path(tmp) / "plugs"), mock.patch.object(plugs, "CAPTURES", Path(tmp)), \
+                    mock.patch.object(detect, "identify", return_value=None), \
+                    mock.patch.object(arrived.ewelink_relay, "answers", side_effect=[False, None, True]) as asked, \
+                    mock.patch.object(arrived.time, "sleep"), \
+                    mock.patch.object(arrived.time, "monotonic", side_effect=iter(range(0, 10000, 5))):
+                plugs.remember_plug(MAC, ewelink_id="1001234abc")
+                self.assertEqual(arrived.step_sonoff_check(ctx)["confirmed_by"], "eWeLink")
+                self.assertEqual(asked.call_count, 3)
+                self.assertEqual(asked.call_args.kwargs["device_id"], "1001234abc")
+
     def test_k3_waits_for_ewelink_to_show_the_plug_online(self):
         with tempfile.TemporaryDirectory() as tmp:
-            ctx = a_context(tmp, plug_ip="192.0.2.50")
+            ctx = self.k3_context(tmp)
             answers = iter([[{"deviceid": "1001234abc", "online": False}], [{"deviceid": "1001234abc", "online": True}]])
             ctx.account_devices = lambda: next(answers)
             with mock.patch.object(plugs, "PLUGS", Path(tmp) / "plugs"), mock.patch.object(plugs, "CAPTURES", Path(tmp)), \
                     mock.patch.object(detect, "identify", return_value=None), \
+                    mock.patch.object(arrived.ewelink_relay, "answers", return_value=True), \
                     mock.patch.object(arrived.time, "sleep"), \
                     mock.patch.object(arrived.time, "monotonic", side_effect=iter(range(0, 10000, 5))):
                 plugs.remember_plug(MAC, ewelink_id="1001234abc")

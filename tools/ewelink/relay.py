@@ -3,6 +3,7 @@ way to reach it on Sonoff's firmware without its LAN key.  check_relay()
 switches it to the other state and back, each confirmed by the plug's
 answer to it, so a run back to Sonoff's firmware ends with the
 relay proved as a run to another firmware does (autoflash's report).
+answers() asks the plug for nothing it changes, to know it is there.
 """
 
 from __future__ import annotations
@@ -57,14 +58,13 @@ def switch_params(params: dict[str, Any], on: bool) -> dict[str, Any]:
     return {"switch": word}
 
 
-def switch(ws: WebSocket, device: dict[str, Any], on: bool, *, wait: float = SWITCH_WAIT) -> bool:
-    """Switch the relay on or off; True once the plug has taken it: its
-    answer to the command (error 0), which the S61 gives without reporting
-    its new state, or a report of that state."""
+def command(ws: WebSocket, device: dict[str, Any], params: dict[str, Any], *, wait: float = SWITCH_WAIT,
+            taken: Callable[[dict[str, Any]], bool] = lambda msg: False) -> bool:
+    """Send the plug an update, as the app does; True once it has answered
+    it (error 0), or sent what `taken` accepts."""
     seq = str(int(time.time() * 1000))
     ws.send_json({"action": "update", "deviceid": device["deviceid"], "apikey": device["apikey"],
-                  "userAgent": "app", "sequence": seq,
-                  "params": switch_params(device.get("params") or {}, on)})
+                  "userAgent": "app", "sequence": seq, "params": params})
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
         try:
@@ -73,9 +73,36 @@ def switch(ws: WebSocket, device: dict[str, Any], on: bool, *, wait: float = SWI
             break
         if msg.get("sequence") == seq:
             return msg.get("error", 0) == 0
-        if msg.get("deviceid") == device["deviceid"] and relay_state(msg.get("params") or {}) is on:
+        if msg.get("deviceid") == device["deviceid"] and taken(msg):
             return True
     return False
+
+
+def switch(ws: WebSocket, device: dict[str, Any], on: bool, *, wait: float = SWITCH_WAIT) -> bool:
+    """Switch the relay on or off; True once the plug has taken it: its
+    answer to the command (error 0), which the S61 gives without reporting
+    its new state, or a report of that state."""
+    return command(ws, device, switch_params(device.get("params") or {}, on), wait=wait,
+                   taken=lambda msg: relay_state(msg.get("params") or {}) is on)
+
+
+def answers(*, email: str, password: str, country_code: str, region: str, device_id: str) -> bool | None:
+    """Whether the plug answers through eWeLink now, or None when eWeLink
+    cannot be reached.  The account's "online" does not say it: eWeLink
+    keeps a plug that went silent online until it has missed its
+    heartbeats, minutes on, and passes it what is sent meanwhile to no one.
+    Asked as the app asks for a plug's readings as its page opens
+    (uiActive), which changes nothing on the plug."""
+    try:
+        region, session = login_session(email, password, country_code, region)
+        device = select_device(get_devices(region, session["at"]), device_id)
+        ws = app_socket(region, session)
+        try:
+            return command(ws, device, {"uiActive": 60})
+        finally:
+            ws.close()
+    except (EwelinkError, WebSocketError, OSError, KeyError, ValueError):
+        return None
 
 
 def check_relay(*, email: str, password: str, country_code: str, region: str, device_id: str,
