@@ -186,11 +186,12 @@ elif [ "$stub" = 1 ]; then
     printf 'EWELINK_EMAIL=%s\nEWELINK_PASSWORD=%s\n' stub@autoflash-stub.test stub \
         | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
 else
-    # Not the Wi-Fi in it, if any, nor a plug's password, web login or key:
-    # those are your real network's and plugs', and the emulated plug's are
-    # its own (given below). Nor the key to the sealed Sonoff backup, which
-    # no run needs.
-    grep -v '^ *\(export \)\?\(AUTOFLASH\|S60\)_\(WIFI_\|TASMOTA_PASSWORD\|ESPHOME_\|BACKUP_KEY\)' "$ROOT/.env" \
+    # The account only. Not the Wi-Fi in it, if any, nor a plug's password,
+    # web login or key: those are your real network's and plugs', and the
+    # emulated plug's are its own (given below). Nor the key to the sealed
+    # Sonoff backup, which no run needs, nor anything else kept there: a
+    # name the tool does not know stops the run.
+    grep '^ *\(export \)\?EWELINK_' "$ROOT/.env" \
         | "${as_you[@]}" -i "$NAME" sh -c "umask 077 && cat > $answers"
 fi
 [ "$keep" = 1 ] && trap 'docker exec "$NAME" rm -f "$answers" 2>/dev/null || true' EXIT

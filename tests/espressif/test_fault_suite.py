@@ -394,6 +394,21 @@ class ScenarioTests(unittest.TestCase):
                                         capture_output=True, text=True, check=True).stdout.strip()
                 self.assertEqual(chosen, driver, tree)
 
+    def test_a_run_is_given_the_ewelink_account_and_nothing_else_from_env(self):
+        # Seen: a token kept in .env for something else reached the run, which
+        # refused the name, and every real-cloud scenario after was NOT-FIRED.
+        import re
+        import subprocess
+        script = (fs.REPO / "tools/espressif/emulator/unattended-test.sh").read_text(encoding="utf-8")
+        given = re.search(r"^ *grep .*\"\$ROOT/\.env\"", script, re.M).group(0)
+        with tempfile.TemporaryDirectory() as root:
+            Path(root, ".env").write_text(
+                "EWELINK_EMAIL=someone@example.com\nexport EWELINK_PASSWORD=x\nAUTOFLASH_WIFI_PASSWORD=y\n"
+                "AUTOFLASH_BACKUP_KEY=z\nOTHER_TOKEN=t\n", encoding="utf-8")
+            out = subprocess.run(["bash", "-c", given], env={"ROOT": root},
+                                 capture_output=True, text=True).stdout
+        self.assertEqual(out, "EWELINK_EMAIL=someone@example.com\nexport EWELINK_PASSWORD=x\n")
+
     def test_a_legacy_tree_goes_in_only_once_the_stub_has_started_from_this_checkout(self):
         # Swapped in as the emulator started, a release from before the
         # reorganisation took away what the stub reads the plug with: no stub,

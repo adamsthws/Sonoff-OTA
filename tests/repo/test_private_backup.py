@@ -165,7 +165,7 @@ class CommandTests(unittest.TestCase):
 
     def test_the_emulator_never_hands_the_key_to_a_run(self):
         script = (pb.ROOT / "tools/espressif/emulator/unattended-test.sh").read_text()
-        self.assertIn("BACKUP_KEY\\)' \"$ROOT/.env\"", script)
+        self.assertIn("grep '^ *\\(export \\)\\?EWELINK_' \"$ROOT/.env\"", script)
 
 
 if __name__ == "__main__":
