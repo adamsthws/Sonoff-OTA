@@ -107,7 +107,8 @@ in [`docs/legal.md`](docs/legal.md).
 
 ## Website stylesheet
 
-`assets/github-markdown-dark.css` and `assets/github-markdown-light.css` are
+`website/public/assets/github-markdown-dark.css` and
+`website/public/assets/github-markdown-light.css` are
 the dark and light stylesheets of
 [github-markdown-css](https://github.com/sindresorhus/github-markdown-css)
 5.9.0, unmodified, which the web page at firmwareliberator.com uses to show

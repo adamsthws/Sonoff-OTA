@@ -1,0 +1,13 @@
+---
+// What the Worker answers for an address with no page.
+import Page from "../layouts/Page.astro";
+import { REPOSITORY } from "../site.mjs";
+---
+<Page title="Not found">
+  <h1>Not found</h1>
+  <p>
+    There is no page at this address. Start at the <a href="/">front page</a>, or go straight to
+    the <a href="/docs/what-happens">docs</a> or the
+    <a href={`https://github.com/${REPOSITORY}/releases`}>releases</a>.
+  </p>
+</Page>

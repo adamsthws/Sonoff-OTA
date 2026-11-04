@@ -243,11 +243,8 @@ releasing); pull requests squashed; secret
 scanning, Dependabot's security updates, CodeQL and private vulnerability
 reporting on; and immutable releases, so a release's tag and files never
 change once published, and GitHub signs an attestation of them that
-`gh release verify` checks; and GitHub Pages serving the README on `main` at
-[firmwareliberator.com](https://firmwareliberator.com) (the `CNAME` file at
-the root names the domain; `_config.yml` and `_layouts/` say what the site
-shows and how; Cloudflare Web Analytics counts its visits, without
-cookies). As an admin, `python3 tools/repo/github_settings.py`
+`gh release verify` checks; and the `website` environment, from which only
+`main` deploys [the website](../website/README.md). As an admin, `python3 tools/repo/github_settings.py`
 says what differs from that, and `... apply` sets it.
 
 ### What crosses the network

@@ -1,3 +1,11 @@
+---
+// The layout main's GitHub Pages site had, as an Astro layout.
+import { REPOSITORY } from "../site.mjs";
+
+const SITE_TITLE = "FirmwareLiberator";
+const DESCRIPTION = "Sonoff S60 to Tasmota or ESPHome, over the air - flash it, don't smash it.";
+const { title } = Astro.props;
+---
 <!DOCTYPE html>
 <!-- Every page of the site: the rendered Markdown in GitHub's own styling,
      dark unless the reader chose light with the button, which the browser
@@ -6,23 +14,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% if page.title and page.title != site.title %}{{ page.title }} · {{ site.title }}{% else %}{{ site.title }}{% endif %}</title>
-<meta name="description" content="{{ site.description }}">
-{% assign title = page.title | default: site.title %}
+<title>{title && title !== SITE_TITLE ? `${title} · ${SITE_TITLE}` : SITE_TITLE}</title>
+<meta name="description" content={DESCRIPTION}>
 <meta property="og:type" content="website">
-<meta property="og:title" content="{{ title }}">
-<meta property="og:description" content="{{ site.description }}">
-<meta property="og:url" content="{{ page.url | absolute_url }}">
-<meta property="og:image" content="{{ '/assets/apple-touch-icon.png' | absolute_url }}">
+<meta property="og:title" content={title || SITE_TITLE}>
+<meta property="og:description" content={DESCRIPTION}>
+<meta property="og:url" content={new URL(Astro.url.pathname, Astro.site)}>
+<meta property="og:image" content={new URL("/assets/apple-touch-icon.png", Astro.site)}>
 <meta name="twitter:card" content="summary">
 <!-- Safari takes the PNG, as it ignores SVG icons; the others prefer the
      SVG, listed last and for any size, whose colour follows their theme. -->
-<link rel="icon" href="{{ '/assets/favicon.png' | relative_url }}" type="image/png" sizes="128x128">
-<link rel="icon" href="{{ '/assets/favicon.svg' | relative_url }}" type="image/svg+xml" sizes="any">
-<link rel="apple-touch-icon" href="{{ '/assets/apple-touch-icon.png' | relative_url }}">
-<link rel="stylesheet" href="{{ '/assets/github-markdown-dark.css' | relative_url }}" id="dark">
-<link rel="stylesheet" href="{{ '/assets/github-markdown-light.css' | relative_url }}" id="light" disabled>
-<style>
+<link rel="icon" href="/assets/favicon.png" type="image/png" sizes="128x128">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" sizes="any">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="stylesheet" href="/assets/github-markdown-dark.css" id="dark">
+<link rel="stylesheet" href="/assets/github-markdown-light.css" id="light" disabled>
+<style is:inline>
   :root { color-scheme: dark; --bg: #0d1117; --fg: #e6edf3; --line: #30363d; }
   :root[data-theme="light"] { color-scheme: light; --bg: #ffffff; --fg: #1f2328; --line: #d0d7de; }
   body { margin: 0; background: var(--bg); }
@@ -34,7 +41,7 @@
   #github { right: 56px; padding: 0 10px; display: flex; align-items: center; gap: 6px; font-size: 14px; text-decoration: none; }
   @media print { #theme, #github { display: none; } }
 </style>
-<script>
+<script is:inline>
   function setTheme(theme) {
     document.documentElement.dataset.theme = theme;
     document.getElementById("dark").disabled = theme === "light";
@@ -46,12 +53,12 @@
 </script>
 </head>
 <body>
-<a id="github" href="https://github.com/{{ site.repository }}"><svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
+<a id="github" href={`https://github.com/${REPOSITORY}`}><svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub</a>
 <button id="theme" type="button" aria-label="Switch between dark and light">&#x263E;&#xFE0E;</button>
 <article class="markdown-body">
-{{ content }}
+<slot />
 </article>
-<script>
+<script is:inline>
   var button = document.getElementById("theme");
   function label() { button.innerHTML = document.documentElement.dataset.theme === "light" ? "&#x263E;&#xFE0E;" : "&#x2600;&#xFE0E;"; }
   button.onclick = function () {
@@ -62,6 +69,6 @@
   };
   label();
 </script>
-<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "5a8e1dd1554949129f3bcf166588fabd"}'></script>
+<script is:inline type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "5a8e1dd1554949129f3bcf166588fabd"}'></script>
 </body>
 </html>

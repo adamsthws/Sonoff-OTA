@@ -16,7 +16,8 @@ class FakeGitHub:
         self.scanning = {"state": "not-configured", "languages": ["actions", "c-cpp", "python"],
                          "query_suite": "default"}
         self.toggles = {toggle: False for toggle in gs.TOGGLES}
-        self.pages = None
+        self.pages = {"cname": "firmwareliberator.com", "build_type": "legacy"}
+        self.environments = {}
         self.rulesets = {7: {"id": 7, "name": "Protect Main Branch", "target": "branch",
                              "enforcement": "active", "conditions": gs.MAIN, "bypass_actors": [],
                              "rules": protect_rules or [{"type": "deletion"}],
@@ -27,13 +28,19 @@ class FakeGitHub:
     def __call__(self, path, method="GET", body=None, ok_missing=False):
         if method != "GET":
             self.sent.append((method, path, body))
-            if path == "/pages":
-                if method == "POST":
-                    self.pages = {"cname": None, "https_enforced": False, "https_certificate": {"state": "new"},
-                                  "build_type": "legacy", "url": "x"}
-                elif body.get("https_enforced") and self.pages["https_certificate"]["state"] != "approved":
-                    raise gs.SettingsError("HTTP 422: certificate not yet issued")
-                self.pages.update(copy.deepcopy(body))
+            if path == "/pages" and method == "DELETE":
+                self.pages = None
+            if path.startswith("/environments/"):
+                name = path.split("/")[2]
+                if path.count("/") == 2:
+                    self.environments[name] = {"policy": copy.deepcopy(body["deployment_branch_policy"]),
+                                               "branches": []}
+                elif method == "POST":
+                    self.environments[name]["branches"].append({"id": len(self.sent), **copy.deepcopy(body)})
+                else:
+                    gone = int(path.rsplit("/", 1)[1])
+                    self.environments[name]["branches"] = [policy for policy in self.environments[name]["branches"]
+                                                           if policy["id"] != gone]
             if path.startswith("/rulesets"):
                 ruleset = {"id": 8 if method == "POST" else int(path.rsplit("/", 1)[1]), **copy.deepcopy(body)}
                 self.rulesets[ruleset["id"]] = ruleset
@@ -47,6 +54,12 @@ class FakeGitHub:
         if path == "/pages":
             assert ok_missing or self.pages is not None
             return self.pages
+        if path.startswith("/environments/"):
+            environment = self.environments.get(path.split("/")[2])
+            if path.endswith("/deployment-branch-policies"):
+                return {"branch_policies": copy.deepcopy(environment["branches"])}
+            assert ok_missing or environment is not None
+            return environment and {"name": path.split("/")[2], "deployment_branch_policy": environment["policy"]}
         if path == "/rulesets":
             return [{"id": r["id"], "name": r["name"]} for r in self.rulesets.values()]
         if path.startswith("/rulesets/"):
@@ -128,34 +141,37 @@ class GitHubSettingsTests(unittest.TestCase):
         fake.repository["security_and_analysis"] = {key: {"status": want} for key, want in gs.SECURITY.items()}
         fake.scanning = dict(gs.CODE_SCANNING)
         fake.toggles = {toggle: True for toggle in gs.TOGGLES}
-        fake.pages = {**copy.deepcopy(gs.PAGES), "https_certificate": {"state": "approved"}}
         fake.sent.clear()
         code, out = run(fake, "apply")
         self.assertEqual((code, fake.sent), (0, []))
         self.assertIn("every setting is as tools/repo/github_settings.py says", out)
 
-    def test_pages_serve_main_at_the_domain_with_https_once_its_certificate_is_issued(self):
+    def test_pages_is_turned_off(self):
         fake = FakeGitHub()
         code, out = run(fake)
-        self.assertIn("Pages: is off, should serve main", out)
+        self.assertIn("Pages: is on, should be off", out)
         code, out = run(fake, "apply")
-        self.assertEqual(code, 0)
         self.assertIn("Pages: set", out)
-        self.assertIn("Pages domain: set, but HTTPS not enforced until GitHub has issued the certificate (now new)", out)
-        self.assertEqual((fake.pages["source"], fake.pages["cname"], fake.pages["https_enforced"]),
-                         (gs.PAGES["source"], gs.PAGES["cname"], False))
-        # Until it is issued, each run says so and sends nothing that would fail.
-        code, out = run(fake, "apply")
-        self.assertIn("not enforced until", out)
-        fake.pages["https_certificate"]["state"] = "approved"
-        code, out = run(fake, "apply")
-        self.assertIn("Pages domain: set\n", out)
-        self.assertTrue(fake.pages["https_enforced"])
+        self.assertIsNone(fake.pages)
 
-    def test_the_cname_file_names_the_pages_domain(self):
+    def test_the_website_environment_takes_main_only(self):
+        fake = FakeGitHub()
+        run(fake, "apply")
+        self.assertEqual(fake.environments, {"website": {"policy": gs.ENVIRONMENT_POLICY, "branches": [
+            {"id": fake.environments["website"]["branches"][0]["id"], "name": "main", "type": "branch"}]}})
+        fake.environments["website"]["branches"].append({"id": 99, "name": "s61", "type": "branch"})
+        code, out = run(fake)
+        self.assertIn("environment 'website' branch s61: should not be there", out)
+        run(fake, "apply")
+        self.assertEqual([policy["name"] for policy in fake.environments["website"]["branches"]], ["main"])
+        fake.sent.clear()
+        run(fake, "apply")
+        self.assertEqual([sent for sent in fake.sent if sent[1].startswith("/environments/")], [])
+
+    def test_the_website_is_deployed_from_the_environment_written_here(self):
         from pathlib import Path
-        cname = (Path(__file__).resolve().parents[2] / "CNAME").read_text(encoding="utf-8")
-        self.assertEqual(cname, gs.PAGES["cname"] + "\n")
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/website.yml").read_text(encoding="utf-8")
+        self.assertIn(f"      name: {gs.ENVIRONMENT}\n      url: {gs.WEBSITE}", workflow)
 
     def test_every_required_check_is_a_job_in_a_workflow(self):
         from pathlib import Path

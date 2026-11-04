@@ -1,3 +1,0 @@
-User-agent: *
-Allow: /
-Sitemap: https://firmwareliberator.com/sitemap.xml

@@ -47,6 +47,7 @@ __pycache__/
 
 # Answers for unattended runs: the eWeLink password, perhaps sudo's (see .env.example).
 .env
+.env_cf
 
 # Local authorization markers must never replace the shipped safety lock.
 tools/espressif/RECOVERY_LOCK.owner-authorized*
@@ -58,3 +59,9 @@ tools/espressif/REPARTITION_LOCK.owner-authorized*
 
 # tools/repo/leak_scan.py: your own values to keep out of Git.
 tools/repo/leak-scan.local
+
+# The website's packages, build and wrangler's state (website/README.md).
+website/node_modules/
+website/dist/
+website/.astro/
+website/.wrangler/

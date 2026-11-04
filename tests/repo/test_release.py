@@ -79,6 +79,7 @@ class OneLineTests(unittest.TestCase):
             subprocess.run(["tar", "-x", "-C", tmp], input=archive, check=True, timeout=120)
             self.assertFalse(Path(tmp, "archive").exists())
             self.assertFalse(Path(tmp, "tests").exists())
+            self.assertFalse(Path(tmp, "website").exists())
             done = subprocess.run([sys.executable, "-I", str(Path(tmp, "tools/autoflash/cli.py")), "--version"],
                                   capture_output=True, text=True, cwd=tmp, timeout=120)
             self.assertEqual(done.returncode, 0, done.stderr)

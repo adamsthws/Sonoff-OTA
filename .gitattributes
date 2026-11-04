@@ -10,3 +10,4 @@ tools/espressif/emulator/container/** text eol=lf
 /archive/ export-ignore
 /tests/ export-ignore
 /.github/ export-ignore
+/website/ export-ignore

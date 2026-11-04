@@ -51,12 +51,14 @@ CODE_SCANNING = {"state": "configured", "languages": ["actions", "python"], "que
 # attestation of them (`gh release verify`).
 TOGGLES = ["private-vulnerability-reporting", "immutable-releases"]
 
-# GitHub Pages: the README on main as a web page at firmwareliberator.com,
-# built by GitHub's own Jekyll, which rewrites its links to the docs to their
-# rendered pages. The CNAME file at the root of the repository names the
-# domain too, so a build keeps it. HTTPS is enforced once GitHub has issued
-# the certificate, which it does after the domain's DNS points at Pages.
-PAGES = {"source": {"branch": "main", "path": "/"}, "cname": "firmwareliberator.com", "https_enforced": True}
+# The website, firmwareliberator.com, is a Cloudflare Worker
+# (website/README.md) the website workflow deploys from this environment: it
+# takes only main, and holds the workflow's CLOUDFLARE_API_TOKEN. GitHub
+# Pages, which served it before, is off.
+WEBSITE = "https://firmwareliberator.com/"
+ENVIRONMENT = "website"
+ENVIRONMENT_POLICY = {"protected_branches": False, "custom_branch_policies": True}
+ENVIRONMENT_BRANCHES = ["main"]
 
 MAIN = {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}
 # The checks main requires: jobs of the unit tests and emulator, leak-scan
@@ -152,14 +154,26 @@ def differences() -> list[tuple[str, str, Any]]:
     for toggle in TOGGLES:
         if not (api(f"/{toggle}", ok_missing=True) or {}).get("enabled"):
             found.append((toggle, "is off, should be on", ("PUT", f"/{toggle}", None)))
-    pages = api("/pages", ok_missing=True)
-    if pages is None:
-        found.append(("Pages", "is off, should serve main", ("POST", "/pages", {"source": PAGES["source"]})))
-        pages = {}
-    have = {"source": {key: (pages.get("source") or {}).get(key) for key in PAGES["source"]},
-            **{key: pages.get(key) for key in ("cname", "https_enforced")}}
-    if have != PAGES:
-        found.append(("Pages domain", f"is {have}, should be {PAGES}", ("PUT", "/pages", PAGES)))
+    if api("/pages", ok_missing=True) is not None:
+        found.append(("Pages", "is on, should be off: the website is a Cloudflare Worker",
+                      ("DELETE", "/pages", None)))
+    environment = api(f"/environments/{ENVIRONMENT}", ok_missing=True)
+    have = (environment or {}).get("deployment_branch_policy")
+    if have != ENVIRONMENT_POLICY:
+        how = "is missing" if environment is None else f"has the branch policy {have}, should name its branches"
+        found.append((f"environment '{ENVIRONMENT}'", how,
+                      ("PUT", f"/environments/{ENVIRONMENT}", {"deployment_branch_policy": ENVIRONMENT_POLICY})))
+    policies = api(f"/environments/{ENVIRONMENT}/deployment-branch-policies")["branch_policies"] \
+        if have == ENVIRONMENT_POLICY else []
+    for branch in ENVIRONMENT_BRANCHES:
+        if not any(policy["name"] == branch and policy.get("type") == "branch" for policy in policies):
+            found.append((f"environment '{ENVIRONMENT}' branch {branch}", "is missing",
+                          ("POST", f"/environments/{ENVIRONMENT}/deployment-branch-policies",
+                           {"name": branch, "type": "branch"})))
+    for policy in policies:
+        if policy["name"] not in ENVIRONMENT_BRANCHES or policy.get("type") != "branch":
+            found.append((f"environment '{ENVIRONMENT}' {policy.get('type')} {policy['name']}", "should not be there",
+                          ("DELETE", f"/environments/{ENVIRONMENT}/deployment-branch-policies/{policy['id']}", None)))
     existing = {ruleset["name"]: ruleset["id"] for ruleset in api("/rulesets")}
     for name, want in RULESETS.items():
         body = {"name": name, **want}
@@ -198,13 +212,6 @@ def main(argv: list[str] | None = None) -> int:
                     api(path, method, body)
                     print(f"  {what}: set, but for {', '.join(not_run)}, not yet run on main: "
                           "apply again once they have")
-                    continue
-            if what == "Pages domain":
-                certificate = (api("/pages").get("https_certificate") or {}).get("state")
-                if certificate != "approved":
-                    api(path, method, {key: value for key, value in body.items() if key != "https_enforced"})
-                    print(f"  {what}: set, but HTTPS not enforced until GitHub has issued the certificate "
-                          f"(now {certificate}): apply again once it has")
                     continue
             api(path, method, body)
             print(f"  {what}: set")

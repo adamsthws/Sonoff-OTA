@@ -1,0 +1,19 @@
+---
+// Each page: a Markdown file of the repository, at the address src/site.mjs
+// makes from its path, titled by its first heading.
+import { getCollection, render } from "astro:content";
+import Page from "../layouts/Page.astro";
+import { slug } from "../site.mjs";
+
+export async function getStaticPaths() {
+  const entries = await getCollection("pages");
+  return entries.map((entry) => ({ params: { slug: slug(entry.id) || undefined }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const { Content, headings } = await render(entry);
+const title = headings.find((heading) => heading.depth === 1)?.text;
+---
+<Page title={entry.id === "README.md" ? undefined : title}>
+  <Content />
+</Page>

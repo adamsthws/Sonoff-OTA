@@ -1,0 +1,19 @@
+// The website at firmwareliberator.com: a Cloudflare Worker serving only the
+// files Astro builds into dist (README.md), with public/_redirects sending
+// the README's one line on to the latest release. Deploying it points both
+// names at it, replacing the DNS records there.
+{
+  "name": "firmware-liberator",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "dist",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    { "pattern": "firmwareliberator.com", "custom_domain": true },
+    // Sent on to firmwareliberator.com by tools/repo/cloudflare_settings.py.
+    { "pattern": "www.firmwareliberator.com", "custom_domain": true }
+  ],
+  "workers_dev": false,
+  "preview_urls": false
+}

@@ -1,0 +1,4 @@
+# The README's one line: the latest release's script, firmwareliberator.com/liberate.sh
+# for Linux and macOS and /liberate.ps1 for Windows. The Worker (wrangler.jsonc) reads this.
+/liberate.sh https://github.com/adamsthws/firmware-liberator/releases/latest/download/liberate.sh 302
+/liberate.ps1 https://github.com/adamsthws/firmware-liberator/releases/latest/download/liberate.ps1 302
