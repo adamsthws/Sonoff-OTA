@@ -56,7 +56,7 @@
       "esp_idf": "5.5.6",
       "builder": "ghcr.io/esphome/esphome:2026.10.0@sha256:1dff19a59070cdb523b76576cdc74d200f862d43c1407809088855920cf57145",
       "size": 967936,
-      "sha256": "3445edf8abcfb0e87e49a15599bdab217d977ca4e97f910ed6044c5fc6b3b411"
+      "sha256": "ff4dbbccb202e9e663340f47b1797c027b0a3a1eb24462ad7460597a645f7875"
     },
     "bootloader": {
       "file": "artifacts/esphome-sonoff-s60-bootloader-1.2.0.bin",
@@ -99,14 +99,14 @@
         "sha256": "07f45d62f32b8f89f782ae6460253c7dc17fdbaceb20b2521e6db2e59a254687"
       },
       "esphome": {
-        "file": "artifacts/esphome-sonoff-s61-1.1.0.rbl",
+        "file": "artifacts/esphome-sonoff-s61-1.2.0.rbl",
         "config": "devices/sonoff-s61/esphome.yaml",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "esphome": "2026.10.0",
         "libretiny": "1.13.0",
         "builder": "ghcr.io/esphome/esphome:2026.10.0@sha256:1dff19a59070cdb523b76576cdc74d200f862d43c1407809088855920cf57145",
         "size": 505168,
-        "sha256": "b412da4e337b01ac1a9623fd5275d2a61e945d5aba206a8bc2eb9c940baf200e"
+        "sha256": "2c61622bcbbc11b7ee1b1e9b082a73f4d35c19570471efb7b0e41a75ad181172"
       }
     }
   }

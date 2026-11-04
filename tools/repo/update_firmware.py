@@ -443,6 +443,19 @@ def with_config_version(config: str, version: str) -> str:
     return PROJECT_VERSION.sub(lambda match: match.group(1) + version + match.group(3), config, count=1)
 
 
+# The release the config names for Home Assistant to adopt it from.  A release
+# tag, never a branch: published, it cannot change, so nothing pushed here later
+# reaches a plug adopted from it unless its owner names a newer one.
+ADOPTION_RELEASE = re.compile(r"^(  package_import_url: \S+@)\S+$", re.MULTILINE)
+
+
+def as_built(config: str, version: str) -> str:
+    """The config as built at this version: named so, and adopted from the
+    release it comes out in."""
+    tag = f"v{release_to_come(CHANGELOG.read_text(encoding='utf-8'))}"
+    return ADOPTION_RELEASE.sub(lambda match: match.group(1) + tag, with_config_version(config, version))
+
+
 def app_description(image: bytes) -> dict[str, str]:
     """What ESP-IDF's app description says, at its fixed place in an app."""
     desc = image[32:32 + 256]
@@ -452,7 +465,7 @@ def app_description(image: bytes) -> dict[str, str]:
 
 def build(builder: str, config_path: Path, version: str, workdir: Path) -> tuple[bytes, bytes]:
     """Build one config at this version: its app and bootloader."""
-    config = with_config_version(config_path.read_text(encoding="utf-8"), version)
+    config = as_built(config_path.read_text(encoding="utf-8"), version)
     (workdir / config_path.name).write_text(config, encoding="utf-8")
     print(f"  building {config_path.name} {version} (minutes; a first build downloads ESP-IDF)...")
     docker("run", "--rm", "-u", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/config",
@@ -557,8 +570,7 @@ def command_esphome(args: argparse.Namespace) -> int:
 
     for key, (version, app, _bootloader, described) in built.items():
         config_path = ROOT / ESPHOME_BUILDS[key][0]
-        config_path.write_text(with_config_version(config_path.read_text(encoding="utf-8"), version),
-                               encoding="utf-8")
+        config_path.write_text(as_built(config_path.read_text(encoding="utf-8"), version), encoding="utf-8")
         publish(pins["esphome"], key, ESPHOME_BUILDS[key][1].format(version=version), app,
                 {"config": ESPHOME_BUILDS[key][0], "version": version, "esphome": release,
                  "esp_idf": described["esp_idf"], "builder": builder})
@@ -755,7 +767,7 @@ def command_openbeken(args: argparse.Namespace) -> int:
 def build_libretiny(builder: str, config_path: Path, version: str, workdir: Path) -> tuple[bytes, dict[str, Any], str]:
     """Build one LibreTiny config at this version: its rt_ota image, the board
     (its layout) the build used, and the LibreTiny version."""
-    config = with_config_version(config_path.read_text(encoding="utf-8"), version)
+    config = as_built(config_path.read_text(encoding="utf-8"), version)
     (workdir / config_path.name).write_text(config, encoding="utf-8")
     print(f"  building {config_path.name} {version} (minutes; a first build downloads LibreTiny and its SDK)...")
     docker("run", "--rm", "-u", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/config",
@@ -791,7 +803,7 @@ def command_esphome_beken(args: argparse.Namespace) -> int:
     if args.dry_run:
         print("\nBuilt and checked; nothing published (--dry-run).")
         return 0
-    (ROOT / config_path).write_text(with_config_version(config, version), encoding="utf-8")
+    (ROOT / config_path).write_text(as_built(config, version), encoding="utf-8")
     publish(section, "esphome", file_pattern.format(version=version), image,
             {"config": config_path, "version": version, "esphome": release, "libretiny": libretiny,
              "builder": builder})
@@ -831,14 +843,20 @@ def bullet(text: str) -> str:
                          break_long_words=False, break_on_hyphens=False)
 
 
+def release_to_come(changelog: str) -> str:
+    """The version of the next release: the top section of CHANGELOG.md, or a
+    minor version on where that is out already."""
+    version = re.search(r"^## (\d+\.\d+\.\d+)\n", changelog, re.MULTILINE).group(1)
+    return next_minor(version) if released(version) else version
+
+
 def changelog_with(entry: str, texts: dict[Path, str]) -> str:
     """CHANGELOG.md and tools/autoflash/__init__.py, in `texts`, with the entry
     under the release to come; that release's version."""
     text = texts.get(CHANGELOG) or CHANGELOG.read_text(encoding="utf-8")
     heading = re.search(r"^## (\d+\.\d+\.\d+)\n", text, re.MULTILINE)
-    version = heading.group(1)
-    if released(version):
-        version = next_minor(version)
+    version = release_to_come(text)
+    if version != heading.group(1):
         text = text[:heading.start()] + f"## {version}\n\n{bullet(entry)}\n\n" + text[heading.start():]
     else:
         following = re.search(r"^## ", text[heading.end():], re.MULTILINE)

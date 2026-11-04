@@ -387,6 +387,24 @@ class ChangelogTests(unittest.TestCase):
             changelog = texts[uf.CHANGELOG]
         self.assertIn("## 2.2.0\n\n- First.\n- Second.\n\n## 2.1.0", changelog)
 
+    def test_a_config_is_adopted_from_the_release_it_comes_out_in(self):
+        import tempfile
+        from unittest import mock
+        config = ('esphome:\n  project:\n    name: x\n    version: "1.0.0"\ndashboard_import:\n'
+                  '  package_import_url: github://someone/repo/esphome.yaml@v1.0.0\n  import_full_config: false\n')
+        for out_already, tag in ((False, "v2.2.0"), (True, "v2.3.0")):
+            with tempfile.TemporaryDirectory() as tmp, self.write(tmp, "# Changelog\n\n## 2.2.0\n\n- First.\n", "2.2.0"), \
+                 mock.patch.object(uf, "released", return_value=out_already):
+                built = uf.as_built(config, "1.1.0")
+            self.assertIn(f"esphome.yaml@{tag}\n", built)
+            self.assertIn('version: "1.1.0"', built)
+
+    def test_a_config_no_one_adopts_only_changes_its_version(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp, self.write(tmp, "# Changelog\n\n## 2.2.0\n\n- First.\n", "2.2.0"):
+            built = uf.as_built('esphome:\n  project:\n    name: x\n    version: "1.0.0"\n', "1.1.0")
+        self.assertEqual(built, 'esphome:\n  project:\n    name: x\n    version: "1.1.0"\n')
+
     def test_a_passage_not_found_changes_nothing(self):
         with self.assertRaisesRegex(uf.UpdateError, "nothing was changed"):
             uf.substituted("no such text", r"ESPHome \S+ built the current", "x", "the release")

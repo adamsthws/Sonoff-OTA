@@ -106,12 +106,31 @@ class PublishedESPHomeTests(unittest.TestCase):
         imprint.require_imprinted(written)
         self.assertEqual(len(written), len(image))
 
+    def test_adopted_each_kinds_config_is_taken_as_a_package_of_a_release(self):
+        # A package, so taking a fix is one line; of a release, never a branch,
+        # so nothing pushed here later reaches an adopted plug by itself.
+        from tools.autoflash import __version__, kinds
+        from tools.autoflash.runs import ROOT
+        for kind in kinds.ALL:
+            config = (ROOT / "devices" / kind.key / "esphome.yaml").read_text(encoding="utf-8")
+            found = re.search(r"(?m)^dashboard_import:\n  package_import_url: github://\S+@v(\d+)\.(\d+)\.(\d+)\n"
+                              r"  import_full_config: false$", config)
+            self.assertIsNotNone(found, kind.key)
+            self.assertLessEqual(tuple(map(int, found.groups())), tuple(map(int, __version__.split("."))), kind.key)
+
+    def test_each_kinds_esphome_page_says_how_adoption_works(self):
+        from tools.autoflash import kinds
+        from tools.autoflash.runs import ROOT
+        for kind in kinds.ALL:
+            page = (ROOT / "devices" / kind.key / "esphome.md").read_text(encoding="utf-8")
+            self.assertIn("docs/home-assistant-adoption.md", page, kind.key)
+
     def test_the_esphome_config_has_no_passwords_and_can_be_adopted(self):
         from tools.autoflash.runs import ROOT
         config = (ROOT / "devices" / "sonoff-s60" / "esphome.yaml").read_text()
         for key in ("password:", "encryption:", "auth:", "key:"):
             self.assertNotIn(key, config.replace("password: !lambda", ""), key)
-        self.assertIn("package_import_url: github://adamsthws/firmware-liberator/devices/sonoff-s60/esphome.yaml@main", config)
+        self.assertIn("package_import_url: github://adamsthws/firmware-liberator/devices/sonoff-s60/esphome.yaml@v", config)
         # Adoption takes this one file: system headers (<...>) only, no local files
         for entry in include_entries(config):
             self.assertTrue(entry.startswith("<"), entry)

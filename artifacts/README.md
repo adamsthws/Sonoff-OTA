@@ -11,11 +11,11 @@ directory, never here.
 | `autoflash-recovery-safeboot-imprintable.bin` | Credential-free recovery Safeboot template; saves the Wi-Fi for the official Tasmota installed after it | `ece36fd964c1443ef9fb74af87a0a257501c9e5ecfb1fb7a1c3aff1744bc29fd` |
 | `tasmota-settings-template-15.6.0.0.bin` | Tasmota's default settings with no Wi-Fi in them, for the bridge to fill in at D1 | `d63f03cb99540407037f36dc8155ec9b02d24425d3b02c52299713233e98f4a5` |
 | `esphome-sonoff-s60-bootloader-1.2.0.bin` | ESPHome's bootloader, from the build of 1.2.0: it replaces Sonoff's when ESPHome is installed, so ESPHome can roll back an update that fails to start | `3792bb665916d69c410c9fd10f69d1a6968e61f2a9e4969829a1c49f9ea6f433` |
-| `esphome-sonoff-s60-imprintable-1.6.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `3445edf8abcfb0e87e49a15599bdab217d977ca4e97f910ed6044c5fc6b3b411` |
+| `esphome-sonoff-s60-imprintable-1.6.0.bin` | ESPHome for the S60, installed instead of the final Tasmota when the run is asked for ESPHome; no Wi-Fi or passwords in it, for the run to imprint the plug's Wi-Fi | `ff4dbbccb202e9e663340f47b1797c027b0a3a1eb24462ad7460597a645f7875` |
 | `autoflash-mover-1.1.0.bin` | A small ESPHome the run uses for a minute or two when leaving Tasmota: it fits in front of Tasmota in Sonoff's layout, and takes the next firmware as an ordinary ESPHome update; two minutes away from the home Wi-Fi, it raises its own network, whose page takes new Wi-Fi details. Wi-Fi placeholders, like the image above | `f6e131e1599c886d742c151c3ba3f84a285bba462b438c36b611d577e01ad243` |
 | `sonoff-s60-partition-table.bin` | Sonoff's partition table, read from a stock plug: the one every conversion starts from, which the Tasmota route's preflight requires byte for byte. Written back when a plug leaves Tasmota's layout. Holds no secrets | `f63f66bbf23b9e291c7eb5dcf24be820190dacf4bf52af515d9664526a4f4daf` |
 | `openbeken-sonoff-s61-1.1.0.rbl` | OpenBeken for the S61, with the 4 MB table, the hook before an OTA's restart, the tool's OpenBeken driver and the S61's table for it built in (a run to ESPHome sends it, with a marker for its app after it, as the interim firmware): the rt_ota image the plug's stock bootloader applies from its download slot, whether sent by the stock firmware's updater, by OpenBeken's own OTA or in a UF2 through ESPHome's | `07f45d62f32b8f89f782ae6460253c7dc17fdbaceb20b2521e6db2e59a254687` |
-| `esphome-sonoff-s61-1.1.0.rbl` | ESPHome for the S61, on LibreTiny: the same rt_ota image form, installed the same ways. Nothing is written into it: its first boot reads the plug's Wi-Fi and meter calibration from the stock store. The tool takes the plug's backup before it, through OpenBeken as the interim firmware | `b412da4e337b01ac1a9623fd5275d2a61e945d5aba206a8bc2eb9c940baf200e` |
+| `esphome-sonoff-s61-1.2.0.rbl` | ESPHome for the S61, on LibreTiny: the same rt_ota image form, installed the same ways. Nothing is written into it: its first boot reads the plug's Wi-Fi and meter calibration from the stock store. The tool takes the plug's backup before it, through OpenBeken as the interim firmware | `2c61622bcbbc11b7ee1b1e9b082a73f4d35c19570471efb7b0e41a75ad181172` |
 
 The Bluetooth image is the exact file used by the successful migrations. It
 was retrieved from Tasmota's official moving `install/firmware` branch at
@@ -168,7 +168,7 @@ The S61's two images are rt_ota images (`.rbl`), as its stock bootloader
 applies them. OpenBeken 1.1.0 is OpenBK7231T_App at `ce1abad` with this
 project's 4 MB-table patches and OpenBeken driver (`tools/beken/openbeken/`)
 and the S61's table for it, `devices/sonoff-s61/drv_autoflash_sonoff_s61.c`, built as `OpenBK7238` with
-`FLASH_SIZE=4M` in `tools/beken/openbeken/build.Dockerfile`; ESPHome 1.1.0 for
+`FLASH_SIZE=4M` in `tools/beken/openbeken/build.Dockerfile`; ESPHome 1.2.0 for
 the S61 is [`../devices/sonoff-s61/esphome.yaml`](../devices/sonoff-s61/esphome.yaml)
 built with ESPHome 2026.10.0 on LibreTiny 1.13.0, `image_bk7238_app.ota.rbl`
 of its build. `firmware.json` pins both under `beken`, with the commits,
@@ -179,8 +179,9 @@ both name the plug as every firmware the tool installs does - OpenBeken
 `openbeken-abcdef`, its hostnames too; ESPHome `esphome-abcdef`, with
 `Sonoff-S61` as its comment - and ESPHome has no backup reader: the tool
 takes the backup through OpenBeken, installed first as the interim firmware,
-which knows itself by a marker sent after it that names its app. 1.0.0
-is in the Git history.
+which knows itself by a marker sent after it that names its app. ESPHome
+1.2.0 is 1.1.0 adopted into Home Assistant as a package rather than a copy
+of its config. 1.0.0 and 1.1.0 are in the Git history.
 
 ESPHome 1.5.0 is a change to 1.4.0's config, built with ESPHome 2026.10.0
 (ESP-IDF 5.5.6) as 1.4.0 was. The bootloader that build makes (ESP-IDF 5.5.6)

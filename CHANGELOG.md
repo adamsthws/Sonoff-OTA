@@ -44,7 +44,7 @@ check.
   Discovering the plug; a run given `--firmware` is not asked.
 - The S61's firmware is published: OpenBeken 1.1.0 (OpenBK7231T_App at
   `ce1abad` with the 4 MB table, a hook before an OTA's restart, the tool's
-  OpenBeken driver and the S61's table for it) and ESPHome 1.1.0
+  OpenBeken driver and the S61's table for it) and ESPHome 1.2.0
   for the S61 (built with ESPHome
   [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0) on
   LibreTiny 1.13.0), built and pinned by `tools/repo/update_firmware.py
@@ -64,6 +64,11 @@ check.
   longer exists, so Home Assistant cannot adopt it until it is updated to the
   image built from the moved config - which running the tool again does
   (below); the plug itself runs as before.
+- When Home Assistant adopts a plug, it now writes a short config that loads
+  this project's ESPHome config, instead of a full copy. It uses the release
+  your plug's firmware came from, which cannot change, so your plug gets a fix
+  only when you choose a newer release. A plug adopted earlier keeps its copy;
+  `docs/home-assistant-adoption.md` explains how to switch it to the short config.
 - ESPHome for the S60 is 1.6.0: a change to its config, built with ESPHome
   [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0) as
   1.4.0 was. Its bootloader is unchanged, so a plug on ESPHome already is

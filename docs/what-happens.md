@@ -248,7 +248,10 @@ before it has run a minute takes the plug back to the release it had, so the
 run waits that out. The plug says which release it runs through its native
 API. One adopted into an ESPHome dashboard, whose API then has an encryption
 key, is not offered it: the published image would take away the dashboard's
-changes and key, so it is updated from the dashboard.
+changes and key, so it is updated from the dashboard - which, from 2.3.0,
+uses this project's config at the release the plug's firmware came from. The
+plug gets a fix when you choose a newer release, and not before
+([how, and how to change a plug adopted before](home-assistant-adoption.md)).
 
 On an S61 the same goes for an earlier release of this project's OpenBeken
 (`--firmware openbeken`): OpenBeken fetches this one from your computer, as

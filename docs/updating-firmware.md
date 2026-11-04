@@ -145,7 +145,11 @@ builds:
   the layout of what it saves ([devices/sonoff-s60/esphome.md](../devices/sonoff-s60/esphome.md) says
   why) - are as they were; if not, the lambda must be checked first;
 - the config's `project` version is raised (the next minor version, or
-  `--image-version`), and it is built;
+  `--image-version`), its `package_import_url` is set to the release it will
+  come out in, the top of `CHANGELOG.md` or the next after it, and it is built.
+  A plug adopted into Home Assistant keeps to that release until its owner
+  names a newer one, and the release workflow refuses a version whose configs
+  name a release that is not out: rebuild them if the version changes first;
 - the app is an ESP32-C3 app that fits Sonoff's slot, says it is that ESPHome
   release, holds each Wi-Fi placeholder once and untouched and takes a Wi-Fi
   written in, and holds no path from the computer that built it;

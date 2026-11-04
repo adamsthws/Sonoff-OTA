@@ -171,10 +171,14 @@ esphome:
               }
             }
 
-# Adopting the plug in Home Assistant's ESPHome builder takes this config.
+# Adopting the plug in Home Assistant's ESPHome builder takes this config as
+# a package: the plug's own config names it, with the plug's name, API key
+# and Wi-Fi. It names the release this image came out in, which cannot change,
+# so nothing of ours reaches an adopted plug until its owner names a newer one.
+# update_firmware.py writes the release.
 dashboard_import:
-  package_import_url: github://adamsthws/firmware-liberator/devices/sonoff-s60/esphome.yaml@main
-  import_full_config: true
+  package_import_url: github://adamsthws/firmware-liberator/devices/sonoff-s60/esphome.yaml@v2.3.0
+  import_full_config: false
 
 globals:
   - id: imprinted_ssid

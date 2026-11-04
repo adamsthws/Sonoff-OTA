@@ -33,6 +33,13 @@ are kept through restarts and updates; the first three start again at
 midnight, on the first of the month and on 1 January. From 1.3.0 or earlier,
 they carry on from where they were.
 
+## Adopted into Home Assistant
+
+Home Assistant's ESPHome builder can adopt a converted plug. It uses this config,
+at the release the plug's firmware came from, and your plug keeps that config until
+you choose a newer release: [how it works, how to take a fix and how to customise
+it](../../docs/home-assistant-adoption.md).
+
 ## Changing it
 
 Edit `esphome.yaml`, then build and publish it with

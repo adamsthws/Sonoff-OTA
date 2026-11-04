@@ -51,6 +51,13 @@ handling and energy totals, so the two plugs look alike in Home Assistant.
 Nothing in the S61 route needs a LibreTiny or ESPHome change: ESPHome 2026.10.0
 pins LibreTiny 1.13.0, which has the BK7238.
 
+## Adopted into Home Assistant
+
+Home Assistant's ESPHome builder can adopt a converted plug. It uses this config,
+at the release the plug's firmware came from, and your plug keeps that config until
+you choose a newer release: [how it works, how to take a fix and how to customise
+it](../../docs/home-assistant-adoption.md).
+
 ## Building
 
 As the S60's image is built: ESPHome's own Docker image, the config alone in a
@@ -150,7 +157,7 @@ interrupt watchdog from a 10 s channel of that group, and a first version
 that raised every channel on every tick ran that feed back to back and
 starved OpenBeken instead.
 
-ESPHome 2026.10.0 built the current image, `artifacts/esphome-sonoff-s61-1.1.0.rbl`,
+ESPHome 2026.10.0 built the current image, `artifacts/esphome-sonoff-s61-1.2.0.rbl`,
 with `tools/repo/update_firmware.py esphome 2026.10.0 --plug sonoff-s61`
 ([docs/updating-firmware.md](../../docs/updating-firmware.md)).
 

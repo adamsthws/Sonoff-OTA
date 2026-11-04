@@ -45,6 +45,13 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
               echo "$tag is already released"
           else
+              # Each image names the release a plug is adopted from: this one, or one out already.
+              for adopted in $(python3 tools/repo/release_notes.py --adoption-tags); do
+                  if [ "$adopted" != "$tag" ] && ! gh release view "$adopted" >/dev/null 2>&1; then
+                      echo "::error::An ESPHome config is adopted from $adopted, which is not released: build it again"
+                      exit 1
+                  fi
+              done
               echo "tag=$tag" >> "$GITHUB_OUTPUT"
           fi
 

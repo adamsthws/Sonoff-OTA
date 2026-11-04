@@ -55,6 +55,21 @@ class PortablePythonTests(unittest.TestCase):
         self.assertEqual(tested, installed)
 
 
+class AdoptionTests(unittest.TestCase):
+    """The release an image names for Home Assistant to adopt it from has to
+    come out: the release workflow refuses a version where one would not."""
+
+    def test_the_release_workflow_checks_each_config_names_a_release(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("release_notes.py --adoption-tags", workflow)
+
+    def test_each_plug_with_an_esphome_config_names_one(self):
+        tags = release_notes.adoption_tags()
+        self.assertTrue(tags)
+        for tag in tags:
+            self.assertRegex(tag, r"^v\d+\.\d+\.\d+$")
+
+
 class OneLineTests(unittest.TestCase):
     """What the README's one line fetches from a release (liberate.sh,
     liberate.ps1) is what the release workflow attaches to it."""
