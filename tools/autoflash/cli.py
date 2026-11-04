@@ -47,7 +47,7 @@ from tools.autoflash.hostsys import FirewallRule  # noqa: E402
 from tools.autoflash.prompts import QuitRun  # noqa: E402
 from tools.autoflash.routes.beken import images as beken_images  # noqa: E402
 from tools.autoflash.routes.espressif import bundle, installer  # noqa: E402
-from tools.autoflash.state import RunState  # noqa: E402
+from tools.autoflash.state import FAILED, PENDING, RunState  # noqa: E402
 from tools.espressif.safeboot.prepare_imprinted_bundle import forget_stored_password  # noqa: E402
 
 
@@ -130,6 +130,34 @@ def run_to_look_at(plug_ip: str | None) -> str | None:
     return runs.read_current() or (runs.run_name(directories[-1]) if directories else None)
 
 
+def wrote_to_plug(directory: Path) -> bool:
+    """Whether a run wrote to its plug: a step that writes begun, unless it
+    failed before writing."""
+    try:
+        state = RunState.open(directory)
+    except (OSError, ValueError):
+        return False
+    steps = state.data.get("steps", {})
+    return any(state.status(step) != PENDING
+               and not (state.status(step) == FAILED and steps.get(step, {}).get("nothing_written"))
+               for step in routes.family_of(state).DESTRUCTIVE_STEPS)
+
+
+def superseded(directory: Path, directories: list[Path]) -> bool:
+    """Whether a later run of the same plug (in `directories`, oldest first)
+    wrote to it: the plug is no longer as this run left it, so carrying this
+    one on would take it for what it was - seen asking for the Wi-Fi to
+    leave a Tasmota a later run had already replaced."""
+    def plug(run: Path) -> str | None:
+        try:
+            return plugs.mac_of_run(run) or RunState.open(run).input("plug_mac")
+        except (OSError, ValueError):
+            return None
+    mac = plug(directory)
+    later = directories[directories.index(directory) + 1:]
+    return bool(mac) and any(plug(run) == mac and wrote_to_plug(run) for run in later)
+
+
 def start_new_run(plug_ip: str | None) -> str:
     name = runs.new_run_name(plug_ip)
     runs.remember_current(name)
@@ -165,7 +193,11 @@ def resolve_run_name(
     if force_new:
         return start_new_run(plug_ip)
 
-    unfinished = [d for d in runs.run_directories() if not run_is_complete(d)]
+    directories = runs.run_directories()
+    unfinished = [d for d in directories if not run_is_complete(d) and not superseded(d, directories)]
+    if plug_ip and not ask:
+        # Not asked, for one device: only a run of that device is carried on.
+        unfinished = [d for d in unfinished if RunState.open(d).input("plug_ip") == plug_ip]
     if not unfinished:
         return start_new_run(plug_ip)
 

@@ -2376,6 +2376,36 @@ class RunChoiceTests(unittest.TestCase):
         self.assertIn("past the point of no return", logged)
         self.assertEqual(cli.RUN_CHOICE, [])
 
+    def plug_run(self, name, mac, done, **inputs):
+        self.run_dir(name, done)
+        state = RunState.open(self.root / name)
+        for key, value in {"plug_mac": mac, **inputs}.items():
+            state.set_input(key, value)
+
+    def test_a_run_a_later_run_of_the_same_plug_wrote_over_is_not_offered(self):
+        # Seen: a run stopped as it left Tasmota, carried on after a later run
+        # had put ESPHome on - asking for the Wi-Fi to leave a Tasmota long gone.
+        self.plug_run("1-stale", "12:34:56:ab:cd:ef", ["A0", "A5"])
+        self.plug_run("2-later", "12:34:56:ab:cd:ef", ["A0", "A5", "L1"], source="tasmota", firmware="esphome")
+        self.plug_run("3-other", "12:34:56:ab:cd:01", ["A0", "A5"])
+        _, menu = self.choose(0)
+        self.assertEqual(len(menu.call_args.args[1]), 4)   # 2-later, 3-other, a new one, remove one
+        self.assertNotIn("1-stale", " ".join(menu.call_args.args[1]))
+
+    def test_a_later_run_that_wrote_nothing_leaves_it_offered(self):
+        self.plug_run("1-stale", "12:34:56:ab:cd:ef", ["A0", "A5"])
+        self.plug_run("2-later", "12:34:56:ab:cd:ef", ["A0"])
+        _, menu = self.choose(0)
+        self.assertEqual(len(menu.call_args.args[1]), 4)
+
+    def test_not_asked_for_one_device_only_its_run_is_carried_on(self):
+        from unittest import mock
+        self.run_dir("half", ["A0"])
+        with mock.patch.object(prompts, "ask_choice") as menu:
+            self.assertNotEqual(cli.resolve_run_name(None, False, "10.0.0.99"), "half")
+            self.assertEqual(cli.resolve_run_name(None, False, "10.0.0.54"), "half")
+        menu.assert_not_called()
+
     def test_other_commands_continue_without_asking(self):
         from unittest import mock
         self.run_dir("half", ["A0"])
