@@ -172,6 +172,10 @@ serving flash reads at the top of the chip, and `ota_http` downloading to
 `0x286000`, where the bootloader applies it.
 [docs/beken-s61-emulation.md](beken-s61-emulation.md) has the detail.
 
+**Related:** the BekenEmulator has no licence, so nobody can tell on what terms
+a fix to it would be taken; [issue #2](https://github.com/openshwprojects/BekenEmulator/issues/2)
+asks for one, and our fix waits on it.
+
 ## Smaller fixes found along the way
 
 | Project | Pull request | What it fixes |
@@ -180,6 +184,7 @@ serving flash reads at the top of the chip, and `ota_http` downloading to
 | Tasmota | [#25169](https://github.com/arendst/Tasmota/pull/25169) | Its setup network went out under the chip's default name (`ESP_` and its MAC) for its first tenth of a second, which phones and computers then list beside the real one |
 | ESPHome | [#21672](https://github.com/esphome/esphome/pull/21672) | An `api` action with an array variable that also responds did not compile; our calibration action, which takes a list of floats, had to go without an answer |
 | ESPHome | [#22163](https://github.com/esphome/esphome/pull/22163) | A friendly name always joined the MAC suffix with a space: an option to choose, so ours can read `esphome-abcdef` as the hostname does |
+| ESPHome | [esphome.io #8011](https://github.com/esphome/esphome.io/pull/8011) | The documentation for #22163's option, and what `name_add_mac_suffix` does to the friendly name |
 | ESPHome | [#22224](https://github.com/esphome/esphome/pull/22224) | The CSE7766 logged a clamped power factor and impossible reactive power at DEBUG on nearly every frame of a resistive load; at VERBOSE, as its other expected noise is. Measured on a real S60, before and after |
 | OpenBeken | [#2293](https://github.com/openshwprojects/OpenBK7231T_App/pull/2293) | No way for a driver to act before an HTTP OTA restarts the device: a weak `HAL_OTA_BeforeReboot(ok)` hook, by which the S61's interim firmware erases its own settings so the firmware it fetched starts clean |
 
