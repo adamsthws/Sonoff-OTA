@@ -288,8 +288,7 @@ signed-char `Tiny_CRC8`, the `0x1e1000` config offset).
   is **LZMA decompression + standard CRC-32** (with an FNV-1a `raw_hash`), all in
   software, with **no payload decryption** — the `crypt` field is a header flag, not a
   cipher, and the download path writes bytes verbatim too. So the whole OTA chain has
-  **no signature, no encryption and no secret key**. **Proven with a real image
- :** OpenBeken ships BK7238 `OpenBK7238_<ver>.rbl` OTA images; staged on
+  **no signature, no encryption and no secret key**. **Proven with a real image:** OpenBeken ships BK7238 `OpenBK7238_<ver>.rbl` OTA images; staged on
   the stock bootloader (no bypasses) it decompresses + writes the full image, passes
   every firmware gate including the final hash verify, and **boots OpenBeken** — the
   emulator performs the whole apply itself (once it models the flash JEDEC id + XIP

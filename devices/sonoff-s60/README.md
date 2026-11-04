@@ -29,7 +29,7 @@ to the S60; the tooling it shares with other Espressif plugs is in
   from this file's path, its `package_import_url`, so moving the file means
   building a new image, as in 2.3.0. The mover that changes a plug's memory
   layout is [`mover.yaml`](mover.yaml).
-- **Flash layout**: Sonoff's, kept by Tasmota and ESPHome
+- **Flash layout**: Sonoff's, which ESPHome keeps and Tasmota replaces with its own
   ([`artifacts/sonoff-s60-partition-table.bin`](../../artifacts/README.md)); the
   recovery Safeboot and the repartitioning route are
   [`tools/espressif/safeboot/`](../../tools/espressif/safeboot/).

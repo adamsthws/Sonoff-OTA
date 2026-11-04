@@ -52,8 +52,7 @@ Three edits against `openshwprojects/OpenBK7231T_App`:
 
 `Autoflash_Init()` registers the driver's four commands, runs the import (a
 no-op once a Wi-Fi SSID is set) and looks for the interim marker, so it is
-safe on every boot. (The driver's long-term home is upstream: OpenBeken would
-then maintain it across its own refactors.)
+safe on every boot.
 
 ## What the driver does on first boot
 

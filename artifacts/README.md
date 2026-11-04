@@ -92,7 +92,7 @@ saves Tasmota's settings without Wi-Fi details, where 4.4.3 refused them, so
 Tasmota starts under the run's name for it and makes its own network by that
 name, not its default `tasmota-XXXXXX-NNNN`. Its code is the same for
 any plug; the wrapper names the S60's model, which is why the file names the
-S60. Tried on the emulator; on hardware by the next run.
+S60. Tested on the emulator and on real plugs.
 
 The version is well above any Sonoff release so far (1.2.0). The stock 1.2.0
 updater does not compare versions - the upgrade command decides what is

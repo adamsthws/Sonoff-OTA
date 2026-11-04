@@ -10,13 +10,19 @@ by hand takes the same steps ([after that](#by-hand)).
 
 | Firmware | On the plug | Follows | Pinned in |
 |---|---|---|---|
-| Official Tasmota: `tasmota32c3.bin`, `tasmota32c3-safeboot.bin` (and `tasmota32c3.factory.bin`, for its partition table) | for good | every Tasmota release | [`firmware.json`](../firmware.json) |
+| Official Tasmota: `tasmota32c3.bin`, `tasmota32c3-safeboot.bin` (and `tasmota32c3.factory.bin`, for its partition table) | for good | every Tasmota release | [`firmware.json`](../artifacts/firmware.json) |
 | ESPHome for the S60 (`artifacts/esphome-sonoff-s60-imprintable-*.bin`) | for good | every ESPHome release | `firmware.json` |
 | ESPHome's bootloader (`artifacts/esphome-sonoff-s60-bootloader-*.bin`) | for good | only when it has to change | `firmware.json` |
 | The mover (`artifacts/autoflash-mover-*.bin`) | a minute or two | only when its config changes | `firmware.json` |
 | OpenBeken for the S61 (`artifacts/openbeken-sonoff-s61-*.rbl`) | for good | by hand: OpenBeken has no releases to settle on | `firmware.json` |
 | ESPHome for the S61 (`artifacts/esphome-sonoff-s61-*.rbl`) | for good | every ESPHome release, by hand so far | `firmware.json` |
 | The Berry Tasmota, the recovery Safeboot, the settings template, the bridge | minutes | no | [`artifacts/README.md`](../artifacts/README.md) says where, and how each is changed |
+
+A new pin reaches plugs already converted. Running the tool on a plug with an
+earlier release of its firmware offers this one as an update, and the plug
+takes it, so treat a pin bump as a change to plugs in use as well as to new
+conversions ([Changing firmware later](what-happens.md#changing-firmware-later)).
+A plug adopted into Home Assistant keeps to the release it names.
 
 The official Tasmota files are not kept in this repository: each run downloads
 them from the release's own page on GitHub and checks them against
@@ -175,6 +181,11 @@ A Beken plug ends on OpenBeken or on ESPHome built on LibreTiny, each an
 rt_ota image the plug's stock bootloader applies from its download slot
 ([devices/sonoff-s61/](../devices/sonoff-s61/README.md)); the images are
 pinned under `beken` in `firmware.json`, by plug.
+
+A change to what the OpenBeken driver does on first boot reaches only plugs
+converted after it: an updated plug keeps its settings, so the import does not
+run again. A fix that updated plugs need goes in what the driver does on every
+start ([openbeken.md](../devices/sonoff-s61/openbeken.md#updating)).
 
 ```sh
 python3 tools/repo/update_firmware.py openbeken                       # the pinned OpenBeken commit

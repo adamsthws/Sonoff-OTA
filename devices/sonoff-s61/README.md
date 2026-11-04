@@ -27,7 +27,7 @@ all of this out is described in
   [`openbeken.md`](openbeken.md). The 4 MB patches offered
   upstream are [`tools/beken/openbeken/`](../../tools/beken/openbeken/).
 - **ESPHome** (LibreTiny): [`esphome.yaml`](esphome.yaml), the path converted
-  plugs will name as their `package_import_url`; how it differs from the S60's, the build, the reversion and what the
+  plugs name as their `package_import_url`; how it differs from the S60's, the build, the reversion and what the
   emulator validated: [`esphome.md`](esphome.md).
 - **Stock firmware**: the public dump upstream BekenEmulator publishes is
   what the emulator and its tests run; this repository holds no Sonoff

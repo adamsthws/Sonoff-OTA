@@ -26,9 +26,7 @@ firmware facts it rests on, what was built, and the verification log. Contents:
 ## Status
 
 **Built and tested through the eWeLink-dependent part of a conversion, and
-proven to run in parallel** (2026-10-19). Branch `cloud-stub` (rebased onto
-`esphome`; a fast-forward of `esphome` takes the whole feature). All of the
-following is done:
+proven to run in parallel** (2026-10-19). All of the following is done:
 
 - The plug honours `frame_params.dis_server` — redirect is a pure NVS edit
   ([test 1](#test-1--does-the-firmware-honour-dis_server)).
@@ -118,7 +116,8 @@ This is self-hosting — redirecting your own device to your own server — not
 impersonating eWeLink:
 
 - Stub mode never resolves `coolkit.cc` / `coolkit.cn` to the stub. Those names
-  appear nowhere in its DNS, its certs, or its config.
+  are not in its certificates, and the emulator's container points eWeLink's API
+  and dispatch addresses at `0.0.0.0`, so they lead nowhere.
 - Stub mode never uses or forges coolkit's certificate or CA private key.
 - Stub mode never extracts or needs the plug's embedded client key.
 - The real eWeLink cloud and the real plugs are untouched; the stub only ever

@@ -52,8 +52,7 @@ cannot connect:
   work or school - makes eWeLink's and GitHub's certificates untrusted. The
   tool says so; use another network, or pause that software.
 
-Windows and macOS have not been through a real conversion yet, so a problem
-there may be new. Please post it in the
+A problem not listed here may be new. Please post it in the
 [Test reports](https://github.com/adamsthws/firmware-liberator/discussions/1) thread - see
 [Reporting how it went](../README.md#reporting-how-it-went) - and the fix
 will help everyone after you. To ask for help, start a
@@ -208,7 +207,7 @@ look; turn it on and run again.
 **"Device model is ..., not one this tool converts"**
 
 Another Sonoff on the same account answered. The tool converts only the S60
-and stops before sending anything. Run again and choose the S60 from the list.
+and S61, and stops before sending anything. Run again and choose your plug from the list.
 
 **"Empty reply from server" when you try `curl` yourself**
 

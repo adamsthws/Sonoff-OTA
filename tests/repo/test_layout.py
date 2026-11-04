@@ -36,6 +36,25 @@ class RepositoryRootTests(unittest.TestCase):
                     wrong.append("%s: %s" % (file.relative_to(ROOT), match.group(0)))
         self.assertEqual(wrong, [])
 
+    def test_every_relative_link_in_the_docs_names_a_file(self):
+        """A Markdown link to a path, as GitHub follows it from the file it is in;
+        code (where a link is only an example) aside."""
+        link = re.compile(r"\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)|^\[[^\]]+\]:\s*(\S+)", re.MULTILINE)
+        tracked = subprocess.run(["git", "ls-files", "*.md"], cwd=ROOT, capture_output=True, text=True,
+                                 check=True).stdout.split()
+        wrong = []
+        for name in tracked:
+            text = (ROOT / name).read_text(encoding="utf-8")
+            text = re.sub(r"`[^`\n]*`", "", re.sub(r"```.*?```", "", text, flags=re.DOTALL))
+            for match in link.finditer(text):
+                href = match.group(1) or match.group(2)
+                if re.match(r"[a-z][a-z0-9+.-]*:|[#/<]", href, re.IGNORECASE):
+                    continue
+                target = ((ROOT / name).parent / href.split("#")[0]).resolve()
+                if not target.exists() or ROOT not in target.parents and target != ROOT:
+                    wrong.append(f"{name}: {href}")
+        self.assertEqual(wrong, [])
+
     def test_every_windows_path_names_a_file(self):
         """`tools\\...\\name.ext` in the PowerShell, batch and prose: Windows runs them
         from the checkout root (C:\\Autoflash\\repo in the emulator's VM)."""

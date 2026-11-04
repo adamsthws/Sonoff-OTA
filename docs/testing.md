@@ -173,7 +173,7 @@ but for two: PSScriptAnalyzer needs PowerShell 7.4.6 or newer (`pwsh`), then
 config` needs Docker, and pulls the image the first time. A
 commit on a computer without one is not stopped - the hook says it skipped
 it, and the workflow runs it - and `git commit --no-verify` skips them all.
-`archive/` is not linted: it is kept as it was.
+`archive/` is linted like the rest.
 
 ## The emulator
 

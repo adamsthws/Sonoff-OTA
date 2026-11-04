@@ -19,7 +19,7 @@ the project adds. See [legal.md](legal.md).
 ## Goals
 
 1. **Convert the plug to OpenBeken (or ESPHome) over OTA, and back to stock** — as
-   the S60 is converted to Tasmota//OpenBeken/ESPHome, through the vendor's own update path,
+   the S60 is converted to Tasmota/OpenBeken/ESPHome, through the vendor's own update path,
    with no soldering. See [Firmware update and conversion](#firmware-update-and-conversion-the-ota-path).
 2. **Read the stored Wi-Fi credentials from flash**, so the conversion retains the
    user's network with no re-typing — as the S60 conversion does. They are stored
@@ -930,7 +930,7 @@ table. Verified in the emulator: the 4 MB build writes its config at `0x3e1000`
 and `0x1e1000` stays blank.
 
 The build is a `FLASH_SIZE=4M` switch, in two patches kept in
-[`tools/beken/openbeken/`](../../tools/beken/openbeken/) and
+[`tools/beken/openbeken/`](../tools/beken/openbeken/) and
 offered upstream — OpenBK7231T_App#2290 and beken_freertos_sdk#13, see
 [upstream-contributions.md](upstream-contributions.md#openbeken-on-a-4-mb-bk7238)
 (the recipe is in [its README](../devices/sonoff-s61/openbeken.md#building-bk7238-4-mb-table)).
@@ -970,7 +970,7 @@ OTA path uses), refusing on a 2 MB-table build where the download would land at
 the emulator against a host HTTP server: `init OTA, startaddr 0x286000` → reboot →
 `upgrade(s61v6->1.0.2)` → stock firmware up, EF40 untouched.
 
-[`tools/beken/backup.py`](../../tools/beken/backup.py) copies the
+[`tools/beken/backup.py`](../tools/beken/backup.py) copies the
 per-device region `0x3e0000–0x400000` (factory TLV, EF40 app store, system ENV)
 out of a converted plug over `GET /api/flash/<addr>-<len>` (the REST reader's
 `DEFAULT_FLASH_LEN` is raised to 4 MB in the S61 build) into
@@ -1598,10 +1598,10 @@ patches no longer apply.
   (find code by the log/format string it uses), and `decomp.py` (angr
   pseudo-C decompiler — no Java/Ghidra needed).
 - **tools/beken** (`tools/beken/`): the static-analysis tools above, plus the
-  provisioning drivers — `seed_join.py` (seed creds → Wi-Fi join),
-  `ble_provision.py` (drive the eWeLink BLE messages through the dispatcher →
-  Wi-Fi join), and `cloud_dial.py` (seed + synthesise the pairing trigger →
-  **eWeLink cloud dial**) — plus `button_sim.py` (button press),
-  `long_press.py`, `pair_drive.py`, and `airkiss_capture.sh` +
+  provisioning drivers `seed_join.py` (seed creds → Wi-Fi join) and
+  `cloud_dial.py` (seed + synthesise the pairing trigger → **eWeLink cloud
+  dial**). `archive/s61-research/` holds the rest: `ble_provision.py` (drive the
+  eWeLink BLE messages through the dispatcher → Wi-Fi join), `button_sim.py`
+  (button press), `long_press.py`, `pair_drive.py`, and `airkiss_capture.sh` +
   `airkiss_replay.py` (AirKiss relay). Emulator tools take paths via env
   `BK_EMU_ROOT` / `S61_DUMP`; see the folder's README.
