@@ -3,8 +3,8 @@
 Building this converter meant pushing ESP32/Beken firmware, HTTP clients and OTA
 code harder than most projects do: downloading firmware in pieces, over Wi-Fi
 that is allowed to drop at any moment, with a plug that has to survive it. When
-something went wrong and the cause was not ours, we chased it into the project
-it came from, fixed it there, and sent the fix back.
+something went wrong and the cause lay elsewhere, this project chased it into
+the project it came from, fixed it there, and sent the fix back.
 
 This page lists those fixes, grouped by what they were about, and how each
 was proven.
@@ -14,7 +14,7 @@ was proven.
 The conversion runs a Berry script on the plug that downloads a firmware image
 in blocks with Tasmota's `webclient`. In testing, a network drop at the wrong
 moment left a plug answering nothing - not even its web page - until it was
-switched off and on. The cause was not in our script: Tasmota's HTTP client
+switched off and on. The cause was not in that script: Tasmota's HTTP client
 waited for the rest of a response body for as long as the connection looked
 open, with no time limit. A server that goes quiet without closing the
 connection (its computer sleeps, a cable is pulled, a router restarts) leaves
@@ -78,8 +78,8 @@ maintainer exposed it in [#25145](https://github.com/arendst/Tasmota/pull/25145)
 
 ## Firmware updates that never gave up
 
-With the HTTP clients done, we checked the other ways ESP32 firmware
-commonly downloads an update:
+With the HTTP clients done, the next thing to check was the other ways ESP32
+firmware commonly downloads an update:
 
 - **arduino-esp32's `HTTPUpdate`** did give up, but only after 300 empty reads,
   each waiting the 8 s connection timeout first: about 40 minutes of a frozen
@@ -174,7 +174,7 @@ serving flash reads at the top of the chip, and `ota_http` downloading to
 
 **Related:** the BekenEmulator has no licence, so nobody can tell on what terms
 a fix to it would be taken; [issue #2](https://github.com/openshwprojects/BekenEmulator/issues/2)
-asks for one, and our fix waits on it.
+asks for one, and this project's fix waits on it.
 
 ## Smaller fixes found along the way
 
@@ -182,17 +182,17 @@ asks for one, and our fix waits on it.
 |---|---|---|
 | Tasmota | [#25163](https://github.com/arendst/Tasmota/pull/25163) | Berry's `webclient` logged a connection timeout's error code as its time: "Connection timeout after -1 ms" |
 | Tasmota | [#25169](https://github.com/arendst/Tasmota/pull/25169) | Its setup network went out under the chip's default name (`ESP_` and its MAC) for its first tenth of a second, which phones and computers then list beside the real one |
-| ESPHome | [#21672](https://github.com/esphome/esphome/pull/21672) | An `api` action with an array variable that also responds did not compile; our calibration action, which takes a list of floats, had to go without an answer |
-| ESPHome | [#22163](https://github.com/esphome/esphome/pull/22163) | A friendly name always joined the MAC suffix with a space: an option to choose, so ours can read `esphome-abcdef` as the hostname does |
+| ESPHome | [#21672](https://github.com/esphome/esphome/pull/21672) | An `api` action with an array variable that also responds did not compile; this project's calibration action, which takes a list of floats, had to go without an answer |
+| ESPHome | [#22163](https://github.com/esphome/esphome/pull/22163) | A friendly name always joined the MAC suffix with a space: an option to choose, so this project's can read `esphome-abcdef` as the hostname does |
 | ESPHome | [esphome.io #8011](https://github.com/esphome/esphome.io/pull/8011) | The documentation for #22163's option, and what `name_add_mac_suffix` does to the friendly name |
 | ESPHome | [#22224](https://github.com/esphome/esphome/pull/22224) | The CSE7766 logged a clamped power factor and impossible reactive power at DEBUG on nearly every frame of a resistive load; at VERBOSE, as its other expected noise is. Measured on a real S60, before and after |
 | OpenBeken | [#2293](https://github.com/openshwprojects/OpenBK7231T_App/pull/2293) | No way for a driver to act before an HTTP OTA restarts the device: a weak `HAL_OTA_BeforeReboot(ok)` hook, by which the S61's interim firmware erases its own settings so the firmware it fetched starts clean |
 
 ## Other people's reports, reproduced on the emulator
 
-With the emulator built, we went through Tasmota's open reports for problems
-it could reproduce, and picked those an S60 owner could meet. Two came from
-one person changing an ESP32-C3 plug's Wi-Fi (discussions
+With the emulator built, this project went through Tasmota's open reports for
+problems it could reproduce, and picked those an S60 owner could meet. Two came
+from one person changing an ESP32-C3 plug's Wi-Fi (discussions
 [#24591](https://github.com/arendst/Tasmota/discussions/24591) and
 [#24585](https://github.com/arendst/Tasmota/discussions/24585)), as someone
 might after converting a plug. Both were in Tasmota's own setup and settings
@@ -251,8 +251,8 @@ showed too, and every fix behaved the same on both.
   downloads for leaks.
 - **Timing.** Expected times were worked out from the code first, then
   measured, so a result that disagreed showed a misunderstanding.
-- **Our own mistakes.** When a test turned out to be wrong - an image that was
-  never flashed, a fix that had leaked into a "before" build - it was
+- **This project's own mistakes.** When a test turned out to be wrong - an
+  image that was never flashed, a fix that had leaked into a "before" build - it was
   re-run, and the PRs only report the re-runs.
 
 ## Related

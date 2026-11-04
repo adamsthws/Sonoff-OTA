@@ -54,17 +54,18 @@ processes, after five problems the first hundred runs found had been fixed:
 | "Address already in use" | a port picked free, let go, then taken by another test before the server bound it | the server started again on another |
 | A clean-up waiting for ever, once | a test server's `shutdown()`; never seen again, so not known | the time limit, which would now show where it was |
 
-Writing a test that keeps it so:
+When you write a test, keep it safe to run this way:
 
 - **Leave nothing behind** in a module, a class or the environment: patch it
   for the test (`mock.patch...start()` with `addCleanup`), and put back what
   the code under test keeps for the life of a process.
-- **Keep a port** picked as free: a server picked one for is started again
-  on another if it cannot bind; a check that nobody answers keeps the socket
-  bound, not listening - refused at once, and no one else's meanwhile.
-- **Nothing of the whole computer's** - its sleep inhibitors, a fixed port, a
-  file outside the test's own temporary directory - unless the tests sharing
-  it are in `TOGETHER`, with why.
+- **Keep a port** you picked as free: a server given a picked port is started
+  again on another if it cannot bind it; a check that nobody answers keeps the
+  socket bound but not listening, so a connection is refused at once and no
+  other test can take the port meanwhile.
+- **Nothing shared across the whole computer** - its sleep inhibitors, a fixed
+  port, a file outside the test's own temporary directory - unless the tests
+  sharing it are in `TOGETHER`, with the reason.
 - **Nothing beyond this computer**: stub what the code under test asks of
   a plug, eWeLink or anything else on the network. A made-up address on a
   private network can be a real device where the tests run, so any
@@ -86,11 +87,12 @@ runs that order again.
 Neither measure below is a gate, and no number is a target: a test written
 to raise one tends to test the stand-ins, not the tool. They say where to
 look - a decision no test takes both ways, or a check whose reason no test
-asks - and a person decides what is worth a test there. What only the
+asks about - and you decide what is worth a test there. What only the
 emulator or a plug can show is tested there.
 
 **Coverage** says what the tests run. The `emulator-check` workflow writes
-it into its summary, by file; to see it here, with what each file misses:
+it into its summary, by file; to see it on your computer, with what each
+file misses:
 
 ```sh
 .venv/bin/python -m coverage run --branch --source=tools -m unittest discover -s tests
@@ -105,7 +107,7 @@ ran once counts as covered however its condition went.
 a time - `>` to `>=`, `or` to `and`, an error's message to `None` - and runs
 the tests on each change. A change some test fails on is caught; one they
 all still pass is a mistake nobody would see. It takes minutes and asks for
-judgement, so it is run by hand, on a module that decides something costly,
+judgement, so run it by hand, on a module that decides something costly,
 after its tests are written - never in a hook. It runs in a copy of the
 checkout, from its own virtual environment (mutmut needs pytest, which
 runs unittest's tests as they are):
@@ -132,12 +134,12 @@ the Beken tools in `tools/beken`, which `tests/beken/test_tools.py` puts on
 the test's path to them changed to `src`, so the two names agree.
 
 `only_mutate` is the module; the tests are every file that uses it
-(`grep -l` its name in `tests/`) - one left out leaves the code only it
-reaches "no tests". `mutmut results` lists each change that survived, and
-`mutmut show NAME` what it changed. Some can never be caught, because they
+(`grep -l` its name in `tests/`) - leave one out and mutmut reports the code
+only that file reaches as "no tests". `mutmut results` lists each change that
+survived, and `mutmut show NAME` what it changed. Some can never be caught, because they
 change nothing: in `Plan.check`, `length <= 0` and `length <= 1` never
-differ, every length being whole sectors. Say so in the tests' commit, so the
-next run's reader need not work it out again.
+differ, every length being whole sectors. Say so in the commit that adds the
+tests, so whoever reads the next run need not work it out again.
 
 On 2026-10-27, `plans.py`, its lines 92% covered, had 144 of 634 changes
 survive - 31 in `Plan.check`, whose refusals were tested only as some
@@ -152,9 +154,9 @@ tools/repo/setup-dev               # once: creates .venv, installs the linters (
 python3 tools/repo/lint.py all
 ```
 
-Before the tests, what is likely wrong in the code as written. The
-pre-commit hook (`python3 tools/repo/leak_scan.py install` sets it up) runs them on
-the files a commit changes, and the `lint` workflow on every file:
+The linters find what is likely wrong in the code as written, before the
+tests run it. The pre-commit hook (`python3 tools/repo/leak_scan.py install`
+sets it up) runs them on the files a commit changes, and the `lint` workflow on every file:
 
 | Linter | On | Looks for |
 |---|---|---|
@@ -194,8 +196,8 @@ tools/espressif/emulator/unattended-test.sh --fresh --plug=MAC --save=on-tasmota
 tools/espressif/emulator/unattended-test.sh --from=on-tasmota --plug=MAC -- --firmware esphome
 ```
 
-That is how every direction is tested: from a plug the tool converted, as a
-person converting it again would have.
+That is how every direction is tested: from a plug the tool converted, the
+kind a person converting it again would have.
 
 ## The fault suite
 
@@ -262,19 +264,19 @@ every direction - 1,380 scenarios:
   --code=DIR` runs the tool from another tree.
 - **A converted plug left on Tasmota's own safeboot** (`lostapp-factory`): an
   ESPHome factory image - bootloader, partition table and app, for a serial
-  flasher - uploaded through Tasmota's page, as a person once asked about
-  did: Tasmota switches to its safeboot for a file that big, which writes it
-  over Tasmota, and the plug starts the safeboot from then on. Then the tool,
+  flasher - uploaded through Tasmota's page, as a person who once asked
+  about it had done: Tasmota switches to its safeboot for a file that big,
+  which writes it over Tasmota, and the plug starts the safeboot from then on. Then the tool,
   to Tasmota, ESPHome or Sonoff. And one only switched to its safeboot, its
   Tasmota unharmed (`lostapp-switched`), which must be started again, never
   written over (FAIL-REPLACED).
 - **A converted plug that lost its template** (`notemplate-generic`): the
   saved Tasmota given Tasmota's generic template and an MQTT host, as a person
   might, so it switches nothing - as a user's plug did. Then the tool, to
-  Tasmota, ESPHome or Sonoff: it must know the plug for one that lost its
+  Tasmota, ESPHome or Sonoff: it must recognise the plug as one that lost its
   template (FAIL-NOT-UNTEMPLATED), never send it the hub's steps, whose first
-  is an ESPHome update no Tasmota takes (FAIL-X1-ON-TASMOTA), and staying on
-  Tasmota, give it the template alone, the MQTT host kept
+  is an ESPHome update no Tasmota takes (FAIL-X1-ON-TASMOTA), and when staying
+  on Tasmota, give it the template alone, with the MQTT host kept
   (FAIL-SETTINGS-LOST).
 - **A converted plug in a boot loop** (`bootloop-fallback`, to Tasmota):
   Tasmota started a sixth time in a row within 10 s of the last start goes
@@ -290,9 +292,10 @@ every direction - 1,380 scenarios:
   ESPHome stopped within a minute of starting ten times in a row does, its
   count kept in flash, so the emulator keeps it too. Safe mode has only Wi-Fi
   and the update service for five minutes, as the mover has. Then the tool,
-  to ESPHome, Tasmota or Sonoff: it must know the plug for ESPHome in safe
+  to ESPHome, Tasmota or Sonoff: it must recognise the plug as ESPHome in safe
   mode and wait for it (FAIL-TAKEN-FOR-MOVER), never take it for one left
-  part way - to stay on ESPHome, that sent it the startup firmware.
+  part way - on a run staying on ESPHome, that mistake sent it the startup
+  firmware.
 - **A Berry phase riding out the network by itself** (`blips-3`,
   `lossy-phase`, at E2, G1, I1, L1 and R1): two 3 s outages from 10% to 90%
   of the phase - further apart than its 20 s of retrying - or one packet in
@@ -384,7 +387,7 @@ D1) run on any machine with Docker: copy the repository and the saved plugs
 
 **How many at once.** Each emulator converting takes about half a CPU core
 and 120 MB. Past one per core the plugs slow down enough for their timeouts to
-fail where nothing is wrong, so the load is kept at or under the number of
+fail where nothing is wrong, so keep the load at or under the number of
 cores. A batch can be scaled while it runs: started with
 `AUTOFLASH_MOST_WORKERS` above its workers, only the number written in
 `workers` in its results directory take a scenario - raised, more start; lowered,
@@ -397,8 +400,8 @@ reset at both ends, so eWeLink lets go of them at once - and opened only for a
 turn: when its run is about to need the cloud (the eWeLink steps, or the
 installer sent again), until the plug has downloaded the installer and
 started it - typically 30-60 s: Sonoff's firmware that loses eWeLink part way
-through the download gives it up. Its run ending gives the turn
-up too; a run after it asks again. Turns are given by how long the run can
+through the download gives it up. A run that ends
+gives up its turn too, and a later run has to ask for one again. Turns are given by how long the run can
 wait: finding the plug in eWeLink first, then a plug back on Sonoff's
 firmware part way, then the rest, and last a C2 scenario's plug, whose turn
 starts before its run does. Between two plugs' turns there is a short pause
@@ -496,7 +499,7 @@ same two with nothing to corrupt.
   passed when run again.
 - **More than one emulator per core.** Then the emulated plug can slow down
   enough to fail where nothing is wrong - once leaving it unable to reach the
-  tool until it restarted - so the suite is run at one per core or fewer.
+  tool until it restarted - so run the suite at one per core or fewer.
   On 22 October it happened once at one per core, on a VM whose host was
   busy: after a fault at E2, the plug's own requests to the tool stalled
   at G1 and none got through for four runs, while it still answered. Run
@@ -522,7 +525,7 @@ Each fixed, with a test, and the scenario run again. On 22 October:
   for one that had lost its settings: the network a Tasmota shows for a
   moment at start-up was taken for its setup network, and the run waited 15
   minutes for it to be joined, then crashed: 6 scenarios. The plug is now
-  given a minute first, and that look's errors stop only its step.
+  given a minute first, and an error in that check stops only its step.
 - Against the real eWeLink, a send of the installer that failed before the
   plug was told to fetch it - eWeLink dropping the tool's connection -
   was put down to the computer's firewall. It now says what happened.

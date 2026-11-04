@@ -3,8 +3,8 @@
 A converted plug ends on official Tasmota, OpenBeken or this project's
 ESPHome. Tasmota and ESPHome follow their projects' releases, a little
 behind: the repository's `firmware-update` workflow takes each once it has
-settled, tests it and releases it, by itself ([below](#by-itself)). By hand, it is the same steps
-([after that](#by-hand)).
+settled, tests it and releases it, by itself ([below](#by-itself)). Doing it
+by hand takes the same steps ([after that](#by-hand)).
 
 ## What follows a release, and what does not
 
@@ -18,9 +18,10 @@ settled, tests it and releases it, by itself ([below](#by-itself)). By hand, it 
 | ESPHome for the S61 (`artifacts/esphome-sonoff-s61-*.rbl`) | for good | every ESPHome release, by hand so far | `firmware.json` |
 | The Berry Tasmota, the recovery Safeboot, the settings template, the bridge | minutes | no | [`artifacts/README.md`](../artifacts/README.md) says where, and how each is changed |
 
-The official Tasmota files are not kept here: each run downloads them from
-the release's own page on GitHub and checks them against `firmware.json`. The
-ESPHome builds are: the run writes the plug's Wi-Fi into a copy of each.
+The official Tasmota files are not kept in this repository: each run downloads
+them from the release's own page on GitHub and checks them against
+`firmware.json`. The ESPHome builds are kept in it: the run writes the plug's
+Wi-Fi into a copy of each.
 
 **The interim firmware** - everything a plug runs only part way through a
 conversion - stays as it is. Each has been through every fault the suite puts
@@ -62,8 +63,8 @@ before's last point release once the new month's `.0` is out: always a month
 behind, on a series that has had its fixes. A release listed under `hold` in
 `firmware.json` (`"hold": {"tasmota": ["16.1.0"]}`) is never taken.
 
-What is due, it makes into a pull request: the update (steps 1 and 2 below,
-its docs and changelog line written, the version raised a minor version),
+The workflow makes what is due into a pull request: the update (steps 1 and 2
+below, its docs and changelog line written, the version raised a minor version),
 then the unit tests and the final-firmware emulator test (step 4). Nothing is
 pushed if the leak scan finds anything in it. The pull request says which
 releases, what each check found, and the tests' results; the workflow then
@@ -153,9 +154,9 @@ builds:
 - the app is an ESP32-C3 app that fits Sonoff's slot, says it is that ESPHome
   release, holds each Wi-Fi placeholder once and untouched and takes a Wi-Fi
   written in, and holds no path from the computer that built it;
-- its bootloader is compared with the published one. The same: kept as it is.
-  Different (a new ESP-IDF): the published one is kept, and it says so - see
-  above.
+- its bootloader is compared with the published one. If they match, nothing
+  changes. If they differ (a new ESP-IDF), the published one is kept, and the
+  command says so - see above.
 
 Then it publishes the image in `artifacts/` (removing the one before), and
 updates its line in `SHA256SUMS`, the config's version and `firmware.json`.
@@ -307,10 +308,9 @@ changelog's; merging to `main` publishes the release
 part way by the release before carry on with the new firmware by themselves:
 the bundle is built again for the new pins - at A5, or as a run carried on
 past A5 starts - and a step whose checks were made with the old bundle does
-them again. One that had installed the official app already (F2) finishes
-with its bundle - or, if this version must build that again (1.2.0's, from
-another startup firmware), one of the same release - on the release it
-began with, read back against that
-release's files as any other, and says so: `firmware.json` keeps each
+them again. A run that had already installed the official app (F2) finishes on the
+release it began with, using its bundle - or, if this version must build that
+again (1.2.0's, from another startup firmware), a bundle of the same release.
+It reads the app back against that release's files as usual, and says so: `firmware.json` keeps each
 release pinned before (`earlier`) by its files, and `update_firmware.py
 tasmota` adds the one it replaces.

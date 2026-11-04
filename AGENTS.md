@@ -98,4 +98,5 @@ and plugs' identities.
 
 Docs, comments and commit messages: plain, compact sentences saying what
 and why, for someone who was not there. Comments as sparing as the code
-around them.
+around them. Docs speak to their reader, not from our side:
+[CONTRIBUTING.md](CONTRIBUTING.md#writing-docs).

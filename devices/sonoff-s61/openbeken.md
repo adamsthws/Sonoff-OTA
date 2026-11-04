@@ -4,20 +4,20 @@ The tool's OpenBeken driver,
 [`tools/beken/openbeken/drv_autoflash.c`](../../tools/beken/openbeken/drv_autoflash.c),
 on first boot of a freshly converted S61, reads the plug's **stock** Wi-Fi
 credentials from the untouched EasyFlash store and applies them through
-OpenBeken's own config API, so the plug rejoins the user's network with no
-typing and no second device.
+OpenBeken's own config API, so the plug rejoins your network with no typing
+and no second device.
 
 The driver serves any eWeLink plug on a Beken chip that keeps its stock
-rt_ota bootloader: what is one plug's own it reads from that plug's table
-([`drv_autoflash.h`](../../tools/beken/openbeken/drv_autoflash.h) has its
+rt_ota bootloader: it reads whatever is specific to one plug from that plug's
+table ([`drv_autoflash.h`](../../tools/beken/openbeken/drv_autoflash.h) has its
 fields). The S61's is [`drv_autoflash_sonoff_s61.c`](drv_autoflash_sonoff_s61.c):
 its kind and stock model, where its stock store (`0x3e0000`-`0x3ec000`),
 download slot (`0x286000`) and OpenBeken's settings (`0x3e1000`) sit, its
 wiring, and its BL0937 meter's calibration - how its `elecCalibCoef` record
 reads, the datasheet constants, the 3840 W rating. A build carries one table,
-the plug's it is built for; the driver itself names no plug. Telling the
-plug from its stock store's model at run time, to carry several tables in
-one image, waits for a second Beken plug.
+for the plug it is built for; the driver itself names no plug. An image that
+carries several tables and tells the plug by its stock store's model at run
+time waits for a second Beken plug.
 
 It goes through `CFG_SetWiFiSSID()` / `CFG_SetWiFiPass()` rather than writing the
 config blob itself, so it keeps working across OpenBeken releases that change the
@@ -52,12 +52,12 @@ Three edits against `openshwprojects/OpenBK7231T_App`:
 
 `Autoflash_Init()` registers the driver's four commands, runs the import (a
 no-op once a Wi-Fi SSID is set) and looks for the interim marker, so it is
-safe on every boot. (Upstreaming the driver is the long-term home — then OpenBeken maintains it
-across its own refactors.)
+safe on every boot. (The driver's long-term home is upstream: OpenBeken would
+then maintain it across its own refactors.)
 
 ## What the driver does on first boot
 
-Only when OpenBeken has no Wi-Fi SSID yet (so a user's later changes are never
+Only when OpenBeken has no Wi-Fi SSID yet (so your later changes are never
 touched), it reads the stock EasyFlash store and:
 
 1. imports **`wifi-ssid` / `wifi-pass`** via `CFG_SetWiFiSSID/Pass()`;
@@ -73,12 +73,12 @@ touched), it reads the stock EasyFlash store and:
    both its short name (its mDNS hostname and its name in Home Assistant) and
    its full one (its DHCP hostname).
 
-The driver also registers `AutoflashKind`, by which the tool tells what plug
-an OpenBeken is on, since every firmware it installs is named alike and the
-user may rename it: `AutoflashKind sonoff-s61` answers OK, any other kind an
+The driver also registers `AutoflashKind`, which the tool uses to tell what
+plug an OpenBeken is on, because every firmware it installs is named alike and
+you may rename it: `AutoflashKind sonoff-s61` answers OK, any other kind an
 error, and an OpenBeken without the driver does not know the command. It
-changes nothing. The tool asks only an OpenBeken on a chip one of its kinds
-has (BK7238).
+changes nothing. The tool asks this only of an OpenBeken on a chip that one of
+the plugs it supports has (BK7238).
 
 Commands: `AutoflashImportWiFi` (run the above by hand),
 `AutoflashRevertToStock <url>` (below) and `AutoflashInterim` (next). Its log
@@ -91,8 +91,9 @@ beginning `S61Import:` and `S61Revert:`, as the runs quoted below show.
 
 A run to ESPHome from Sonoff's firmware installs this same OpenBeken first,
 to back the plug up through it, then has it fetch ESPHome. The tool tells it
-which it is with a marker sent in the same update: B2 sends the image, `0xff`
-to the next 4 KB boundary (from the image's start) and one 4 KB sector -
+that it is the interim firmware with a marker sent in the same update: B2 sends
+the image, `0xff` to the next 4 KB boundary (from the image's start) and one
+4 KB sector -
 `AFINTERM`, a format version, the image's size, the size and FNV-1a hash of
 the app it installs (its RBL header's `size_raw` and `raw_hash`) and a CRC-32
 ([`tools/beken/interim_marker.py`](../../tools/beken/interim_marker.py) has
@@ -118,12 +119,11 @@ and changes nothing: the bootloader installs an image before any app starts,
 so a marker whose app is not running never will be. With no marker nothing
 changes, and the app is not read.
 
-That name is the record of it being the interim firmware: no field of
-OpenBeken's config is the driver's to keep a flag in - its flags and unused
-bytes are upstream's to give a meaning, and a config from a later OpenBeken
-could then read as interim - while a name set through the setters survives
-any change of the config's layout. A plug renamed is the user's own, and no
-longer the interim firmware.
+That name is the record of it being the interim firmware. The driver keeps no
+flag in OpenBeken's config: upstream may give its flags and unused bytes a
+meaning, and a config from a later OpenBeken could then read as interim. A name
+set through the setters survives any change of the config's layout. A plug you
+have renamed is your own, and no longer the interim firmware.
 
 `AutoflashInterim` answers OK on the interim firmware and an error on any
 other; an OpenBeken without the driver, or with one from before it, does not
@@ -147,7 +147,7 @@ totals) and any marker past the image. A download cut off leaves it the
 interim firmware, to be sent the image again; a power cut after the erase
 still applies the image, which is whole in the slot. A later move back to
 OpenBeken starts afresh, named by its first boot's import. Any other
-OpenBeken - a user's own, updating itself - is left as it is. OpenBeken's
+OpenBeken - your own, updating itself - is left as it is. OpenBeken's
 LittleFS, which would sit at the top of the download slot, is never made on
 the interim firmware, so there is none to erase.
 
@@ -308,8 +308,8 @@ the download slot, as any OpenBeken update. Its settings stay: the hook
 erases them only on the interim firmware, and the driver's first-boot
 import, finding a Wi-Fi SSID set, imports nothing again - so what a later
 driver does on first boot reaches only a plug converted with it. An
-upstream build, for the 2 MB table and without the driver, is no update
-for an S61.
+upstream build is for the 2 MB table and has no driver, so it is not an
+update for an S61.
 
 ## Reverting to stock
 

@@ -118,8 +118,8 @@ goes by `autoflash-recovery-XXXX` as the bridge does (1.0.0 was
 Like the imprintable Safeboot they hold placeholders instead of a
 network name and password, and the run writes the plug's Wi-Fi into them in
 memory (`tools/autoflash/imprint.py`). It has no OTA password, web login or API
-encryption key, as ESPHome's own ready-made images have none: the plug is open
-on the home network until its owner adds them, as official Tasmota is. To
+encryption key, as ESPHome's own ready-made images have none: your plug is open
+on your home network until you add them, as official Tasmota is. To
 publish a new one, change the config and build and publish it with
 `tools/repo/update_firmware.py esphome`, which [`../docs/updating-firmware.md`](../docs/updating-firmware.md)
 describes, as for a new ESPHome release; then update the files' rows above.

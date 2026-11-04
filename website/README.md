@@ -3,8 +3,8 @@
 [firmwareliberator.com](https://firmwareliberator.com) is the repository's
 README and docs as web pages, built with [Astro](https://astro.build) and
 served by a Cloudflare Worker that holds nothing but the built files. The
-pages are written once, as the repository's Markdown; this folder is only
-how they become a site.
+pages are written once, as the repository's Markdown; this folder only turns
+them into a site.
 
 ## What is here
 
@@ -28,8 +28,8 @@ templates. A page's address is its path without `.md`: `docs/emulator.md` is
 and the README is `/`. A link to another page goes to its address; a link to
 anything else in the repository - the tool, a config, `LICENSE` - goes to it
 on GitHub; pictures under `docs/` are served beside the pages. The Worker
-also answers `/docs/emulator.html` (by redirect), as the old GitHub Pages
-site's addresses were.
+also answers `/docs/emulator.html` (by redirect), the form the old GitHub
+Pages site's addresses took.
 
 `public/_redirects` sends `/liberate.sh` and `/liberate.ps1` to the latest
 release's, with a 302 so no browser keeps it past the next release.
@@ -55,7 +55,8 @@ request once it has been open a week with its checks passed.
 `.github/workflows/website.yml` tests and builds it for each pull request,
 and on each push to `main` deploys it with wrangler from the `website`
 environment, which only `main` can use (`tools/repo/github_settings.py`).
-Its secret `CLOUDFLARE_API_TOKEN` is one Cloudflare API token:
+Its secret `CLOUDFLARE_API_TOKEN` is one Cloudflare API token, with these
+permissions:
 
 - Individual Workers - `firmware-liberator`: Editor (the Worker, and only
   it: the account's other Workers are out of its reach)

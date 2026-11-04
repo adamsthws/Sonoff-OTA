@@ -33,7 +33,7 @@ the helper tools' environment, and the passwords are kept out of the log.
 The file is also read on an ordinary run, where it saves typing the account
 details. If eWeLink refuses the password, it is asked for instead. The
 emulator is the exception: its copy of the repository leaves `.env` out, so a
-run you sit through there is asked everything, as a real one is, while
+run you sit through there asks you everything, as a real one does, while
 `tools/espressif/emulator/unattended-test.sh` hands `.env` to its run alone.
 
 ## Run it

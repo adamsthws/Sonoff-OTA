@@ -1,6 +1,6 @@
 # When it goes wrong
 
-Every problem listed here actually happened while this was being built. The
+Every problem listed here actually happened while the tool was being built. The
 screen only shows a line per stage, so when one stops, the full story is in
 the run's log, `captures/plugs/<MAC>/runs/<date>/run.log` - the tool prints its path, and it is
 safe to share: what identifies you, your network or your plug is written as
@@ -99,8 +99,8 @@ into macOS and Windows). Without one, type it: `s60-ota-bridge`.
 
 ## The router rule (no longer used)
 
-The tool no longer touches your router. The plug downloads our firmware straight
-from your computer, so there is nothing to redirect - whether or not Sonoff is
+The tool no longer touches your router. The plug downloads the tool's firmware
+straight from your computer, so there is nothing to redirect - whether or not Sonoff is
 offering the plug an update. If you are following an older guide that told you to
 add a destination-NAT rule, you can skip that step entirely.
 [router-rules.md](router-rules.md) keeps the old instructions, says why the rule
@@ -224,8 +224,8 @@ The tool already does this.
 
 **Tasmota never appears after the installer gave it your Wi-Fi**
 
-With the bridge and a captured settings template, Tasmota starts with the Wi-Fi
-details the installer had just joined with, and joins by itself. If the details
+The installer saves the Wi-Fi details it joined with into Tasmota's settings, so
+Tasmota starts with them and joins your network by itself. If the details
 stop working (say the router restarted onto another channel and refuses the
 plug), Tasmota keeps retrying them and never opens its setup network.
 
@@ -295,10 +295,10 @@ time limit.
 A plug can be left answering nothing - not even its web page - though it
 still answers ping: kept busy too long, or left waiting on your computer when
 the tool was stopped mid-stage. Give it two minutes; if its web page still does
-not answer, switch it off and on. At every point this can happen that is safe: staging
+not answer, switch it off and on. Wherever this can happen, doing that is safe: staging
 writes only the spare half of memory, the rewrite downloads what it needs
 before it writes anything, and installing the official startup firmware
-carries on where it stopped. Then run this again.
+carries on where it stopped. Then run the tool again.
 
 **"The device is on the network but not answering yet"**
 
@@ -319,7 +319,7 @@ fast" entry above.
 
 The tool marks a step before it starts writing, so an interrupted run is
 visible rather than silent. It checks the plug: where the plug shows the step
-finished, the run moves on; otherwise it does the step again by itself, which
+finished, it moves on; otherwise it does the step again by itself, which
 is safe, as every step checks the plug before it writes anything and refuses
 if it is not as expected.
 
@@ -395,11 +395,11 @@ After a new router or a changed Wi-Fi password, the plug cannot join any more.
 
 Tasmota answers and stays on your Wi-Fi, but has no relay or power meter: in
 Home Assistant's Tasmota integration it shows only a restart button and its
-Wi-Fi. Tasmota restarted six times in a row, each within 10 seconds of
-starting, took that for a boot loop and went over to its fallback module,
-which knows nothing of the plug. A plug converted by 2.1.2 or later has its
-own template as that fallback and goes on switching; for one converted
-before, the check below puts the template back and makes it the fallback.
+Wi-Fi. This happens when Tasmota restarts six times in a row, each within 10
+seconds of starting: it takes that for a boot loop and goes over to its fallback
+module, which knows nothing of your plug. A plug converted by 2.1.2 or later has
+its own template as that fallback and goes on switching. For a plug converted
+earlier, the check below puts the template back and makes it the fallback.
 Or, in the plug's web page under **Tools → Console**:
 
 ```
@@ -410,11 +410,12 @@ Backlog Template {"NAME":"Sonoff S60TPG","GPIO":[1,1,1,1,224,544,1,3104,1,32,1,0
 
 ## An ESPHome plug with no page and no relay
 
-ESPHome stopped within a minute of starting ten times in a row - switched
-off and on, say - takes that for a boot loop and starts in safe mode: on
-your Wi-Fi with only its update service, no page, no relay, nothing in Home
-Assistant. Five minutes on, it restarts as itself, with nothing lost; leave
-it switched on. The tool, run meanwhile, says so and waits for it.
+If ESPHome is stopped within a minute of starting ten times in a row - by
+switching it off and on, say - it takes that for a boot loop and starts in safe
+mode: on your Wi-Fi with only its update service, no page, no relay, nothing in
+Home Assistant. After five minutes it restarts as itself, with nothing lost;
+leave it switched on. If you run the tool meanwhile, it says so and waits for
+the plug.
 
 ## Checking a finished plug at any time
 
@@ -423,8 +424,8 @@ python3 -m tools.autoflash step H1 --plug-ip 192.168.1.50
 ```
 
 Reads four areas of the plug's memory - the bootloader, the memory map, Safeboot
-and Tasmota - and compares them against the pinned files, and checks Tasmota
-has the plug's template, as its fallback module too. Read-only but for that:
-a plug without its template (which switches nothing) is given it again, its
-other settings kept, and one without it as the fallback is given that. Safe
+and Tasmota - and compares them against the known files, and checks Tasmota
+has the plug's template, as its fallback module too. It only reads, with one
+exception: a plug without its template (which switches nothing) gets it back,
+keeping its other settings, and a plug without it as the fallback gets that. Safe
 to run whenever you want reassurance.

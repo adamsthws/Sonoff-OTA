@@ -6,7 +6,7 @@ change that stops a run started on an earlier version from being resumed, or
 removes an option.
 
 The version is set in one place, `tools/autoflash/__init__.py`. Merging a new
-one to `main` tags it and publishes a release with its notes from here, so add
+one to `main` tags it and publishes a release with its notes from this file, so add
 the section below before changing the number. The release waits for the unit
 tests, the final firmware on the emulator, the lint and the leak scan to pass
 on that commit, and carries the firmware files the tool installs with
@@ -30,18 +30,19 @@ check.
   through OpenBeken's flash reads after the first conversion: a run to
   ESPHome installs OpenBeken first, as the interim firmware, backs the plug
   up through it, then has it fetch ESPHome, so ESPHome keeps no way to read
-  the plug out. The interim firmware is sent with a marker after it, naming
-  the app it installs, by which it knows itself - a marker for any other app
-  never counts, and is erased: it is named `autoflash-recovery-CDEF` from its first
-  start, as the S60's interim firmwares are, and once it has fetched the next
-  firmware it erases its own settings, so ESPHome - or a later OpenBeken -
-  finds nothing of it. A run that lost its record recognises a plug left on
-  it, and goes on from there. Run end to end in the emulator in every
-  direction; not yet on a real plug.
+  the plug out. The tool sends the interim firmware with a marker after it,
+  naming the app it installs, which is how the firmware knows it is the interim
+  one; a marker for any other app never counts, and is erased. The interim
+  firmware is named `autoflash-recovery-CDEF` from its first start, as the
+  S60's interim firmwares are, and once it has fetched the next firmware it
+  erases its own settings, so ESPHome - or a later OpenBeken - finds nothing
+  of it. A run that lost its record recognises a plug left on it, and goes on
+  from there. Tested end to end in the emulator in every direction; not yet on
+  a real plug.
 - From Sonoff's firmware the run finds the plug in eWeLink before it asks
-  which firmware: which firmware a plug can have depends on what plug it is.
-  The question is a stage of its own (Choosing the firmware), after
-  Discovering the plug; a run given `--firmware` is not asked.
+  which firmware you want, because which firmware a plug can have depends on
+  what plug it is. The question is a stage of its own (Choosing the firmware),
+  after Discovering the plug; with `--firmware` you are not asked.
 - The S61's firmware is published: OpenBeken 1.1.0 (OpenBK7231T_App at
   `ce1abad` with the 4 MB table, a hook before an OTA's restart, the tool's
   OpenBeken driver and the S61's table for it) and ESPHome 1.2.0
@@ -55,8 +56,8 @@ check.
   mirroring `tools/`. The published firmware, `firmware.json` and `SHA256SUMS`
   are together in `artifacts/`, where `SHA256SUMS` names its files bare, so
   `sha256sum -c` works in the directory a release's files are downloaded to.
-  On Windows, `start.cmd` is the one start file, from a double-click or a
-  terminal.
+  On Windows, `start.cmd` is the one start file, whether you double-click it
+  or run it from a terminal.
 - **Breaking for Home Assistant adoption**: the ESPHome configs moved to
   `devices/sonoff-s60/esphome.yaml` and `devices/sonoff-s61/esphome.yaml`,
   and the `package_import_url` a plug gives Home Assistant names the new
@@ -82,10 +83,10 @@ check.
   ([reported](https://github.com/adamsthws/firmware-liberator/discussions/1#discussioncomment-19373248)).
   Reactive power is 0 while power is within 1.5% of voltage times current:
   the meter gets them within about 1% on a resistive load, where a 1 kW
-  heater read up to 148 var. And they change only in a second steady with
+  heater used to read up to 148 var. And they change only in a second steady with
   the last: as a load switches, the meter's power follows its current a
-  second or three behind, and a 2 kW heater's thermostat read up to
-  1782 var and a power factor of 0.66.
+  second or three behind, and a 2 kW heater's thermostat used to read up
+  to 1782 var and a power factor of 0.66.
 - Every firmware the tool installs names the plug alike, in lower case as
   ESPHome requires: the firmware and the last three bytes of its MAC, as its
   hostname and its name inside the firmware - `tasmota-abcdef` (Tasmota's
@@ -102,13 +103,13 @@ check.
   conversion, should the S60's updater take only a newer version as the
   S61's does. The installer itself, and its published file, are unchanged.
 - The report says whether the end-of-run checks passed (`Checks passed`),
-  where it gave the relay's and the power meter's results: what is checked
+  instead of giving the relay's and the power meter's results: what is checked
   can differ from one kind of device to another, and the report stays the
   same. For a plug the checks still switch its relay off and on, and what
   they found is in the run's log.
 - A run from a converted plug - back to Sonoff's firmware, say - reports
   the plug's model and its Sonoff firmware from what the tool kept of the
-  plug at its first conversion, where it gave `__` for both.
+  plug at its first conversion; it used to give `__` for both.
 - While the report is put together after the last stage - the device's
   checks take a few seconds - "Generating your report..." shows with the
   stages' spinner, and goes when the report is shown.
@@ -116,20 +117,21 @@ check.
   and PayPal.
 - The addresses of a list of links line up under one another.
 - At PROCEED, an answer other than the word - an Enter or a y pressed by
-  habit - asks again ("Only the TYPED word PROCEED is accepted"), where it
-  stopped the run; q stops. Ctrl-C there stops the run at once, as at every
-  question, where it was taken as a first press during work.
+  habit - asks again ("Only the TYPED word PROCEED is accepted"); it used to
+  stop the run. q stops. Ctrl-C there stops the run at once, as at every
+  question; it used to count as a first press during work.
 - A Ctrl-C at a question is not shown as `^C`, and what the run says next
   starts on a row of its own.
 - A run starts at the top of the window, with all of it to use: what the
   window showed is scrolled up into its scrollback, not cleared, so it can
   still be scrolled back to.
 - A question cut short by Ctrl-C or q - PROCEED, say - is taken off the
-  screen with its note when the run stops, as an answered one is, where it
-  stayed, with its stage shown twice: underway above it, stopped below.
-- A step interrupted last time that the device does not show finished is
-  done again by itself, where the run asked; answered "it did finish" for a
-  step that had not, the run waited for good on a firmware never sent.
+  screen with its note when the run stops, as an answered one is; it used to
+  stay, with its stage shown twice: underway above it, stopped below.
+- If a step was interrupted last time and the device does not show it
+  finished, the tool now repeats it by itself. It used to ask you, and if you
+  answered "it did finish" for a step that had not, the run waited for good on
+  a firmware never sent.
 - Never two blank lines in a row: one left above something taken off the
   screen - "Looking for supported devices..." - no longer doubles the next.
 - In VS Code's terminal a run starts under the command that started it,
@@ -137,58 +139,58 @@ check.
   scrolled out of sight over the window's top rows, which covered the run's
   first.
 - An S61 whose new firmware its bootloader would not install starts
-  Sonoff's firmware again: the run sends it again by itself (twice at
-  most), where it asked to switch the device off and on again and again.
-  PROCEED is asked once a run, not again for it. A run
-  that stopped to ask for the switch off and on takes it as done when run
-  again. The same for ESPHome fetched by OpenBeken (J2, O1), which restarts
-  by itself to install it: back on OpenBeken since, by its uptime, ESPHome
-  was not installed, and it is fetched again - no switch off and on to ask
-  for. The S61's fault suite has each case, an image its bootloader refuses
-  (`--simulate-bad-image STEP`).
-- A step recorded done that the device disagrees with is done again by
-  itself, where the run asked whether to: on an S61, a plug still on the
+  Sonoff's firmware again: the run now sends the firmware again by itself
+  (twice at most), instead of asking you to switch the device off and on again
+  and again. You are asked PROCEED once a run, not again for this. A run that
+  stopped to ask you to switch the device off and on takes it as done when you
+  run it again. The same goes for ESPHome fetched by OpenBeken (J2, O1), which
+  restarts by itself to install it: if OpenBeken's uptime shows it has
+  restarted since, ESPHome was not installed, and it is fetched again, with no
+  switch off and on to ask you for. The S61's fault suite has each case, an
+  image its bootloader refuses (`--simulate-bad-image STEP`).
+- A step recorded as done that the device disagrees with is now done again by
+  itself; the run used to ask you whether to: on an S61, a plug still on the
   firmware it was leaving; on an S60, a high slot, partition table or
   Safeboot not as the step left them, or the recovery firmware where the
   official app should be.
 - A device not seen on the network at the start is looked for twice more
-  by itself, 15 s apart, before the run asks what now: one just plugged in,
-  or on a busy Wi-Fi, answers a moment later.
-- A password or key check the device gives no answer to is asked again by
-  itself, with what was typed, before the person is asked to choose again.
+  by itself, 15 s apart, before the run asks you what to do: one just plugged
+  in, or on a busy Wi-Fi, answers a moment later.
+- If the device gives no answer to a password or key check, the tool tries
+  again by itself with what you typed, before asking you to choose again.
 - On an S60, an upload cut off by the network is sent again by itself once
-  the device shows it did not take it, where it was left to the person to
-  upload through the device's page; one taken, its answer lost, is not sent
-  again.
+  the device shows it did not take it; it used to be left to you to upload
+  through the device's page. An upload the device took, with only its answer
+  lost, is not sent again.
 - More steps are tried again by themselves after a network blip: ESPHome's
   arrival check and Tasmota put back on an S60, and the interim firmware
   made the plug's own OpenBeken on an S61.
 - On an S60, a backup whose two reads fail is read twice more by itself
-  before the run asks whether to try again or carry on without one.
+  before the run asks you whether to try again or carry on without one.
 - A blank line stands between every question and the options or text above
   it.
-- A first Ctrl-C asks "! Are you sure?", under the stage line where it was
-  shown after a second copy of it, counts down the seconds a second Ctrl-C
-  stops the run at once, and goes when they are up.
-- A plug on an earlier release of this project's ESPHome is offered this
-  one as an update (`--firmware esphome` chooses it in advance): sent as an
-  ordinary ESPHome update, its settings kept, the Wi-Fi read from the plug.
-  So a fix reaches a plug no ESPHome dashboard builds for. Only an ESPHome
-  that says it is this project's for its kind, through its API, and whose
-  API is not encrypted is offered it: one adopted into a dashboard is that
-  dashboard's to update.
+- A first Ctrl-C asks "! Are you sure?" under the stage line; it used to show
+  after a second copy of that line. It counts down the seconds in which a
+  second Ctrl-C stops the run at once, and goes when they are up.
+- If your plug is on an earlier release of this project's ESPHome, the tool
+  offers this release as an update (`--firmware esphome` chooses it in
+  advance). It sends an ordinary ESPHome update, keeps the plug's settings and
+  reads the Wi-Fi from the plug, so a fix reaches a plug no ESPHome dashboard
+  builds for. The tool offers it only to an ESPHome that says it is this
+  project's for its kind, through its API, and whose API is not encrypted: you
+  update a plug adopted into a dashboard from that dashboard.
 - The same for a Sonoff S61 on an earlier release of this project's
-  OpenBeken (`--firmware openbeken`): it fetches this one as any OpenBeken
+  OpenBeken (`--firmware openbeken`): it fetches this release as any OpenBeken
   update, its settings kept. Only an OpenBeken whose driver says it is on
   an S61, and whose build says it is an earlier release, is offered it.
   Upstream's own builds have neither the driver nor the S61's 4 MB layout,
-  so this is the way an OpenBeken this tool installed is updated.
+  so this is how you update an OpenBeken this tool installed.
 - And for official Tasmota older than the release the tool installs
-  (`--firmware tasmota`): switched to its safeboot and given that release
-  there, as the conversion gives it, its settings and template kept, then
-  its meter checked. Only an official release build is offered it, never
-  anyone's own. Tasmota's own update, from its page, works as ever; this
-  makes running the tool again update any plug it converted.
+  (`--firmware tasmota`): the tool switches it to its safeboot and gives it
+  that release there, as the conversion does, keeps its settings and template,
+  then checks its meter. Only an official release build is offered it, never
+  anyone's own. Tasmota's own update, from its page, works as ever; with this,
+  running the tool again updates any plug it converted.
 - A device hanging up on the tool as it writes - a plug restarting under a
   check - no longer ends the run on the spot, with nothing cleaned up: the
   tool set SIGPIPE to end it, for quiet output into `head`.

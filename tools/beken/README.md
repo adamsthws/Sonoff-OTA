@@ -108,8 +108,8 @@ Those marked archived are in
 
 - **`seed_join.py`** — put the emulated plug on a network the faithful way.
   Hooks the firmware's own `ef_get_env_blob` (EasyFlash V4, `0x12f438`) and returns
-  our SSID/passphrase for `wifi-ssid`/`wifi-pass` — making it a provisioned plug at
-  the credential read, with nothing else forced. Attaches the fork peer as a
+  the tool's SSID/passphrase for `wifi-ssid`/`wifi-pass` — making it a provisioned
+  plug at the credential read, with nothing else forced. Attaches the fork peer as a
   WPA2-PSK AP with the same creds; the plug then does the real sequence (station →
   associate → WPA2 four-way → **IPv4 DHCP → 192.168.1.100**). This corrects the old
   "seeding creds leaves it idle" result — that was the integrity gate, which this
@@ -122,9 +122,9 @@ Those marked archived are in
   `0x72940`, so its own consumer task runs the handlers in context (driving them
   directly corrupts the shared state; the dispatcher does not). Data fields are
   injected plaintext past the AES (the key is the device apikey at RAM `0x40ce90`).
-  The handlers run and the plug joins our AP (WPA2 + DHCP). This exercises the real
-  eWeLink provisioning path, but does not by itself dial the cloud — that needs the
-  pairing-completion trigger (`cloud_dial.py`). Env `SEQ`/`SSID`/`PASS`/`SECS`.
+  The handlers run and the plug joins the tool's AP (WPA2 + DHCP). This exercises
+  the real eWeLink provisioning path, but does not by itself dial the cloud — that
+  needs the pairing-completion trigger (`cloud_dial.py`). Env `SEQ`/`SSID`/`PASS`/`SECS`.
   `python3 ble_provision.py`
 
 - **`cloud_dial.py`** — the full provisioning outcome: the emulated plug dials
@@ -162,7 +162,7 @@ Those marked archived are in
   status in `state.pwmn_stat`, reaching the armed long-press timer.
   `python3 button_sim.py [pin]`
 
-- **`airkiss_capture.sh`** (archived) — put the laptop's Intel AX200 into monitor mode on
+- **`airkiss_capture.sh`** (archived) — put a Wi-Fi adapter that can capture in monitor mode (an Intel AX200 can) into it on
   the router's channel and capture a phone's eWeLink AirKiss/smartconfig broadcast
   to a pcap. Needs root; takes over the Wi-Fi adapter while capturing.
   `sudo ./airkiss_capture.sh <channel> [iface] [out.pcap]`
@@ -278,7 +278,8 @@ signed-char `Tiny_CRC8`, the `0x1e1000` config offset).
   steerable at a local stub. A genuinely bound dump is still useful only for a
   *faithful* server + device-secret. See the main doc for the full gate chain.
 - **OTA / conversion path mapped:** the S61 flashes updates the same
-  CoolKit way as the S60 — an `upgrade` command names a `downloadUrl` we control.
+  CoolKit way as the S60 — an `upgrade` command names a `downloadUrl` the sender
+  controls.
   The cloud download is a CoolKit **FOTA** container (magic `0x1beef11e`, HTTP 206,
   version gate, CRC32s); the bootloader then applies an `rt_ota` **RBL**. Tested by
   staging an RBL directly in the download partition and booting: the bootloader
@@ -295,8 +296,8 @@ signed-char `Tiny_CRC8`, the `0x1e1000` config offset).
   write-through; see the main doc). The full image also **stages verbatim over the
   cloud path** (byte-for-byte). `fota_wrap.py` wraps any `.rbl` in the FOTA
   container (and can serve it).
-  (An earlier note here claimed a hardware-AES engine with a baked key — that was a
-  mis-attribution, now corrected.) See
+  (It is not a hardware-AES engine with a baked key, as an earlier version of this
+  page said.) See
   [the main doc](../../docs/beken-s61-emulation.md#firmware-update-and-conversion-the-ota-path).
 - **Cloud ONLINE achieved:** `cloud_online.py` completes the
   handshake against a local stub — dispatch → TLS `/api/ws` → `register` → ONLINE,
@@ -305,7 +306,7 @@ signed-char `Tiny_CRC8`, the `0x1e1000` config offset).
   cleared by the S60's honest trust-anchor swap (`--trust-ca`) applied at
   `mbedtls_x509_crt_parse` (`0x125e4c`), since the S61 builds its CoolKit CA in RAM
   rather than storing it in flash. No verification is weakened — only the trusted
-  root is swapped for our own, and the stub serves a leaf signed by it.
+  root is swapped for the tool's own, and the stub serves a leaf signed by it.
 - **AirKiss — decoder stubbed in this build:** frame delivery into
   the MAC is solved (100 %, `sent == rx` on a synthetic self-test and a real
   7446-frame capture) once injection is gated on the RX-FIQ handler object

@@ -86,7 +86,7 @@ The S61S (iPlug Gen2, model **S61STPF**) is being worked on: see [devices/sonoff
 > Linux, macOS or Windows, with Wi-Fi.
 
 **Administrator rights**
-> Required to auto-add one temporary firewall rule (allowing the plug to communicate with the computer, removed when the run finishes).
+> The tool needs them to add one temporary firewall rule (allowing the plug to communicate with your computer, removed when the tool finishes).
 
 <br>
 
@@ -115,7 +115,7 @@ The S61S (iPlug Gen2, model **S61STPF**) is being worked on: see [devices/sonoff
 
 Simply paste this one line into your terminal...
 
->You're walked through every step of the conversion. It downloads the latest release into your home folder and starts it.
+>You're walked through every step of the conversion. The line downloads the latest release into your home folder and starts it.
 
 **Windows**
 ```
@@ -176,14 +176,14 @@ was interrupted, it checks the plug to work out where to resume from.
 
 **Sonoff:** A full backup of the plug's Sonoff firmware to restore later.
 
-> Afterward, Tasmota and ESPhome updates are applied as normal. Running the tool again updates the device's Tasmota or this project's ESPHome to the release the tool installs, keeping its settings.
+> Afterward, you update Tasmota and ESPHome as normal. Or run the tool again to update your plug's Tasmota, or this project's ESPHome, to the release the tool installs, keeping its settings.
 
 <br>
 
 ## If something goes wrong
 
 Start with **[docs/troubleshooting.md](docs/troubleshooting.md)** - it covers
-the problems that actually came up while this was being built.
+the problems that actually came up while the tool was being built.
 
 <br>
 
@@ -214,7 +214,7 @@ report back on how it went here:
 - **[docs/testing.md](docs/testing.md)** - how the tool is tested: unit tests,
   the emulator, every fault in the way of every step, and real plugs.
 - **[docs/updating-firmware.md](docs/updating-firmware.md)** - how the
-  Tasmota and ESPHome the tool installs are moved to each new release.
+  Tasmota and ESPHome the tool installs are updated to each new release.
 - **[docs/private-backup.md](docs/private-backup.md)** - for the maintainer:
   how their own Sonoff backup is kept sealed and private, off their computer.
 - **[docs/device-names.md](docs/device-names.md)** - the name the plug goes by

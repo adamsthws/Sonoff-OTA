@@ -55,7 +55,7 @@ page's polling from a 3-second cache, and passes every action straight on;
 coming on one open connection (`/events`), which the proxy passes straight
 through, one browser tab at a time.
 
-Each ensures the image first: one labelled with the hash of what it is built
+Each command first ensures the image: one labelled with the hash of what it is built
 from (`bk-emu.sh tag`: `UPSTREAM`, `patches/`, `requirements.txt`,
 `bk-emu.Dockerfile`), pulled from `ghcr.io/adamsthws/autoflash-beken-emu:<hash>`,
 which the `beken-emulator-image` workflow publishes for every version pushed,

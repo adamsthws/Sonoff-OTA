@@ -8,14 +8,14 @@ Every firmware a plug runs during a conversion has a name, used two ways:
 
 Each firmware uses one name for both. This page lists every name, where each
 is set, and everything that has to change to rename them. It was written
-after the 2026-10 renaming, which took every name off the S60, so that
-another rename can be done in one pass.
+after the 2026-10 renaming, which took the S60 out of every name, so that
+you can do another rename in one pass.
 
 ## The names
 
 The examples are for a plug whose Wi-Fi MAC is `12:34:56:ab:cd:ef` (made
 up): `CDEF` is the last two bytes, upper case; `abcdef` is the last three,
-lower case. Each plug works its own out, so no two plugs share a name.
+lower case. Each plug works out its own, so no two plugs share a name.
 
 | When | Firmware | Name (hostname and own network) | Where the name comes from |
 |---|---|---|---|
@@ -77,8 +77,8 @@ settings are lost (see [Tasmota's own names](#tasmotas-own-names)).
 
 ### The startup firmware
 
-- Our build of Tasmota's Safeboot. The pattern is `WIFI_DEFAULT_HOSTNAME`
-  (`"autoflash-recovery-%4X"`, Tasmota's `%4X` being the MAC's last four hex
+- This project's build of Tasmota's Safeboot. The pattern is
+  `WIFI_DEFAULT_HOSTNAME` (`"autoflash-recovery-%4X"`, Tasmota's `%4X` being the MAC's last four hex
   digits), written into the build's `user_config_override.h` by
   [`tools/espressif/safeboot/configure_imprintable_safeboot.py`](../tools/espressif/safeboot/configure_imprintable_safeboot.py)
   and [`tools/espressif/safeboot/configure_recovery_safeboot.py`](../tools/espressif/safeboot/configure_recovery_safeboot.py).
@@ -182,9 +182,10 @@ All in [`tools/autoflash/names.py`](../tools/autoflash/names.py) unless said:
 - [`tools/autoflash/kinds.py`](../tools/autoflash/kinds.py): per kind of
   plug, ESPHome's old names (`esphome_legacy_setup_prefix`,
   `esphome_legacy_prefix`), and the friendly name its ESPHome had before its
-  comment said the kind (`esphome_legacy_friendly_name`). No kind is told by
-  a name, which the user may change: Tasmota by its template, ESPHome by its
-  comment, OpenBeken by its driver's answer to `AutoflashKind`
+  comment said the kind (`esphome_legacy_friendly_name`). The tool never tells
+  a plug's kind by its name, which you may change: it tells Tasmota by its
+  template, ESPHome by its comment, OpenBeken by its driver's answer to
+  `AutoflashKind`
   ([`devices/sonoff-s61/openbeken.md`](../devices/sonoff-s61/openbeken.md)).
 - [`tools/beken/openbeken/drv_autoflash.c`](../tools/beken/openbeken/drv_autoflash.c):
   `autoflash_name()`, both the Beken plugs' OpenBeken names - `openbeken-%02x%02x%02x`, and
@@ -196,7 +197,7 @@ All in [`tools/autoflash/names.py`](../tools/autoflash/names.py) unless said:
   `find_ssid()` takes a network by the names in the order given, with
   `PROVISIONAL_PREFIX` (`ESP_`) last and looked at again.
 - [`tools/autoflash/output.py`](../tools/autoflash/output.py): the patterns
-  that keep a plug's name out of the report one shares.
+  that keep a plug's name out of the report you share.
 - [`tools/espressif/flash_readout.py`](../tools/espressif/flash_readout.py): the names it waits
   for while reading a stock plug.
 
@@ -215,7 +216,8 @@ plus one: `ESP_ABCDF0`). Tasmota's `WifiManagerBegin()` turns the access
 point on first (`WifiSetMode(WIFI_AP_STA)`, which ends with `delay(100)`)
 and names it after (`WiFi.softAP()`), so for those 100 ms it beacons under
 ESP-IDF's default name. Seen at nearly every Tasmota setup-network start in
-the emulator, in both builds we install (the 15.6.0 release: 4 starts of 5).
+the emulator, in both builds the tool installs (the 15.6.0 release: 4 starts
+of 5).
 Calling `WiFi.softAP()` first - which turns the access point on and names
 it at once - ends it: built from the same commit, 8 starts of 8 without the
 change went out as `ESP_ABCDF0` first, none of 8 with it, and the setup
@@ -227,14 +229,14 @@ name for a minute after, and the tool never takes it over the real one
 
 ## Old names
 
-A plug a run of an older checkout left part way through goes by the name it
+A plug left part way through by a run of an older checkout goes by the name it
 had then, so the tool still looks for every one: `Sonoff-Setup-XXXX` (the
 installer 4.4.3, the mover 1.0.0 and ESPHome 1.1.0's own networks),
 `S60-OTA-Bridge-XXXX` with the password `s60-ota-bridge` (installers before
 4.4.3), `s60-ota-bridge` and `sonoff-s60-mover-xxxxxx` (hostnames),
 `sonoff-s60-xxxxxx` (ESPHome 1.1.0), the "S60 OTA Bridge" page, the
-`S60-IMPRINT-` placeholders and the `s60_wifi` action. Renaming again, add
-today's names to these lists rather than replacing them.
+`S60-IMPRINT-` placeholders and the `s60_wifi` action. If you rename again,
+add today's names to these lists rather than replacing them.
 
 ## Renaming: the checklist
 

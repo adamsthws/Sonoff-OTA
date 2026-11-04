@@ -2,8 +2,8 @@
 
 Sonoff's ESP32-C3 smart plug: the **S60TPG** (UK, Type G) and the **S60TPF**
 (Europe, Type E/F), the same board behind different pins. The stock firmware
-calls it `SN-ESP32C3-S60-01`. What is the S60's alone lives here or is linked
-from here; the tooling it shares with other Espressif plugs is
+calls it `SN-ESP32C3-S60-01`. This folder holds or links everything specific
+to the S60; the tooling it shares with other Espressif plugs is in
 [`tools/espressif/`](../../tools/espressif/).
 
 | | |
@@ -25,10 +25,10 @@ from here; the tooling it shares with other Espressif plugs is
   ([docs/updating-firmware.md](../../docs/updating-firmware.md#1-tasmota)). Its
   names on the network: [docs/device-names.md](../../docs/device-names.md).
 - **ESPHome**: [`esphome.yaml`](esphome.yaml); what it reports and how to
-  change it: [`esphome.md`](esphome.md). Its path is the `package_import_url`
-  a converted plug gives Home Assistant to adopt it from, so moving it means a
-  new image (2.3.0 did). The mover that changes a plug's memory layout is
-  [`mover.yaml`](mover.yaml).
+  change it: [`esphome.md`](esphome.md). Home Assistant adopts a converted plug
+  from this file's path, its `package_import_url`, so moving the file means
+  building a new image, as in 2.3.0. The mover that changes a plug's memory
+  layout is [`mover.yaml`](mover.yaml).
 - **Flash layout**: Sonoff's, kept by Tasmota and ESPHome
   ([`artifacts/sonoff-s60-partition-table.bin`](../../artifacts/README.md)); the
   recovery Safeboot and the repartitioning route are

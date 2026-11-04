@@ -41,7 +41,7 @@ handling and energy totals, so the two plugs look alike in Home Assistant.
   (FlashDB) in the empty 32 KB at `0x3ee000`, and the unused LittleFS in the
   sector at `0x3e1000`, where the interim firmware left its settings. The stock EasyFlash stores at `0x3e2000` and
   `0x3f6000` are left alone, so the plug can always go back to stock.
-- **No backup reader.** The S60's tool backs a plug up from its stock
+- **No backup reader.** On the S60, the tool backs a plug up from its stock
   firmware; the S61's stock firmware has no way to read its store out, and
   ESPHome reads no flash. So the tool installs OpenBeken first, as the
   interim firmware, takes the backup through its flash reads (`/api/flash`),
@@ -60,8 +60,9 @@ it](../../docs/home-assistant-adoption.md).
 
 ## Building
 
-As the S60's image is built: ESPHome's own Docker image, the config alone in a
-directory. The first build fetches LibreTiny, its Beken SDK and the toolchain.
+You build it as you would the S60's image: in ESPHome's own Docker image, with
+the config alone in a directory. The first build fetches LibreTiny, its Beken
+SDK and the toolchain.
 
 ```sh
 mkdir build && cp devices/sonoff-s61/esphome.yaml build/ && cd build
@@ -110,9 +111,9 @@ other's.
 
 ## Validated in the emulator
 
-All in the BekenEmulator fork on a 4 MB flash shaped like the owner's plug
-(stock firmware, provisioned with a test network), with no bypass of any check
-the plug makes:
+All in the BekenEmulator fork on a 4 MB flash shaped like the project owner's
+plug (stock firmware, provisioned with a test network), with no bypass of any
+check the plug makes:
 
 1. **The conversion**, the way the tool drives it: the plug on the local
    eWeLink stub is pushed an `upgrade` command; it fetches the FOTA-wrapped
@@ -161,5 +162,5 @@ ESPHome 2026.10.0 built the current image, `artifacts/esphome-sonoff-s61-1.2.0.r
 with `tools/repo/update_firmware.py esphome 2026.10.0 --plug sonoff-s61`
 ([docs/updating-firmware.md](../../docs/updating-firmware.md)).
 
-Not yet done: a real plug. The tool's route runs end to end in the emulator
-([its fault suite](../../docs/testing.md#the-s61s-fault-suite)).
+This has not yet been done on a real plug. The tool's route runs end to end in
+the emulator ([its fault suite](../../docs/testing.md#the-s61s-fault-suite)).

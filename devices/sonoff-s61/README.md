@@ -3,10 +3,11 @@
 Sonoff's Beken smart plug, sold as the **S61S** (iPlug Gen2, Matter over
 Wi-Fi), model **S61STPF** for the European plug. The firmware calls itself
 `S61`: its eWeLink model is `SN-BK7238-S61-01`, its board id
-`FWSW-01-S61-BK`, and the module is the `WBBK_01P_V1.3`. What is the S61's
-alone lives here or is linked from here; the tooling it shares with other
-Beken plugs is [`tools/beken/`](../../tools/beken/), and the emulation that
-worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-emulation.md).
+`FWSW-01-S61-BK`, and the module is the `WBBK_01P_V1.3`. This folder holds or
+links everything specific to the S61; the tooling it shares with other Beken
+plugs is in [`tools/beken/`](../../tools/beken/), and the emulation that worked
+all of this out is described in
+[`docs/beken-s61-emulation.md`](../../docs/beken-s61-emulation.md).
 
 | | |
 |---|---|
@@ -40,8 +41,10 @@ worked all of this out is [`docs/beken-s61-emulation.md`](../../docs/beken-s61-e
   taking the next firmware as an update of its own, Sonoff's firmware back
   from the public dump, the backup through OpenBeken's flash reads after the
   first conversion (a run to ESPHome installs OpenBeken first, as the interim
-  firmware, to take it). Run end to end in the emulator in every direction, faults and
-  all ([its fault suite](../../docs/testing.md#the-s61s-fault-suite)); never yet on a real plug.
+  firmware, to take it). The route has run end to end in the emulator in every
+  direction, faults and all
+  ([its fault suite](../../docs/testing.md#the-s61s-fault-suite)); it has never yet
+  run on a real plug.
   From Sonoff's firmware a run to OpenBeken is B1, B2 (sent through eWeLink),
   K1, B4; a run to ESPHome is B1, B2 (OpenBeken as the interim firmware), J1,
   B4 (the backup through it), J2 (it fetches ESPHome), K2. A run back to

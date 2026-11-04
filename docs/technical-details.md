@@ -64,7 +64,7 @@ Run again, the line looks for a newer release, and if there is one it updates
 the folder in place: the files the installed release put there, listed in
 `.installed-release`, are replaced or removed, and nothing else is touched -
 not `captures/` (below), not `.python/`, not a file of your own. Offline, it
-starts the version already there. Another folder is chosen with
+starts the version already there. Choose another folder with
 `AUTOFLASH_HOME`; a git clone in the folder is started as it is, and a folder
 holding something else is left alone.
 
@@ -186,7 +186,8 @@ remade as needed:
 | `emulation/legacy/`, `emulation/cache/`, `emulation/stub-cloud/` | earlier releases' trees, the QEMU fork's source, the cloud stub's own CA | the suite, `emu.sh` (a new CA means the saved stub plugs are made again) |
 
 The maintainer's own backup is sealed in a private package, and the emulator
-restores it when it is not here ([private-backup.md](private-backup.md)): in
+restores it when it is not in `captures/`
+([private-backup.md](private-backup.md)): in
 the maintainer's checkout nothing in `captures/` needs backing up.
 
 ### Keeping secrets out of Git

@@ -13,13 +13,13 @@ code: what worked, what did not, and on which plug and computer.
   so on - but its folder is named after the plug's MAC address: attach the
   file, do not paste its path. [docs/troubleshooting.md](docs/troubleshooting.md)
   covers what has gone wrong before.
-- **A plug we do not list yet** - if you got the tool working on a model or a
-  stock firmware version that is not in the compatibility list, please
-  contribute it back so the list keeps growing. Tell us what the plug was and
+- **A plug the list does not have yet** - if you got the tool working on a
+  model or a stock firmware version that is not in the compatibility list, please
+  contribute it back so the list keeps growing. Say what the plug was and
   what the conversion took - the addresses, config and wiring a new model
   needed, and anything that differed from a listed one. A report alone is
   welcome; a pull request that adds the support is more welcome still, and the
-  notes behind it are what we most want to receive.
+  notes behind it are what this project most wants to receive.
 - **A security problem**: privately, never as an issue - see [SECURITY.md](SECURITY.md).
 
 ## Setting up
@@ -64,8 +64,8 @@ python3 tools/repo/lint.py all     # every linter on every file
 ```
 
 Every fix comes with a test that fails without it. The tests run side by
-side and in any order, so a new one leaves nothing behind, keeps a port it
-picked, and touches nothing of the whole computer's:
+side and in any order, so a new test must leave nothing behind, keep hold of
+any port it picked, and touch nothing shared across the whole computer:
 [docs/testing.md](docs/testing.md#side-by-side-in-any-order). Coverage and
 mutation testing show where the tests are thin - a guide, not a target:
 [docs/testing.md](docs/testing.md#how-much-they-test). The emulator -
@@ -87,24 +87,24 @@ eWeLink accounts and plugs' identities.
   with `--no-verify`.
   [docs/technical-details.md](docs/technical-details.md#keeping-secrets-out-of-git)
 - No third party's proprietary firmware - Sonoff's stock images, a plug's
-  dump, anything else we have no right to publish - is ever committed, put on
-  a release or built into a published image. Git ignores `*.bin` for this
+  dump, anything else this project has no right to publish - is ever committed,
+  put on a release or built into a published image. Git ignores `*.bin` for this
   reason; the exceptions listed in `.gitignore` are open-source firmware this
   project ships. Where the tooling needs such an image, as the emulators'
   tests do, it is fetched at run time from wherever its owner or another
-  project publishes it, never copied here.
+  project publishes it, never copied into this repository.
 
 ## Commits and pull requests
 
 - **One cohesive change per commit**, its message saying what changed and
-  why. While a branch is unpushed, fold a fix to its own work into the
+  why. While a branch is unpushed, fold a fix to that branch's work into the
   commit it belongs to rather than adding one on top.
 - **A pull request** is squashed into one commit when merged, once the
   required checks pass: the unit tests on Python 3.12 and 3.10, the
   emulator, the lint and the leak scan. A pull request from a fork runs them
   all - none needs a secret - once a maintainer has let a first-time
-  contributor's workflows run. The form a pull request opens with lists
-  what is asked of it.
+  contributor's workflows run. The form a new pull request opens with lists
+  what you need to check.
 - **Written with an AI assistant?** That's fine, and you don't need to say
   so: as with the Linux kernel, whoever submits a change answers for it -
   its correctness, its tests and its licence - however it was written.
@@ -128,14 +128,45 @@ eWeLink accounts and plugs' identities.
   `tests/beken/`; `tests/run.py <directory>` runs one of them); `docs/` prose only;
   and `archive/` the work that got the project here and is no longer used,
   kept for the reasoning, linted like the rest.
-- Docs, comments and commit messages match what is here already: plain,
+- Docs, comments and commit messages match the existing ones: plain,
   compact sentences saying what something does and why.
+
+## Writing docs
+
+Write for the person reading the page, not from the side of whoever built the
+tool. That person may not know how the project works, or why it was made this
+way.
+
+- **Say "you" and "your plug"**, and tell readers what they do and what happens
+  to them. Call the software "the tool" or "this project", or name the program,
+  such as "the stub". Avoid "we", "our" and "ours".
+- **Use words the reader already has.** On pages for plug owners, say "firmware"
+  rather than "image", and leave out terms such as "pushed" or "pinned" where
+  only the result matters. Pages for people working on the code can use them.
+- **Say where.** "From this project" or "on your computer", not "from here".
+- **Write full sentences.** A reader should not have to read one twice to find
+  out what it is about.
+
+For example:
+
+| Instead of | Write |
+|---|---|
+| so one you add changes nothing of ours | The project's config does not use substitutions, so you cannot change its settings with them |
+| The tool then leaves the plug to the builder | From then on you update the plug from the builder |
+| Your config then fetches nothing from here | The builder then downloads nothing from this project |
+| ESPHome takes it for a new item and refuses it | ESPHome treats it as a new item and shows an error |
+
+Released sections of `CHANGELOG.md` are history and stay as they were.
+`tests/repo/test_docs_voice.py` fails on "we", "our", "ours", "us" and "from
+here" in the docs.
+[docs/home-assistant-adoption.md](docs/home-assistant-adoption.md) is a good page
+to copy the style from.
 
 ## Elsewhere
 
 A bug found in another project - Tasmota, ESPHome, ESP-IDF, OpenBeken, the
 emulator's QEMU - is reported there, and every pull request or issue opened
-because of work here gets an entry in
+because of work on this project gets an entry in
 [docs/upstream-contributions.md](docs/upstream-contributions.md) in the same
 change, in that document's style: a row in the table of the topic it belongs
 to (or a new topic, with a short introduction), giving the project, a link

@@ -137,7 +137,7 @@ to say which devices and services it works with, and states that it is
 independent and not an official installer
 ([NOTICES.md](../NOTICES.md)).
 
-## What we ask of you
+## What this project asks of you
 
 - **Do not share your backup.** It is Sonoff's firmware, and it also holds your
   Wi-Fi password and your plug's eWeLink keys in plain text.

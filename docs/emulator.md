@@ -19,17 +19,17 @@ another regional version's power meter.
   `tools/espressif/flash_readout.py` takes one without converting (over Wi-Fi; the plug is
   put back to stock afterwards). `emu.sh` lists them by MAC address - on the
   plug's label, and in your router and the eWeLink app - and asks which plug
-  to run when there are several (`--plug <MAC>` says beforehand; with nobody
+  to run when there are several (`--plug <MAC>` chooses beforehand; with nobody
   at the keyboard the plug run last is used). It runs a copy: the backup is
   never written. A dump set up the older way, `flash.bin` and `efuse.bin` in
   `captures/emulation/`, is offered too. Each plug's emulated flash is kept
   in `captures/emulation/state/` between runs, so switching plugs and back
   carries on where each was; `--fresh` puts the chosen one back to its
-  backup. With none here, the maintainer's sealed backup is fetched from its
-  private package and filed here first, and a test copy `--plug` asks for
-  that is not here yet is made from it (`copy_plug.py`): given its key and a
-  login that can read the package, a checkout with an empty `captures/` runs
-  the emulator ([private-backup.md](private-backup.md)).
+  backup. With no backup in `captures/plugs/`, the maintainer's sealed backup
+  is fetched from its private package and filed there first, and a test copy
+  `--plug` asks for that is not there yet is made from it (`copy_plug.py`):
+  given its key and a login that can read the package, a checkout with an empty
+  `captures/` runs the emulator ([private-backup.md](private-backup.md)).
   `AUTOFLASH_NO_RESTORE=1` says not to.
 - **The NVS partition generator** (and `cryptography`, for the cloud stub)
   in the repository's `.venv`, as the workflows pin them:
@@ -162,7 +162,7 @@ python -m tools.autoflash run    # or just: run  (options pass through: run --ve
 
 and window **plug** follows the plug's serial output, with the dump's secrets
 masked (Ctrl-b n / Ctrl-b p switch windows; Ctrl-b d leaves, keeping the
-plug's flash). Started with `--detach`, it is joined with
+plug's flash). If you started it with `--detach`, join it with
 `docker exec -it -u ubuntu autoflash-emu tmux attach -t autoflash`, and Ctrl-b d
 then leaves it running - not `docker attach`, which shows the session but
 takes no typing. When the tool asks you to do something to the plug or your
@@ -398,7 +398,7 @@ conversion can also be run over SSH itself (`windows-ssh.sh`, then
 OpenConsole nor the classic one.
 
 Server Core has no desktop, which is what makes it quick to install and run,
-and leaves three things a person's Windows has untested here: the User
+and leaves three things a person's Windows has untested in this set-up: the User
 Account Control prompt (Server Core has neither the prompt nor the service
 behind it, and an administrator's programs are always elevated there, so the
 firewall rule is added without asking; tests/autoflash/test_windows_uac.py answers it
@@ -510,9 +510,9 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
   `emu.sh` downloads it once into `captures/emulation/cache/`, checks it
   against the SHA-256 in `emu.Dockerfile`, and the image is built from it with
   no network - so building needs nothing outside this repository. Releases
-  here are immutable, so such a release holds one archive and never changes:
-  moving the pin is a new archive on a new release, and the old one stays for
-  older checkouts (the S61's emulator is kept the same way,
+  of this repository are immutable, so such a release holds one archive and
+  never changes: moving the pin is a new archive on a new release, and the old
+  one stays for older checkouts (the S61's emulator is kept the same way,
   `emulator-source-beken-<commit>`; the earlier `emulator-source` release
   was deleted on 2026-10-29, and its name cannot be used again). QEMU is
   GPL-2.0: the archive is its unmodified source, and this project's changes

@@ -69,8 +69,8 @@ sent. The plug could not download the firmware and stayed on the version it
 had. One side effect was seen: afterwards it showed as offline in eWeLink until
 it was power-cycled.
 
-It does not get in the way of converting the plug: our firmware comes from your
-computer on your own network, and that traffic never passes through the
+It does not get in the way of converting the plug: the tool's firmware comes
+from your computer on your own network, and that traffic never passes through the
 router's firewall. Nor does it affect a converted plug: Tasmota's own updates
 do not use port 8088.
 
@@ -119,7 +119,7 @@ same moment. To remove it, delete the rule and apply.
 ## Redirecting the download to your computer
 
 This was a step in earlier versions of the tool, used only when Sonoff was
-offering the plug an update. It was never how our firmware was delivered - that
+offering the plug an update. It was never how the tool's firmware was delivered - that
 has always come straight from your computer - but a guard against the plug
 fetching and installing Sonoff's genuine update in the same few seconds. It was
 dropped because the owner's upgrade command already decides what is installed,

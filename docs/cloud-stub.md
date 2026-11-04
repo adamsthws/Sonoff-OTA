@@ -2,7 +2,7 @@
 
 Give each emulated plug its **own** locally-served eWeLink "cloud", so emulator
 conversions run fully in parallel instead of taking turns on the one shared real
-cloud. Everything here runs inside the emulator's isolated per-instance network;
+cloud. All of it runs inside the emulator's isolated per-instance network;
 nothing touches the real eWeLink cloud, the real plugs, or the read-only stock
 dump.
 
@@ -12,7 +12,7 @@ firmware facts it rests on, what was built, and the verification log. Contents:
 - [Status](#status)
 - [The goal](#the-goal)
 - [What the cloud is actually used for](#what-the-cloud-is-actually-used-for)
-- [The approach](#the-approach) · [What we are explicitly NOT doing](#what-we-are-explicitly-not-doing)
+- [The approach](#the-approach) · [What stub mode does not do](#what-stub-mode-does-not-do)
 - [Requirements, and where each came from](#requirements-and-where-each-came-from)
 - [Firmware facts (static analysis)](#firmware-facts-static-analysis)
 - [The private domain](#the-private-domain)
@@ -32,8 +32,8 @@ following is done:
 
 - The plug honours `frame_params.dis_server` — redirect is a pure NVS edit
   ([test 1](#test-1--does-the-firmware-honour-dis_server)).
-- Trust swap: the plug trusts our CA and completes the TLS handshake to the stub
-  ([test 2](#test-2--does-the-trust-swap-let-the-tls-handshake-complete)).
+- Trust swap: the plug trusts the stub's CA and completes the TLS handshake to
+  the stub ([test 2](#test-2--does-the-trust-swap-let-the-tls-handshake-complete)).
 - The stub brings the plug online and it opens its LAN interface
   ([test 3](#test-3--does-the-stub-bring-the-plug-online-and-enable-lan-control)).
 - A conversion against the stub completes stock → recovery bridge (step C2) with
@@ -106,28 +106,28 @@ cloud only carries the small `upgrade` message that triggers the LAN fetch.
 
 ## The approach
 
-Point each emulated plug at a dispatch server **on a private domain we control
-inside the emulator**, served by a small local stub with a **self-signed cert**
-the plug is made to trust, so the plug comes online against our own server and
+Point each emulated plug at a dispatch server **on a private domain this project
+controls inside the emulator**, served by a small local stub with a **self-signed
+cert** the plug is made to trust, so the plug comes online against the stub and
 the tool reads the plug's already-known key from the stub — no coolkit hostname,
 no coolkit cert, no shared cloud.
 
-### What we are explicitly NOT doing
+### What stub mode does not do
 
-This is self-hosting — redirecting our own device to our own server — not
+This is self-hosting — redirecting your own device to your own server — not
 impersonating eWeLink:
 
-- We never resolve `coolkit.cc` / `coolkit.cn` to our server. Those names appear
-  nowhere in our DNS, our certs, or our config.
-- We never use or forge coolkit's certificate or CA private key.
-- We never extract or need the plug's embedded client key.
+- Stub mode never resolves `coolkit.cc` / `coolkit.cn` to the stub. Those names
+  appear nowhere in its DNS, its certs, or its config.
+- Stub mode never uses or forges coolkit's certificate or CA private key.
+- Stub mode never extracts or needs the plug's embedded client key.
 - The real eWeLink cloud and the real plugs are untouched; the stub only ever
   runs on the emulator's firewalled per-instance network.
 
-The device genuinely talks to a domain we own, presenting a cert we legitimately
-issued for that domain. The only firmware change on the trust side is making our
-own firmware copy trust our own CA — the same thing any self-hosted-IoT setup
-does.
+The device genuinely talks to the stub's own domain, which presents a cert the
+stub's own CA legitimately issued for it. The only firmware change on the trust
+side is making the working copy of the firmware trust that CA — the same thing
+any self-hosted-IoT setup does.
 
 ## Requirements, and where each came from
 
@@ -138,14 +138,14 @@ makes it necessary. The evidence is in [the firmware facts](#firmware-facts-stat
 
 **The plug (touchpoint B)**
 
-- **Send it to our domain by NVS, not a firmware patch.** It dials the host
+- **Send it to the stub's domain by NVS, not a firmware patch.** It dials the host
   stored in `frame_params.dis_server`/`dis_port`, not the one its
   `%s-disp.coolkit.cc` constructor builds
   ([test 1](#test-1--does-the-firmware-honour-dis_server)).
-- **Make it trust our CA, in the same slots.** It pins one coolkit root CA, twice,
-  in fixed 1040-byte slots with unrelated data straight after, so the replacement
-  must fit: an EC P-256 CA (a 644-byte PEM) does, RSA-2048 would not. It offers
-  ECDHE-ECDSA suites, so an EC CA costs nothing
+- **Make it trust the stub's CA, in the same slots.** It pins one coolkit root CA,
+  twice, in fixed 1040-byte slots with unrelated data straight after, so the
+  replacement must fit: an EC P-256 CA (a 644-byte PEM) does, RSA-2048 would not.
+  It offers ECDHE-ECDSA suites, so an EC CA costs nothing
   ([test 2](#test-2--does-the-trust-swap-let-the-tls-handshake-complete)).
 - **Certificates that do not depend on its clock.** It asks for no time before
   dispatch (no NTP; test 1), so both certificates are long-dated, with a
@@ -168,8 +168,8 @@ makes it necessary. The evidence is in [the firmware facts](#firmware-facts-stat
   replaces every region's account-API base (`get_device_key.py`) and the
   hard-coded app dispatch (`probe_ota_command.py`). Trust comes from
   `SSL_CERT_FILE`, which the tool's `ssl.create_default_context()` already
-  honours: a bundle of the system roots and our CA, so the firmware downloads
-  still verify ([test 4](#test-4--end-to-end---stub-cloud-conversion-through-c2)).
+  honours: a bundle of the system roots and the stub's CA, so the firmware
+  downloads still verify ([test 4](#test-4--end-to-end---stub-cloud-conversion-through-c2)).
 - **An account record the tool takes for an S60.** The device list's
   `extra.model` must be `SN-ESP32C3-S60-01`: the tool knows an S60 by it (or by
   an `S60TP*` product model) and stops with "not a Sonoff S60" otherwise
@@ -181,16 +181,16 @@ makes it necessary. The evidence is in [the firmware facts](#firmware-facts-stat
   with a `data.otaInfoList`, even an empty one.
 - **`online` as eWeLink means it.** True only while the plug's WebSocket is held:
   the tool waits on it before sending the installer (`serve_tasmota_ota.py`), and
-  by it tells a plug cut off from the internet, one that answers here but shows
-  offline (`why_not_found`).
+  by it tells a plug cut off from the internet, one that answers on the network
+  but shows offline (`why_not_found`).
 - **The rest of the record, so the failure paths read the same.** `productModel`
   names the region in the report and the Tasmota template; it is not in the dump
   ([the stub server](#the-stub-server)). `params.staMac` lets the tool ask the
   plug's last-seen address first, and say "is at … but does not answer" when
   only its MAC is seen. `params.ssid` names its network in "not seen on this
   computer's network". The plug reports `ssid` and `bssid` in its `update`s,
-  which the stub passes on as eWeLink does; it never reports its MAC here, so
-  that is the MAC of the plug being run
+  which the stub passes on as eWeLink does; it never reports its MAC there, so
+  `staMac` is the MAC of the plug being run
   ([test 7](#test-7--the-whole-account-record)).
 - **Relay the app's commands.** The installer goes as an `upgrade` from the tool's
   app connection (`userAgent:"app"`) to the plug, and the plug's replies come
@@ -205,9 +205,9 @@ makes it necessary. The evidence is in [the firmware facts](#firmware-facts-stat
   clones of one device id are online at once
   ([test 5](#test-5--parallel-runs)), and the fault suite's cross-instance cloud
   lock goes with `--stub-cloud`.
-- **Never stand in for eWeLink's own names.** Our own `.test` domain and
+- **Never stand in for eWeLink's own names.** The stub's own `.test` domain and
   certificate only; in stub mode eWeLink's hostnames resolve to `0.0.0.0`
-  ([what we are not doing](#what-we-are-explicitly-not-doing)).
+  ([what stub mode does not do](#what-stub-mode-does-not-do)).
 - **The key stays on the instance's network.** The identity is read from the dump
   inside the container and written to the container's `/run`, and secret values
   are redacted in the stub's log. It runs as root, so with `-B`: no bytecode left
@@ -292,7 +292,7 @@ slot length. A replacement CA PEM must therefore be < 1040 B, null-padded to the
 slot. An **EC P-256** CA PEM (~644 B) fits; RSA-2048 (~1200 B) would not. mbedTLS
 stops at the `END CERTIFICATE` marker, so trailing nulls are ignored. A straight
 MITM of the unmodified firmware is impossible without coolkit's CA private key;
-the stub instead replaces this trust anchor in a working copy with our own CA.
+the stub instead replaces this trust anchor in a working copy with its own CA.
 
 ### eWeLink identity in NVS
 
@@ -309,8 +309,8 @@ energy and relay settings); `phy` (`cal_data`, `cal_mac`, `cal_version`),
 `productId` (an opaque 14-digit number, not the product model), `histEnergy0..8`,
 `bt_config.conf` and `evtLogName`. eWeLink's product model (`S60TPG`/`S60TPF`)
 appears nowhere in the flash. In this plug's dump `apikey` and `encrypt_key`
-hold the same value, and either opens its LAN advert (below), so which of the
-two is the LAN key does not arise for it.
+hold the same value, and either opens its LAN advert (below), so for this plug
+it does not matter which of the two is the LAN key.
 
 ### What the plug says of itself on the network
 
@@ -376,16 +376,16 @@ The CA is **kept stable once made** — it is flashed into the trust store, so
 `make_ca.py` reuses it and only reissues the leaf (e.g. to add a SAN); `--force`
 regenerates the CA. The CA private key never enters the firmware.
 
-### Firmware change A — trust our CA (trust-store swap in `ota_0`)
+### Firmware change A — trust the stub's CA (trust-store swap in `ota_0`)
 
 [`patch_stock.py --trust-ca <ca.crt>`](../tools/espressif/emulator/patch_stock.py) checks
 both slots currently hold the coolkit CA (`O=coolkit, CN=coolkit.cn`), overwrites
-each with our CA PEM null-padded to the original 1040-byte slot, then calls
+each with the stub's CA PEM null-padded to the original 1040-byte slot, then calls
 `appimage.reseal` so the image checksum and SHA-256 are valid and the bootloader
 accepts it. Applied only in stub mode, alongside the existing BLE patches. The
 plain-boot path (no `--trust-ca`) is unchanged.
 
-### Firmware change B — point the plug at our domain (NVS `dis_server`)
+### Firmware change B — point the plug at the stub's domain (NVS `dis_server`)
 
 [`rewrite_nvs.py --dis-server disp.autoflash-stub.test --dis-port 443`](../tools/espressif/emulator/rewrite_nvs.py)
 sets those `frame_params` fields the same way it already rewrites
@@ -411,11 +411,11 @@ secret values (`apikey`, `deviceid`, `devicekey`, `encrypt_key`, …) redacted.
 - **`GET /dispatch/app`** (tool/app) → the IoT server for the app side.
 - **`POST /v2/user/login`, `GET /v2/device/thing`, `POST /v2/device/ota/query`**
   (tool, touchpoint A) → a canned login token, a one-device list, and an empty
-  OTA list (firmware comes over LAN, not from here). The device list carries the
+  OTA list (firmware comes over LAN, not from the stub). The device list carries the
   plug's `devicekey`, `online` (true while its IoT WebSocket is held, as at
   eWeLink), its model, firmware version and other params (`ssid`, `bssid`) as
   the plug itself reports them, its MAC (`params.staMac`: the plug never reports
-  it here, so it is the one `emu.sh` runs the plug with), and its **product
+  it to the stub, so it is the one `emu.sh` runs the plug with), and its **product
   model** when known (below).
 - **app↔device relay** — the real cloud passes an app's `upgrade` command to the
   device and its replies back. Device and app each hold their own WebSocket to the
@@ -507,8 +507,8 @@ after the list.
   to `0.0.0.0` and lead nowhere, and the plug stays on its own network. Nothing
   the plug or tool does reaches the real eWeLink.
 - **The tool** trusts the stub by `SSL_CERT_FILE` pointing at a bundle of the
-  system roots **and** our CA (so trusting the stub takes nothing away from other
-  TLS, e.g. the firmware downloads), and is pointed at the stub by
+  system roots **and** the stub's CA (so trusting the stub takes nothing away from
+  other TLS, e.g. the firmware downloads), and is pointed at the stub by
   `AUTOFLASH_EWELINK_API_BASE`, honoured in `get_device_key.py` (the account API) and
   `probe_ota_command.py` (the app dispatch).
 - **`unattended-test.sh --stub-cloud`** runs a whole conversion with no eWeLink
@@ -584,13 +584,13 @@ DNS was refused (offline), so it retried on a backoff (~5–90 s). No NTP query
 preceded the lookup. No TLS/443 traffic (never resolved).
 
 **Interpretation:** `dis_server` is honoured → redirect is a **pure NVS edit**.
-The clock does not gate reaching dispatch. The moment DNS answers our domain, the
-plug connects with no other prerequisite.
+The clock does not gate reaching dispatch. The moment DNS answers for the stub's
+domain, the plug connects with no other prerequisite.
 
 ### Test 2 — does the trust swap let the TLS handshake complete?
 
-**Goal:** with our CA swapped in and the plug pointed at our domain, confirm the
-plug completes a TLS handshake to the stub.
+**Goal:** with the stub's CA swapped in and the plug pointed at the stub's domain,
+confirm the plug completes a TLS handshake to the stub.
 
 **Run:** instance 16, offline, `--pcap`, `--no-firewall` (ufw denies inbound 443;
 the internet block is separate iptables rules, so offline is preserved). Stub
@@ -838,7 +838,7 @@ X1 too, from its configuration dump: X1 -23, D4 -19, E1 -22, reported -23.
 
 ## Risks and limitations
 
-- **Fidelity:** the stub tests *our tool and the bridge firmware*, not eWeLink's
+- **Fidelity:** the stub tests *the tool and the bridge firmware*, not eWeLink's
   servers. Keep a small set of real-`--cloud` runs as an end-to-end smoke test.
 - **Scope past C2:** once D1 is done the conversion is LAN-only and exercises no
   eWeLink; it runs the same under `--stub-cloud` as under `--cloud`. Sending the
@@ -861,7 +861,7 @@ X1 too, from its configuration dump: X1 -23, D4 -19, E1 -22, reported -23.
   [test 7](#test-7--the-whole-account-record) found a restart check that did.
 - **Resembles a MITM, so built deliberately:** the low-level mechanics (a
   trust-store edit plus a server answering the dispatch protocol) look like a TLS
-  man-in-the-middle even though this is self-hosting our own device to our own
+  man-in-the-middle even though this is self-hosting your own device to your own
   server. It is kept confined to the firewalled per-instance network.
 
 ## Safety / rollback
