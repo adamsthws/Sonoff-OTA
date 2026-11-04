@@ -63,11 +63,23 @@ check.
   paths. A plug on ESPHome 1.4.0 or earlier names the old path, which no
   longer exists, so Home Assistant cannot adopt it until it is updated to the
   image built from the moved config; the plug itself runs as before.
-- ESPHome for the S60 is 1.5.0: a change to its config, built with ESPHome
+- ESPHome for the S60 is 1.6.0: a change to its config, built with ESPHome
   [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0) as
   1.4.0 was. Its bootloader is unchanged, so a plug on ESPHome already is
   not given a new one. It is the image built from the moved config, and
-  names the plug as every firmware does (below).
+  names the plug as every firmware does (below). Its apparent power,
+  reactive power and power factor are worked out each second from the
+  calibrated voltage, current and power of the same readings, where they
+  came from the meter's raw readings:
+  a load close to resistive took those past a power factor of 1, and the log
+  filled with each reading refused as impossible, many a second
+  ([reported](https://github.com/adamsthws/firmware-liberator/discussions/1#discussioncomment-19373248)).
+  Reactive power is 0 while power is within 1.5% of voltage times current:
+  the meter gets them within about 1% on a resistive load, where a 1 kW
+  heater read up to 148 var. And they change only in a second steady with
+  the last: as a load switches, the meter's power follows its current a
+  second or three behind, and a 2 kW heater's thermostat read up to
+  1782 var and a power factor of 0.66.
 - Every firmware the tool installs names the plug alike, in lower case as
   ESPHome requires: the firmware and the last three bytes of its MAC, as its
   hostname and its name inside the firmware - `tasmota-abcdef` (Tasmota's

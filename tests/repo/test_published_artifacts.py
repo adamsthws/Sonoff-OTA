@@ -116,6 +116,36 @@ class PublishedESPHomeTests(unittest.TestCase):
         for entry in include_entries(config):
             self.assertTrue(entry.startswith("<"), entry)
 
+    def test_the_meters_readings_worked_out_from_others_are_from_calibrated_ones(self):
+        # The CSE7766's own apparent power, reactive power and power factor
+        # come from its raw readings, and log each impossible one: many a
+        # second under a resistive load.
+        from tools.autoflash.runs import ROOT
+        config = (ROOT / "devices" / "sonoff-s60" / "esphome.yaml").read_text(encoding="utf-8")
+        meter = re.search(r"(?ms)^  - platform: cse7766\n(.*?)(?=^  - |^\S)", config)
+        self.assertIsNotNone(meter)
+        for key in ("apparent_power", "reactive_power", "power_factor"):
+            self.assertNotRegex(meter.group(1), rf"(?m)^    {key}:", key)
+        for name in ("Apparent power", "Reactive power", "Power factor"):
+            self.assertRegex(config, rf'(?m)^  - platform: template\n    name: "{name}"$', name)
+
+    def test_a_resistive_load_has_no_reactive_power_within_the_meters_accuracy(self):
+        # sqrt(S^2 - P^2) turns the meter's 1% between P and V*I on a heater
+        # into up to 15% of S: it read 0-148 var on a 1 kW radiator.
+        from tools.autoflash.runs import ROOT
+        config = (ROOT / "devices" / "sonoff-s60" / "esphome.yaml").read_text(encoding="utf-8")
+        self.assertIn("id(reactive_power).publish_state(s - p > 0.015f * s ? std::sqrt(s * s - p * p) : 0.0f);", config)
+
+    def test_a_load_switching_gives_no_reactive_power(self):
+        # A 2 kW radiator's thermostat switching read up to 1782 var and a power
+        # factor of 0.66 for a second or three: the meter's power follows its
+        # current behind. Only a second like the last one gives them.
+        from tools.autoflash.runs import ROOT
+        config = (ROOT / "devices" / "sonoff-s60" / "esphome.yaml").read_text(encoding="utf-8")
+        derived = config[config.index("id(apparent_power).publish_state(s);"):config.index("id(power_factor)")]
+        self.assertIn("if (!steady) return;", derived)
+        self.assertLess(derived.index("if (!steady) return;"), derived.index("id(reactive_power)"))
+
     def test_every_include_form_is_found(self):
         config = (
             "esphome:\n"
