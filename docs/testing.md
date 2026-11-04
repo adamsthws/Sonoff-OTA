@@ -346,6 +346,9 @@ AUTOFLASH_CLOUD_WORKERS=1 AUTOFLASH_ANY_WORKERS=3 \
 tools/espressif/emulator/fault_suite.py report
 ```
 
+`batch` refuses to start from a converted plug `prep` made with other firmware
+than this checkout installs: run `prep` again after a firmware change.
+
 Against the real cloud, one cloud scenario at a time. The plugs take turns
 at eWeLink, but a run waiting for its turn still talks to it: it sees the
 plug whose turn it is as its own and sends it the installer, which that

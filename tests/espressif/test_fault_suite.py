@@ -42,7 +42,126 @@ class NameProblemTests(unittest.TestCase):
                          ([], None))
 
 
+class CloudTurnTests(unittest.TestCase):
+    def turns_from_the_start(self, sc):
+        monitor = fs.PlugMonitor(mock.Mock(n=24, state=Path("/nonexistent"), sc=sc, say=lambda _: None))
+        monitor.preheld = True
+        with mock.patch.object(monitor, "live_run", return_value=None), \
+                mock.patch.object(monitor, "hold") as hold, \
+                mock.patch.object(fs, "plug_internet"), mock.patch.object(fs, "NO_CLOUD", False), \
+                mock.patch.object(monitor.stop, "wait", side_effect=lambda _: monitor.stop.set()):
+            monitor.watching()
+        return [call.args[0] for call in hold.call_args_list]
+
+    def test_a_legacy_run_s_plug_is_online_from_the_start_whatever_step_it_stops_at(self):
+        # Seen against the real cloud: its turn held and its way out shut, so
+        # eWeLink showed the plug offline and the old release stopped to ask,
+        # long before the step under test.
+        self.assertEqual(self.turns_from_the_start({"step": "C3", "fault": "legacy"}), ["from the start"])
+        self.assertEqual(self.turns_from_the_start({"step": "start", "fault": "legacy"}), ["from the start"])
+        self.assertEqual(self.turns_from_the_start({"step": "C2", "fault": "crash"}), ["from the start"])
+        self.assertEqual(self.turns_from_the_start({"step": "C3", "fault": "crash"}), [])
+
+    def test_the_installer_sent_again_while_waiting_for_a_turn_is_answered_by_it(self):
+        said = []
+        monitor = fs.PlugMonitor(mock.Mock(n=24, state=Path("/nonexistent"), sc={"step": "C3"}, say=said.append))
+        text = ["=== run started\n"]
+        intent = "[11:31:39] Sending the installer again (attempt %d of 3)\n"
+        calls = iter(range(1000))
+        waits = iter([False] * 20 + [True] * 1000)   # a bounded wait, whatever the turns
+
+        def live_run():
+            if next(calls) == 0:
+                return ("run", "=== run started\n")
+            return ("run", "".join(text))
+        turns = []
+
+        def acquire(*_):
+            if not turns:
+                text.append(intent % 2)   # sent again while it waits
+            return True
+
+        def hold(why, run=None):
+            turns.append(why)
+            return len(fs.INTENT.findall("".join(text)))
+        text.append(intent % 1)
+        with mock.patch.object(monitor, "live_run", side_effect=live_run), \
+                mock.patch.object(monitor, "hold", side_effect=hold), \
+                mock.patch.object(fs, "plug_internet"), mock.patch.object(fs, "NO_CLOUD", False), \
+                mock.patch.object(fs.CLOUD, "acquire", side_effect=acquire), \
+                mock.patch.object(monitor.stop, "wait", side_effect=lambda t: next(waits) and monitor.stop.set()):
+            monitor.watching()
+        self.assertEqual(turns, ["fallen back"])
+
+    def test_a_turn_starts_again_when_the_installer_is_sent_again_part_way(self):
+        # Seen against the real cloud: sent again with 70 s of a turn left, and
+        # the plug shut off part way through that attempt.
+        with tempfile.TemporaryDirectory() as state:
+            (Path(state) / "logs").mkdir()
+            (Path(state) / "logs/uart.log").write_text("", encoding="utf-8")
+            said = []
+            monitor = fs.PlugMonitor(mock.Mock(n=24, state=Path(state), sc={"step": "C3"}, say=said.append))
+            text = ["=== run started\n", "Sending the installer again (attempt 1 of 3)\n"]
+            clock = [1000.0]
+
+            def wait(_):
+                clock[0] += 100
+                if clock[0] == 1200:
+                    text.append("Sending the installer again (attempt 2 of 3)\n")
+            with mock.patch.object(monitor, "live_run", side_effect=lambda: ("run", "".join(text))), \
+                    mock.patch.object(monitor, "run_text", return_value=""), \
+                    mock.patch.object(fs, "plug_internet"), mock.patch.object(fs.CLOUD, "release"), \
+                    mock.patch.object(fs.time, "time", side_effect=lambda: clock[0]), \
+                    mock.patch.object(monitor.stop, "wait", side_effect=wait):
+                seen = monitor.hold("fallen back", run="run")
+        self.assertEqual(seen, 2)
+        self.assertIn("CLOUD: turn renewed (asked again)", said)
+        # Held a whole turn past the attempt sent at 1200.
+        self.assertGreaterEqual(clock[0], 1200 + fs.HOLD_AT_MOST)
+
+
 class SavedPlugTests(unittest.TestCase):
+    def stale(self, made, todo):
+        # A saved plug's name from its route; its firmware as prep recorded it.
+        with tempfile.TemporaryDirectory() as emu:
+            start = Path(emu) / "saved" / fs.saved("suite-esphome")
+            start.mkdir(parents=True)
+            if made is not None:
+                (start / "firmware.json").write_text(made, encoding="utf-8")
+            with mock.patch.object(fs, "EMU", Path(emu)), \
+                    mock.patch.object(fs, "installs", return_value={"version": "2"}):
+                return fs.stale_starts(todo)
+
+    def test_a_batch_is_told_when_a_saved_plug_is_not_on_this_checkout_s_firmware(self):
+        # Seen: ESPHome moved on and every esphome> scenario still started from
+        # the release before, passing, until the tool began offering it an update.
+        todo = [{"route": "esphome>tasmota", "fault": "crash"}]
+        name = fs.saved("suite-esphome")
+        self.assertEqual(self.stale('{"version": "1"}', todo), [name])
+        self.assertEqual(self.stale(None, todo), [name])
+        self.assertEqual(self.stale("not json", todo), [name])
+        self.assertEqual(self.stale('{"version": "2"}', todo), [])
+
+    def test_a_batch_refuses_to_start_from_one(self):
+        with mock.patch.object(fs, "scenarios", return_value=[{"id": "a", "route": "esphome>tasmota", "fault": "crash"}]), \
+                mock.patch.object(fs, "latest", return_value={}), mock.patch.object(fs, "LOGS"), \
+                mock.patch.object(fs, "stale_starts", return_value=["suite-esphome"]), \
+                mock.patch.object(fs, "worker", side_effect=AssertionError("a scenario was run")):
+            with self.assertRaisesRegex(SystemExit, "suite-esphome.*Run prep"):
+                fs.batch()
+
+    def test_runs_that_start_from_no_converted_plug_ask_nothing_of_it(self):
+        self.assertEqual(self.stale('{"version": "1"}', [{"route": "sonoff>esphome", "fault": "crash"},
+                                                         {"route": "esphome>sonoff", "fault": "legacy"}]), [])
+
+    def test_a_starting_plug_is_kept_only_when_its_run_got_there(self):
+        # All six once listed as saved, each run stopped at "Discovering the device".
+        stopped_early = "Stage  2 - Discovering the device - Stopped\nExit code 130"
+        self.assertFalse(fs.prepared(stopped_early, None, False))
+        self.assertFalse(fs.prepared(stopped_early, "C2", False))
+        self.assertTrue(fs.prepared("     Result:               Converted\nExit code 0", None, False))
+        self.assertTrue(fs.prepared("Stage  7 - Backing up Sonoff firmware - Stopped", "C2", True))
+
     def saved_as(self, owner, mac):
         with tempfile.TemporaryDirectory() as emu:
             if owner:
@@ -235,6 +354,28 @@ class ScenarioTests(unittest.TestCase):
             self.assertNotIn("--firmware", old)
             self.assertEqual(new[-2:], ["--firmware", "tasmota"])
 
+    def test_the_advice_beside_a_question_is_followed_though_the_screen_lost_it(self):
+        # sonoff>esphome:C2:cancel-switch: eWeLink showed the plug offline after
+        # its update was cut off, the run said to switch it off and on beside
+        # "What now", and stopped there - its last screen without the advice.
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp, "scenario.log")
+            log.write_text("--- --instance=4\n Stage 2 - Discovering the device - Stopped\n"
+                           " Cleaned up. Nothing was left half done. Exiting.\n", encoding="utf-8")
+            runs = Path(tmp, "state/work/captures/plugs/unidentified/runs/20261103-041854")
+            runs.mkdir(parents=True)
+            (runs / "run.log").write_text(
+                "=== run started ===\n[04:20:00] earlier: switch it off and on\n=== run ended ===\n"
+                "=== run started ===\n[04:21:45]     - 'S60' (S60TPG): eWeLink shows it offline - check it is\n"
+                "[04:21:45]     switched on. If it is, switch the device off and on: after an update cut off\n"
+                "[04:21:45]     What now\n", encoding="utf-8")
+            sc = fs.Scenario(24, {"id": "x", "route": "sonoff>esphome", "step": "C2", "fault": "cancel",
+                                  "arg": "switch", "at": 40}, str(log))
+            sc.state = Path(tmp, "state")
+            said = sc.last_said()
+        self.assertIn("switch the device off and on", said)
+        self.assertNotIn("earlier", said)   # the last run's, not one before it
+
     def test_a_legacy_tree_is_run_by_its_own_driver(self):
         # unattended-test.sh --code: a release from before the reorganisation
         # keeps its driver, and the tool it starts, directly in tools/.
@@ -270,6 +411,24 @@ class ScenarioTests(unittest.TestCase):
             for tag in fs.LEGACY_STEPS:
                 with self.subTest(tag=tag):
                     fs.legacy_tree(tag)
+
+    def test_the_person_carries_on_when_a_run_log_moves_as_it_looks(self):
+        # Seen on a VM: the tool moved a run from unidentified/ under its
+        # plug's MAC between the person's listing and its look at the log,
+        # and the person's thread died with FileNotFoundError.
+        import threading
+        sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "D4", "fault": "cancel",
+                              "arg": "new", "at": 40}, "/dev/null")
+        sc.started = 0
+        stop = threading.Event()
+        moved = Path(tempfile.gettempdir()) / "no-such-run" / "run.log"
+
+        def logs(state):
+            stop.set()  # one look, then stop
+            return [(1.0, moved, "a run")]
+        with mock.patch.object(sc, "ex", return_value=mock.Mock(stdout="", returncode=1)), \
+                mock.patch.object(fs, "run_logs", side_effect=logs):
+            sc.person(stop)
 
     def test_a_legacy_run_is_killed_by_its_own_tools_name(self):
         # 2.0.x's tool is tools/autoflash_cli.py, 1.2.0's tools/s60_autoflash.py.

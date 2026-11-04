@@ -380,6 +380,11 @@ def needs_cloud(sc):
     return sc["fault"] == "legacy" or (sc["route"].startswith("sonoff>") and sc["step"] in CLOUD_STEPS)
 
 
+def starts_online(sc):
+    # A plug fresh from Sonoff, its first run looking it up in eWeLink at once.
+    return sc.get("step") == "C2" or sc.get("fault") == "legacy"
+
+
 # -- the cloud: one plug at a time ----------------------------------------------
 # Shut: the plug's TCP to the internet answered with a reset, and eWeLink's to
 # it, so each end lets go of their connection at once and the next turn starts
@@ -625,7 +630,7 @@ class PlugMonitor:
         live = self.live_run()
         if live:
             handled[live[0]] = len(INTENT.findall(live[1]))
-        if self.sc.sc.get("step") == "C2" and not NO_CLOUD and not getattr(self, "started_online", False):
+        if starts_online(self.sc.sc) and not NO_CLOUD and not getattr(self, "started_online", False):
             # A fresh plug, as a real one is, online from the start: A1 gives it
             # about a minute to show in eWeLink, less than a turn asked for
             # then and Sonoff's firmware reconnecting take. Held through C2.
@@ -652,16 +657,24 @@ class PlugMonitor:
                     if NO_CLOUD:
                         self.sc.say("CLOUD: wanted, but this machine gives no turns")
                     elif CLOUD.acquire(self.n, priority, self.stop.is_set):
-                        self.hold("finding" if finding else "fallen back" if again else "fresh")
-                    live = self.live_run()
-                    if live and live[0] == run:
-                        handled[run] = len(INTENT.findall(live[1]))
+                        seen = self.hold("finding" if finding else "fallen back" if again else "fresh", run=run)
+                        if seen is not None:
+                            handled[run] = seen
             self.stop.wait(1.0)
 
-    def hold(self, why, limit=HOLD_AT_MOST):
+    def intents(self, run):
+        live = self.live_run()
+        return len(INTENT.findall(live[1])) if live and live[0] == run else None
+
+    def hold(self, why, limit=HOLD_AT_MOST, run=None):
+        """Gives the plug its way out until the run ends, the plug leaves
+        Sonoff's firmware or `limit` runs out; returns how many times `run`
+        had asked by then, all of them answered by this turn."""
         uart = self.state / "logs/uart.log"
         pos = uart.stat().st_size if uart.exists() else 0
         ended = self.run_text().count("=== run ended ===")
+        # Asked for again while it waited: this turn is theirs too.
+        asked = self.intents(run)
         plug_internet(self.n, True)
         self.sc.say(f"CLOUD: turn taken ({why})")
         since = time.time()
@@ -673,6 +686,14 @@ class PlugMonitor:
                     # turn (a fresh one) starts with its way shut.
                     plug_internet(self.n, True)
                     opened = time.time()
+                now_asked = self.intents(run)
+                if asked is not None and now_asked is not None and now_asked > asked:
+                    # The installer sent again part way through: a whole turn
+                    # from here. Seen: a turn running out as it was sent again
+                    # went with the plug shut off, the download never begun.
+                    asked = now_asked
+                    since = time.time()
+                    self.sc.say("CLOUD: turn renewed (asked again)")
                 # Held through the download, not only to its start: Sonoff's
                 # firmware that loses eWeLink part way gives the download up.
                 # Its end is the installer starting, below.
@@ -692,6 +713,7 @@ class PlugMonitor:
             plug_internet(self.n, False)
             CLOUD.release(self.n)
             self.sc.say(f"CLOUD: turn given up after {time.time() - since:.0f}s")
+        return asked
 
 
 def name(n):
@@ -1092,8 +1114,10 @@ class Scenario:
                     silent = 0
             else:
                 silent = 0
-            for _, log, text in run_logs(self.state):
-                if log.stat().st_mtime < self.started:
+            # As run_logs read it: the tool moves a run filed as unidentified
+            # under its plug's MAC once it knows it, so the path may be gone.
+            for written, log, text in run_logs(self.state):
+                if written < self.started:
                     continue
                 joins, backs = JOIN.findall(text), text.count(BACK)
                 if log not in seen:
@@ -1171,7 +1195,7 @@ class Scenario:
 
     def go(self):
         monitor = PlugMonitor(self)
-        if (self.sc.get("step") == "C2" or self.sc["fault"] == "legacy") and not NO_CLOUD and not STUB_CLOUD:
+        if starts_online(self.sc) and not NO_CLOUD and not STUB_CLOUD:
             # The turn before the run, not beside it: A1 looks the plug up in
             # eWeLink within seconds of starting, and finds it offline if it
             # is still waiting for its turn then.
@@ -1472,6 +1496,16 @@ class Scenario:
             time.sleep(3)
         return False
 
+    def last_said(self):
+        """What the last run told the person: the screen it ended on, and its own
+        log - which keeps what a question showed while it was asked, gone from
+        the screen once an unattended run stops there (seen: "switch the device
+        off and on", the advice beside "What now", never followed)."""
+        screen = Path(self.log).read_text(encoding="utf-8", errors="replace").split("--- ")[-1]
+        logs = run_logs(self.state)
+        own = logs[-1][2].split("=== run started")[-1] if logs else ""
+        return re.sub(r"\s+", " ", screen + "\n" + own)
+
     def again(self, results, target, extra, delay=None, first_fault=None, code=None, later=None):
         """The tool run again, as a person would - switching the plug off and
         on, or joining its own network, where the run says to - until the plug
@@ -1481,7 +1515,7 @@ class Scenario:
         sc = self.sc
         fault, arg = sc["fault"], sc["arg"]
         while "Converted" not in results[-1][1] and len(results) < MAX_RUNS:
-            said = re.sub(r"\s+", " ", Path(self.log).read_text(encoding="utf-8", errors="replace").split("--- ")[-1])
+            said = self.last_said()
             if re.search(r"switch (the plug|the device|it) off and on", said):
                 self.say("following the run's advice: the plug switched off and on")
                 self.ex(PLUG_CMD, "restart")
@@ -1789,6 +1823,9 @@ def batch(ids_file=None):
     done = {i for i, row in latest().items() if row["verdict"] in ("PASS", "EMULATOR-LIMIT", "NO-TRAFFIC")}
     cloud, anywhere = queue.Queue(), queue.Queue()
     ids = read_ids(ids_file) if ids_file else list(known)
+    stale = stale_starts(known[i] for i in ids if i not in done)
+    if stale:
+        raise SystemExit(f"Saved plugs not on the firmware this checkout installs: {', '.join(stale)}. Run prep.")
     for i in ids:
         if i in done:
             continue
@@ -1822,6 +1859,39 @@ def batch(ids_file=None):
     report()
 
 
+def installs(target):
+    return json.loads((REPO / "artifacts/firmware.json").read_text(encoding="utf-8"))[target]
+
+
+def converted_start(target):
+    return EMU / "saved" / saved(ROUTES[f"{target}>sonoff"][0])
+
+
+def stale_starts(todo):
+    """The saved converted plugs `todo` would start from that prep did not make
+    with the firmware this checkout installs. A run from one leaves an older
+    firmware than the tool installs, untested for the one it does, and passes."""
+    # A legacy run makes its own plug, and Sonoff's firmware is not ours to change.
+    targets = {sc["route"].split(">")[0] for sc in todo if sc["fault"] != "legacy"} - {"sonoff"}
+    stale = []
+    for target in sorted(targets):
+        try:
+            made = json.loads((converted_start(target) / "firmware.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            made = None
+        if made != installs(target):
+            stale.append(saved(ROUTES[f"{target}>sonoff"][0]))
+    return stale
+
+
+def prepared(said, stop_after, stopped):
+    """Whether a starting plug's run got where it was meant to: stopped once
+    `stop_after` was done, or else converted. Saved whatever happened, a plug
+    whose run stopped at the start was once listed as saved, and its
+    scenarios all failed."""
+    return stopped if stop_after else bool(re.search(r"Result:\s+Converted", said))
+
+
 def prep():
     """The starting plugs, saved: one converted to each firmware; a stock plug
     stopped just after C2 (the installer sent, before the backup) for each;
@@ -1830,9 +1900,10 @@ def prep():
     n = int(os.environ.get("AUTOFLASH_PREP_INSTANCE", "1"))
     unattended = str(REPO / "tools/espressif/emulator/unattended-test.sh")
 
-    def stopped_after(step, sc, since):
+    def stopped_after(step, sc, since, stopped):
         while True:
             if re.search(rf"\] {step} done", sc.current_run(since, None) or ""):
+                stopped.set()
                 sc.signal("INT"); time.sleep(0.5); sc.signal("INT")
                 return
             time.sleep(0.2)
@@ -1845,8 +1916,9 @@ def prep():
         sc = Scenario(n, {"id": "prep", "step": "C2" if fresh else "", "fault": "prep", "arg": ""}, log)
         monitor = PlugMonitor(sc).start()
         since = time.time()
+        stopped = threading.Event()
         if stop_after:
-            threading.Thread(target=stopped_after, args=(stop_after, sc, since), daemon=True).start()
+            threading.Thread(target=stopped_after, args=(stop_after, sc, since, stopped), daemon=True).start()
         stub = ["--stub-cloud"] if STUB_CLOUD else []
         with open(log, "w", encoding="utf-8") as out:
             subprocess.call([unattended, f"--instance={n}", f"--plug={MAC}", f"--save={saved(save)}",
@@ -1854,11 +1926,17 @@ def prep():
         monitor.stop.set()
         plug_internet(n, False)
         CLOUD.release(n)
-        print(saved(save), "saved" if (EMU / "saved" / saved(save) / "flash.bin").exists() else "MISSING",
-              flush=True)
+        kept = EMU / "saved" / saved(save)
+        if not prepared(log.read_text(encoding="utf-8", errors="replace"), stop_after, stopped.is_set()):
+            # Not the plug it should be: none rather than one every scenario
+            # from it would start wrong.
+            shutil.rmtree(kept, ignore_errors=True)
+            raise SystemExit(f"{saved(save)} NOT MADE: its run did not get there - see {log}")
+        print(saved(save), "saved" if (kept / "flash.bin").exists() else "MISSING", flush=True)
 
     for target in ("tasmota", "esphome"):
         make(ROUTES[f"{target}>sonoff"][0], ["--fresh", "--", "--firmware", target])
+        (converted_start(target) / "firmware.json").write_text(json.dumps(installs(target)), encoding="utf-8")
         stock = ROUTES[f"sonoff>{target}"][0]
         make(stock, ["--fresh", "--", "--firmware", target], stop_after="C2")
         make(AFTER_D1[f"sonoff>{target}"], [f"--from={saved(stock)}", "--", "--firmware", target],
