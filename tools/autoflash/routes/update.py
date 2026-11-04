@@ -76,13 +76,20 @@ RELEASE: dict[str, Callable[["Context"], str | None]] = {"esphome": esphome_rele
                                                           "tasmota": tasmota_release}
 
 
-def outdated(ctx: Context, firmware: str, published: str | None) -> bool:
-    """Whether the plug runs this tool's `firmware` for its kind, older than
-    the `published` one: recorded with both versions (update_from, update_to)."""
+def earlier_release(ctx: Context, firmware: str, published: str | None) -> str | None:
+    """The release the plug runs, where that is this tool's `firmware` for its
+    kind, older than the `published` one; else None."""
     if firmware not in RELEASE or not published or (firmware == "esphome" and ctx.esphome_firmware):
-        return False
+        return None
     release = RELEASE[firmware](ctx)
-    if release is None or not older(release, published):
+    return release if release is not None and older(release, published) else None
+
+
+def outdated(ctx: Context, firmware: str, published: str | None) -> bool:
+    """Whether the plug runs an earlier release of `firmware` than the
+    `published` one: recorded with both versions (update_from, update_to)."""
+    release = earlier_release(ctx, firmware, published)
+    if release is None:
         return False
     ctx.state.set_input("update_from", release)
     ctx.state.set_input("update_to", published)

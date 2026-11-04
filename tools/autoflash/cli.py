@@ -288,6 +288,9 @@ def cmd_status(ctx: Context) -> int:
     output.say(f"Address:   {ctx.state.input('plug_ip') or '(not set)'}")
     output.say(f"Manifest:  {ctx.manifest_path}")
     output.say(f"State:     {ctx.state.path}")
+    available = routes.update_available(ctx)
+    if available:
+        output.say(f"Update:    {available}")
     output.say("")
     output.say(ctx.state.summary([(step, title) for step, title, _ in routes.STEPS]))
     captures = ctx.state.data.get("captures", {})

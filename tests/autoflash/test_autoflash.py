@@ -5538,6 +5538,46 @@ class FirmwareSearchCase(unittest.TestCase):
         return SimpleNamespace(state=state, web_password=None, esphome_login=None)
 
 
+class RestartingPlugTests(FirmwareSearchCase):
+    """A plug given by address that does not answer yet: waited for if this
+    computer converted it, never taken for one on Sonoff's firmware."""
+
+    def setUp(self):
+        super().setUp()
+        for owner, name, value in ((detect, "answers_as_tasmota", False), (source.time, "sleep", None)):
+            patch = mock.patch.object(owner, name, return_value=value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def find(self, answers, *, known=True, mac="12:34:56:ab:cd:ef", clock=None):
+        macs = {"12:34:56:ab:cd:ef"} if known else set()
+        with mock.patch.object(source, "known_macs", return_value=macs), \
+                mock.patch.object(hostsys, "mac_of", return_value=mac), \
+                mock.patch.object(detect, "identify", side_effect=answers) as asked, \
+                mock.patch.object(source.time, "monotonic", side_effect=clock or (lambda: 0.0)):
+            return source.find_current_firmware(self.ctx(plug_ip="192.168.0.137")), asked.call_count
+
+    def test_a_plug_it_converted_is_waited_for(self):
+        self.assertEqual(self.find([None, None, "esphome"]), ("esphome", 3))
+
+    def test_with_no_mac_to_go_on_any_conversion_here_is_reason_to_wait(self):
+        source.converted_here.return_value = True
+        self.assertEqual(self.find([None, "esphome"], known=False, mac=None), ("esphome", 2))
+
+    def test_a_plug_it_never_converted_is_not(self):
+        self.assertEqual(self.find([None], known=False), ("sonoff", 1))
+
+    def test_it_stops_waiting_after_the_grace_and_goes_to_sonoffs_route(self):
+        times = iter([0.0, 0.0, source.RESTART_GRACE + 1])
+        self.assertEqual(self.find([None, None], clock=lambda: next(times)), ("sonoff", 2))
+
+    def test_a_tasmota_without_its_template_answers_so_is_not_waited_for(self):
+        detect.answers_as_tasmota.return_value = True
+        with mock.patch.object(detect, "identify", return_value=None) as asked:
+            self.assertIsNone(source.identify_once_restarted(self.ctx(), "192.168.0.137"))
+        asked.assert_called_once()
+
+
 class TasmotaWebPasswordTests(FirmwareSearchCase):
     """A plug on Tasmota with a web password: asked for it, before anything
     needs it, where someone can type it; stopped, saying what to give, where

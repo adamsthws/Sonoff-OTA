@@ -361,8 +361,8 @@ def run_steps(ctx: Context) -> int:
     started = time.monotonic()
     safety_locks.restore_left_locks(ROOT)  # a resumed run skips A5, which looks too
     output.tell("")
-    output.tell("Converting a device usually takes under 10 minutes. Some stages take a")
-    output.tell("minute or two with little to see - that's normal. Keep the device powered,")
+    output.tell("A conversion usually takes under 10 minutes, and an update less. Some stages")
+    output.tell("take a minute or two with little to see - that's normal. Keep the device powered,")
     output.tell("and this computer on, until the last stage says complete.")
     output.tell("")
     try:

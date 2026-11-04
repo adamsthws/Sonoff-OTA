@@ -194,6 +194,12 @@ check.
 - A device hanging up on the tool as it writes - a plug restarting under a
   check - no longer ends the run on the spot, with nothing cleaned up: the
   tool set SIGPIPE to end it, for quiet output into `head`.
+- A plug given by address that does not answer yet, and that this computer
+  converted, is waited for as it restarts, as one found by searching already
+  was. It was taken for a plug on Sonoff's firmware, and the run went on to ask
+  eWeLink for it.
+- `status` says when a plug has an earlier release of its firmware than this
+  version installs.
 
 ## 2.2.0
 

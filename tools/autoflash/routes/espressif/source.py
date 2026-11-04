@@ -33,7 +33,7 @@ def find_current_firmware(ctx: Context) -> str:
     later, through eWeLink).  With --plug-ip, the plug at that address."""
     given = ctx.state.input("plug_ip")
     if given:
-        running = unlock.identify(ctx, given)
+        running = identify_once_restarted(ctx, given)
         if running == "locked":
             unlock.ask_web_password(ctx, given)
             running = unlock.identify(ctx, given)
@@ -134,6 +134,26 @@ def find_current_firmware(ctx: Context) -> str:
     if chosen.firmware == "midway" and chosen.name == "the mover":
         return past_the_commit(ctx, esphome_safe_mode(ctx, chosen.firmware))
     return past_the_commit(ctx, chosen.firmware)
+
+
+def identify_once_restarted(ctx: Context, host: str) -> str | None:
+    """What the plug at `host` runs.  Silent, a plug this computer converted
+    may be restarting - never to be taken for one on Sonoff's firmware, as
+    the search below waits for it too.  A MAC says which plug it is, where
+    the network still shows one."""
+    running = unlock.identify(ctx, host)
+    if running is not None or detect.answers_as_tasmota(host):
+        return running
+    mac = hostsys.mac_of(host)
+    if not (hostsys.normalise_mac(mac) in known_macs() if mac else converted_here(ctx)):
+        return None
+    output.tell("    It did not answer, and this computer converted it, so it may be restarting: looking "
+                f"again for up to {RESTART_GRACE:.0f} seconds...")
+    started = time.monotonic()
+    while running is None and time.monotonic() - started < RESTART_GRACE:
+        time.sleep(5)
+        running = unlock.identify(ctx, host)
+    return running
 
 
 def past_the_commit(ctx: Context, running: str) -> str:

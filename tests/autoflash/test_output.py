@@ -874,7 +874,12 @@ class ReportTests(OutputTestCase):
         self.assertEqual(fields["Stock firmware"], "1.3.0")
         with mock.patch.object(plugs, "read_plug", return_value={}):
             fields = dict(report.report_fields(ctx, 441, False))
-        self.assertEqual((fields["Device model"], fields["Stock firmware"]), ("__", "__"))
+        self.assertEqual((fields["Device model"], fields["Stock firmware"]), ("Sonoff S61", "__"))
+        # On Sonoff's route the kind is only a default until eWeLink has been asked.
+        with mock.patch.object(plugs, "read_plug", return_value={}):
+            fields = dict(report.report_fields(self.ctx(plug_kind="sonoff-s61", product_model="", stock_version="",
+                                                        source="sonoff"), 441, False))
+        self.assertEqual(fields["Device model"], "__")
         # What the run itself found comes first.
         with mock.patch.object(plugs, "read_plug", return_value={"model": "S61STPF", "stock_version": "1.3.0"}):
             fields = dict(report.report_fields(self.ctx(plug_kind="sonoff-s61", product_model="S61STPE",

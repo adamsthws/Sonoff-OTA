@@ -147,7 +147,8 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     # model, and the Sonoff firmware its backup holds - stands in.
     record = plugs.read_plug(ctx.state.input("plug_mac") or "")
     product = str(ctx.state.input("product_model") or record.get("model") or "")
-    model = kind.product_of(product)
+    # A converted plug with no record here says its kind, if not its exact model.
+    model = kind.product_of(product) or (kind.name if runs.run_source(ctx.state) != "sonoff" else "")
     stock_version = str(ctx.state.input("stock_version") or record.get("stock_version") or "")
     captures = ctx.state.data.get("captures", {})
     joined = (captures.get("D1.upload_route") == "bridge network"

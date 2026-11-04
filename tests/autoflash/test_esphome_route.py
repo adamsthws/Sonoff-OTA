@@ -1073,6 +1073,40 @@ class ESPHomeUpdateTests(RouteTestCase):
         with mock.patch.object(esphome, "api_device_info", return_value=self.ours()):
             self.assertFalse(update.outdated(ctx, "esphome", "1.6.0"))
 
+    def test_status_says_an_update_is_available_and_records_nothing(self):
+        ctx = self.ctx(plug_kind="sonoff-s60", firmware="esphome", source="sonoff")
+        with mock.patch.object(esphome, "api_device_info", return_value=self.ours()), \
+                mock.patch.object(espressif, "published_version", return_value="1.6.0"):
+            self.assertEqual(routes.update_available(ctx),
+                             "ESPHome 1.4.0 is on the device, and 1.6.0 is available: run the tool again")
+        self.assertIsNone(ctx.state.input("update_from"))
+
+    def test_status_shows_it_with_the_run(self):
+        ctx = self.ctx(plug_kind="sonoff-s60", firmware="esphome", source="sonoff")
+        ctx.plug, ctx.manifest_path = "12:34:56:ab:cd:ef", "manifest.json"
+        with mock.patch.object(routes, "update_available", return_value="1.6.0 is available"), \
+                contextlib.redirect_stdout(io.StringIO()) as shown:
+            self.assertEqual(cli.cmd_status(ctx), 0)
+        self.assertIn("Update:    1.6.0 is available", shown.getvalue())
+
+    def test_status_says_nothing_where_there_is_no_update_to_offer(self):
+        for why, firmware, info in (("this release", "esphome", self.ours("1.6.0")),
+                                    ("adopted", "esphome", self.ours(encrypted=True)),
+                                    ("not answering", "esphome", None),
+                                    ("no firmware chosen", None, self.ours()),
+                                    ("back on Sonoff's", "sonoff", self.ours())):
+            with self.subTest(why):
+                ctx = self.ctx(run=why, plug_kind="sonoff-s60", firmware=firmware, source="sonoff")
+                with mock.patch.object(esphome, "api_device_info", return_value=info), \
+                        mock.patch.object(espressif, "published_version", return_value="1.6.0"):
+                    self.assertIsNone(routes.update_available(ctx))
+
+    def test_status_survives_a_plug_that_fails_when_asked(self):
+        ctx = self.ctx(plug_kind="sonoff-s60", firmware="esphome", source="sonoff")
+        with mock.patch.object(esphome, "api_device_info", side_effect=OSError("no route")), \
+                mock.patch.object(espressif, "published_version", return_value="1.6.0"):
+            self.assertIsNone(routes.update_available(ctx))
+
     def test_releases_are_compared_as_numbers(self):
         self.assertTrue(update.older("1.9.0", "1.10.0"))
         self.assertFalse(update.older("1.10.0", "1.9.0"))

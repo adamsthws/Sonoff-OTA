@@ -124,6 +124,20 @@ def steps_for(firmware: str | None, source: str = "sonoff", family: ModuleType =
     return START + family.steps_for(firmware, source)
 
 
+def update_available(ctx: Context) -> str | None:
+    """What `status` says of an update for the run's plug, or None: none, or
+    the plug not answering.  It only asks: nothing is recorded."""
+    firmware = recorded_firmware(ctx.state)
+    published = family_of(ctx.state).published_version(kinds.of_run(ctx.state), firmware) if firmware else None
+    try:
+        release = update.earlier_release(ctx, firmware, published)
+    except (OSError, RuntimeError):
+        return None
+    if release is None:
+        return None
+    return f"{FIRMWARES[firmware]} {release} is on the device, and {published} is available: run the tool again"
+
+
 def recorded_firmware(state: RunState) -> str | None:
     """The firmware a run's record says it installs, None if not chosen yet:
     a run of 1.x, with steps done but no choice recorded, was for Tasmota -
