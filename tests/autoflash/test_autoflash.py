@@ -127,9 +127,24 @@ class LoaderTests(unittest.TestCase):
             f"var code=wc.get_string() return compile(code)() end autoflash_commit=autoflash_urlbeload('{self.URL}')"
         )
         compact = short_loader(self.URL, assign_to="autoflash_commit")
-        self.assertLess(len(compact), len(printed) / 2)
+        self.assertLess(len(compact), len(printed) * 2 / 3)
         for fragment in ("webclient()", self.URL, "compile(", "autoflash_commit="):
             self.assertIn(fragment, compact)
+
+    def test_short_loader_tries_the_fetch_again_until_it_is_answered(self):
+        # Under packet loss one connection timed out and the plug ran nothing
+        # (lossy-phase, HTP: Connection timeout): each try a new connection,
+        # the first answered taken; ten of 2 s each, inside FETCH_DEADLINE.
+        compact = short_loader(self.URL)
+        self.assertRegex(compact, r"var c,i=0 while i<10 c=webclient\(\) c\.begin\('[^']+'\) "
+                                  r"if c\.GET\(\)==200 break end i\+=1 end ")
+
+    def test_a_phase_not_armed_is_loaded_unrun_and_nothing_of_the_last_is_left_to_start(self):
+        compact = short_loader(self.URL)
+        self.assertTrue(compact.startswith("autoflash_run=nil "))
+        self.assertTrue(compact.endswith(" autoflash_run=compile(c.get_string())"))
+        self.assertTrue(short_loader(self.URL, assign_to="autoflash_commit").endswith(
+            " autoflash_commit=compile(c.get_string())()"))
 
     def test_loader_url_and_arm_token_are_parsed_from_server_output(self):
         printed = f"return autoflash_urlbeload('{self.URL}')"
@@ -795,21 +810,110 @@ class FetchCheckTests(unittest.TestCase):
         def join(self, _):
             pass
 
+    def runner(self, answers=(True,)):
+        from unittest import mock
+        from tools.autoflash import phases
+        runner = phases.PhaseRunner.__new__(phases.PhaseRunner)
+        runner.log = mock.Mock()
+        runner._plug_answers = mock.Mock(side_effect=list(answers))
+        runner._start = mock.Mock()
+        return runner
+
     def test_a_fetch_lets_the_phase_continue(self):
-        from tools.autoflash.phases import PhaseRunner
         process = self.Process()
-        PhaseRunner._require_fetch(None, process, ['  [10.0.0.5] "GET /berry/preflight.be HTTP/1.1" 200 -'],
-                                   self.Reader(), "preflight")
+        self.runner()._require_fetch(process, ['  [10.0.0.5] "GET /berry/preflight.be HTTP/1.1" 200 -'],
+                                     self.Reader(), "preflight")
         self.assertFalse(process.terminated)
 
     def test_no_fetch_stops_the_server_and_says_so(self):
         from unittest import mock
         from tools.autoflash import phases
-        process = self.Process()
+        process, runner = self.Process(), self.runner()
         with mock.patch.object(phases, "FETCH_DEADLINE", 1.0):
             with self.assertRaises(phases.PlugNeverConnected):
-                phases.PhaseRunner._require_fetch(None, process, [], self.Reader(), "preflight")
+                runner._require_fetch(process, [], self.Reader(), "preflight")
         self.assertTrue(process.terminated)
+        runner._start.assert_not_called()  # it was answered: the plug ran it, and could not reach us
+
+    def test_a_start_lost_on_the_way_is_sent_again_not_failed(self):
+        # Seen in the fault suite: L1's start sent as a Wi-Fi blip began, lost
+        # in it, and the step failed as a firewall - the plug answering.
+        from unittest import mock
+        from tools.autoflash import phases
+        captured, runner = [], self.runner()
+        runner._unanswered, runner._start_code = True, "loader"
+
+        def fetched(_):
+            runner._unanswered = False
+            captured.append('  [10.0.0.5] "GET /berry/plan.be HTTP/1.1" 200 -')
+        runner._start.side_effect = fetched
+        with mock.patch.object(phases, "FETCH_DEADLINE", 1.0):
+            runner._require_fetch(self.Process(), captured, self.Reader(), "plan")
+        runner._start.assert_called_once_with("loader")
+
+    def test_a_start_cut_off_on_the_way_is_sent_again_though_taken_for_sent(self):
+        # Seen in the fault suite: the blip cut L1's start off, its request
+        # ending as if sent - so with no reply to wait for.
+        from unittest import mock
+        from tools.autoflash import phases
+        captured, runner = [], self.runner()
+        runner._reply_lost, runner._start_code = True, "loader"
+        runner._start.side_effect = lambda _: captured.append('  [10.0.0.5] "GET /berry/plan.be HTTP/1.1" 200 -')
+        with mock.patch.object(phases, "FETCH_DEADLINE", 1.0):
+            runner._require_fetch(self.Process(), captured, self.Reader(), "plan")
+        runner._start.assert_called_once_with("loader")
+
+    def test_a_start_s_request_cut_off_is_known_to_have_no_reply_coming(self):
+        import http.client
+        import threading
+        from unittest import mock
+        from tools.autoflash import phases
+        for failure, lost in ((http.client.RemoteDisconnected("closed"), True),
+                              (ConnectionResetError("reset"), True), (None, False)):
+            runner = phases.PhaseRunner.__new__(phases.PhaseRunner)
+            done = threading.Event()
+
+            def berry(code, timeout, failure=failure):
+                try:
+                    if failure:
+                        raise failure
+                    return {"Br": "nil"}
+                finally:
+                    done.set()
+            runner.device = mock.Mock(berry=berry)
+            runner._start("loader")
+            done.wait(5)
+            deadline = time.monotonic() + 5
+            while runner._unanswered and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(runner._reply_lost, lost, failure)
+
+    def test_a_start_lost_every_time_fails_in_the_end(self):
+        from unittest import mock
+        from tools.autoflash import phases
+        runner = self.runner(answers=[True] * 10)
+        runner._unanswered, runner._start_code = True, "loader"
+        with mock.patch.object(phases, "FETCH_DEADLINE", 1.0):
+            with self.assertRaises(phases.PlugNeverConnected):
+                runner._require_fetch(self.Process(), [], self.Reader(), "plan")
+        self.assertEqual(runner._start.call_count, phases.START_TRIES - 1)
+
+    def test_no_verdict_while_a_start_that_never_arrived_waits_to_go_again(self):
+        from unittest import mock
+        from tools.autoflash import phases
+        captured, runner, joins = [], self.runner(), []
+        runner._resending = True
+
+        class Reader:
+            def join(self, _):
+                joins.append(1)
+                if len(joins) == 10:  # back, and sent again: the deadline anew
+                    runner._resending, runner._started_at = False, 2.0
+                if len(joins) == 13:
+                    captured.append('  [10.0.0.5] "GET /berry/plan.be HTTP/1.1" 200 -')
+        with mock.patch.object(phases, "FETCH_DEADLINE", 2.0):
+            runner._require_fetch(self.Process(), captured, Reader(), "plan")
+        runner._plug_answers.assert_not_called()
 
 
 class ModelGuardTests(unittest.TestCase):
@@ -1110,6 +1214,82 @@ class PhaseWaitTests(unittest.TestCase):
         with mock.patch.object(phases.time, "monotonic", side_effect=lambda: next(clock)):
             self.assertEqual(runner._wait("restore", self.Server(exits_after=30), 540.0, lambda: 0), 0)
         runner._plug_answers.assert_not_called()
+
+    def test_a_start_lost_on_the_way_is_sent_again_not_failed(self):
+        # Seen in the fault suite: L1's start sent as a Wi-Fi blip began. The
+        # plug answered 40 s on, never having run it, and the step failed.
+        from unittest import mock
+        from tools.autoflash import phases
+        runner = phases.PhaseRunner.__new__(phases.PhaseRunner)
+        shown = []
+        runner.log = shown.append
+        runner._plug_answers = mock.Mock(side_effect=[True] + [False] * 100)  # then busy running it
+        runner._start_code = "autoflash_run()"
+        runner._unanswered = True
+        sent = []
+        runner._start = sent.append
+        clock = iter(range(1000, 100_000, 2))
+        with mock.patch.object(phases.time, "monotonic", side_effect=lambda: next(clock)):
+            self.assertEqual(runner._wait("stage", self.Server(exits_after=15), 540.0, lambda: 0), 0)
+        self.assertEqual(sent, ["autoflash_run()"])
+        self.assertIn("    The start did not reach the device; sending it again.", shown)
+
+    def test_a_start_cut_off_on_the_way_is_sent_again_though_taken_for_sent(self):
+        # Seen in the fault suite: L1's start cut off by a Wi-Fi blip, its
+        # request ending as if sent. The plug asked for nothing after it.
+        from unittest import mock
+        from tools.autoflash import phases
+        for asked, again in ((900, ["autoflash_run()"]), (None, ["autoflash_run()"]), (1100, [])):
+            runner = phases.PhaseRunner.__new__(phases.PhaseRunner)
+            runner.log = lambda line: None
+            runner._plug_answers = mock.Mock(side_effect=[True] + [False] * 100)
+            runner._start_code, runner._started_at = "autoflash_run()", 1000
+            sent = []
+            runner._start = sent.append
+            clock = iter(range(1200, 100_000, 2))
+            with mock.patch.object(phases.time, "monotonic", side_effect=lambda: next(clock)):
+                if again:
+                    runner._wait("stage", self.Server(exits_after=15), 540.0, lambda: 0, lambda: asked)
+                else:  # it asked after the start, so ran it: stopped, as before
+                    with self.assertRaisesRegex(phases.PhaseError, "without reaching this computer"):
+                        runner._wait("stage", self.Server(), 540.0, lambda: 0, lambda: asked)
+            self.assertEqual(sent, again, asked)
+
+    def test_a_start_lost_every_time_fails_in_the_end(self):
+        from unittest import mock
+        from tools.autoflash import phases
+        runner = phases.PhaseRunner.__new__(phases.PhaseRunner)
+        runner.log = lambda line: None
+        runner._plug_answers = mock.Mock(return_value=True)
+        runner._start_code = "autoflash_run()"
+        runner._unanswered = True
+        runner._start = mock.Mock()
+        clock = iter(range(1000, 100_000, 2))
+        with mock.patch.object(phases.time, "monotonic", side_effect=lambda: next(clock)), \
+                self.assertRaisesRegex(phases.PhaseError, "without reaching this computer"):
+            runner._wait("stage", self.Server(), 540.0, lambda: 0)
+        self.assertEqual(runner._start.call_count, phases.START_TRIES - 1)
+
+    def test_the_last_start_s_reply_ends_its_wait_not_an_earlier_one_s(self):
+        import threading
+        from unittest import mock
+        from tools.autoflash import phases
+        runner = phases.PhaseRunner.__new__(phases.PhaseRunner)
+        first, second = threading.Event(), threading.Event()
+        replies = iter([first, second])
+        runner.device = mock.Mock(berry=lambda code, timeout: next(replies).wait(5))
+        runner._start("autoflash_run()")
+        runner._start("autoflash_run()")
+        first.set()
+        for _ in range(50):
+            threading.Event().wait(0.01)
+        self.assertTrue(runner._unanswered)
+        second.set()
+        for _ in range(500):
+            if not runner._unanswered:
+                break
+            threading.Event().wait(0.01)
+        self.assertFalse(runner._unanswered)
 
     def test_quiet_is_counted_from_the_start_when_it_went_later(self):
         from unittest import mock
@@ -1998,7 +2178,11 @@ sys.exit({code})
         self.assertIn("joined <wifi-name>", log)
         self.assertNotIn("Home-2G-made-up", log)
         self.assertIsNotNone(runner.busy_seconds)  # the plug's last request came after the start
-        self.assertIn("compile(", self.device.berry.call_args.args[0])
+        sent = [c.args[0] for c in self.device.berry.call_args_list]
+        self.assertIn("compile(", sent[0])
+        # Started by a short command of its own, not from the loader's line:
+        # the plan, run from there, overflowed the plug's stack.
+        self.assertEqual(sent[1:], [f"{phases.START_NAME}()"])
 
     def test_a_server_with_no_loader_stops_the_phase_with_what_it_said(self):
         with self.assertRaisesRegex(PhaseError, "did not print a loader URL:\nport in use"):
@@ -2011,16 +2195,17 @@ sys.exit({code})
             self.run_phase("commit", [self.loader(), 'autoflash_commit("t0ken")', self.FETCH, "sleep 30"],
                            confirm=confirm)
         confirm.assert_called_once_with("commit")
-        self.device.berry_fire.assert_called_once()   # the instructions went, ...
-        self.device.berry.assert_not_called()         # ... the start never did
+        sent = [c.args[0] for c in self.device.berry.call_args_list]
+        self.assertEqual(len(sent), 1)                # the instructions went, ...
+        self.assertIn("autoflash_commit=", sent[0])   # ... the start never did
 
     def test_an_armed_phase_confirmed_is_started_with_its_token(self):
         (code, _), _ = self.run_phase("commit", [self.loader(), 'autoflash_commit("t0ken")', self.FETCH, "sleep 0.5"],
                                       confirm=lambda phase: True)
         self.assertEqual(code, 0)
-        self.assertIn("autoflash_commit=", self.device.berry_fire.call_args.args[0])
-        self.device.berry.assert_called_once()
-        self.assertEqual(self.device.berry.call_args.args[0], 'autoflash_commit("t0ken")')
+        sent = [c.args[0] for c in self.device.berry.call_args_list]
+        self.assertIn("autoflash_commit=", sent[0])
+        self.assertEqual(sent[1:], ['autoflash_commit("t0ken")'])
 
     def test_an_armed_phase_with_no_arm_command_is_never_started(self):
         with self.assertRaisesRegex(PhaseError, "did not print an arm command"):
