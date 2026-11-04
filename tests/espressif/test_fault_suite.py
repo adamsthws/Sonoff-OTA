@@ -243,6 +243,27 @@ class ScenarioTests(unittest.TestCase):
         ids = [sc["id"] for sc in fs.scenarios()]
         self.assertEqual(len(ids), len(set(ids)))
 
+    def test_the_tasmota_update_has_its_own_faults(self):
+        ids = {sc["id"] for sc in fs.scenarios()}
+        for wanted in ("update>tasmota:U5:plugoff-1", "update>tasmota:U5@90:plugoff-1", "update>tasmota:U5:double-plugoff-1",
+                       "update>tasmota:U5:cancel-switch", "update>tasmota:U6:outage-30", "update>tasmota:U6:crash-1"):
+            self.assertIn(wanted, ids)
+
+    def test_an_update_counts_as_having_got_there(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "log"
+            log.write_text("--- run\n     Result:               Updated\n", encoding="utf-8")
+            result = fs.Scenario.screen_result(mock.Mock(log=log))
+        self.assertIn("Converted", result)
+
+    def test_a_run_over_before_its_fault_waits_for_all_of_it(self):
+        self.assertGreater(fs.fault_wait(180), 180)
+        self.assertEqual(fs.fault_wait("once"), 120)
+
+    def test_an_updates_earlier_release_is_never_stale(self):
+        with mock.patch.object(fs, "converted_start", side_effect=AssertionError("asked")):
+            self.assertEqual(fs.stale_starts([{"route": "update>tasmota", "fault": "plugoff"}]), [])
+
     def test_the_composite_faults_are_listed(self):
         ids = {sc["id"] for sc in fs.scenarios()}
         for wanted in ("sonoff>tasmota:C3:ownnet-cut", "sonoff>esphome:D1:lostanswer-once",
@@ -445,16 +466,107 @@ class ScenarioTests(unittest.TestCase):
                 mock.patch.object(fs, "run_logs", side_effect=logs):
             sc.person(stop)
 
+    def scenario(self, fault="outage", arg=60):
+        return fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "D4", "fault": fault,
+                                "arg": arg, "at": 40}, "/dev/null")
+
     def test_a_router_switch_not_taken_is_noted_and_one_taken_is_not(self):
-        sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "D4", "fault": "outage",
-                              "arg": 60, "at": 40}, "/dev/null")
+        sc = self.scenario()
         with mock.patch.object(sc, "ex", return_value=mock.Mock(returncode=0)) as ex:
             sc.router("off")
-        ex.assert_called_once_with(fs.PLUG_CMD, "router", "off")
-        self.assertNotIn("router_not_switched", sc.notes)
+        ex.assert_called_once_with(fs.PLUG_CMD, "router", "off", timeout=60)
+        self.assertNotIn("not_applied", sc.notes)
         with mock.patch.object(sc, "ex", return_value=mock.Mock(returncode=1)):
             sc.router("off")
-        self.assertTrue(sc.notes["router_not_switched"])
+        self.assertEqual(sc.notes["not_applied"], [f"{fs.PLUG_CMD} router off"])
+
+    def test_each_fault_that_cannot_start_is_noted(self):
+        for fault, arg in (("plugoff", 0), ("crash", "1"), ("cancel", "switch"), ("ctrlc", "once"),
+                           ("hangup", "1"), ("sleep", 0), ("pcoff", 0), ("weak", 0), ("lossy", 0),
+                           ("diskfull", "1"), ("token", "login"), ("lostanswer", "once"), ("seven", "times")):
+            with self.subTest(fault=fault):
+                sc = self.scenario(fault, arg)
+                sc.step_length = 0
+                sc.current_run = mock.Mock(return_value="] D1 done")
+                with mock.patch.object(sc, "ex", return_value=mock.Mock(returncode=1, stdout="", stderr="")), \
+                        mock.patch.object(fs.time, "sleep"):
+                    sc.fault(fault, arg, 0, None)
+                self.assertTrue(sc.notes.get("not_applied"))
+
+    def test_a_signal_reaching_any_of_the_run_is_enough(self):
+        sc = self.scenario("crash", "1")
+        with mock.patch.object(sc, "ex", side_effect=[mock.Mock(returncode=1), mock.Mock(returncode=0)]):
+            sc.signal("KILL", "a helper", "the tool")
+        self.assertNotIn("not_applied", sc.notes)
+
+    def test_the_second_ctrl_c_may_find_the_run_ended(self):
+        sc = self.scenario("cancel", "switch")
+        with mock.patch.object(sc, "ex", side_effect=[mock.Mock(returncode=0), mock.Mock(returncode=1)]), \
+                mock.patch.object(fs.time, "sleep"):
+            sc.fault("cancel", "switch", 0, None)
+        self.assertNotIn("not_applied", sc.notes)
+
+    def test_cleaning_up_after_a_restart_is_not_a_fault_not_applied(self):
+        sc = self.scenario("weak", 0)
+        results = iter([0, 0, 2, 2])
+        with mock.patch.object(sc, "ex", side_effect=lambda *a, **k: mock.Mock(returncode=next(results))), \
+                mock.patch.object(fs.time, "sleep"):
+            sc.fault("weak", 0, 0, None)
+        self.assertNotIn("not_applied", sc.notes)
+
+    def test_joining_the_plugs_network_and_failing_is_noted(self):
+        sc = self.scenario("fallback", 1)
+        def ex(*args, **_):
+            if args[0] == "cat":
+                return mock.Mock(returncode=0, stdout="plug-network\n")
+            return mock.Mock(returncode=1 if args[-2:] == ("join", "plug-network") else 0, stdout="")
+        now = iter([0, 0, 5])
+        with mock.patch.object(sc, "ex", side_effect=ex), mock.patch.object(fs.time, "sleep"), \
+                mock.patch.object(fs.time, "time", side_effect=lambda: next(now, 9)):
+            sc.fault("fallback", 1, 0, None)
+        self.assertEqual(sc.notes["not_applied"], ["joining plug-network"])
+        self.assertNotIn("joined_early", sc.notes)
+
+    def test_a_conversion_without_its_fault_proves_nothing(self):
+        outage = {"fault": "outage", "arg": 60}
+        self.assertFalse(fs.not_fired(outage, {}, True))
+        self.assertTrue(fs.not_fired(outage, {"not_applied": ["x"]}, True))
+        cut = {"fault": "ownnet", "arg": "cut"}
+        self.assertTrue(fs.not_fired(cut, {}, True))
+        self.assertFalse(fs.not_fired(cut, {"cut_after_upload": True}, True))
+        self.assertTrue(fs.not_fired({"fault": "seven", "arg": "advised"}, {}, True))
+
+    def test_a_ctrl_c_the_run_never_logged_never_happened(self):
+        for fault, arg in (("ctrlc", "once"), ("ctrlc", "apart"), ("cancel", "switch")):
+            self.assertTrue(fs.not_fired({"fault": fault, "arg": arg}, {"ctrl_c_logged": False}, True))
+            self.assertFalse(fs.not_fired({"fault": fault, "arg": arg}, {"ctrl_c_logged": True}, True))
+
+    def test_a_ctrl_c_from_prep_in_a_saved_plugs_log_is_not_this_faults(self):
+        sc = self.scenario("ctrlc", "once")
+        logs = [(1.0, "run.log", f"[01:00:00] {fs.CTRL_C_LOGGED}\n")]
+        with mock.patch.object(fs, "run_logs", side_effect=lambda state: logs):
+            sc.ctrl_c_before = sc.ctrl_c_lines()
+            self.assertEqual(sc.ctrl_c_lines(), sc.ctrl_c_before)
+            logs[0] = (2.0, "run.log", logs[0][2] + f"[02:00:00] {fs.CTRL_C_LOGGED}\n")
+            self.assertGreater(sc.ctrl_c_lines(), sc.ctrl_c_before)
+
+    def test_a_failure_stands_though_its_fault_never_happened(self):
+        self.assertFalse(fs.not_fired({"fault": "outage", "arg": 60}, {"not_applied": ["x"]}, False))
+
+    def test_prep_refuses_an_instance_in_use_and_leaves_the_saved_plugs(self):
+        with mock.patch.object(fs, "sh", return_value=mock.Mock(stdout="abc123\n")), \
+                mock.patch.object(fs.shutil, "rmtree") as removed, mock.patch.object(fs.subprocess, "call") as call:
+            with self.assertRaises(SystemExit) as refused:
+                fs.prep()
+        self.assertIn("AUTOFLASH_PREP_INSTANCE", str(refused.exception))
+        removed.assert_not_called()
+        call.assert_not_called()
+
+    def test_only_a_failure_is_labelled_starved(self):
+        starved = {"notes": {"memory": {"starved": True}}}
+        self.assertIn("memory-starved", fs.starved_label({**starved, "verdict": "FAIL"}))
+        self.assertEqual(fs.starved_label({**starved, "verdict": "PASS"}), "")
+        self.assertEqual(fs.starved_label({"verdict": "HARNESS-ERROR"}), "")
 
     def test_a_legacy_run_is_killed_by_its_own_tools_name(self):
         # 2.0.x's tool is tools/autoflash_cli.py, 1.2.0's tools/s60_autoflash.py.

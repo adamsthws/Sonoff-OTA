@@ -43,6 +43,8 @@ PURPLE = "\x1b[38;5;135m"  # #af5fff: link titles, opposite the green on the col
 MAGENTA = "\x1b[35m"        # the same where only the basic colours are: rounded, 135 comes out blue
 
 _lock = threading.RLock()
+# What the run log says as a Ctrl-C arrives; the fault suites look for it.
+CTRL_C_LOGGED = "Ctrl-C pressed"
 
 # Colour and hyperlink sequences, which take no room on screen.
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\]8;;[^\x1b]*\x1b\\")
@@ -174,6 +176,7 @@ def start(log_path: Path | None, *, verbose: bool) -> None:
             _s.ticker.start()
         _s.draws_notice = _s.concise and sys.stdout.isatty() and colour_ok()
         interrupt.shown_by(_notice_text)
+        interrupt.logged_by(_log_ctrl_c)
         if _s.concise:
             _hide_keys()
 
@@ -181,6 +184,7 @@ def start(log_path: Path | None, *, verbose: bool) -> None:
 def finish() -> None:
     """End cleanly: no half-drawn line left behind, and the log closed."""
     interrupt.shown_by(None)
+    interrupt.logged_by(None)
     _s.draws_notice = False
     _s.stop_ticker.set()
     if _s.ticker is not None:
@@ -1089,6 +1093,24 @@ def _gap(text: str) -> None:
         _s.after_blank = True
         if _s.transient_rows is not None:
             _s.transient_rows += 1
+
+
+def _log_ctrl_c() -> None:
+    """The log says a Ctrl-C came when it came, though the stage may fail before
+    anything is asked about it. From the signal handler, so without the lock the
+    interrupted code may hold: one line in one append, and _write_log flushes whole
+    lines, so neither can split the other's."""
+    if _s.log_path is None:
+        return
+    stamp = datetime.datetime.now().strftime("%H:%M:%S")
+    try:
+        log = os.open(_s.log_path, os.O_WRONLY | os.O_APPEND)
+        try:
+            os.write(log, f"[{stamp}] {CTRL_C_LOGGED}\n".encode())
+        finally:
+            os.close(log)
+    except OSError:
+        pass  # the log being moved, say: the run goes on without this line
 
 
 def _write_log(text: str) -> None:

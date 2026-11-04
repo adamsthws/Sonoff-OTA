@@ -42,8 +42,12 @@ How many at once, from the environment:
                        --stub-cloud, captures/emulation/suite-stub)
 
 Results: results.jsonl, a log per scenario, and what a failure leaves (its
-run records and the plug's serial output).
+run records and the plug's serial output). A fault that never happened is
+NOT-FIRED, not a pass. Each row's notes say how short of memory the computer
+was; a failure while it was starved prints "memory-starved", as the plug's
+connections can then fail with nothing wrong.
 """
+import hashlib
 import heapq
 import json
 import os
@@ -51,12 +55,17 @@ import queue
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import traceback
+import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO))
+from tools.autoflash.output import CTRL_C_LOGGED  # noqa: E402
+from tools.repo.memory_pressure import LOW_MEMORY_KB, MemoryWatch, memory_now  # noqa: E402
 EMU = REPO / "captures/emulation"
 OUT = Path(os.environ.get("AUTOFLASH_SUITE_DIR", EMU / "suite"))
 RESULTS = OUT / "results.jsonl"
@@ -116,6 +125,8 @@ ROUTES = {
                         "E3": 5, "F2": 35, "F4": 10, "G1": 21, "H1": 2}),
     "sonoff>esphome": ("suite-stockC2-esphome", "esphome",
                        {"C3": 14, "C3fb": 14, "D1": 18, "D4": 31, "D5": 2, "I1": 30, "I2": 5}),
+    # A plug on the Tasmota release before this one, updated (prep_update).
+    "update>tasmota": ("suite-tasmota-earlier", "tasmota", {"U5": 38, "U6": 12}),
 }
 # Past D1 a stock route needs the cloud no more: it starts from a plug saved
 # there (prep), on the interim Tasmota, so any machine can run it.
@@ -165,7 +176,7 @@ NOTHING_TO_CORRUPT = {"R2"}
 # must carry on by itself through it.
 FALLBACK_STEPS = {"C3", "D1", "L1", "M1", "X1", "I2"}
 # Faults at 10% and 90% of the riskiest steps, and two in a row there.
-CRITICAL = {"D4", "E3", "F2", "F4", "R1", "X2"}
+CRITICAL = {"D4", "E3", "F2", "F4", "R1", "U5", "X2"}
 # The tool's own handling - a second run refused, Ctrl-C twice apart or at its
 # question - is the same at every step: tried at the riskiest, and where each
 # firmware is first written from (C2, L1, X1). A 2-minute sleep, too, but also
@@ -174,6 +185,12 @@ OWN_HANDLING = [("second", "run"), ("ctrlc", "countdown"), ("ctrlc", "apart")]
 OWN_HANDLING_STEPS = CRITICAL | {"C2", "L1", "X1"}
 TIMING_FAULTS = [("plugoff", 1), ("outage", 30), ("crash", 1)]
 DOUBLE_FAULTS = [("double", "plugoff-1"), ("double", "outage-30")]
+
+
+def fault_wait(arg):
+    """How long a run that ended before its fault did waits for the fault: a
+    plug off for 180 s, its run finished, was asked for its template while off."""
+    return max(120, arg + 60) if isinstance(arg, int) else 120
 
 
 def sid(route, step, fault, arg, at=40):
@@ -724,6 +741,24 @@ def sh(*args, timeout=None):
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
 
 
+# The note each fault leaves once it has happened, for those that wait for a
+# moment in the run that may never come.
+FIRED_NOTE = {("ownnet", "cut"): "cut_after_upload", ("ownnet", "dropupload"): "dropped_off",
+              ("ownnet", "dropsetup"): "dropped_off", ("lostanswer", "once"): "answer_dropped",
+              ("seven", "times"): "seven_times", ("seven", "advised"): "seven_times"}
+
+
+def not_fired(sc, notes, converted):
+    """A plug converted though its fault never happened proves nothing. A failure
+    stands whatever happened: it may be a real one, or a brick."""
+    if not converted:
+        return False
+    note = FIRED_NOTE.get((sc["fault"], sc["arg"]))
+    if sc["fault"] in ("cancel", "ctrlc"):
+        note = "ctrl_c_logged"
+    return bool(notes.get("not_applied") or (note and not notes.get(note)))
+
+
 # -- faults ---------------------------------------------------------------------
 # One TCP packet in 20 of 128 bytes or more (one in 2 in a short step, whose
 # few packets may be small: a final check's answers), a byte of its data
@@ -761,6 +796,7 @@ class Scenario:
         self.n, self.sc, self.log = n, sc, log
         self.state = EMU / f"state-{n}"
         self.fired = None
+        self.ctrl_c_before = 0
         self.notes = {}
         self.step_length = 60  # the step under test's usual length (go_watched)
         self.earlier_release_wrote = {}  # each run log, as far as a legacy run left it
@@ -846,36 +882,55 @@ class Scenario:
             self.notes["mistimed"] = True  # the step was over before the fault
         if first:
             self.fired = time.time()
+            self.ctrl_c_before = self.ctrl_c_lines()
         self.say(f"FAULT {fault} {arg} at {at} +{delay:.1f}s")
         self.fault(fault, arg, since, headers)
         self.say("FAULT done")
 
-    def router(self, state):
-        """A switch QEMU did not take is an outage that never happened, not a pass."""
-        if self.ex(PLUG_CMD, "router", state).returncode:
-            self.say(f"FAULT: the router did not go {state}")
-            self.notes["router_not_switched"] = True
+    def ctrl_c_lines(self):
+        """In every run log the plug has: a saved plug's carries on from the Ctrl-C
+        that stopped prep's run, so what counts is any more since the fault."""
+        return sum(text.count(CTRL_C_LOGGED) for _, _, text in run_logs(self.state))
 
-    def signal(self, sig, *patterns):
-        for pattern in patterns or (TOOL,):
-            self.ex("pkill", f"-{sig}", "-f", pattern)
+    def not_applied(self, what):
+        self.say(f"FAULT: did not happen: {what}")
+        self.notes.setdefault("not_applied", []).append(what)
+
+    def must(self, *args, timeout=60):
+        """A command that starts a fault, or ends one the run needs ended. What
+        only cleans up goes through ex: a restart may have taken what it undoes."""
+        result = self.ex(*args, timeout=timeout)
+        if result.returncode:
+            self.not_applied(" ".join(args[:4]))
+        return result
+
+    def router(self, state):
+        self.must(PLUG_CMD, "router", state)
+
+    def signal(self, sig, *patterns, must=True):
+        """To whichever of them are running; the run may have ended by a later
+        Ctrl-C of two, which is not `must`."""
+        patterns = patterns or (TOOL,)
+        hit = [self.ex("pkill", f"-{sig}", "-f", pattern).returncode == 0 for pattern in patterns]
+        if must and not any(hit):
+            self.not_applied(f"{sig} to a run not running")
 
     def fault(self, fault, arg, since, headers):
         p = PLUG_CMD
         if fault == "outage":
             self.router("off"); time.sleep(arg); self.router("on")
         elif fault == "plugoff":
-            self.ex(p, "off"); time.sleep(arg); self.ex(p, "on")
+            self.must(p, "off"); time.sleep(arg); self.must(p, "on")
         elif fault == "crash":
             self.signal("KILL", *HELPERS, TOOL)
         elif fault == "legacy":
             self.signal("KILL", *HELPERS, *LEGACY_TOOLS, TOOL)
         elif fault == "cancel":
-            self.signal("INT"); time.sleep(1); self.signal("INT")
+            self.signal("INT"); time.sleep(1); self.signal("INT", must=False)
         elif fault == "ctrlc" and arg == "once":
             self.signal("INT")
         elif fault == "ctrlc" and arg == "apart":
-            self.signal("INT"); time.sleep(11); self.signal("INT")
+            self.signal("INT"); time.sleep(11); self.signal("INT", must=False)
         elif fault == "ctrlc" and arg == "countdown":
             self.signal("INT")
             deadline = time.time() + 900
@@ -883,7 +938,7 @@ class Scenario:
                 text = self.current_run(since, headers) or ""
                 if "You pressed Ctrl-C" in text:
                     time.sleep(3)
-                    self.signal("INT")
+                    self.signal("INT", must=False)
                     self.notes["countdown_pressed"] = True
                     break
                 time.sleep(0.5)
@@ -893,11 +948,9 @@ class Scenario:
             # The computer asleep: everything of the run stopped, and nothing
             # of it on the network, then all back at once.
             self.offline(True)
-            for pattern in (TOOL, *HELPERS, "tools/repo/unattended_run.py"):
-                self.ex("pkill", "-STOP", "-f", pattern)
+            self.signal("STOP", TOOL, *HELPERS, "tools/repo/unattended_run.py")
             time.sleep(arg)
-            for pattern in ("tools/repo/unattended_run.py", *HELPERS, TOOL):
-                self.ex("pkill", "-CONT", "-f", pattern)
+            self.signal("CONT", "tools/repo/unattended_run.py", *HELPERS, TOOL, must=False)
             self.offline(False)
         elif fault == "fallback":
             # The home network gone long enough for the plug to raise its own;
@@ -913,7 +966,10 @@ class Scenario:
                     joined = network
                     self.joined = network
                     self.say(f"PERSON: joined {network} before being asked (rc {result.returncode})")
-                    self.notes["joined_early"] = network
+                    if result.returncode:
+                        self.not_applied(f"joining {network}")
+                    else:
+                        self.notes["joined_early"] = network
                 time.sleep(2)
             self.router("on")
             if not joined:
@@ -921,10 +977,10 @@ class Scenario:
         elif fault == "pcoff":
             self.offline(True); time.sleep(arg); self.offline(False)
         elif fault == "weak":
-            self.ex("tc", "qdisc", "add", "dev", "tap0", "root", "netem",
-                    "delay", "150ms", "100ms", "loss", "10%")
-            self.ex("tc", "filter", "add", "dev", "tap0", "ingress", "pref", "6", "protocol", "ip",
-                    "u32", "match", "u32", "0", "0", "action", "gact", "ok", "random", "netrand", "drop", "10")
+            self.must("tc", "qdisc", "add", "dev", "tap0", "root", "netem",
+                      "delay", "150ms", "100ms", "loss", "10%")
+            self.must("tc", "filter", "add", "dev", "tap0", "ingress", "pref", "6", "protocol", "ip",
+                      "u32", "match", "u32", "0", "0", "action", "gact", "ok", "random", "netrand", "drop", "10")
             time.sleep(arg)
             self.ex("tc", "filter", "del", "dev", "tap0", "ingress", "pref", "6")
             self.ex("tc", "qdisc", "del", "dev", "tap0", "root")
@@ -937,10 +993,10 @@ class Scenario:
             self.router("off"); time.sleep(arg); self.router("on")
         elif fault == "lossy":
             # One packet in ten lost, as "weak", for the rest of the phase.
-            self.ex("tc", "qdisc", "add", "dev", "tap0", "root", "netem",
-                    "delay", "150ms", "100ms", "loss", "10%")
-            self.ex("tc", "filter", "add", "dev", "tap0", "ingress", "pref", "6", "protocol", "ip",
-                    "u32", "match", "u32", "0", "0", "action", "gact", "ok", "random", "netrand", "drop", "10")
+            self.must("tc", "qdisc", "add", "dev", "tap0", "root", "netem",
+                      "delay", "150ms", "100ms", "loss", "10%")
+            self.must("tc", "filter", "add", "dev", "tap0", "ingress", "pref", "6", "protocol", "ip",
+                      "u32", "match", "u32", "0", "0", "action", "gact", "ok", "random", "netrand", "drop", "10")
             time.sleep(self.step_length)
             self.ex("tc", "filter", "del", "dev", "tap0", "ingress", "pref", "6")
             self.ex("tc", "qdisc", "del", "dev", "tap0", "root")
@@ -980,15 +1036,15 @@ class Scenario:
             self.say("SECOND RUN: " + said[-600:])
         elif fault == "diskfull":
             pid = self.ex("pgrep", "-f", "-o", TOOL).stdout.strip()
-            self.ex("prlimit", f"--pid={pid}", "--fsize=1000000")
+            self.must("prlimit", f"--pid={pid}", "--fsize=1000000")
             self.notes["diskfull_pid"] = pid
             time.sleep(60)
             self.ex("prlimit", f"--pid={pid}", "--fsize=unlimited")
         elif fault == "token":
-            out = self.ex("sh", "-c", "cd /work && set -a && . /tmp/autoflash-unattended.env && "
-                          "/opt/venv/bin/python -c 'import os; from tools.ewelink.get_device_key import login; "
-                          "login(os.environ[\"EWELINK_EMAIL\"], os.environ[\"EWELINK_PASSWORD\"], \"+44\", \"eu\"); "
-                          "print(\"logged in again\")'", timeout=60)
+            out = self.must("sh", "-c", "cd /work && set -a && . /tmp/autoflash-unattended.env && "
+                            "/opt/venv/bin/python -c 'import os; from tools.ewelink.get_device_key import login; "
+                            "login(os.environ[\"EWELINK_EMAIL\"], os.environ[\"EWELINK_PASSWORD\"], \"+44\", \"eu\"); "
+                            "print(\"logged in again\")'", timeout=60)
             self.notes["token"] = (out.stdout + out.stderr).strip()[-200:]
         elif fault == "ownnet":
             # D1 through the installer's own network (the fallback, below);
@@ -1005,7 +1061,7 @@ class Scenario:
             # now, as the backup's flash - which holds the same words - is read.
             rule = ["INPUT", "-s", "192.168.60.50", "-p", "tcp", "--sport", "80", "-m", "string",
                     "--string", "Upload verified", "--algo", "bm", "-j", "DROP"]
-            self.notes["answer_dropped"] = self.ex("iptables", "-I", *rule).returncode == 0
+            self.notes["answer_dropped"] = self.must("iptables", "-I", *rule).returncode == 0
             deadline = time.time() + 600
             while time.time() < deadline:
                 text = self.current_run(since, headers) or ""
@@ -1014,7 +1070,7 @@ class Scenario:
                 time.sleep(1)
             self.ex("iptables", "-D", *rule)
         elif fault == "seven" and arg == "times":
-            self.ex(PLUG_CMD, "cycle", "7", timeout=300)
+            self.must(PLUG_CMD, "cycle", "7", timeout=300)
             self.notes["seven_times"] = True
         elif fault == "seven" and arg == "advised":
             # Tasmota sent through the installer cannot join the home Wi-Fi
@@ -1027,7 +1083,7 @@ class Scenario:
             if self.when_said(since, "Switch the device off and on 7 times", lambda: None, limit=900):
                 time.sleep(10)  # a person reads it
                 self.say("PERSON: switching the plug off and on 7 times")
-                self.ex(PLUG_CMD, "cycle", "7", timeout=300)
+                self.must(PLUG_CMD, "cycle", "7", timeout=300)
                 self.notes["seven_times"] = True
             self.router("on")
         elif fault == "nohook":
@@ -1051,7 +1107,7 @@ class Scenario:
 
     def drop_join(self):
         time.sleep(3)  # part way
-        self.ex("/opt/autoflash-emu/bin/wifi-root", "home", timeout=60)
+        self.must("/opt/autoflash-emu/bin/wifi-root", "home", timeout=60)
         self.say("FAULT: this computer back on the home network, off the plug's")
         self.notes["dropped_off"] = True
         self.dropped = True  # the person stand-in joins again when asked
@@ -1067,7 +1123,7 @@ class Scenario:
                   ("OUTPUT", "-d", "192.168.60.50", "-p", "udp", "-m", "multiport", "--sports", "53,67")]
         for (chain, *match), action in [(r, "DROP") for r in rules] + [(r, "ACCEPT") for r in router]:
             if off:
-                self.ex("iptables", "-I", chain, "1", *match, "-j", action)
+                self.must("iptables", "-I", chain, "1", *match, "-j", action)
             else:
                 while self.ex("iptables", "-D", chain, *match, "-j", action).returncode == 0:
                     pass
@@ -1079,6 +1135,8 @@ class Scenario:
         if "there is nothing to convert" in clean:
             return "Converted (already: nothing to convert)"
         found = re.findall(r"Result:\s+(.*)", clean)
+        if found and found[-1].strip() == "Updated":
+            return "Converted (updated)"   # an update's report says so, and it counts the same
         return found[-1].strip() if found else "no report"
 
     def person(self, stop):
@@ -1216,6 +1274,8 @@ class Scenario:
         self.uart_from = uart.stat().st_size if uart.exists() else 0  # this scenario's networks: from here
         attending = threading.Event()
         threading.Thread(target=self.person, args=(attending,), daemon=True).start()
+        self.memory = MemoryWatch()
+        self.memory.start()
         try:
             return self.go_watched()
         finally:
@@ -1261,7 +1321,7 @@ class Scenario:
         results = [(self.run_tool(self.target, source=source, fresh=source is None), None)]
         results[-1] = (results[-1][0], self.screen_result())
         stop.set()
-        injector.join(120)  # what the fault did is part of the verdict
+        injector.join(fault_wait(arg))  # what the fault did is part of the verdict
         if self.fired is None:
             return self.finish(results, "NOT-FIRED")
         if fault == "crash":
@@ -1622,10 +1682,12 @@ class Scenario:
             self.notes["restore_carried_on_after"] = int(found[-1]) if found else 0
             if not self.notes.get("later_fired") and not special:
                 special = "NOT-FIRED"
-        if self.notes.get("router_not_switched") and not special:
-            special = "NOT-FIRED"
+        self.notes["memory"] = self.memory.note()
         ours = re.sub(r"\s+", " ", "".join(self.ours(p, t) for m, p, t in run_logs(self.state)
                                            if m >= self.started))
+        self.notes["ctrl_c_logged"] = self.ctrl_c_lines() > self.ctrl_c_before
+        if not_fired(sc, self.notes, converted) and not special:
+            special = "NOT-FIRED"
         converted_from_untemplated = "Converting the device from Tasmota without the device's template" in ours
         target_final = getattr(self, "target_final", self.target)
         template_bad = converted and target_final == "tasmota" and not self.template_ok()
@@ -1798,7 +1860,7 @@ def worker(n, todo, lock, cloud=False, room=None):
         skip = OUT / "skip.txt"
         if skip.exists() and sc["id"] in skip.read_text().split():
             continue
-        while int(re.search(r"MemAvailable:\s+(\d+)", Path("/proc/meminfo").read_text(encoding="utf-8")).group(1)) < 350_000:
+        while memory_now()[0] < LOW_MEMORY_KB:
             time.sleep(10)
         log = LOGS / (key(sc["id"]) + ".log")
         log.unlink(missing_ok=True)
@@ -1812,7 +1874,7 @@ def worker(n, todo, lock, cloud=False, room=None):
                 f.write(json.dumps(row) + "\n")
             sh("docker", "stop", name(n), timeout=120)
         with lock:
-            print(f"{time.strftime('%T')} [{n}] {row['verdict']:16} {sc['id']}", flush=True)
+            print(f"{time.strftime('%T')} [{n}] {row['verdict']:16} {sc['id']}{starved_label(row)}", flush=True)
         TUNER.finished(row, log, started)
 
 
@@ -1880,7 +1942,8 @@ def stale_starts(todo):
     with the firmware this checkout installs. A run from one leaves an older
     firmware than the tool installs, untested for the one it does, and passes."""
     # A legacy run makes its own plug, and Sonoff's firmware is not ours to change.
-    targets = {sc["route"].split(">")[0] for sc in todo if sc["fault"] != "legacy"} - {"sonoff"}
+    # An update's plug is made from one (prep_update), on the release before on purpose.
+    targets = {sc["route"].split(">")[0] for sc in todo if sc["fault"] != "legacy"} - {"sonoff", "update"}
     stale = []
     for target in sorted(targets):
         try:
@@ -1906,6 +1969,10 @@ def prep():
     and one of those carried on as far as D1 (on the interim Tasmota), so the
     steps after D1 need no cloud."""
     n = int(os.environ.get("AUTOFLASH_PREP_INSTANCE", "1"))
+    # A run that could not start would count as one that failed, and take the
+    # plug saved before it away.
+    if sh("docker", "ps", "-q", "--filter", f"name=^{name(n)}$").stdout.strip():
+        raise SystemExit(f"{name(n)} is running: stop it, or choose another with AUTOFLASH_PREP_INSTANCE")
     unattended = str(REPO / "tools/espressif/emulator/unattended-test.sh")
 
     def stopped_after(step, sc, since, stopped):
@@ -1951,9 +2018,41 @@ def prep():
              stop_after="D1")
 
 
+def earlier_tasmota():
+    """The app of the official Tasmota release before this one, as firmware.json
+    pins it: Tasmota's own, fetched from where it is published."""
+    earlier = installs("tasmota")["earlier"][0]
+    file = earlier["files"]["app"]
+    url = f"https://github.com/arendst/Tasmota/releases/download/{earlier['tag']}/{file['name']}"
+    with urllib.request.urlopen(url, timeout=120) as answer:
+        app = answer.read()
+    if hashlib.sha256(app).hexdigest() != file["sha256"]:
+        raise SystemExit(f"{url} is not the file firmware.json pins")
+    return app
+
+
+def prep_update():
+    """The update>tasmota scenarios' starting plug: the plug saved on Tasmota,
+    the release before in its app0.  No run gets one there, the tool installing
+    only this release."""
+    kept = EMU / "saved" / saved(ROUTES["update>tasmota"][0])
+    shutil.rmtree(kept, ignore_errors=True)
+    shutil.copytree(converted_start("tasmota"), kept, symlinks=True)
+    app = earlier_tasmota()
+    with open(kept / "flash.bin", "r+b") as flash:
+        flash.seek(APP0_OFFSET)
+        flash.write(app)
+    print(kept.name, "saved", flush=True)
+
+
 def listing():
     for sc in scenarios():
         print(sc["id"], "cloud" if needs_cloud(sc) else "any")
+
+
+def starved_label(row):
+    starved = row["verdict"] != "PASS" and row.get("notes", {}).get("memory", {}).get("starved")
+    return "  (memory-starved)" if starved else ""
 
 
 def report():
@@ -1962,7 +2061,7 @@ def report():
     print(Counter(r["verdict"] for r in rows.values()))
     for r in rows.values():
         if r["verdict"] != "PASS":
-            print(f"  {r['verdict']:16} {r['id']}  runs={r.get('runs')}  {r.get('results', r.get('error'))}")
+            print(f"  {r['verdict']:16} {r['id']}  runs={r.get('runs')}  {r.get('results', r.get('error'))}{starved_label(r)}")
     # The plug kept busiest by one Berry phase (plug_busy): a real S60TPG once
     # stopped answering at 70-90 s, so the longest are worth a look.
     busiest = sorted(((max(busy.values()), r["id"], step) for r in rows.values()
@@ -1982,7 +2081,7 @@ def main():
     parser.add_argument("--stub-cloud", action="store_true",
                         help="each emulator serves its own local eWeLink stub (offline, fully "
                              "parallel, no cloud lock); the default uses the real cloud")
-    parser.add_argument("command", choices=["prep", "list", "batch", "report"])
+    parser.add_argument("command", choices=["prep", "prep-update", "list", "batch", "report"])
     parser.add_argument("file", nargs="?", help="batch: the scenario ids to run (else all)")
     args = parser.parse_args()
     STUB_CLOUD = STUB_CLOUD or args.stub_cloud
@@ -1991,10 +2090,10 @@ def main():
         # take a stub run's passes for its own.
         OUT = EMU / "suite-stub"
         RESULTS, LOGS = OUT / "results.jsonl", OUT / "logs"
-    if args.command in ("prep", "batch") and not args.plug:
+    if args.command in ("prep", "prep-update", "batch") and not args.plug:
         parser.error("--plug is needed: the backed-up plug the emulators run copies of")
     MAC = args.plug
-    {"prep": prep, "list": listing, "report": report,
+    {"prep": prep, "prep-update": prep_update, "list": listing, "report": report,
      "batch": lambda: batch(args.file)}[args.command]()
 
 

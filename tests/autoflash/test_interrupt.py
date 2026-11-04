@@ -1,9 +1,86 @@
 """Ctrl-C asks before it stops a run part way; a second, soon after, stops it."""
 import signal
+import subprocess
+import sys
+import tempfile
+import threading
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from tools.autoflash import interrupt, output, prompts, runner
+
+
+class CtrlCLoggedTests(unittest.TestCase):
+    def begin(self, directory):
+        log = Path(directory, "run.log")
+        output.start(log, verbose=True)
+        self.addCleanup(output.finish)
+        return log
+
+    def test_the_log_says_so_as_it_arrives_with_the_output_lock_held(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = self.begin(directory)
+            self.addCleanup(interrupt.clear)
+            held, release = threading.Event(), threading.Event()
+
+            def hold():
+                with output._lock:
+                    held.set()
+                    release.wait(10)
+            holder = threading.Thread(target=hold)
+            holder.start()
+            held.wait(10)
+            try:
+                with mock.patch.object(interrupt, "_say"):
+                    interrupt._on_interrupt(signal.SIGINT, None)
+                self.assertIn(output.CTRL_C_LOGGED, log.read_text(encoding="utf-8"))
+            finally:
+                release.set()
+                holder.join(10)
+            output.finish()
+
+    def test_lines_either_side_stay_whole(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = self.begin(directory)
+            self.addCleanup(interrupt.clear)
+            output.log_only("before")
+            with mock.patch.object(interrupt, "_say"):
+                interrupt._on_interrupt(signal.SIGINT, None)
+            output.log_only("after")
+            lines = log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual([line.split("] ", 1)[1] for line in lines[-3:]],
+                             ["before", output.CTRL_C_LOGGED, "after"])
+            output.finish()
+
+    def test_a_log_gone_does_not_stop_the_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = self.begin(directory)
+            self.addCleanup(interrupt.clear)
+            with mock.patch.object(output.os, "open", side_effect=OSError):
+                with mock.patch.object(interrupt, "_say"):
+                    interrupt._on_interrupt(signal.SIGINT, None)
+            self.assertNotIn(output.CTRL_C_LOGGED, log.read_text(encoding="utf-8"))
+            output.finish()
+
+    def test_a_real_ctrl_c_is_logged(self):
+        program = ("import os, signal, sys\n"
+                   "from pathlib import Path\n"
+                   "from tools.autoflash import interrupt, output\n"
+                   "output.start(Path(sys.argv[1]), verbose=True)\n"
+                   "interrupt.install()\n"
+                   "os.kill(os.getpid(), signal.SIGINT)\n"
+                   "output.finish()\n")
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory, "run.log")
+            subprocess.run([sys.executable, "-c", program, str(log)], cwd=Path(__file__).resolve().parents[2],
+                           check=True, capture_output=True, timeout=30)
+            self.assertIn(output.CTRL_C_LOGGED, log.read_text(encoding="utf-8"))
+
+    def test_no_log_running_nothing_to_say(self):
+        with mock.patch.object(output._s, "log_path", None), mock.patch.object(output.os, "open") as opened:
+            output._log_ctrl_c()
+        opened.assert_not_called()
 
 
 class CtrlCTests(unittest.TestCase):

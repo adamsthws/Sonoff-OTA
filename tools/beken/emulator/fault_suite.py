@@ -48,7 +48,10 @@ it has an update, in the emulator as on a real plug
 (tools/beken/emulator/README.md).
 
 Results: captures/emulation/s61-suite/results.jsonl, and each scenario's run
-logs and the plug's serial output beside it.
+logs and the plug's serial output beside it. A fault that never happened is
+NOT-FIRED, not a pass. Each result's notes say how short of memory the computer
+was; a failure while it was starved prints "memory-starved", as the plug's
+connections can then fail with nothing wrong.
 """
 from __future__ import annotations
 
@@ -67,7 +70,9 @@ from typing import Callable
 
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO))
+from tools.autoflash.output import CTRL_C_LOGGED  # noqa: E402
 from tools.autoflash.routes import beken  # noqa: E402
+from tools.repo.memory_pressure import MemoryWatch  # noqa: E402
 
 BK_EMU = REPO / "tools/beken/emulator/bk-emu.sh"
 EMU = REPO / "captures/emulation"
@@ -268,7 +273,7 @@ class Instance:
         return False
 
     def power(self, how: str) -> None:
-        self.sh("power", how, timeout=60)
+        self.sh("power", how, timeout=60, check=True)
 
     def tool(self, target: str, log: Path, new: bool = False, more: tuple[str, ...] = ()) -> subprocess.Popen:
         args = ["computer", "tools/autoflash/cli.py", "run", "--unattended", "--env-file",
@@ -308,25 +313,64 @@ def wait_for_step(instance: Instance, step: str, run: subprocess.Popen, limit: f
     return False
 
 
+def not_applied(notes: dict, what: str) -> None:
+    notes.setdefault("not_applied", []).append(what)
+
+
+def must(notes: dict, *command: str, **options) -> subprocess.CompletedProcess:
+    """A command that starts a fault, or ends one the run needs ended."""
+    done = subprocess.run(command, capture_output=True, text=True, **options)
+    if done.returncode:
+        not_applied(notes, " ".join(command[:3]))
+    return done
+
+
+# What the plug says once it has really stopped (plug.py): the switch itself is
+# only a file written, which says nothing of whether the plug saw it.
+SWITCHED_OFF = b"[plug] switched off"
+
+
+def cut_power(instance: Instance, seconds: float, wait: float = 30) -> bool:
+    """The plug off for `seconds`, and on again; False if it never went off."""
+    serial = instance.state / "serial.log"
+    try:
+        offset = serial.stat().st_size
+    except OSError:
+        offset = 0
+    instance.power("off")
+    went_off, deadline = False, time.monotonic() + wait
+    while not went_off and time.monotonic() < deadline:
+        time.sleep(0.2)
+        try:
+            with open(serial, "rb") as output:
+                output.seek(offset)
+                went_off = SWITCHED_OFF in output.read()
+        except OSError:
+            pass
+    time.sleep(seconds)
+    instance.power("on")
+    return went_off
+
+
 def inject(instance: Instance, fault: str, arg, notes: dict) -> None:
     if fault == "plugoff":
-        instance.power("off")
-        time.sleep(arg)
-        instance.power("on")
+        if not cut_power(instance, arg):
+            not_applied(notes, "the plug switched off")
     elif fault == "outage":
         address = subprocess.run(["docker", "inspect", "-f",
                                   "{{(index .NetworkSettings.Networks \"%s\").IPAddress}}" % instance.network,
                                   instance.computer], capture_output=True, text=True).stdout.strip()
-        subprocess.run(["docker", "network", "disconnect", instance.network, instance.computer],
-                       capture_output=True)
-        time.sleep(arg)
-        subprocess.run(["docker", "network", "connect", "--ip", address, instance.network, instance.computer],
-                       capture_output=True)
         notes["outage_address"] = address
+        if not address:
+            not_applied(notes, "the computer's address on the Wi-Fi")
+            return
+        must(notes, "docker", "network", "disconnect", instance.network, instance.computer)
+        time.sleep(arg)
+        must(notes, "docker", "network", "connect", "--ip", address, instance.network, instance.computer)
     elif fault == "crash":
-        subprocess.run(["docker", "kill", instance.computer], capture_output=True)
+        must(notes, "docker", "kill", instance.computer)
     elif fault == "ctrlc":
-        subprocess.run(["docker", "kill", "--signal", "INT", instance.computer], capture_output=True)
+        must(notes, "docker", "kill", "--signal", "INT", instance.computer)
 
 
 def recover(instance: Instance, target: str, notes: dict) -> None:
@@ -375,10 +419,8 @@ class ApplyCut(threading.Thread):
                 end = APPLY_ENDS.search(seen)
                 for found in APPLY_PROGRESS.finditer(seen[:end.start()] if end else seen):
                     if int(found.group(1)) >= self.at:
-                        self.instance.power("off")
-                        time.sleep(1)
-                        self.instance.power("on")
-                        self.fired = int(found.group(1))
+                        if cut_power(self.instance, 1):
+                            self.fired = int(found.group(1))
                         return
                 if not end:
                     break
@@ -390,9 +432,17 @@ def readdress(instance: Instance, notes: dict) -> None:
     """The router forgets the plug's address and gives it another when it next asks."""
     address = instance.lease() or ""
     last = int(address.rsplit(".", 1)[1]) if address else 50
-    subprocess.run(["docker", "exec", instance.plug, "/run/autoflash-s61/router", "55" if last < 55 else "50"],
-                   capture_output=True, timeout=60)
+    must(notes, "docker", "exec", instance.plug, "/run/autoflash-s61/router", "55" if last < 55 else "50", timeout=60)
     notes["moved_from"] = address
+
+
+def not_fired(fault: str, notes: dict) -> bool:
+    """A plug converted though its fault never happened proves nothing."""
+    return bool(notes.get("not_applied")
+                or (fault == "double" and not notes.get("second_cut"))
+                or (fault == "readdress" and not (notes.get("moved_from") and notes.get("moved_to")
+                                                  and notes["moved_from"] != notes["moved_to"]))
+                or (fault == "ctrlc" and not notes.get("ctrlc_seen")))
 
 
 def wait_for(run: subprocess.Popen, seen: Callable[[], bool], limit: float = RUN_LIMIT) -> bool:
@@ -419,8 +469,11 @@ def run_scenario(instance: Instance, sc: dict) -> dict:
     log = folder / "tool.log"
     started = time.monotonic()
     notes: dict = {}
+    memory = MemoryWatch()
+    memory.start()
     instance.reset(source)
     if not instance.start(source):
+        notes["memory"] = memory.note()
         return dict(result="NOT-READY", notes=notes)
     if sc["step"] == "apply":
         outcome = apply_scenario(instance, sc, target, log, notes)
@@ -445,6 +498,7 @@ def run_scenario(instance: Instance, sc: dict) -> dict:
         shutil.copy(instance.state / "serial.log", folder / "serial.log")
     except OSError:
         pass
+    notes["memory"] = memory.note()
     return dict(**outcome, notes=notes, seconds=round(time.monotonic() - started))
 
 
@@ -532,8 +586,15 @@ def step_scenario(instance: Instance, sc: dict, target: str, log: Path, notes: d
         runs += 1
     if sc["fault"] == "readdress":
         notes["moved_to"] = instance.lease()
+    if sc["fault"] == "ctrlc":
+        notes["ctrlc_seen"] = any(CTRL_C_LOGGED in path.read_text(encoding="utf-8", errors="replace")
+                                  for path in instance.runs())
     ok = converted(instance.last_state(), sc["route"])
-    return dict(result="MISTIMED" if notes.get("mistimed") else ("PASS" if ok else "FAIL"), runs=runs)
+    if notes.get("mistimed"):
+        return dict(result="MISTIMED", runs=runs)
+    if ok and not_fired(sc["fault"], notes):
+        return dict(result="NOT-FIRED", runs=runs)
+    return dict(result="PASS" if ok else "FAIL", runs=runs)
 
 
 def record(sc: dict, outcome: dict) -> None:
@@ -551,6 +612,11 @@ def latest() -> dict[str, dict]:
     except (OSError, ValueError):
         pass
     return found
+
+
+def starved_label(outcome: dict) -> str:
+    starved = outcome.get("result") != "PASS" and outcome.get("notes", {}).get("memory", {}).get("starved")
+    return "  (memory-starved)" if starved else ""
 
 
 def batch(ids_file: str | None = None) -> None:
@@ -578,7 +644,7 @@ def batch(ids_file: str | None = None) -> None:
                     outcome = dict(result="ERROR", notes={"error": repr(exc)})
                 with lock:
                     record(sc, outcome)
-                    print(f"{outcome['result']:9} {sc['id']}", flush=True)
+                    print(f"{outcome['result']:9} {sc['id']}{starved_label(outcome)}", flush=True)
         finally:
             instance.stop()   # an emulator never left running
 
@@ -648,7 +714,7 @@ def report() -> None:
     found = latest()
     for sc in scenarios():
         entry = found.get(sc["id"])
-        print(f"{(entry or {}).get('result', '-'):9} {sc['id']}")
+        print(f"{(entry or {}).get('result', '-'):9} {sc['id']}{starved_label(entry or {})}")
 
 
 def main(argv: list[str]) -> int:

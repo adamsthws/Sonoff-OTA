@@ -70,9 +70,15 @@ class ApplyCutTests(unittest.TestCase):
         `reads`, in those groups of lines, each taken in by one read."""
         with tempfile.TemporaryDirectory() as tmp:
             switched = []
-            instance = SimpleNamespace(state=Path(tmp), power=switched.append)
             serial = Path(tmp, "serial.log")
             serial.write_bytes(b"")
+
+            def power(how):
+                switched.append(how)
+                if how == "off":
+                    with serial.open("ab") as out:
+                        out.write(fault_suite.SWITCHED_OFF + b"; its flash is kept\n")
+            instance = SimpleNamespace(state=Path(tmp), power=power)
             cut = fault_suite.ApplyCut(instance, at)
             cut.start()
             for group in reads or [[line] for line in lines]:
@@ -104,6 +110,123 @@ class ApplyCutTests(unittest.TestCase):
         self.assertEqual(self.watch(lines, 90), (95, ["off", "on"]))
         # One read taking in the first's end and the next's start, as a busy computer's may.
         self.assertEqual(self.watch(lines, 90, reads=[lines[:-1], lines[-1:]]), (95, ["off", "on"]))
+
+
+class FaultAppliedTests(unittest.TestCase):
+    """A fault that never happened is not a pass (fault_suite.not_fired)."""
+
+    def instance(self, tmp, says_off=True):
+        serial = Path(tmp, "serial.log")
+        serial.write_bytes(b"[plug] switched off; an earlier cut\n")
+
+        def power(how):
+            self.switched.append(how)
+            if how == "off" and says_off:
+                with serial.open("ab") as out:
+                    out.write(fault_suite.SWITCHED_OFF + b"; its flash is kept\n")
+        self.switched = []
+        return SimpleNamespace(state=Path(tmp), power=power, network="a-network", computer="a-computer",
+                               plug="a-plug", lease=lambda: "198.18.62.51")
+
+    def test_a_plug_seen_to_stop_is_a_cut(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            notes = {}
+            fault_suite.inject(self.instance(tmp), "plugoff", 0, notes)
+        self.assertEqual(self.switched, ["off", "on"])
+        self.assertNotIn("not_applied", notes)
+
+    def test_a_plug_that_never_says_it_stopped_is_not(self):
+        # Only a line since the switch counts: an earlier cut's is in the log already.
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertFalse(fault_suite.cut_power(self.instance(tmp, says_off=False), 0, wait=0.5))
+        self.assertEqual(self.switched, ["off", "on"])
+
+    def test_the_apply_cut_does_not_fire_on_a_plug_that_stayed_on(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            serial = Path(tmp, "serial.log")
+            instance = self.instance(tmp)
+            serial.write_bytes(b"OTA firmware(app) upgrade(a->b) startup.\nOTA Write: [=>] 60%\n")
+            cut = fault_suite.ApplyCut(instance, 50)
+            with mock.patch.object(fault_suite, "cut_power", return_value=False):
+                cut.start()
+                cut.join(3)
+        self.assertIsNone(cut.fired)
+
+    def docker(self, fault, arg, codes):
+        from unittest import mock
+        notes = {}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(fault_suite.time, "sleep"), \
+                mock.patch.object(fault_suite.subprocess, "run",
+                                  side_effect=[SimpleNamespace(returncode=c, stdout="198.18.62.2\n") for c in codes]):
+            if fault == "readdress":
+                fault_suite.readdress(self.instance(tmp), notes)
+            else:
+                fault_suite.inject(self.instance(tmp), fault, arg, notes)
+        return notes
+
+    def test_each_docker_command_that_fails_is_noted(self):
+        for fault, arg, codes in (("outage", 0, [0, 1, 0]), ("outage", 0, [0, 0, 1]), ("crash", 1, [1]),
+                                  ("ctrlc", "once", [1]), ("readdress", None, [1])):
+            with self.subTest(fault=fault, codes=codes):
+                self.assertTrue(self.docker(fault, arg, codes).get("not_applied"))
+
+    def test_each_docker_command_that_works_is_not(self):
+        for fault, arg, codes in (("outage", 0, [0, 0, 0]), ("crash", 1, [0]), ("ctrlc", "once", [0]),
+                                  ("readdress", None, [0])):
+            with self.subTest(fault=fault):
+                self.assertNotIn("not_applied", self.docker(fault, arg, codes))
+
+    def test_an_outage_with_no_address_to_come_back_to_is_not_started(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(fault_suite.subprocess, "run",
+                                  return_value=SimpleNamespace(returncode=0, stdout="\n")) as run:
+            notes = {}
+            fault_suite.inject(self.instance(tmp), "outage", 0, notes)
+        self.assertEqual(run.call_count, 1)
+        self.assertTrue(notes["not_applied"])
+
+    def test_what_never_happened_proves_nothing(self):
+        self.assertFalse(fault_suite.not_fired("plugoff", {}))
+        self.assertTrue(fault_suite.not_fired("plugoff", {"not_applied": ["x"]}))
+        self.assertTrue(fault_suite.not_fired("double", {}))
+        self.assertFalse(fault_suite.not_fired("double", {"second_cut": True}))
+        self.assertTrue(fault_suite.not_fired("readdress", {"moved_from": "a", "moved_to": "a"}))
+        self.assertTrue(fault_suite.not_fired("readdress", {"moved_from": "", "moved_to": "a"}))
+        self.assertFalse(fault_suite.not_fired("readdress", {"moved_from": "a", "moved_to": "b"}))
+        self.assertTrue(fault_suite.not_fired("ctrlc", {"ctrlc_seen": False}))
+        self.assertFalse(fault_suite.not_fired("ctrlc", {"ctrlc_seen": True}))
+
+    def test_a_plug_that_stayed_on_is_noted(self):
+        from unittest import mock
+        notes = {}
+        with mock.patch.object(fault_suite, "cut_power", return_value=False):
+            fault_suite.inject(None, "plugoff", 1, notes)
+        self.assertTrue(notes["not_applied"])
+
+    def step_result(self, *, is_converted):
+        from unittest import mock
+        sc = next(sc for sc in fault_suite.scenarios() if sc["fault"] == "ctrlc")
+        instance = SimpleNamespace(tool=lambda *a, **k: None, last_state=lambda: {}, last_log=lambda: "",
+                                   runs=lambda: [])
+        with mock.patch.object(fault_suite, "wait_for_step", return_value=True), \
+                mock.patch.object(fault_suite, "inject"), mock.patch.object(fault_suite, "finish"), \
+                mock.patch.object(fault_suite, "recover"), mock.patch.object(fault_suite.time, "sleep"), \
+                mock.patch.object(fault_suite, "converted", return_value=is_converted):
+            return fault_suite.step_scenario(instance, sc, "esphome", Path("unused"), {})["result"]
+
+    def test_converted_without_its_fault_is_not_fired_and_a_failure_stands(self):
+        self.assertEqual(self.step_result(is_converted=True), "NOT-FIRED")
+        self.assertEqual(self.step_result(is_converted=False), "FAIL")
+
+    def test_only_a_failure_is_labelled_starved(self):
+        starved = {"notes": {"memory": {"starved": True}}}
+        self.assertIn("memory-starved", fault_suite.starved_label({**starved, "result": "FAIL"}))
+        self.assertEqual(fault_suite.starved_label({**starved, "result": "PASS"}), "")
+        self.assertEqual(fault_suite.starved_label({"result": "ERROR", "notes": {"error": "x"}}), "")
+        self.assertEqual(fault_suite.starved_label({}), "")
 
 
 class RecoverTests(unittest.TestCase):

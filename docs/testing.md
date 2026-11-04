@@ -202,10 +202,11 @@ kind a person converting it again would have.
 ## The fault suite
 
 `tools/espressif/emulator/fault_suite.py` puts every fault in the way of every step, in
-every direction - 1,380 scenarios:
+every direction - 1,436 scenarios:
 
 - **Directions:** Sonoff to Tasmota, Sonoff to ESPHome, Tasmota to ESPHome,
-  Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff.
+  Tasmota to Sonoff, ESPHome to Tasmota, ESPHome to Sonoff, and official Tasmota
+  updated from the release before.
 - **Steps:** each step that writes to the plug or waits on it.
 - **Faults:**
   - the network gone (the router off) for 5, 15, 30, 60, 120 or 180 s, or
@@ -357,6 +358,11 @@ tools/espressif/emulator/fault_suite.py report
 
 `batch` refuses to start from a converted plug `prep` made with other firmware
 than this checkout installs: run `prep` again after a firmware change.
+
+The update scenarios (`update>tasmota`) start from a plug no run can make, since
+the tool installs only the current release. `prep-update` makes it from the plug
+`prep` saved on Tasmota, with the previous release firmware.json pins in its app
+slot, fetched from Tasmota's releases.
 
 Against the real cloud, one cloud scenario at a time. The plugs take turns
 at eWeLink, but a run waiting for its turn still talks to it: it sees the

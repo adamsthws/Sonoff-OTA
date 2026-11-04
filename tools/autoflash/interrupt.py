@@ -39,7 +39,7 @@ CARRY_ON_AFTER = 30.0
 
 _lock = threading.Lock()
 _state: dict[str, Any] = {"first": None, "asking": 0, "closed": False, "installed": False,
-                         "deferring": 0, "deferred": False, "shown_by": None}
+                         "deferring": 0, "deferred": False, "shown_by": None, "logged_by": None}
 NOTICE_TITLE = "! Are you sure?"
 
 
@@ -64,6 +64,8 @@ def _say(text: str) -> None:
 
 
 def _on_interrupt(signum: int, frame: Any) -> None:
+    if _state["logged_by"]:
+        _state["logged_by"]()
     now = time.monotonic()
     first = _state["first"]
     if _state["asking"] or (first is not None and now - first <= GRACE):
@@ -87,6 +89,11 @@ def shown_by(where: Callable[[], str | None] | None) -> None:
     """`where` gives what a first Ctrl-C writes out - notice() laid out for
     the screen as it is - or None when the screen draws it itself."""
     _state["shown_by"] = where
+
+
+def logged_by(where: Callable[[], None] | None) -> None:
+    """`where` records each Ctrl-C as it arrives, from the signal handler."""
+    _state["logged_by"] = where
 
 
 def notice() -> list[str]:
