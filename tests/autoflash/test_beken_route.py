@@ -403,6 +403,7 @@ class OnwardTests(unittest.TestCase):
                     mock.patch.object(onward.handover, "consent_to_leave",
                                       side_effect=lambda ctx, what: order.append(("go-ahead", what))), \
                     mock.patch.object(onward, "serve_to_plug", return_value=1.0), \
+                    mock.patch.object(onward.openbeken, "info", return_value=None), \
                     mock.patch.object(onward.join.output, "say"):
                 self.assertEqual(onward.step_openbeken_to_esphome(ctx)["signal_dbm"], -85)
                 with mock.patch.object(onward.esphome, "signal", return_value=-70), \

@@ -65,6 +65,12 @@ Writing a test that keeps it so:
 - **Nothing of the whole computer's** - its sleep inhibitors, a fixed port, a
   file outside the test's own temporary directory - unless the tests sharing
   it are in `TOGETHER`, with why.
+- **Nothing beyond this computer**: stub what the code under test asks of
+  a plug, eWeLink or anything else on the network. A made-up address on a
+  private network can be a real device where the tests run, so any
+  connection beyond loopback fails the test that made it, even where the
+  code catches the error (`tests/no_network.py`, which each test package
+  switches on in its `__init__.py`). Its message names the address.
 
 To soak them again, after a change to how tests share anything:
 

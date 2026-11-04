@@ -37,6 +37,12 @@ class FakeTasmota:
 
 
 class TasmotaTests(unittest.TestCase):
+
+    def setUp(self):
+        # No OpenBeken at these made-up addresses: asked, it is whatever is there on this network.
+        patch = mock.patch.object(detect, "openbeken_plug", return_value=None)
+        patch.start()
+        self.addCleanup(patch.stop)
     def kind(self, fake):
         with mock.patch.object(detect, "Device", fake):
             found = detect._tasmota("192.168.0.137", 2.0)
@@ -247,6 +253,12 @@ class WebPasswordTests(unittest.TestCase):
     """A Tasmota with a web password says whether it is an S60 only once given
     it - and the password goes to nothing that has not asked for it."""
 
+    def setUp(self):
+        # No OpenBeken at these made-up addresses: asked, it is whatever is there on this network.
+        patch = mock.patch.object(detect, "openbeken_plug", return_value=None)
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def started(self, server):
         self.addCleanup(server.stop)
         return server
@@ -407,6 +419,12 @@ class EsphomeLoginTests(unittest.TestCase):
 class InstallerTests(unittest.TestCase):
     """This tool's installer, left by a run part way from Sonoff's firmware,
     answers with its own page: a run carries on from it, not from eWeLink."""
+
+    def setUp(self):
+        # No OpenBeken at these made-up addresses: asked, it is whatever is there on this network.
+        patch = mock.patch.object(detect, "openbeken_plug", return_value=None)
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def test_its_page_names_it(self):
         with mock.patch.object(detect.esphome, "page", return_value="other"), \
