@@ -16,6 +16,7 @@ Each linter is handed the files of its kind:
     PSScriptAnalyzer  PowerShell (PSScriptAnalyzerSettings.psd1), through pwsh
     esphome config    the ESPHome configs firmware.json builds, in the ESPHome
                       image it pins (Docker): what ESPHome itself would refuse
+    adoption examples the configs in docs/home-assistant-adoption.md, the same way
 
 The first four come from requirements/lint.txt, in the repository's .venv, which
 tools/repo/setup-dev creates and fills:
@@ -47,7 +48,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 ROOT = Path(__file__).resolve().parents[2]
 # Where the hook's Python is, and the repository's .venv: the linters it installs.
@@ -119,12 +120,19 @@ def esphome_config(path: Path) -> bool:
     return path.as_posix() in {build["config"] for build in esphome_pins().values()}
 
 
-def esphome_command(files: list[str]) -> list[str]:
+def esphome_command(files: list[str], mounts: Iterable[str] = ()) -> list[str]:
     # ESPHome's own image, as the next build would use it, on this checkout read-only.
     user = ["-u", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []
+    extra = [argument for mount in mounts for argument in ("-v", mount)]
     return ["docker", "run", "--rm", *user, "-e", "HOME=/tmp", "--tmpfs", "/cache",
-            "-v", f"{ROOT}:/config:ro", "-w", "/config", esphome_pins()["image"]["builder"],
+            "-v", f"{ROOT}:/config:ro", *extra, "-w", "/config", esphome_pins()["image"]["builder"],
             "-q", "config", *files]
+
+
+def adoption_example(path: Path) -> bool:
+    """The guide, or a plug's config that its examples build on."""
+    return path == Path("docs/home-assistant-adoption.md") or (
+        path.name == "esphome.yaml" and path.parts[0] == "devices")
 
 
 LINTERS = [
@@ -142,6 +150,9 @@ LINTERS = [
            "pwsh", "install pwsh 7.4.6+, then: Install-Module PSScriptAnalyzer -Scope CurrentUser",
            has_psscriptanalyzer),
     Linter("esphome config", esphome_config, esphome_command, "docker",
+           "install Docker (its image is pulled on first use)"),
+    Linter("adoption examples", adoption_example,
+           lambda files: [sys.executable, "-m", "tools.repo.adoption_examples"], "docker",
            "install Docker (its image is pulled on first use)"),
 ]
 
