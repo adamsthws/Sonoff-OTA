@@ -56,7 +56,13 @@
       "esp_idf": "5.5.6",
       "builder": "ghcr.io/esphome/esphome:2026.10.0@sha256:1dff19a59070cdb523b76576cdc74d200f862d43c1407809088855920cf57145",
       "size": 967936,
-      "sha256": "ff4dbbccb202e9e663340f47b1797c027b0a3a1eb24462ad7460597a645f7875"
+      "sha256": "ff4dbbccb202e9e663340f47b1797c027b0a3a1eb24462ad7460597a645f7875",
+      "built": "2026-11-04 14:38:48 +0000",
+      "earlier_builds": [
+        "2026-10-21 02:35:20 +0100",
+        "2026-10-22 19:49:39 +0000",
+        "2026-10-26 17:26:39 +0000"
+      ]
     },
     "bootloader": {
       "file": "artifacts/esphome-sonoff-s60-bootloader-1.2.0.bin",
@@ -106,7 +112,9 @@
         "libretiny": "1.13.0",
         "builder": "ghcr.io/esphome/esphome:2026.10.0@sha256:1dff19a59070cdb523b76576cdc74d200f862d43c1407809088855920cf57145",
         "size": 505168,
-        "sha256": "2c61622bcbbc11b7ee1b1e9b082a73f4d35c19570471efb7b0e41a75ad181172"
+        "sha256": "2c61622bcbbc11b7ee1b1e9b082a73f4d35c19570471efb7b0e41a75ad181172",
+        "built": "2026-11-04 14:39:04 +0000",
+        "earlier_builds": []
       }
     }
   }

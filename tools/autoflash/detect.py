@@ -178,7 +178,8 @@ def _template_name(device: Device) -> str | None:
 
 def _esphome(host: str, timeout: float, login: tuple[str, str] | None) -> str | None:
     """"esphome" if this tool's ESPHome answers at `host` - one with the relay
-    the ESPHome made for each kind of plug names; "esphome-login" for an
+    the ESPHome made for each kind of plug names, or which says it is one of
+    those kinds, its relay renamed by its owner; "esphome-login" for an
     ESPHome behind a web login that `login` (user name, password) is not;
     "other" for any other ESPHome; None for no ESPHome page.
 
@@ -198,7 +199,9 @@ def _esphome(host: str, timeout: float, login: tuple[str, str] | None) -> str | 
             return "esphome-login"
     if found != "esphome":
         return None
-    return "esphome" if esphome.relay(host) is not None else "other"
+    if esphome.relay(host) is not None or kinds.for_esphome(*esphome.title(host)) is not None:
+        return "esphome"
+    return "other"
 
 
 def openbeken_plug(host: str, timeout: float = 3.0) -> Found | None:

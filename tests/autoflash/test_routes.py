@@ -126,7 +126,7 @@ class FamilyTests(unittest.TestCase):
         family = SimpleNamespace(FIRMWARES={"openbeken": "OpenBeken", "sonoff": "Sonoff"}, SONOFF_FROM_BACKUP=True,
                                  published_version=lambda kind, firmware: None)
         state = self.state(plug_kind="made-up")
-        ctx = SimpleNamespace(state=state, firmware_given="tasmota", esphome_firmware=None)
+        ctx = SimpleNamespace(state=state, replace_own_build=False, firmware_given="tasmota", esphome_firmware=None)
         with mock.patch.object(kinds, "ALL", (kinds.SONOFF_S60, other)), \
                 mock.patch.dict(routes.FAMILIES, {"madeup": family}), \
                 mock.patch.object(routes.source, "find_current_firmware", return_value="sonoff"):
@@ -136,7 +136,7 @@ class FamilyTests(unittest.TestCase):
                 routes.step_choose(ctx)
             # A converted plug's kind is known when the route is settled.
             family.FIRMWARES["esphome"] = "ESPHome"
-            converted = SimpleNamespace(state=self.state(plug_kind="made-up"), firmware_given="tasmota",
+            converted = SimpleNamespace(state=self.state(plug_kind="made-up"), replace_own_build=False, firmware_given="tasmota",
                                         esphome_firmware=None)
             with mock.patch.object(routes.source, "find_current_firmware", return_value="esphome"):
                 with self.assertRaisesRegex(routes.Abort, "takes OpenBeken or Sonoff or ESPHome"):
@@ -160,7 +160,7 @@ class BekenTargetTests(unittest.TestCase):
 
     def test_an_s61_on_esphome_can_go_back_to_sonoff_without_a_backup(self):
         ctx = SimpleNamespace(state=self.state(plug_kind="sonoff-s61", plug_mac="12:34:56:ab:cd:ef"),
-                              firmware_given="sonoff", esphome_firmware=None)
+                              replace_own_build=False, firmware_given="sonoff", esphome_firmware=None)
         with mock.patch.object(routes.source, "find_current_firmware", return_value="esphome"), \
                 mock.patch.object(routes.plugs, "find_backup", return_value=None), \
                 mock.patch.object(routes.output, "say"):
@@ -179,7 +179,7 @@ class BekenTargetTests(unittest.TestCase):
                 state = RunState.open(Path(self.tmp.name) / running)
                 state.set_input("plug_kind", "sonoff-s60")
                 state.set_input("plug_mac", "12:34:56:ab:cd:ef")
-                ctx = SimpleNamespace(state=state, firmware_given="esphome", esphome_firmware=None)
+                ctx = SimpleNamespace(state=state, replace_own_build=False, firmware_given="esphome", esphome_firmware=None)
                 with mock.patch.object(routes.source, "find_current_firmware", return_value=running), \
                         mock.patch.object(routes.plugs, "find_backup", return_value=object()), \
                         mock.patch.dict(update.RELEASE, tasmota=lambda ctx: None), \
@@ -192,7 +192,7 @@ class BekenTargetTests(unittest.TestCase):
 
     def test_an_s60_still_needs_its_backup(self):
         ctx = SimpleNamespace(state=self.state(plug_kind="sonoff-s60", plug_mac="12:34:56:ab:cd:ef"),
-                              firmware_given="sonoff", esphome_firmware=None)
+                              replace_own_build=False, firmware_given="sonoff", esphome_firmware=None)
         with mock.patch.object(routes.source, "find_current_firmware", return_value="esphome"), \
                 mock.patch.object(routes.plugs, "find_backup", return_value=None):
             with self.assertRaisesRegex(routes.Abort, "no backup"):

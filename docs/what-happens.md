@@ -248,10 +248,14 @@ one, with your Wi-Fi read from the plug and written in. ESPHome writes it into
 the half of its memory it is not running from and starts it, keeping its
 settings. On an S60, a power cut before the new release has run for a minute
 takes the plug back to the release it had, so the tool waits that minute out.
-The plug reports its release through its native API. A plug adopted into an
-ESPHome dashboard, whose API then has an encryption key, is not offered this: the
-firmware the tool installs would take away the dashboard's changes and key, so
-you update the plug from the dashboard instead. From 2.3.0 the dashboard uses
+The plug reports its release and when it was built through its native API. A
+plug adopted into an ESPHome dashboard is not offered this, with an encryption
+key or without one, because its build is not one this project published: the
+firmware the tool installs would take away the dashboard's changes and any key,
+so you update the plug from the dashboard instead. To install this project's
+firmware over it anyway, give `--replace-own-build`, which tells you what you lose
+and asks you to confirm. It replaces only this project's ESPHome for that kind of
+plug, never another project's. From 2.3.0 the dashboard uses
 this project's config at the release the plug's firmware came from. The plug gets
 a fix when you choose a newer release, and not before
 ([how, and how to change a plug adopted before](home-assistant-adoption.md)).

@@ -63,7 +63,8 @@ class Context:
         esphome = getattr(args, "esphome", None)
         self.esphome_firmware = Path(esphome).expanduser().resolve() if esphome else None
         # --firmware: which to install, instead of being asked (--unattended needs it).
-        self.firmware_given = "esphome" if esphome else getattr(args, "firmware", None)
+        self.replace_own_build = getattr(args, "replace_own_build", False)
+        self.firmware_given = "esphome" if esphome or self.replace_own_build else getattr(args, "firmware", None)
         if args.plug_ip:
             self.state.set_input("plug_ip", args.plug_ip)
         if args.email:

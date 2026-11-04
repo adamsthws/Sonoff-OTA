@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 from tools.autoflash import (
+    kinds,
+    unlock,
     handover,
     cli,
     detect,
@@ -52,7 +54,7 @@ class RouteTestCase(unittest.TestCase):
         for key, value in {"product_model": "S60TPF", "stock_version": "1.2.0",
                            "plug_ip": "192.168.0.50", **inputs}.items():
             state.set_input(key, value)
-        return SimpleNamespace(state=state, firmware_given=given, esphome_firmware=None,
+        return SimpleNamespace(state=state, firmware_given=given, esphome_firmware=None, replace_own_build=False,
                                dry_run=False, finder=SimpleNamespace(poll=lambda: None),
                                esphome_password=None, esphome_key=None, web_password=None,
                                esphome_login=None)
@@ -997,17 +999,19 @@ class DeviceInfoTests(unittest.TestCase):
     serve = WifiActionTests.serve
 
     @staticmethod
-    def info(name=b"esphome-abcdef", version=b"2026.10.0", project=b"adamsthws.sonoff-s60", release=b"1.4.0"):
+    def info(name=b"esphome-abcdef", version=b"2026.10.0", built=b"2026-10-26 17:26:39 +0000",
+             project=b"adamsthws.sonoff-s60", release=b"1.4.0"):
         from tools.autoflash.esphome import _frame, _varint
         fields = b"".join(bytes([number << 3 | 2]) + _varint(len(value)) + value
-                          for number, value in ((2, name), (4, version), (8, project), (9, release)) if value)
+                          for number, value in ((2, name), (4, version), (5, built), (8, project), (9, release)) if value)
         return _frame(10, b"\x08\x00" + fields)
 
     def test_it_says_its_project_and_its_version(self):
         port = self.serve((b"\x00\x00\x09", self.info()))
         self.assertEqual(esphome.api_device_info("127.0.0.1", port, timeout=3.0),
                          {"name": "esphome-abcdef", "esphome_version": "2026.10.0",
-                          "project_name": "adamsthws.sonoff-s60", "project_version": "1.4.0", "encrypted": False})
+                          "built": "2026-10-26 17:26:39 +0000", "project_name": "adamsthws.sonoff-s60",
+                          "project_version": "1.4.0", "encrypted": False})
 
     def test_one_built_as_no_project_says_none(self):
         port = self.serve((b"\x00\x00\x09", self.info(project=b"", release=b"")))
@@ -1038,7 +1042,7 @@ class ESPHomeUpdateTests(RouteTestCase):
     @staticmethod
     def ours(release="1.4.0", **changed):
         return {"name": "esphome-abcdef", "esphome_version": "2026.10.0", "project_name": "adamsthws.sonoff-s60",
-                "project_version": release, "encrypted": False, **changed}
+                "project_version": release, "built": esphome.PINS["image"]["built"], "encrypted": False, **changed}
 
     def test_an_earlier_release_is_offered_the_update(self):
         ctx, route, offered = self.settle(self.ours(), answer=1)
@@ -1062,6 +1066,8 @@ class ESPHomeUpdateTests(RouteTestCase):
                           ("another project", self.ours(project_name="someone.else")),
                           ("another kind's", self.ours(project_name="adamsthws.sonoff-s61")),
                           ("adopted, its API given a key", self.ours(encrypted=True)),
+                          ("adopted without a key: not a build published",
+                           self.ours(built="2026-11-04 21:19:12 +0000")),
                           ("not one of our releases", self.ours("dev")), ("not saying", None)):
             with self.subTest(why):
                 with self.assertRaisesRegex(routes.NothingToDo, "already runs ESPHome"):
@@ -1106,6 +1112,93 @@ class ESPHomeUpdateTests(RouteTestCase):
         with mock.patch.object(esphome, "api_device_info", side_effect=OSError("no route")), \
                 mock.patch.object(espressif, "published_version", return_value="1.6.0"):
             self.assertIsNone(routes.update_available(ctx))
+
+    OWN = "2026-11-04 21:19:12 +0000"
+
+    def replacing(self, info, *, word=True, **inputs):
+        ctx = self.ctx(given="esphome", run=str(id(info)) + str(word), plug_kind="sonoff-s60", **inputs)
+        ctx.replace_own_build = True
+        with mock.patch.object(source, "find_current_firmware", return_value="esphome"), \
+                mock.patch.object(esphome, "api_device_info", **(
+                    {"side_effect": info} if isinstance(info, BaseException) else {"return_value": info})), \
+                mock.patch.object(espressif, "published_version", return_value="1.6.0"), \
+                mock.patch.object(routes, "sonoff_backup_exists", return_value=True), \
+                mock.patch.object(prompts, "warning_box") as warned, \
+                mock.patch.object(prompts, "require_word", return_value=word):
+            self.addCleanup(routes.apply_target, "tasmota", "sonoff")
+            return ctx, routes.settle_route(ctx), warned
+
+    def test_replacing_an_own_build_without_a_key_of_the_same_version(self):
+        ctx, route, warned = self.replacing(self.ours("1.6.0", built=self.OWN))
+        self.assertEqual(route, ("esphome", "outdated"))
+        self.assertEqual(update.versions(ctx), (update.OWN_BUILD, "1.6.0"))
+        self.assertEqual([step for step, _, _ in routes.steps_of(ctx.state)], ["A0", "A5", "U1", "U2"])
+        said = " ".join(warned.call_args.args[1])
+        self.assertIn("You lose any changes", said)
+        self.assertIn("If you renamed its relay", said)
+
+    def test_replacing_an_own_build_with_a_key_given(self):
+        ctx, route, _ = self.replacing(self.ours("1.6.0", built=self.OWN, encrypted=True))
+        self.assertEqual(route, ("esphome", "outdated"))
+
+    def test_with_no_key_to_give_nothing_is_replaced(self):
+        with mock.patch.object(unlock, "ask_esphome_key", return_value=False):
+            with self.assertRaisesRegex(errors.Abort, "API encryption key, and none was given"):
+                self.replacing(esphome.ApiLocked())
+            with self.assertRaisesRegex(errors.Abort, "API encryption key, and the one given is not it"):
+                self.replacing(esphome.ApiLocked(wrong=True))
+
+    def test_not_agreeing_stops_before_anything_is_recorded(self):
+        with self.assertRaisesRegex(errors.Abort, "not confirmed"):
+            self.replacing(self.ours("1.6.0", built=self.OWN), word=False)
+
+    def test_another_projects_esphome_is_never_replaced(self):
+        for info in (self.ours(project_name="someone.else"), self.ours(project_name="adamsthws.sonoff-s61"), None):
+            with self.subTest(info=info), self.assertRaisesRegex(errors.Abort, "only replaces this project's"):
+                self.replacing(info)
+
+    def test_a_published_build_has_nothing_to_replace(self):
+        with self.assertRaisesRegex(routes.NothingToDo, "nothing to convert\\.$"):
+            self.replacing(self.ours("1.6.0"))
+
+    def test_a_published_earlier_release_is_just_updated(self):
+        ctx, route, warned = self.replacing(self.ours())
+        self.assertEqual(update.versions(ctx), ("1.4.0", "1.6.0"))
+        warned.assert_not_called()
+
+    def test_any_other_firmware_is_not_replaced(self):
+        ctx = self.ctx(given="esphome", plug_kind="sonoff-s60")
+        with self.assertRaisesRegex(errors.Abort, "does not answer as that: it runs Tasmota"):
+            update.replace_own_build(ctx, "tasmota", "16.0.0")
+
+    def test_the_update_is_only_done_once_the_published_build_answers(self):
+        # Often the same version: an own build that kept running, or a plug that
+        # went back to it, must not pass for the release sent.
+        ctx = self.ctx(plug_kind="sonoff-s60", firmware="esphome", replaced_build=self.OWN)
+        with mock.patch.object(esphome, "api_device_info", return_value=self.ours("1.6.0", built=self.OWN)):
+            self.assertEqual(update.esphome_release(ctx), update.OWN_BUILD)
+        with mock.patch.object(esphome, "api_device_info", return_value=self.ours("1.6.0")):
+            self.assertEqual(update.esphome_release(ctx), "1.6.0")
+
+    def test_a_refused_update_points_to_the_option_for_an_own_build_alone(self):
+        for info, says in ((self.ours("1.6.0", built=self.OWN), True), (self.ours("1.6.0"), False),
+                           (esphome.ApiLocked(), True), (None, False)):
+            ctx = self.ctx(given="esphome", run=f"hint{id(info)}", plug_kind="sonoff-s60")
+            with self.subTest(info=info), mock.patch.object(esphome, "api_device_info", **(
+                    {"side_effect": info} if isinstance(info, BaseException) else {"return_value": info})):
+                with self.assertRaises(routes.NothingToDo) as stopped:
+                    routes.nothing_to_convert(ctx, "esphome")
+                self.assertEqual("--replace-own-build" in str(stopped.exception), says)
+
+    def test_a_build_published_for_an_earlier_release_is_offered_it(self):
+        ctx, route, _ = self.settle(self.ours(built=esphome.PINS["image"]["earlier_builds"][0]), answer=1)
+        self.assertEqual(route, ("esphome", "outdated"))
+
+    def test_published_builds_are_each_kinds_own(self):
+        s60, s61 = (esphome.published_builds(kinds.by_key(key)) for key in ("sonoff-s60", "sonoff-s61"))
+        self.assertIn(esphome.PINS["image"]["built"], s60)
+        self.assertIn(esphome.FIRMWARE["beken"]["sonoff-s61"]["esphome"]["built"], s61)
+        self.assertEqual(s60 & s61, set())
 
     def test_releases_are_compared_as_numbers(self):
         self.assertTrue(update.older("1.9.0", "1.10.0"))

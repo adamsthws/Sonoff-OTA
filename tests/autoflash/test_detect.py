@@ -443,6 +443,29 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.137", "installer")])
 
 
+
+class RenamedRelayTests(unittest.TestCase):
+    """An ESPHome knows its kind by its comment as well as its relay's name: the
+    adoption guide's example renames the relay, and it was taken for Sonoff's."""
+
+    def found(self, relay, comment):
+        with mock.patch.object(detect.esphome, "page", return_value="esphome"), \
+                mock.patch.object(detect.esphome, "relay", return_value=relay), \
+                mock.patch.object(detect.esphome, "title", return_value=("my plug", comment)):
+            return detect._esphome("192.0.2.1", 1.0, None)
+
+    def test_its_relay_renamed_it_is_known_by_its_comment(self):
+        self.assertEqual(self.found(None, "Sonoff-S60"), "esphome")
+        self.assertEqual(self.found(None, "Sonoff-S61"), "esphome")
+
+    def test_with_its_relay_named_its_comment_is_not_asked_for(self):
+        self.assertEqual(self.found(True, None), "esphome")
+
+    def test_any_other_esphome_is_another_projects(self):
+        self.assertEqual(self.found(None, None), "other")
+        self.assertEqual(self.found(None, "a lamp of my own"), "other")
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -497,4 +520,3 @@ class OtherNetworksTests(unittest.TestCase):
                 mock.patch.object(detect, "_port_open", side_effect=lambda host, *_: asked.append(host) and False):
             detect.converted_plugs("10.0.0.2")
         self.assertEqual(asked, ["10.0.0.37"])
-

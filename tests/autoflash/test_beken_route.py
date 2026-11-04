@@ -674,7 +674,7 @@ class OpenBekenUpdateTests(unittest.TestCase):
 
     def ctx(self, run="run", **inputs):
         ctx = a_context(Path(self.tmp) / run, plug_ip=self.server.host, **inputs)
-        ctx.firmware_given = inputs.get("given")
+        ctx.firmware_given, ctx.replace_own_build = inputs.get("given"), False
         return ctx
 
     def settle(self, *, given=None, answer=0, run="run"):

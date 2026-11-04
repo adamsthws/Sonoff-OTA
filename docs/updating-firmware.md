@@ -22,7 +22,10 @@ A new pin reaches plugs already converted. Running the tool on a plug with an
 earlier release of its firmware offers this one as an update, and the plug
 takes it, so treat a pin bump as a change to plugs in use as well as to new
 conversions ([Changing firmware later](what-happens.md#changing-firmware-later)).
-A plug adopted into Home Assistant keeps to the release it names.
+A plug adopted into Home Assistant keeps to the release it names, and the tool
+leaves it alone: `firmware.json` records when each published ESPHome image was
+built (`built`, `earlier_builds`), and the tool updates only a plug that reports
+one of those times.
 
 The official Tasmota files are not kept in this repository: each run downloads
 them from the release's own page on GitHub and checks them against

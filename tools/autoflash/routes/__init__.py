@@ -196,7 +196,11 @@ def nothing_to_convert(ctx: Context, source: str) -> None:
     """Asked for what it runs: nothing to do, and nothing left unfinished."""
     ctx.state.set_input("source", source)
     ctx.state.set_input("firmware", source)
-    raise NothingToDo(f"The device already runs {detect.NAMES[source]}: there is nothing to convert.")
+    own = source == "esphome" and update.is_own_build(ctx)
+    raise NothingToDo(f"The device already runs {detect.NAMES[source]}: there is nothing to convert."
+                      + (" It is a build of its own, adopted into an ESPHome builder perhaps, so update it from "
+                         "there. To install this project's ESPHome over it, losing its config changes and any "
+                         "API key, run this again with --replace-own-build." if own else ""))
 
 
 def settle_route(ctx: Context) -> tuple[str | None, str]:
@@ -226,7 +230,9 @@ def settle_route(ctx: Context) -> tuple[str | None, str]:
         return "tasmota", "sonoff"
     running = source.find_current_firmware(ctx)
     updating = running
-    if update.outdated(ctx, running, family_of(ctx.state).published_version(kinds.of_run(ctx.state), running)):
+    published = family_of(ctx.state).published_version(kinds.of_run(ctx.state), running)
+    if update.outdated(ctx, running, published) or (
+            ctx.replace_own_build and update.replace_own_build(ctx, running, published)):
         running = "outdated"
     if running == "sonoff":
         if given == "sonoff":

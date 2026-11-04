@@ -169,7 +169,7 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
         ("Result", result),
         ("Firmware", routes.FIRMWARES[firmware] if firmware else "not chosen"),
         ("Converted from", (f"{routes.FIRMWARES[firmware]}, " if runs.run_source(ctx.state) == "outdated" else "")
-         + CONVERTED_FROM[runs.run_source(ctx.state)]),
+         + ("its own build" if ctx.state.input("replaced_build") else CONVERTED_FROM[runs.run_source(ctx.state)])),
         ("Tool version", __version__),
         ("Device model", model or "__"),
         ("Stock firmware", stock_version or "__"),

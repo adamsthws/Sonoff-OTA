@@ -226,6 +226,27 @@ class UpdateHelperTests(unittest.TestCase):
               '    version: "1.2.0"\n  on_boot:\n    - priority: 1000\n'
               'ota:\n  - platform: esphome\n    version: 2\n')
 
+    def test_a_build_says_one_build_time(self):
+        self.assertEqual(uf.build_time(b"x 2026-11-04 14:38:48 +0000 y", "it"), "2026-11-04 14:38:48 +0000")
+        for image in (b"no time", b"2026-11-04 14:38:48 +0000 and 2026-11-04 14:38:49 +0000"):
+            with self.assertRaisesRegex(uf.UpdateError, "build times"):
+                uf.build_time(image, "it")
+
+    def test_an_images_earlier_builds_keep_each_earlier_version(self):
+        old = {"version": "1.5.0", "built": "2026-01-02 00:00:00 +0000", "earlier_builds": ["2026-01-01 00:00:00 +0000"]}
+        image = b"2026-01-03 00:00:00 +0000"
+        self.assertEqual(uf.builds_record(image, "it", old, "1.6.0"),
+                         {"built": "2026-01-03 00:00:00 +0000",
+                          "earlier_builds": ["2026-01-01 00:00:00 +0000", "2026-01-02 00:00:00 +0000"]})
+        # A rebuild of the same version replaces its build: the one before was never released.
+        self.assertEqual(uf.builds_record(image, "it", old, "1.5.0")["earlier_builds"], ["2026-01-01 00:00:00 +0000"])
+
+    def test_the_build_times_pinned_are_the_images_own(self):
+        pins = json.loads((ROOT / "artifacts/firmware.json").read_text(encoding="utf-8"))
+        s60, s61 = pins["esphome"]["image"], pins["beken"]["sonoff-s61"]["esphome"]
+        self.assertEqual(s60["built"], uf.build_time((ROOT / s60["file"]).read_bytes(), s60["file"]))
+        self.assertEqual(s61["built"], uf.build_time(rbl.unpack((ROOT / s61["file"]).read_bytes()), s61["file"]))
+
     def test_the_project_version_and_only_it_is_changed(self):
         changed = uf.with_config_version(self.CONFIG, "1.3.0")
         self.assertEqual(uf.config_version(changed), "1.3.0")
@@ -538,7 +559,7 @@ class UpdateCommandTests(unittest.TestCase):
 
         def build(builder, config_path, version, workdir):
             built.append((config_path.name, version))
-            return f"app {config_path.name} {version}".encode(), bootloader
+            return f"app {config_path.name} {version} 2099-01-01 12:00:00 +0000".encode(), bootloader
 
         with mock.patch.object(uf, "stable_release", return_value={"tag_name": "2099.1.0"}), \
              mock.patch.object(uf, "esphome_builder", return_value="esphome:2099.1.0@sha256:d"), \
@@ -558,6 +579,7 @@ class UpdateCommandTests(unittest.TestCase):
         self.assertEqual((pin["file"], pin["version"], pin["esphome"], pin["builder"]),
                          (new, "1.5.0", "2099.1.0", "esphome:2099.1.0@sha256:d"))
         self.assertEqual(pin["sha256"], sha256_bytes((self.root / new).read_bytes()))
+        self.assertEqual(pin["built"], "2099-01-01 12:00:00 +0000")
         self.assertFalse((self.root / "artifacts/esphome-sonoff-s60-imprintable-1.4.0.bin").exists())
         sums = (self.root / "artifacts" / "SHA256SUMS").read_text(encoding="utf-8")
         self.assertIn(f"{pin['sha256']}  {Path(new).name}", sums)

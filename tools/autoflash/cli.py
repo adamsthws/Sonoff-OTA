@@ -457,6 +457,9 @@ def _main() -> int:
                         help="keep no backup of the Sonoff firmware (it holds the Wi-Fi password)")
     parser.add_argument("--firmware", choices=list(routes.FIRMWARES),
                         help="which firmware to install, instead of being asked at the start")
+    parser.add_argument("--replace-own-build", action="store_true",
+                        help="install this project's ESPHome over a build of its config made elsewhere, such as "
+                        "by an ESPHome builder, losing that build's config changes and any API key")
     # An ESPHome built by hand (firmware.ota.bin), instead of the published one.
     parser.add_argument("--esphome", metavar="PATH", help=argparse.SUPPRESS)
     parser.add_argument("--dry-run", action="store_true")
@@ -475,6 +478,8 @@ def _main() -> int:
                         help=argparse.SUPPRESS)  # testing: the S61's image STEP sends is refused by its bootloader
     parser.add_argument("--bridge", help=argparse.SUPPRESS)  # research: archive/docs/reference/automatic-wifi.md
     args = parser.parse_args()
+    if args.replace_own_build and (args.esphome or args.firmware not in (None, "esphome")):
+        parser.error("--replace-own-build installs the published ESPHome, so goes with no other firmware")
     prompts.UNATTENDED = args.unattended
     installer.SIMULATED_BACKUP_FAILURES = 2 * installer.BACKUP_ROUNDS if args.simulate_backup_failure else 0
     beken_images.SPOIL_STEP = args.simulate_bad_image

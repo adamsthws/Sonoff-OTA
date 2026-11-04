@@ -26,12 +26,13 @@ import zlib
 from collections.abc import Callable
 from pathlib import Path
 
-from . import imprint, noise
+from . import imprint, kinds, noise
 
 ROOT = Path(__file__).resolve().parents[2]
 # What each is, as firmware.json pins it: tools/repo/update_firmware.py writes it,
 # docs/updating-firmware.md says when.
-PINS = json.loads((ROOT / "artifacts" / "firmware.json").read_text(encoding="utf-8"))["esphome"]
+FIRMWARE = json.loads((ROOT / "artifacts" / "firmware.json").read_text(encoding="utf-8"))
+PINS = FIRMWARE["esphome"]
 # The published image, the ESPHome made for the Sonoff S60 (kinds.SONOFF_S60),
 # pinned: a changed file is refused, never used unseen.
 IMAGE = ROOT / PINS["image"]["file"]
@@ -545,11 +546,19 @@ def api_wifi(host: str, port: int = API_PORT, timeout: float = 8.0,
 _DEVICE_INFO, _DEVICE_INFO_ANSWER = 9, 10
 
 
+def published_builds(kind: kinds.Kind) -> set[str]:
+    """When each image this project published for `kind` was built, as its API
+    says.  Any other build is someone's own, whatever version it gives: the same
+    config built by a dashboard says the same version, and need not have a key."""
+    pin = PINS["image"] if kind.family == "espressif" else FIRMWARE["beken"][kind.key]["esphome"]
+    return {pin["built"], *pin.get("earlier_builds", ())}
+
+
 def api_device_info(host: str, port: int = API_PORT, timeout: float = 8.0,
                     key: bytes | None = None) -> dict[str, object] | None:
-    """What ESPHome says it is: its name, its ESPHome's version, the project
-    it was built as and the project's version ("" for one built as none),
-    and whether its API is encrypted - which ours never is.  None from one
+    """What ESPHome says it is: its name, its ESPHome's version, when it was
+    built, the project it was built as and the project's version ("" for one
+    built as none), and whether its API is encrypted - which ours never is.  None from one
     that does not answer; ApiLocked as api_wifi_details."""
     try:
         api = _Api(host, port, timeout, key)
@@ -561,7 +570,8 @@ def api_device_info(host: str, port: int = API_PORT, timeout: float = 8.0,
             if kind == _DEVICE_INFO_ANSWER:
                 fields = _fields(payload)
                 said = {name: fields.get(number, b"") for name, number in
-                        (("name", 2), ("esphome_version", 4), ("project_name", 8), ("project_version", 9))}
+                        (("name", 2), ("esphome_version", 4), ("built", 5), ("project_name", 8),
+                         ("project_version", 9))}
                 return {**{name: value.decode("utf-8", "replace") if isinstance(value, bytes) else ""
                            for name, value in said.items()}, "encrypted": api.ciphers is not None}
     except (OSError, ValueError, IndexError):

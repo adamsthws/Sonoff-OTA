@@ -30,6 +30,21 @@ the newer release, and install.
 A config can run code on the computer that builds it, so choosing a newer release
 means trusting it with that computer as well as your plug.
 
+## Going back to this project's firmware
+
+To stop using the builder for a plug, run the tool with `--replace-own-build`. It
+installs this project's ESPHome over your build, after telling you what you lose
+and asking you to confirm.
+
+You lose any changes in your config, and the plug's API key. If the plug has a
+key, the tool asks for it, or you can give it with `--esphome-api-key`. Afterwards
+remove the plug from Home Assistant and add it again, and delete its config from
+the builder. The tool can then update the plug again.
+
+If you renamed the relay, it goes back to how it was before you renamed it, because
+ESPHome saves a relay's state under its name. That may switch whatever is plugged
+in, so unplug anything that should not change.
+
 ## Using your own config instead
 
 Download your plug's `esphome.yaml` from the release you are on (it is in

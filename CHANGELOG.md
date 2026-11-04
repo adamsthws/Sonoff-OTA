@@ -200,6 +200,16 @@ check.
   eWeLink for it.
 - `status` says when a plug has an earlier release of its firmware than this
   version installs.
+- A plug adopted into an ESPHome dashboard is left to that dashboard even if its
+  API has no key: the tool offers an update only to a build this project
+  published, by when it says it was built, so an update cannot overwrite the
+  owner's config.
+- A plug on ESPHome whose relay its owner renamed is known by the kind its
+  config names. It was taken for one on Sonoff's firmware, and the run stopped
+  waiting for eWeLink.
+- `--replace-own-build` installs this project's ESPHome over a build made
+  elsewhere, such as a plug adopted into an ESPHome builder, for an owner who
+  wants to stop using that build. It says what is lost and asks first.
 
 ## 2.2.0
 

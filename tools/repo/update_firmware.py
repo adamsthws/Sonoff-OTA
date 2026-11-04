@@ -517,6 +517,24 @@ def with_ignore_exception(gitignore: str, old: str, new: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def build_time(firmware: bytes, label: str) -> str:
+    """When ESPHome says `firmware` was built, as its API will say it: how the
+    tool tells a published image from a dashboard's build of the same config."""
+    found = set(re.findall(rb"20\d\d-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d{4}", firmware))
+    if len(found) != 1:
+        raise UpdateError(f"{label} holds {len(found)} build times, not one")
+    return found.pop().decode("ascii")
+
+
+def builds_record(firmware: bytes, label: str, old: dict[str, Any], version: str) -> dict[str, Any]:
+    """An ESPHome image's build time, and those of the earlier versions: a plug
+    on one of those is offered this one.  A rebuild of a version replaces it."""
+    earlier = list(old.get("earlier_builds", []))
+    if old.get("built") and old.get("version") != version and old["built"] not in earlier:
+        earlier.append(old["built"])
+    return {"built": build_time(firmware, label), "earlier_builds": earlier}
+
+
 def publish(section: dict[str, Any], key: str, file: str, data: bytes, record: dict[str, Any]) -> None:
     """`data` as `file` in artifacts/, pinned under `key` of `section` (a part of
     firmware.json) with `record`, in SHA256SUMS and let past .gitignore; the
@@ -573,7 +591,8 @@ def command_esphome(args: argparse.Namespace) -> int:
         config_path.write_text(as_built(config_path.read_text(encoding="utf-8"), version), encoding="utf-8")
         publish(pins["esphome"], key, ESPHOME_BUILDS[key][1].format(version=version), app,
                 {"config": ESPHOME_BUILDS[key][0], "version": version, "esphome": release,
-                 "esp_idf": described["esp_idf"], "builder": builder})
+                 "esp_idf": described["esp_idf"], "builder": builder,
+                 **(builds_record(app, "the ESPHome built", old_image, version) if key == "image" else {})})
     version, _app, bootloader, described = built["image"]
     if args.new_bootloader and new_bootloader:
         publish(pins["esphome"], "bootloader", BOOTLOADER_FILE.format(version=version), bootloader,
@@ -792,8 +811,9 @@ def command_esphome_beken(args: argparse.Namespace) -> int:
     BUILD_CACHE.mkdir(parents=True, exist_ok=True)
     image, board, libretiny = build_libretiny(builder, ROOT / config_path, version, BUILD_CACHE)
     project = re.search(r"^    name: (\S+)", config, re.MULTILINE).group(1)
-    check_rbl(image, "the ESPHome built", None,
-              [version.encode("ascii"), project.encode("ascii"), release.encode("ascii"), b"autoflash_wifi"])
+    firmware = check_rbl(image, "the ESPHome built", None,
+                         [version.encode("ascii"), project.encode("ascii"), release.encode("ascii"),
+                          b"autoflash_wifi"])
     layout = board.get("flash", {})
     if layout.get("download") != f"0x{uf2.DOWNLOAD_OFFSET:06X}+0x{uf2.DOWNLOAD_SIZE:X}":
         raise UpdateError(f"the build's download partition is {layout.get('download')}, not the stock "
@@ -806,7 +826,7 @@ def command_esphome_beken(args: argparse.Namespace) -> int:
     (ROOT / config_path).write_text(as_built(config, version), encoding="utf-8")
     publish(section, "esphome", file_pattern.format(version=version), image,
             {"config": config_path, "version": version, "esphome": release, "libretiny": libretiny,
-             "builder": builder})
+             "builder": builder, **builds_record(firmware, "the ESPHome built", section.get("esphome", {}), version)})
     save_pins(pins)
     print("\nfirmware.json, SHA256SUMS, .gitignore, the config's version and artifacts/ updated: "
           "git add the new file, and git rm the old.")

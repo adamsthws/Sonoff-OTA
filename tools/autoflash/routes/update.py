@@ -11,9 +11,11 @@ Each family sends the image its own way and checks it arrived; what is
 shared is here: which plug is offered the update, and what it says once it
 has it.  One is offered it only when its firmware says it is this tool's
 for its kind at an earlier version (RELEASE).  An ESPHome is also passed
-over where its API is encrypted: ours never is, and one adopted into an
-ESPHome dashboard, which gives it a key, is that dashboard's to update - the
-published image would take away its changes and its key.
+over where its API is encrypted, which ours never is, or where it is a build
+this project did not publish (esphome.published_builds): one adopted into an
+ESPHome dashboard, with a key or without, is that dashboard's to update - the
+published image would take away its changes and any key.  Its owner can ask
+for that (--replace-own-build, replace_own_build).
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ import re
 import time
 from typing import Any, Callable, TYPE_CHECKING
 
-from tools.autoflash import detect, esphome, join, kinds, openbeken, output, runs
+from tools.autoflash import detect, esphome, join, kinds, openbeken, output, prompts, runs, unlock
 from tools.autoflash.errors import Abort
 
 if TYPE_CHECKING:
@@ -38,15 +40,26 @@ def older(version: str, than: str) -> bool:
         return False
 
 
+# What a plug whose own build is being replaced runs, in place of a release:
+# the same version as the published one, often, so the version cannot tell them.
+OWN_BUILD = "your own build"
+
+
 def esphome_release(ctx: Context) -> str | None:
     """The release of this tool's ESPHome for the run's kind the plug runs
-    (esphome.api_device_info), or None: another project's, or an encrypted one."""
+    (esphome.api_device_info), or None: another project's, an encrypted one, or
+    a build this project did not publish."""
     host = ctx.state.input("plug_ip")
     try:
         info = esphome.api_device_info(host, key=ctx.esphome_key) if host else None
     except esphome.ApiLocked:
         return None
-    if not info or info["encrypted"] or info["project_name"] != kinds.of_run(ctx.state).esphome_project:
+    kind = kinds.of_run(ctx.state)
+    if not info or info["project_name"] != kind.esphome_project:
+        return None
+    if info["built"] == ctx.state.input("replaced_build"):
+        return OWN_BUILD
+    if info["encrypted"] or info["built"] not in esphome.published_builds(kind):
         return None
     return str(info["project_version"])
 
@@ -92,6 +105,60 @@ def outdated(ctx: Context, firmware: str, published: str | None) -> bool:
     if release is None:
         return False
     ctx.state.set_input("update_from", release)
+    ctx.state.set_input("update_to", published)
+    return True
+
+
+def is_own_build(ctx: Context) -> bool:
+    """Whether the plug's ESPHome is this project's for its kind but not a build
+    it published, or has an API that will not say without a key: adopted into a
+    dashboard, most likely."""
+    host = ctx.state.input("plug_ip")
+    kind = kinds.of_run(ctx.state)
+    try:
+        info = esphome.api_device_info(host, key=ctx.esphome_key) if host else None
+    except esphome.ApiLocked:
+        return True
+    return bool(info and info["project_name"] == kind.esphome_project
+                and (info["encrypted"] or info["built"] not in esphome.published_builds(kind)))
+
+
+def replace_own_build(ctx: Context, firmware: str, published: str | None) -> bool:
+    """--replace-own-build: whether to send the published ESPHome over the plug's
+    own build, its owner having agreed to what that loses; recorded as an update
+    is, with the build it replaces.  False from a build this project published,
+    which needs nothing of the kind.  Refused for all but this project's ESPHome
+    for the plug's kind: another's may have other pins or another flash layout."""
+    host = ctx.state.input("plug_ip")
+    kind = kinds.of_run(ctx.state)
+    if firmware != "esphome" or not published or not host:
+        raise Abort(f"--replace-own-build is for this project's ESPHome, and the device does not answer as that"
+                    f"{'' if firmware == 'sonoff' else f': it runs {detect.NAMES[firmware]}'}")
+    try:
+        info = esphome.api_device_info(host, key=ctx.esphome_key)
+    except esphome.ApiLocked as locked:
+        if not unlock.ask_esphome_key(ctx, host, wifi=True):
+            raise Abort(f"--replace-own-build needs the device's API encryption key, "
+                        f"{'and the one given is not it' if locked.wrong else 'and none was given'}: "
+                        f"{unlock.ESPHOME_KEY_HINT}") from None
+        info = esphome.api_device_info(host, key=ctx.esphome_key)
+    if not info or info["project_name"] != kind.esphome_project:
+        raise Abort(f"--replace-own-build only replaces this project's ESPHome for a {kind.name}, and the "
+                    f"device says it is {(info or {}).get('project_name') or 'no project'}")
+    if not info["encrypted"] and info["built"] in esphome.published_builds(kind):
+        return False
+    prompts.warning_box("Replacing your own build", [
+        f"This installs this project's ESPHome {published} over the build on the device.",
+        "You lose any changes in its config, and any API encryption key. Home Assistant",
+        "stops reaching it until you remove the device there and add it again, and the",
+        "ESPHome builder's config for it no longer matches what it runs. If you renamed",
+        "its relay, the relay goes back to how it was before that, which may switch",
+        "whatever is plugged in.",
+    ])
+    if not prompts.require_word(prompts.CONSENT_WORD):
+        raise Abort("not confirmed")
+    ctx.state.set_input("replaced_build", info["built"])
+    ctx.state.set_input("update_from", OWN_BUILD)
     ctx.state.set_input("update_to", published)
     return True
 
