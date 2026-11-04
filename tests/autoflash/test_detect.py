@@ -53,6 +53,63 @@ class TasmotaTests(unittest.TestCase):
                            module="Generic")
         self.assertEqual(self.kind(fake), "hub")
 
+    def found_busy(self, fake):
+        """What the search and identify make of `fake`, a plug this computer
+        knows that answers as a Tasmota once its Berry is free."""
+        neighbours = {"192.168.0.137": "12:34:56:ab:cd:ef"}
+        with mock.patch.object(detect, "Device", fake), \
+                mock.patch.object(detect.hostsys, "sweep"), \
+                mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
+                mock.patch.object(detect, "_port_open", return_value=True), \
+                mock.patch.object(detect, "_is_installer", return_value=False), \
+                mock.patch.object(detect, "answers_as_tasmota", return_value=True), \
+                mock.patch.object(detect.esphome, "page", return_value="other"), \
+                mock.patch.object(detect.esphome_ota, "probe", return_value=None):
+            return (detect.converted_plugs("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"}),
+                    detect.identify("192.168.0.137"))
+
+    def test_a_tasmota_too_busy_to_answer_is_asked_again(self):
+        # Seen in the fault suite: its Berry held for 18 s by a phase whose
+        # server Ctrl-C had stopped, the hub did not answer Status 0 in time,
+        # was taken for official Tasmota without its template once it did,
+        # and sent the way off Tasmota's layout.
+        import http.client
+        import urllib.error
+        # Or its connection dropped as its Berry came free (seen at E3).
+        for failure in (TimeoutError("timed out"), ConnectionResetError("reset"),
+                        http.client.RemoteDisconnected("closed"), urllib.error.URLError(OSError("refused"))):
+            fake = FakeTasmota(version="15.6.0.1(f5b34a2-bluetooth)", table=detect.SONOFF_TABLE_SHA256,
+                               module="Generic")
+            answers = fake.command
+
+            def busy(command, failure=failure, answers=answers):
+                if command == "Status 0":
+                    raise failure
+                return answers(command)
+            fake.command = busy
+            self.assertEqual(self.found_busy(fake), ([], None), failure)
+
+    def test_a_page_that_answers_no_to_the_command_is_no_tasmota(self):
+        import io
+        import urllib.error
+        fake = FakeTasmota(version="", table=None)
+
+        def not_found(command):
+            raise urllib.error.HTTPError("http://192.168.0.137/cm", 404, "Not Found", {}, io.BytesIO())
+        fake.command = not_found
+        self.assertIsNone(self.kind(fake))
+
+    def test_the_routes_own_tasmota_too_busy_to_say_its_layout_is_asked_again(self):
+        fake = FakeTasmota(version="15.6.0.1(f5b34a2-bluetooth)", table=None, module="Generic")
+
+        def busy(address, length, timeout=None):
+            raise TimeoutError("timed out")
+        fake.sha_region = busy
+        self.assertEqual(self.found_busy(fake), ([], None))
+        # Official Tasmota, which may have no Berry to ask, is found as before.
+        fake.version, fake.module = "15.6.0(release-tasmota32)", "Sonoff S60TPG"
+        self.assertEqual(self.kind(fake), "tasmota")
+
     def test_official_tasmota_with_sonoffs_table_is_still_leaving_tasmota(self):
         # The table written, the restart into the mover not yet: leaving Tasmota
         # is done again, and finds its writes done - never taken as the hub.

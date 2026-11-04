@@ -15,8 +15,10 @@ module says it is), which a run carrying on recognises.
 from __future__ import annotations
 
 import concurrent.futures
+import http.client
 import ipaddress
 import socket
+import urllib.error
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -107,6 +109,14 @@ def _tasmota(host: str, timeout: float,
         status = device.command("Status 0")
         if isinstance(status, dict) and "StatusFWR" not in status:
             status["StatusFWR"] = device.command("Status 2").get("StatusFWR", {})
+    except urllib.error.HTTPError:
+        return None  # it answered: no Tasmota
+    except (OSError, http.client.HTTPException):
+        # Its web page open, its commands not answered - in time, or at all,
+        # its connection dropped: a Tasmota whose Berry is held (the routes'
+        # own, by a phase whose server is gone, say) is asked again, never
+        # taken for one without its template once it answers.
+        raise Unreadable(host) from None
     except Exception:  # noqa: BLE001 - anything but Tasmota answering
         return None
     if not isinstance(status, dict) or "Status" not in status:
@@ -119,6 +129,10 @@ def _tasmota(host: str, timeout: float,
         sonoff_layout = device.sha_region(0x8000, 0x1000, timeout=20) in (SONOFF_TABLE_SHA256,
                                                                            INTERIM_TABLE_SHA256)
     except Exception:  # noqa: BLE001 - no Berry: not one of this tool's
+        if "bluetooth" in version:
+            # The routes' own, its Berry busy - with a phase whose server is
+            # gone, say: not to be taken for official Tasmota on its layout.
+            raise Unreadable(host) from None
         sonoff_layout = False
     # The routes' own Tasmota is the bluetooth build.  Official Tasmota with
     # Sonoff's table is one leaving Tasmota that has not restarted yet: still
@@ -136,7 +150,7 @@ def _tasmota(host: str, timeout: float,
 
 
 class Unreadable(RuntimeError):
-    """A Tasmota that answered, but not what its template is."""
+    """A Tasmota that answered, but not what its template or layout is."""
 
 
 class Locked(RuntimeError):
