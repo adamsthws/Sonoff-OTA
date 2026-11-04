@@ -30,6 +30,11 @@ import re
 from dataclasses import dataclass
 
 
+# The author every kind's ESPHome project is named for, as ESPHome's
+# author.project wants: what every image published so far calls itself.
+ESPHOME_AUTHOR = "adamsthws"
+
+
 @dataclass(frozen=True, eq=False)
 class Kind:
     """A kind of plug the tool converts."""
@@ -76,6 +81,12 @@ class Kind:
         """`product_model` as eWeLink gives it, if it is one of this kind's; else ""."""
         product = (product_model or "").strip().upper()
         return product if self.product.fullmatch(product) else ""
+
+    @property
+    def esphome_project(self) -> str:
+        """The project its ESPHome is built as (devices/<kind>/esphome.yaml),
+        which the plug says through its API, with the project's version."""
+        return f"{ESPHOME_AUTHOR}.{self.key}"
 
     @property
     def display_name(self) -> str:

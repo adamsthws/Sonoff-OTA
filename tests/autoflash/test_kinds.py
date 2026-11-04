@@ -52,6 +52,12 @@ class NamesTests(unittest.TestCase):
         self.assertEqual((S60.display_name, kinds.SONOFF_S61.display_name), ("Sonoff-S60", "Sonoff-S61"))
         self.assertEqual(json.loads(S60.tasmota_template())["NAME"], "Sonoff-S60")
 
+    def test_each_kinds_esphome_is_built_as_the_project_its_updates_look_for(self):
+        from tools.autoflash.runs import ROOT
+        for kind in kinds.ALL:
+            config = (ROOT / "devices" / kind.key / "esphome.yaml").read_text(encoding="utf-8")
+            self.assertRegex(config, rf"(?m)^  project:\n    name: {re.escape(kind.esphome_project)}\n", kind.key)
+
     def test_an_esphome_is_known_by_its_comment_whatever_its_name(self):
         S61 = kinds.SONOFF_S61
         self.assertIs(kinds.for_esphome("esphome abcdef", "Sonoff-S61"), S61)

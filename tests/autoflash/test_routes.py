@@ -104,10 +104,14 @@ class FamilyTests(unittest.TestCase):
                 for attribute in ("FIRMWARES", "SOURCES", "steps_for", "POINT_OF_NO_RETURN",
                                   "DESTRUCTIVE_STEPS", "RETRY_STEPS", "ERASED_CHECK_STEPS", "STAGE_NAMES",
                                   "TARGET_STAGE_NAMES", "PLAIN_DESCRIPTION", "ATTEMPTED_EVIDENCE",
-                                  "STEP_VERIFIERS", "SONOFF_FROM_BACKUP", "RESUME_CHECK"):
+                                  "STEP_VERIFIERS", "SONOFF_FROM_BACKUP", "RESUME_CHECK",
+                                  "published_version"):
                     self.assertTrue(hasattr(family, attribute), attribute)
-                # Every step of every route has a name for its stage line and a plain description.
+                # Every step of every route has a name for its stage line and a plain description:
+                # from an earlier release of this tool's firmware, only to this one's.
+                kind = next(kind for kind in kinds.ALL if routes.FAMILIES[kind.family] is family)
                 steps = {step for firmware in family.FIRMWARES for source in family.SOURCES
+                         if source != "outdated" or family.published_version(kind, firmware)
                          for step, _, _ in family.steps_for(firmware, source)}
                 self.assertEqual(steps - set(family.STAGE_NAMES), set())
                 self.assertEqual(steps - set(family.PLAIN_DESCRIPTION), set())
@@ -119,7 +123,8 @@ class FamilyTests(unittest.TestCase):
 
     def test_a_firmware_another_family_takes_is_refused_for_this_plug(self):
         other = a_kind("made-up", "madeup")
-        family = SimpleNamespace(FIRMWARES={"openbeken": "OpenBeken", "sonoff": "Sonoff"}, SONOFF_FROM_BACKUP=True)
+        family = SimpleNamespace(FIRMWARES={"openbeken": "OpenBeken", "sonoff": "Sonoff"}, SONOFF_FROM_BACKUP=True,
+                                 published_version=lambda kind, firmware: None)
         state = self.state(plug_kind="made-up")
         ctx = SimpleNamespace(state=state, firmware_given="tasmota", esphome_firmware=None)
         with mock.patch.object(kinds, "ALL", (kinds.SONOFF_S60, other)), \
@@ -167,7 +172,9 @@ class BekenTargetTests(unittest.TestCase):
         # esphome>tasmota:E3:cancel-switch). Part way, there is no firmware to
         # name, only where it goes.
         from tools.autoflash.routes import espressif
-        for running in set(espressif.SOURCES) - {"sonoff", "esphome"}:
+        from tools.autoflash.routes import update
+        # "outdated" is no plug found, but a firmware the route finds older (routes/update.py).
+        for running in set(espressif.SOURCES) - {"sonoff", "esphome", "outdated"}:
             with self.subTest(running=running):
                 state = RunState.open(Path(self.tmp.name) / running)
                 state.set_input("plug_kind", "sonoff-s60")
@@ -175,6 +182,7 @@ class BekenTargetTests(unittest.TestCase):
                 ctx = SimpleNamespace(state=state, firmware_given="esphome", esphome_firmware=None)
                 with mock.patch.object(routes.source, "find_current_firmware", return_value=running), \
                         mock.patch.object(routes.plugs, "find_backup", return_value=object()), \
+                        mock.patch.dict(update.RELEASE, tasmota=lambda ctx: None), \
                         mock.patch.object(routes.output, "say") as said:
                     self.assertEqual(routes.settle_route(ctx), ("esphome", running))
                 line = said.call_args.args[0]

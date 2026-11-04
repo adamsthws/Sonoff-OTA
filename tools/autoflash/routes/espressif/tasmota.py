@@ -31,6 +31,7 @@ from tools.autoflash import (
 from tools.autoflash.device import DeviceError, UploadRefused
 from tools.autoflash.errors import Abort
 from tools.autoflash.phases import PhaseError, failure_reason
+from tools.autoflash.routes import update
 from tools.autoflash.routes.espressif import evidence, hub
 from tools.autoflash.runs import ROOT
 from tools.autoflash.state import DONE, FAILED
@@ -424,6 +425,47 @@ def step_tasmota_back(ctx: Context) -> dict[str, Any]:
     return {"app_upload": how, "outcome": outcome, "name": name}
 
 
+def step_tasmota_update(ctx: Context) -> dict[str, Any]:
+    """U5 - an earlier release of official Tasmota switched to its safeboot
+    (Restart 3), which is given this release as F2 and T1 give it: app0
+    alone, so its settings and template stay.  Asked again, on a plug left
+    on the safeboot by a try cut off, it uploads from there."""
+    app = ROOT / "captures/safeboot-recovery-migration/tasmota32c3.bin"
+    _, new = update.versions(ctx)
+    if ctx.dry_run:
+        output.say(f"[dry-run] would switch Tasmota to its safeboot and upload Tasmota {new}")
+        return {"dry_run": True}
+    device = ctx.device
+    if not device.is_safeboot():
+        output.say("Switching Tasmota to its safeboot, the small firmware that takes its updates...")
+        try:
+            device.command("Restart 3", timeout=10)
+        except (DeviceError, OSError):
+            pass   # it may restart before it answers
+        started = time.monotonic()
+        while not device.is_safeboot():
+            if time.monotonic() - started > SAFEBOOT_WAIT:
+                raise Abort("Tasmota did not switch to its safeboot. Nothing was changed; running the same "
+                            "command again tries again")
+            time.sleep(3)
+    how, outcome = install_official(ctx, app)
+    if not outcome.startswith("rejoined"):
+        raise Abort(f"Tasmota {new} is on the device, but {outcome}: it lost its settings. Set it up there - "
+                    "its Wi-Fi, and the device's template - then run this again")
+    return {"app_upload": how, "outcome": outcome}
+
+
+def step_tasmota_updated(ctx: Context) -> dict[str, Any]:
+    """U6 - the new release running, then the meter checked, as a plug kept
+    on Tasmota has it checked (runner.rerun_on_tasmota)."""
+    result = update.wait_for_update(ctx, wait=120.0)
+    if not result.get("dry_run"):
+        result["meter"] = calibrate_tasmota_meter(ctx)
+    return result
+
+
+# How long Tasmota asked to switch to its safeboot may take to answer from it.
+SAFEBOOT_WAIT = 120.0
 # How long a plug asked to start Tasmota again may take before it is back on
 # the safeboot - nothing there to start - or Tasmota answers.
 TASMOTA_START_WAIT = 90.0

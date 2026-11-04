@@ -19,9 +19,10 @@ from tools.autoflash import (
     report,
     routes,
     runner,
+    runs,
 )
 from tools.autoflash.state import DONE, RunState
-from tools.autoflash.routes import espressif
+from tools.autoflash.routes import espressif, update
 from tools.autoflash.routes.espressif import evidence, mover, source, tasmota
 
 
@@ -32,13 +33,19 @@ class RouteTestCase(unittest.TestCase):
         self.quiet = contextlib.redirect_stdout(io.StringIO())
         self.quiet.__enter__()
         self.addCleanup(self.quiet.__exit__, None, None, None)
-        # No plug's own network to be seen, nor joined, and an ESPHome that
-        # wants nothing for an update: nothing goes on the network.
+        # No plug's own network to be seen, nor joined, an ESPHome that
+        # wants nothing for an update and says nothing of what it is:
+        # nothing goes on the network.
         for owner, name, value in ((join, "on_a_plug_network", False), (prompts, "find_ssid", None),
-                                   (esphome_ota, "wants", esphome_ota.NOTHING)):
+                                   (esphome_ota, "wants", esphome_ota.NOTHING),
+                                   (esphome, "api_device_info", None)):
             patch = mock.patch.object(owner, name, return_value=value)
             patch.start()
             self.addCleanup(patch.stop)
+        # A Tasmota that says no release of official Tasmota: asked, it would be the plug at plug_ip.
+        patch = mock.patch.dict(update.RELEASE, tasmota=lambda ctx: None)
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def ctx(self, given=None, run="run", **inputs):
         state = RunState.open(Path(self.tmp.name) / run)
@@ -794,6 +801,15 @@ class FromAConvertedPlugTests(RouteTestCase):
             for firmware in espressif.FIRMWARES:
                 if firmware == running or (running == "sonoff" and firmware == "sonoff"):
                     continue
+                if running == "outdated":
+                    # Updated, as its firmware takes any update: the last step checks
+                    # the new release arrived. Left, it is a run from the one it runs.
+                    if firmware == "sonoff":
+                        self.assertRaises(ValueError, espressif.steps_for, firmware, running)
+                        continue
+                    self.assertEqual([step for step, _, _ in espressif.steps_for(firmware, running)],
+                                     {"esphome": ["A5", "U1", "U2"], "tasmota": ["A5", "U5", "U6"]}[firmware])
+                    continue
                 steps = [step for step, _, _ in espressif.steps_for(firmware, running)]
                 if (running, firmware) == ("safeboot", "tasmota"):
                     # Its own Tasmota put back, not converted: T1 sees it running,
@@ -877,3 +893,227 @@ class ConfirmedOnlyAfterAMinuteTests(RouteTestCase):
             ctx = self.ctx(firmware="esphome")
             mover.step_esphome_check(ctx)
         self.assertEqual(asked.call_count, 1)
+
+
+class TasmotaUpdateTests(RouteTestCase):
+    """Official Tasmota of an earlier release than the one this tool installs
+    is offered that one, uploaded to its safeboot as F2 uploads it; any
+    other Tasmota is not."""
+
+    def settle(self, release, *, given=None, answer=0, run="run"):
+        ctx = self.ctx(given=given, run=run, plug_kind="sonoff-s60")
+        with mock.patch.object(source, "find_current_firmware", return_value="tasmota"), \
+                mock.patch.dict(update.RELEASE, tasmota=lambda ctx: release), \
+                mock.patch.object(routes, "sonoff_backup_exists", return_value=True), \
+                mock.patch.object(prompts, "ask_choice", return_value=answer) as asked:
+            route = routes.settle_route(ctx)
+        self.addCleanup(routes.apply_target, "tasmota", "sonoff")
+        return ctx, route, (asked.call_args.args[1] if asked.called else None)
+
+    def test_an_earlier_release_is_offered_the_one_this_tool_installs(self):
+        ctx, route, offered = self.settle("15.6.0")
+        self.assertEqual(offered, [f"Tasmota, updated to {tasmota.OFFICIAL_TASMOTA_VERSION}", "ESPHome",
+                                   "Sonoff's own firmware (back to eWeLink, from its backup)"])
+        self.assertEqual(route, ("tasmota", "outdated"))
+        self.assertEqual([step for step, _, _ in routes.steps_of(ctx.state)], ["A0", "A5", "U5", "U6"])
+        self.assertEqual(update.versions(ctx), ("15.6.0", tasmota.OFFICIAL_TASMOTA_VERSION))
+        self.assertTrue(runs.plug_runs_tasmota(ctx.state))
+
+    def test_asked_for_on_the_command_line_it_is_updated_unasked(self):
+        _, route, offered = self.settle("15.6.0", given="tasmota")
+        self.assertEqual((route, offered), (("tasmota", "outdated"), None))
+
+    def test_leaving_it_is_leaving_any_tasmota(self):
+        _, route, _ = self.settle("15.6.0", answer=1)
+        self.assertEqual(route, ("esphome", "tasmota"))
+
+    def test_this_release_or_anyones_own_build_is_kept_as_it_is(self):
+        # Its meter checked instead (rerun_on_tasmota), as ever.
+        for why, release in (("this release", tasmota.OFFICIAL_TASMOTA_VERSION), ("not official", None)):
+            with self.subTest(why):
+                with self.assertRaisesRegex(routes.NothingToDo, "already runs Tasmota"):
+                    self.settle(release, given="tasmota", run=why)
+
+    def test_its_release_is_read_from_an_official_builds_version_alone(self):
+        for version, release in (("15.6.0(release-tasmota32)", "15.6.0"), ("16.0.0 (release-tasmota32)", "16.0.0"),
+                                 ("15.6.0.1(f5b34a2-bluetooth)", None), ("16.0.0(release-safeboot)", None),
+                                 ("14.0.0(tasmota32c3-mine)", None), ("", None)):
+            ctx = SimpleNamespace(device=SimpleNamespace(firmware_version=lambda version=version: version))
+            self.assertEqual(update.tasmota_release(ctx), release, version)
+
+    def plug(self, safeboot_after=1):
+        """A Tasmota that goes to its safeboot on Restart 3, after `safeboot_after` asks."""
+        commands = []
+        asks = iter([False] * safeboot_after + [True] * 100)
+        device = SimpleNamespace(is_safeboot=lambda: next(asks),
+                                 command=lambda text, timeout=None: commands.append(text) or {})
+        ctx = self.ctx(source="outdated", firmware="tasmota", update_from="15.6.0",
+                       update_to=tasmota.OFFICIAL_TASMOTA_VERSION)
+        ctx.device = device
+        return ctx, commands
+
+    def test_it_is_switched_to_its_safeboot_and_given_this_release_there(self):
+        ctx, commands = self.plug()
+        with mock.patch.object(tasmota, "install_official", return_value=("uploaded", "rejoined the network")) \
+                as installed, mock.patch.object(tasmota.time, "sleep"):
+            result = tasmota.step_tasmota_update(ctx)
+        self.assertEqual(commands, ["Restart 3"])
+        self.assertEqual(installed.call_args.args[1].name, "tasmota32c3.bin")
+        self.assertEqual(result["outcome"], "rejoined the network")
+
+    def test_left_on_its_safeboot_it_is_given_it_from_there(self):
+        ctx, commands = self.plug(safeboot_after=0)
+        with mock.patch.object(tasmota, "install_official", return_value=("uploaded", "rejoined the network")):
+            tasmota.step_tasmota_update(ctx)
+        self.assertEqual(commands, [])
+
+    def test_one_that_lost_its_settings_is_left_to_the_person(self):
+        ctx, _ = self.plug()
+        with mock.patch.object(tasmota, "install_official", return_value=("uploaded", "raised its own network")), \
+                mock.patch.object(tasmota.time, "sleep"), self.assertRaisesRegex(errors.Abort, "lost its settings"):
+            tasmota.step_tasmota_update(ctx)
+
+    def test_the_check_waits_for_the_new_release_then_checks_the_meter(self):
+        ctx, _ = self.plug()
+        answers = iter(["15.6.0", None, tasmota.OFFICIAL_TASMOTA_VERSION])
+        with mock.patch.dict(update.RELEASE, tasmota=lambda ctx: next(answers)), \
+                mock.patch.object(tasmota, "calibrate_tasmota_meter", return_value={"changed": False}) as meter, \
+                mock.patch.object(time, "sleep"):
+            result = tasmota.step_tasmota_updated(ctx)
+        self.assertEqual((result["to"], result["meter"]), (tasmota.OFFICIAL_TASMOTA_VERSION, {"changed": False}))
+        meter.assert_called_once()
+
+    def test_a_try_cut_off_is_judged_by_the_release_it_runs(self):
+        ctx, _ = self.plug()
+        for release, finished in ((tasmota.OFFICIAL_TASMOTA_VERSION, True), ("15.6.0", False), (None, None)):
+            with mock.patch.dict(update.RELEASE, tasmota=lambda ctx, release=release: release):
+                self.assertIs(evidence.ATTEMPTED_EVIDENCE["U5"](ctx)[0], finished, release)
+                self.assertIs(espressif.STEP_VERIFIERS["U5"](ctx)[0], finished is not False, release)
+
+
+class DeviceInfoTests(unittest.TestCase):
+    """What ESPHome says it is, asked through its API."""
+
+    serve = WifiActionTests.serve
+
+    @staticmethod
+    def info(name=b"esphome-abcdef", version=b"2026.10.0", project=b"adamsthws.sonoff-s60", release=b"1.4.0"):
+        from tools.autoflash.esphome import _frame, _varint
+        fields = b"".join(bytes([number << 3 | 2]) + _varint(len(value)) + value
+                          for number, value in ((2, name), (4, version), (8, project), (9, release)) if value)
+        return _frame(10, b"\x08\x00" + fields)
+
+    def test_it_says_its_project_and_its_version(self):
+        port = self.serve((b"\x00\x00\x09", self.info()))
+        self.assertEqual(esphome.api_device_info("127.0.0.1", port, timeout=3.0),
+                         {"name": "esphome-abcdef", "esphome_version": "2026.10.0",
+                          "project_name": "adamsthws.sonoff-s60", "project_version": "1.4.0", "encrypted": False})
+
+    def test_one_built_as_no_project_says_none(self):
+        port = self.serve((b"\x00\x00\x09", self.info(project=b"", release=b"")))
+        info = esphome.api_device_info("127.0.0.1", port, timeout=3.0)
+        self.assertEqual((info["project_name"], info["project_version"]), ("", ""))
+
+    def test_an_encrypted_api_says_so(self):
+        port = self.serve((b"", b"\x01\x00\x08Bad indicator"))
+        with self.assertRaises(esphome.ApiLocked):
+            esphome.api_device_info("127.0.0.1", port, timeout=2.0)
+
+
+class ESPHomeUpdateTests(RouteTestCase):
+    """This tool's ESPHome, an earlier release, is offered this one as an
+    update; any other ESPHome is not."""
+
+    def settle(self, info, *, given=None, answer=0, run="run", **inputs):
+        ctx = self.ctx(given=given, run=run, plug_kind="sonoff-s60", **inputs)
+        with mock.patch.object(source, "find_current_firmware", return_value="esphome"), \
+                mock.patch.object(esphome, "api_device_info", return_value=info), \
+                mock.patch.object(espressif, "published_version", return_value="1.6.0"), \
+                mock.patch.object(routes, "sonoff_backup_exists", return_value=True), \
+                mock.patch.object(prompts, "ask_choice", return_value=answer) as asked:
+            route = routes.settle_route(ctx)
+        self.addCleanup(routes.apply_target, "tasmota", "sonoff")
+        return ctx, route, (asked.call_args.args[1] if asked.called else None)
+
+    @staticmethod
+    def ours(release="1.4.0", **changed):
+        return {"name": "esphome-abcdef", "esphome_version": "2026.10.0", "project_name": "adamsthws.sonoff-s60",
+                "project_version": release, "encrypted": False, **changed}
+
+    def test_an_earlier_release_is_offered_the_update(self):
+        ctx, route, offered = self.settle(self.ours(), answer=1)
+        self.assertEqual(offered, ["Tasmota", "ESPHome, updated to 1.6.0",
+                                   "Sonoff's own firmware (back to eWeLink, from its backup)"])
+        self.assertEqual(route, ("esphome", "outdated"))
+        self.assertEqual([step for step, _, _ in routes.steps_of(ctx.state)], ["A0", "A5", "U1", "U2"])
+        self.assertEqual(update.versions(ctx), ("1.4.0", "1.6.0"))
+
+    def test_asked_for_on_the_command_line_it_is_updated_unasked(self):
+        _, route, offered = self.settle(self.ours(), given="esphome")
+        self.assertEqual((route, offered), (("esphome", "outdated"), None))
+
+    def test_leaving_it_is_leaving_any_esphome(self):
+        ctx, route, _ = self.settle(self.ours(), answer=0)
+        self.assertEqual(route, ("tasmota", "esphome"))
+        self.assertEqual(routes.steps_of(ctx.state), routes.steps_for("tasmota", "esphome"))
+
+    def test_any_other_esphome_is_not_offered_it(self):
+        for why, info in (("this release", self.ours("1.6.0")), ("a later one", self.ours("1.10.0")),
+                          ("another project", self.ours(project_name="someone.else")),
+                          ("another kind's", self.ours(project_name="adamsthws.sonoff-s61")),
+                          ("adopted, its API given a key", self.ours(encrypted=True)),
+                          ("not one of our releases", self.ours("dev")), ("not saying", None)):
+            with self.subTest(why):
+                with self.assertRaisesRegex(routes.NothingToDo, "already runs ESPHome"):
+                    self.settle(info, given="esphome", run=why)
+
+    def test_not_with_an_esphome_built_by_hand(self):
+        ctx = self.ctx(given="esphome", plug_kind="sonoff-s60")
+        ctx.esphome_firmware = Path("own.bin")
+        with mock.patch.object(esphome, "api_device_info", return_value=self.ours()):
+            self.assertFalse(update.outdated(ctx, "esphome", "1.6.0"))
+
+    def test_releases_are_compared_as_numbers(self):
+        self.assertTrue(update.older("1.9.0", "1.10.0"))
+        self.assertFalse(update.older("1.10.0", "1.9.0"))
+        self.assertFalse(update.older("1.6.0", "1.6.0"))
+        self.assertFalse(update.older("", "1.6.0"))
+
+    def check(self, versions, confirm=0.0):
+        ctx = self.ctx(source="outdated", firmware="esphome", update_from="1.4.0", update_to="1.6.0",
+                       plug_kind="sonoff-s60")
+        answers = iter(self.ours(version) if version else None for version in versions)
+        with mock.patch.object(esphome, "api_device_info", side_effect=lambda *a, **k: next(answers)), \
+                mock.patch.object(time, "sleep"):
+            return update.wait_for_update(ctx, wait=60.0, confirm=confirm)
+
+    def test_the_check_waits_for_the_new_release(self):
+        result = self.check([None, "1.4.0", "1.6.0"])
+        self.assertEqual((result["from"], result["to"]), ("1.4.0", "1.6.0"))
+
+    def test_one_gone_back_to_its_old_release_is_not_done(self):
+        # The S60's ESPHome takes an update back if it restarts before confirming it.
+        with self.assertRaisesRegex(errors.Abort, "went back to ESPHome 1.4.0"):
+            self.check(["1.6.0", "1.4.0"], confirm=70.0)
+        self.assertEqual(self.check(["1.6.0", "1.6.0"], confirm=70.0)["to"], "1.6.0")
+
+    def test_a_send_cut_off_is_judged_by_the_release_it_runs(self):
+        ctx = self.ctx(source="outdated", firmware="esphome", update_from="1.4.0", update_to="1.6.0",
+                       plug_kind="sonoff-s60")
+        for version, finished in (("1.6.0", True), ("1.4.0", False), (None, None)):
+            with mock.patch.object(esphome, "api_device_info", return_value=self.ours(version) if version else None):
+                self.assertIs(evidence.ATTEMPTED_EVIDENCE["U1"](ctx)[0], finished, version)
+                self.assertIs(espressif.STEP_VERIFIERS["U1"](ctx)[0], finished is not False, version)
+
+    def test_its_report_says_it_was_updated(self):
+        for running, firmware, result in (("outdated", "esphome", "Updated"), ("esphome", "tasmota", "Converted")):
+            ctx = self.ctx(source=running, firmware=firmware, run=running)
+            with mock.patch.object(report, "check_esphome_hardware", return_value={}), \
+                    mock.patch.object(report, "check_hardware", return_value={}), \
+                    mock.patch.object(report, "offer_report") as offered:
+                report.invite_report(ctx, 60.0, False)
+            self.assertEqual(report.answer(dict(offered.call_args.args[1])["Result"]), result, running)
+
+    def test_the_wifi_is_read_from_esphome_not_tasmota(self):
+        ctx = self.ctx(source="outdated", firmware="esphome")
+        self.assertFalse(runs.plug_runs_tasmota(ctx.state))

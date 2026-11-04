@@ -1,6 +1,7 @@
 """ESPHome, and the way to and from it: ESPHome written from the hub (I1,
-I2), Tasmota left for the mover (L1, M1), and the startup firmware sent
-to an ESPHome to bring the plug back to the hub (X1, X2).
+I2), Tasmota left for the mover (L1, M1), the startup firmware sent to an
+ESPHome to bring the plug back to the hub (X1, X2), and an earlier release
+of ESPHome updated (U1, U2).
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from tools.autoflash import (
 )
 from tools.autoflash.device import DeviceError
 from tools.autoflash.errors import Abort, NothingWritten
+from tools.autoflash.routes import update
 from tools.autoflash.routes.espressif import hub
 from tools.autoflash.runs import ROOT
 from tools.espressif.safeboot.prepare_imprinted_bundle import BundleError, startup_image
@@ -170,6 +172,38 @@ def step_esphome_from_mover(ctx: Context) -> dict[str, Any]:
     seconds = handover.send_as_esphome_update(ctx, image, "ESPHome")
     output.say(f"    ESPHome sent in {seconds}s; the device restarts into it.")
     return {"seconds": seconds, "size": len(image)}
+
+
+def step_esphome_update(ctx: Context) -> dict[str, Any]:
+    """U1 - this release's ESPHome, the plug's Wi-Fi written in, sent to the
+    earlier release as an ordinary ESPHome update: it writes it into its
+    other slot and starts it, its settings kept, and goes back to the one it
+    had should the new one not start."""
+    unlock.unlock_esphome(ctx)
+    _, new = update.versions(ctx)
+    ssid, password = ctx.wifi(why=[
+        "ESPHome cannot say what its Wi-Fi password is, and the update needs it",
+        "written in, as every ESPHome image this tool installs does.",
+    ])
+    try:
+        image = esphome.image_for(ssid, password)
+    except (esphome.ImageError, imprint.ImprintError, OSError) as exc:
+        raise Abort(f"the ESPHome image cannot be used: {exc}") from exc
+    if ctx.dry_run:
+        return {"dry_run": True}
+    seconds = handover.send_as_esphome_update(ctx, image, f"ESPHome {new}")
+    output.say(f"    ESPHome {new} sent in {seconds}s; the device restarts into it.")
+    return {"seconds": seconds, "size": len(image)}
+
+
+def step_esphome_updated(ctx: Context) -> dict[str, Any]:
+    """U2 - the update started, joined the Wi-Fi and kept; then given the
+    plug's factory calibration, as I2 does, which a release before 1.4.0 did
+    not take."""
+    result = update.wait_for_update(ctx, confirm=ESPHOME_CONFIRMS_AFTER)
+    if not result.get("dry_run"):
+        result["meter"] = calibrate_esphome_meter(ctx)
+    return result
 
 
 def step_startup_from_esphome(ctx: Context, *, again: bool = False) -> dict[str, Any]:

@@ -346,6 +346,8 @@ def unlock_tasmota(ctx: Context) -> None:
     leaves it (L1) - every firmware after that is one this tool put on.  A
     run carried on was not asked yet, nor one given the wrong password."""
     source = runs.run_source(ctx.state)
+    if source == "outdated" and runs.run_firmware(ctx.state) == "tasmota":
+        source = "tasmota"   # updated: an official Tasmota, its password its own
     if source not in ("tasmota", "safeboot", "untemplated") or ctx.state.is_done("L1"):
         return
     if source == "safeboot" and not ctx.state.is_done("T1"):

@@ -2,7 +2,8 @@
 takes the next as an update of its own kind.  OpenBeken fetches an rt_ota
 image by URL into the download slot (O1, O2, and J2 as the interim
 firmware); an ESPHome on LibreTiny takes a UF2 carrying one through ESPHome's
-OTA (E1, E2).  The stock bootloader
+OTA (E1, E2, and U1, this release's ESPHome to an earlier one; U3 is
+OpenBeken's own update, this release's to an earlier one).  The stock bootloader
 applies whichever is there on the restart that follows, and the new firmware
 reads the plug's Wi-Fi from the stock store.
 """
@@ -221,6 +222,32 @@ def step_esphome_to_sonoff(ctx: Context) -> dict[str, Any]:
     data = uf2.write(stock, name="sonoff-stock", version=version)
     seconds = handover.send_as_esphome_update(ctx, data, f"Sonoff's firmware {version}", port=ESPHOME_OTA_PORT)
     return {"seconds": seconds, "version": version, "signal_dbm": signal}
+
+
+def step_esphome_update(ctx: Context) -> dict[str, Any]:
+    """U1 - this release's ESPHome, sent to the earlier release as an update
+    the same way; the plug's own store, with its Wi-Fi and calibration, is
+    left as it is, so the new one reads them as the old one did."""
+    kind = kinds.of_run(ctx.state)
+    image, version = images.image(ctx, "esphome")
+    if ctx.dry_run:
+        return {"dry_run": True, "version": version}
+    data = uf2.write(image, name=f"esphome-{kind.key}", version=version)
+    seconds = handover.send_as_esphome_update(ctx, data, f"ESPHome {version}", port=ESPHOME_OTA_PORT)
+    return {"seconds": seconds, "version": version}
+
+
+def step_openbeken_update(ctx: Context) -> dict[str, Any]:
+    """U3 - this release's OpenBeken, fetched by the earlier release into the
+    download slot as O1 has it fetch ESPHome: its settings are kept, and its
+    driver, finding the Wi-Fi set, imports nothing from the store again."""
+    image, version = images.image(ctx, "openbeken")
+    if ctx.dry_run:
+        return {"dry_run": True, "version": version}
+    host = ctx.state.input("plug_ip")
+    seconds = serve_to_plug(ctx, images.as_sent(ctx, "U3", image), f"OpenBeken {version}",
+                            lambda url: openbeken.ota_http(host, url), unstick=lambda: openbeken.restart(host))
+    return {"seconds": seconds, "version": version}
 
 
 # How long a plug just switched on may take to answer, before its record is judged.

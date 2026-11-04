@@ -86,12 +86,13 @@ def public_text(text: str, limit: int = 240) -> str:
 
 
 def run_result(ctx: Context, ending: str) -> str:
-    """How the run ended, for the report: "converted", or where and why it stopped.
+    """How the run ended, for the report: "converted" ("updated", for an
+    update of this tool's firmware), or where and why it stopped.
 
     ending: "converted", "failed" or "crashed".
     """
     if ending == "converted":
-        return "converted"
+        return "updated" if runs.run_source(ctx.state) == "outdated" else "converted"
     # The stage that failed, not the first left to do: a failure may have sent
     # earlier steps back to be done again (E3 refused as changed sends E1, E2).
     failed = getattr(ctx, "last_failed_step", "")
@@ -123,7 +124,8 @@ CONVERTED_FROM = {"sonoff": "Sonoff", "tasmota": "Tasmota", "esphome": "ESPHome"
                   "midway": "unfinished conversion", "committed": "unfinished conversion",
                   "installer": "unfinished conversion", "interim": "unfinished conversion",
                   "safeboot": "Tasmota's safeboot",
-                  "untemplated": "Tasmota without its template"}
+                  "untemplated": "Tasmota without its template",
+                  "outdated": "an earlier release"}   # of the run's firmware, named before it
 
 
 def report_fields(ctx: Context, seconds: float, resumed: bool,
@@ -165,7 +167,8 @@ def report_fields(ctx: Context, seconds: float, resumed: bool,
     fields = [
         ("Result", result),
         ("Firmware", routes.FIRMWARES[firmware] if firmware else "not chosen"),
-        ("Converted from", CONVERTED_FROM[runs.run_source(ctx.state)]),
+        ("Converted from", (f"{routes.FIRMWARES[firmware]}, " if runs.run_source(ctx.state) == "outdated" else "")
+         + CONVERTED_FROM[runs.run_source(ctx.state)]),
         ("Tool version", __version__),
         ("Device model", model or "__"),
         ("Stock firmware", stock_version or "__"),
@@ -350,7 +353,7 @@ def invite_report(ctx: Context, seconds: float, resumed: bool) -> None:
              "sonoff": check_ewelink_hardware}.get(
         runs.run_firmware(ctx.state), lambda ctx: {})
     with output.working("Generating your report..."):
-        fields = report_fields(ctx, seconds, resumed, check(ctx))
+        fields = report_fields(ctx, seconds, resumed, check(ctx), result=run_result(ctx, "converted"))
     offer_report(ctx, fields, "Please share how it went!")
     output.tell("")
     output.show("You've reached the bit where I hold out my hat!", output.GREEN)

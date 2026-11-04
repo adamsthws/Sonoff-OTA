@@ -110,7 +110,8 @@ def file_plug(ctx: Context, mac: str, account: AccountPlug | None) -> None:
 
 def plug_runs_tasmota(state: RunState) -> bool:
     """Whether the plug runs a Tasmota at this point of its run: everywhere but
-    on a route from ESPHome before X2, and after the plug has left Tasmota."""
+    on a route from ESPHome before X2, on another firmware's update, and after
+    the plug has left Tasmota."""
     source = run_source(state)
     if source == "safeboot":
         # Its safeboot says nothing of the Wi-Fi; from T1 it is a Tasmota's run.
@@ -119,6 +120,8 @@ def plug_runs_tasmota(state: RunState) -> bool:
         source = "tasmota"
     if source == "untemplated":
         source = "tasmota"
+    if source == "outdated":
+        return run_firmware(state) == "tasmota"
     if source not in ("tasmota", "esphome"):
         return True
     if source == "tasmota" and not state.is_done("L1"):

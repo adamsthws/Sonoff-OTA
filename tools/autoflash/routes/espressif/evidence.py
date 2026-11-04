@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, TYPE_CHECKING
 
 from tools.autoflash import detect, esphome, names, prompts, unlock
+from tools.autoflash.routes import update
 from tools.autoflash.routes.espressif import installer
 
 if TYPE_CHECKING:
@@ -27,7 +28,7 @@ def evidence_esphome_installed(ctx: Context) -> tuple[bool | None, str]:
     return None, "The device neither runs ESPHome nor answers as the temporary Tasmota."
 
 
-DESTRUCTIVE_STEPS = {"C2", "E2", "E3", "F2", "G1", "I1", "L1", "M1", "X1", "X2", "D5", "R1"}
+DESTRUCTIVE_STEPS = {"C2", "E2", "E3", "F2", "G1", "I1", "L1", "M1", "X1", "X2", "D5", "R1", "U1", "U5"}
 
 
 def evidence_official_app_installed(ctx: "Context") -> tuple[bool | None, str]:
@@ -164,4 +165,6 @@ ATTEMPTED_EVIDENCE: dict[str, Callable[["Context"], tuple[bool | None, str]]] = 
     "D5": evidence_bootloader,
     "R1": evidence_by_what_answers({"sonoff"}, {"hub"}),
     "T1": evidence_by_what_answers({"tasmota"}, {"startup"}),
+    "U1": update.evidence_updated,
+    "U5": update.evidence_updated,
 }

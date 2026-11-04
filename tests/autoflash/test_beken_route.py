@@ -4,6 +4,7 @@ import hashlib
 import json
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,7 +12,7 @@ from unittest import mock
 
 from tests.autoflash.test_openbeken import FakeOpenBeken
 from tools.autoflash import detect, errors, handover, kinds, openbeken, plugs, report, routes, state
-from tools.autoflash.routes import beken
+from tools.autoflash.routes import beken, update
 from tools.autoflash.routes.beken import arrived, images, onward, stock
 from tools.beken import fota_wrap, interim_marker, rbl, uf2
 from tools.ewelink import ota_push
@@ -36,12 +37,18 @@ class RouteTests(unittest.TestCase):
             ("esphome", "interim", ["A0", "B4", "J2", "K2"]),
             ("openbeken", "interim", ["A0", "J3", "K1", "B4"]),
             ("sonoff", "interim", ["A0", "B4", "J4", "K3"]),
+            # This tool's ESPHome or OpenBeken, an earlier release, updated
+            # (left for another firmware, it is a run from the one it runs).
+            ("esphome", "outdated", ["A0", "U1", "U2"]),
+            ("openbeken", "outdated", ["A0", "U3", "U4"]),
         ):
             with self.subTest(firmware=firmware, source=source):
                 self.assertEqual([s for s, _, _ in routes.steps_for(firmware, source, beken)], expected)
         self.assertEqual(beken.steps_for("esphome", "esphome"), [])
         with self.assertRaises(ValueError):
             beken.steps_for("esphome", "midway")
+        with self.assertRaises(ValueError):
+            beken.steps_for("sonoff", "outdated")
         self.assertIn("interim", beken.SOURCES)
 
     def test_a_run_to_esphome_shows_these_stages(self):
@@ -477,6 +484,18 @@ class OnwardTests(unittest.TestCase):
                 onward.step_esphome_to_sonoff(ctx)
             self.assertEqual(uf2.image_in(sent.call_args.args[1]), ("download", b"RBL stock"))
 
+    def test_an_earlier_esphome_is_sent_this_release_the_same_way(self):
+        # No go-ahead: an ESPHome update, not a conversion.
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = a_context(tmp, firmware="esphome", source="outdated")
+            with mock.patch.object(handover, "send_as_esphome_update", return_value=4.0) as sent, \
+                    mock.patch.object(handover, "consent_to_leave", side_effect=AssertionError("asked")):
+                result = onward.step_esphome_update(ctx)
+            image, version = images.image(ctx, "esphome")
+            self.assertEqual(uf2.image_in(sent.call_args.args[1]), ("download", image))
+            self.assertEqual(sent.call_args.kwargs["port"], 8892)
+            self.assertEqual(result["version"], version)
+
     def test_the_go_ahead_comes_first(self):
         with tempfile.TemporaryDirectory() as tmp:
             ctx = a_context(tmp, firmware="esphome", source="openbeken")
@@ -637,6 +656,104 @@ class FromTheInterimFirmwareTests(unittest.TestCase):
                     source.find_current_firmware(ctx)
 
 
+class OpenBekenUpdateTests(unittest.TestCase):
+    """This tool's OpenBeken, an earlier release, is offered this one as an
+    update, fetched as any OpenBeken update is; any other OpenBeken is not."""
+
+    def setUp(self):
+        self.server = FakeOpenBeken()
+        self.server.version = "1.0.9"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.tmp = directory.name
+        self.published = images.PINS["sonoff-s61"]["openbeken"]["version"]
+
+    def ctx(self, run="run", **inputs):
+        ctx = a_context(Path(self.tmp) / run, plug_ip=self.server.host, **inputs)
+        ctx.firmware_given = inputs.get("given")
+        return ctx
+
+    def settle(self, *, given=None, answer=0, run="run"):
+        ctx = self.ctx(run)
+        ctx.firmware_given = given
+        with mock.patch.object(routes.source, "find_current_firmware", return_value="openbeken"), \
+                mock.patch.object(routes, "sonoff_backup_exists", return_value=True), \
+                mock.patch.object(routes.output, "say"), \
+                mock.patch.object(routes.prompts, "section"), \
+                mock.patch.object(routes.prompts, "ask_choice", return_value=answer) as asked:
+            route = routes.settle_route(ctx)
+        self.addCleanup(routes.apply_target, "tasmota", "sonoff")
+        return ctx, route, (asked.call_args.args[1] if asked.called else None)
+
+    def test_an_earlier_release_is_offered_the_update(self):
+        ctx, route, offered = self.settle(answer=0)
+        self.assertEqual(offered, [f"OpenBeken, updated to {self.published}", "ESPHome",
+                                   "Sonoff's own firmware (back to eWeLink, from its backup)"])
+        self.assertEqual(route, ("openbeken", "outdated"))
+        self.assertEqual([step for step, _, _ in routes.steps_of(ctx.state)], ["A0", "U3", "U4"])
+        self.assertEqual(update.versions(ctx), ("1.0.9", self.published))
+
+    def test_asked_for_on_the_command_line_it_is_updated_unasked(self):
+        _, route, offered = self.settle(given="openbeken")
+        self.assertEqual((route, offered), (("openbeken", "outdated"), None))
+
+    def test_leaving_it_is_leaving_any_openbeken(self):
+        ctx, route, _ = self.settle(answer=1)
+        self.assertEqual(route, ("esphome", "openbeken"))
+        self.assertEqual(routes.steps_of(ctx.state), routes.steps_for("esphome", "openbeken", beken))
+
+    def test_any_other_openbeken_is_not_offered_it(self):
+        later = ".".join(str(int(part) + 1) for part in self.published.split("."))
+        for why, version, kind in (("this release", self.published, "sonoff-s61"), ("a later one", later, "sonoff-s61"),
+                                   ("not one of our releases", "1.18.320-dev", "sonoff-s61"),
+                                   ("another kind's", "1.0.9", "sonoff-s99")):
+            with self.subTest(why):
+                self.server.version, self.server.kind = version, kind
+                with self.assertRaisesRegex(routes.NothingToDo, "already runs OpenBeken"):
+                    self.settle(given="openbeken", run=why)
+
+    def test_it_is_fetched_by_the_earlier_release_unasked(self):
+        # No go-ahead and no backup: an OpenBeken update, not a conversion.
+        ctx = self.ctx(firmware="openbeken", source="outdated")
+        with mock.patch.object(onward, "serve_to_plug", return_value=4.0) as served, \
+                mock.patch.object(handover, "consent_to_leave", side_effect=AssertionError("asked")):
+            result = onward.step_openbeken_update(ctx)
+        image, version = images.image(ctx, "openbeken")
+        self.assertEqual(served.call_args.args[1], image)
+        served.call_args.args[3]("http://192.168.0.2:8088/firmware.rbl")
+        self.assertEqual(self.server.commands[-1], "ota_http http://192.168.0.2:8088/firmware.rbl")
+        self.assertEqual((result["seconds"], result["version"]), (4.0, version))
+
+    def test_the_check_waits_for_the_new_release(self):
+        ctx = self.ctx(firmware="openbeken", source="outdated", update_from="1.0.9", update_to=self.published)
+        answers = iter(["1.0.9", self.published])
+
+        def sleep(_seconds):
+            self.server.version = next(answers)
+        with mock.patch.object(time, "sleep", side_effect=sleep), mock.patch.object(update.output, "say"):
+            self.server.version = "1.0.9"
+            result = update.wait_for_update(ctx, wait=60.0)
+        self.assertEqual((result["from"], result["to"]), ("1.0.9", self.published))
+
+    def test_a_send_cut_off_is_judged_by_the_release_it_runs(self):
+        ctx = self.ctx(firmware="openbeken", source="outdated", update_from="1.0.9", update_to=self.published)
+        for version, finished in ((self.published, True), ("1.0.9", False)):
+            self.server.version = version
+            self.assertIs(beken.ATTEMPTED_EVIDENCE["U3"](ctx)[0], finished, version)
+            self.assertIs(beken.STEP_VERIFIERS["U3"](ctx)[0], finished, version)
+        self.server.kind = None   # an OpenBeken not ours, or none: cannot say
+        self.assertIsNone(beken.ATTEMPTED_EVIDENCE["U3"](ctx)[0])
+
+    def test_its_report_says_it_was_updated_from_an_earlier_openbeken(self):
+        ctx = self.ctx(firmware="openbeken", source="outdated")
+        with mock.patch.object(routes, "STEPS", []), mock.patch.object(routes, "ROUTE", ("openbeken", "outdated")):
+            fields = dict(report.report_fields(ctx, 60.0, False, result=report.run_result(ctx, "converted")))
+        self.assertEqual((fields["Result"], fields["Converted from"]), ("Updated", "OpenBeken, an earlier release"))
+
+
 class StillInstalledTests(unittest.TestCase):
     """A power cut while the image is written leaves the plug on the firmware
     it was leaving, its step recorded done (seen in the fault suite)."""
@@ -660,7 +777,7 @@ class StillInstalledTests(unittest.TestCase):
         self.assertTrue(self.judge(waiting, waiting, waiting)[0])
 
     def test_the_onward_steps_are_checked_on_resume(self):
-        self.assertEqual(set(beken.STEP_VERIFIERS), {"J2", "J4", "O1", "O2", "E1", "E2"})
+        self.assertEqual(set(beken.STEP_VERIFIERS), {"J2", "J4", "O1", "O2", "E1", "E2", "U1", "U3"})
 
 
 class ArrivedTests(unittest.TestCase):

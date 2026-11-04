@@ -34,6 +34,7 @@ NAMES = {
     "interim": "the interim firmware",
     "midway": "a firmware part way through a conversion",
     "untemplated": "Tasmota without the device's template",
+    "outdated": "an earlier release of the firmware this tool installs",
     "installer": "this tool's installer, part way from Sonoff's firmware",
     "safeboot": "Tasmota's safeboot, its Tasmota missing",
     "locked": "Tasmota with a web password",

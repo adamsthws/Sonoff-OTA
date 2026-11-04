@@ -62,7 +62,8 @@ check.
   and the `package_import_url` a plug gives Home Assistant names the new
   paths. A plug on ESPHome 1.4.0 or earlier names the old path, which no
   longer exists, so Home Assistant cannot adopt it until it is updated to the
-  image built from the moved config; the plug itself runs as before.
+  image built from the moved config - which running the tool again does
+  (below); the plug itself runs as before.
 - ESPHome for the S60 is 1.6.0: a change to its config, built with ESPHome
   [2026.10.0](https://github.com/esphome/esphome/releases/tag/2026.10.0) as
   1.4.0 was. Its bootloader is unchanged, so a plug on ESPHome already is
@@ -171,6 +172,18 @@ check.
   that says it is this project's for its kind, through its API, and whose
   API is not encrypted is offered it: one adopted into a dashboard is that
   dashboard's to update.
+- The same for a Sonoff S61 on an earlier release of this project's
+  OpenBeken (`--firmware openbeken`): it fetches this one as any OpenBeken
+  update, its settings kept. Only an OpenBeken whose driver says it is on
+  an S61, and whose build says it is an earlier release, is offered it.
+  Upstream's own builds have neither the driver nor the S61's 4 MB layout,
+  so this is the way an OpenBeken this tool installed is updated.
+- And for official Tasmota older than the release the tool installs
+  (`--firmware tasmota`): switched to its safeboot and given that release
+  there, as the conversion gives it, its settings and template kept, then
+  its meter checked. Only an official release build is offered it, never
+  anyone's own. Tasmota's own update, from its page, works as ever; this
+  makes running the tool again update any plug it converted.
 - A device hanging up on the tool as it writes - a plug restarting under a
   check - no longer ends the run on the spot, with nothing cleaned up: the
   tool set SIGPIPE to end it, for quiet output into `head`.

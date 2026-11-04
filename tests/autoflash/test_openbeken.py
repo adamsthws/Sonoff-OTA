@@ -24,6 +24,7 @@ class FakeOpenBeken(http.server.ThreadingHTTPServer):
         self.kind = "sonoff-s61"   # what its import module answers AutoflashKind for; None: no module
         self.interim = False   # whether its module says it is the interim firmware (AutoflashInterim)
         self.short_name = "openbeken-abcdef"
+        self.version = "1.0.0"   # the release its build string gives
 
     @property
     def host(self):
@@ -44,7 +45,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/info":
             self._send(200, json.dumps({
-                "uptime_s": self.server.uptime, "build": "Built on Oct 30 2026 12:00:00 version 1.0.0", "ip": "192.168.0.50",
+                "uptime_s": self.server.uptime, "build": f"Built on Oct 30 2026 12:00:00 version {self.server.version}", "ip": "192.168.0.50",
                 "mac": "12:34:56:AB:CD:EF", "flags": "0", "mqtthost": ":1883", "mqtttopic": "obk",
                 "chipset": "BK7238", "webapp": "", "shortName": self.server.short_name, "startcmd": "",
                 "supportsSSDP": 0, "supportsClientDeviceDB": True}).encode())

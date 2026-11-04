@@ -542,6 +542,35 @@ def api_wifi(host: str, port: int = API_PORT, timeout: float = 8.0,
     return None
 
 
+_DEVICE_INFO, _DEVICE_INFO_ANSWER = 9, 10
+
+
+def api_device_info(host: str, port: int = API_PORT, timeout: float = 8.0,
+                    key: bytes | None = None) -> dict[str, object] | None:
+    """What ESPHome says it is: its name, its ESPHome's version, the project
+    it was built as and the project's version ("" for one built as none),
+    and whether its API is encrypted - which ours never is.  None from one
+    that does not answer; ApiLocked as api_wifi_details."""
+    try:
+        api = _Api(host, port, timeout, key)
+    except OSError:
+        return None
+    try:
+        api.send((_DEVICE_INFO, b""))
+        for kind, payload in api.messages():
+            if kind == _DEVICE_INFO_ANSWER:
+                fields = _fields(payload)
+                said = {name: fields.get(number, b"") for name, number in
+                        (("name", 2), ("esphome_version", 4), ("project_name", 8), ("project_version", 9))}
+                return {**{name: value.decode("utf-8", "replace") if isinstance(value, bytes) else ""
+                           for name, value in said.items()}, "encrypted": api.ciphers is not None}
+    except (OSError, ValueError, IndexError):
+        return None
+    finally:
+        api.close()
+    return None
+
+
 # Our ESPHome's action that gives the Wi-Fi it is on (devices/sonoff-s60/esphome.yaml):
 # its name from 1.2.0, and 1.1.0's; and the API messages that list and call it.
 WIFI_ACTIONS = ("autoflash_wifi", "s60_wifi")

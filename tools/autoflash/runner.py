@@ -30,6 +30,7 @@ from tools.autoflash.device import DeviceError
 from tools.autoflash.errors import Abort, NothingWritten
 from tools.autoflash.phases import PhaseError, PlugNeverConnected
 from tools.autoflash.prompts import QuitRun
+from tools.autoflash.routes import update
 from tools.autoflash.routes.espressif import tasmota
 from tools.autoflash.runs import ROOT
 from tools.autoflash.state import ATTEMPTED, DONE, FAILED, PENDING
@@ -456,9 +457,15 @@ def run_steps(ctx: Context) -> int:
     if ctx.dry_run:
         output.show("Dry run complete: nothing was written to the device.", output.GREEN)
         return 0
-    output.show("Conversion complete!", output.GREEN)
+    updated = runs.run_source(ctx.state) == "outdated"
+    output.show("Update complete!" if updated else "Conversion complete!", output.GREEN)
     firmware = routes.ROUTE[0] or runs.run_firmware(ctx.state)
-    if firmware == "sonoff":
+    if updated:
+        output.tell(f"The device is running {routes.FIRMWARES[firmware]} {update.versions(ctx)[1]}...")
+        url = report.plug_page_url(ctx.state.input("plug_ip"))
+        if url:
+            output.show_link(url, "Your device")
+    elif firmware == "sonoff":
         output.tell("The device is running its own Sonoff firmware again, with the settings it")
         output.tell("had: it is back in the eWeLink app.")
     else:

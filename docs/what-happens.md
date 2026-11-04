@@ -239,6 +239,33 @@ advance), which changes nothing but its meter: calibrated as step 10 does it,
 if it is not already - on a plug converted before the tool did that, say. A
 meter calibrated by hand, against another meter, is left as it is.
 
+On an earlier release of this project's ESPHome it offers this one instead
+(`--firmware esphome` chooses it in advance): sent to ESPHome as an ordinary
+ESPHome update, as Home Assistant would send one, with your Wi-Fi read from
+the plug and written in. ESPHome writes it into the half of its memory it is
+not running from and starts it, its settings kept; on an S60 a power cut
+before it has run a minute takes the plug back to the release it had, so the
+run waits that out. The plug says which release it runs through its native
+API. One adopted into an ESPHome dashboard, whose API then has an encryption
+key, is not offered it: the published image would take away the dashboard's
+changes and key, so it is updated from the dashboard.
+
+On an S61 the same goes for an earlier release of this project's OpenBeken
+(`--firmware openbeken`): OpenBeken fetches this one from your computer, as
+it fetches any update, and restarts into it, its settings kept. Which
+release it runs its build says; that it is ours, on an S61, its driver
+says. Update it this way rather than from upstream: OpenBeken's own builds
+have neither the driver nor the S61's memory layout.
+
+On an official Tasmota older than the release this tool installs, choosing
+Tasmota updates it to that one (`--firmware tasmota` chooses it in advance):
+Tasmota restarts into its safeboot, which takes the new Tasmota from your
+computer as the conversion's last steps give it, and its meter is checked
+as above. Its settings and the device's template stay. Only Tasmota's own
+release builds are offered it - a build of your own is left as it is. The
+Firmware Upgrade on Tasmota's page does the same from Tasmota's site, and
+goes on working.
+
 Most routes pass through the same place the first conversion does: Sonoff's
 memory layout, with a full Tasmota running from its second half. From there
 the steps above finish the job for Tasmota or ESPHome, and going back to

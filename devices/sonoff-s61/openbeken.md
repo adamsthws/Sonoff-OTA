@@ -298,6 +298,19 @@ SetStartValue <relayChannel> -1      # -1 = remember last state (persisted on ch
 (The relay channel depends on the S61 pin mapping, which the conversion also
 applies as an OpenBeken pin template — the generic build ships none.)
 
+## Updating
+
+A plug on an earlier release of this OpenBeken is updated by the tool
+(`--firmware openbeken`; tools/autoflash/routes/update.py): it answers
+`AutoflashKind` for its kind and gives its release in its build string
+(`make APP_VERSION=`), and fetches the published image by `ota_http` into
+the download slot, as any OpenBeken update. Its settings stay: the hook
+erases them only on the interim firmware, and the driver's first-boot
+import, finding a Wi-Fi SSID set, imports nothing again - so what a later
+driver does on first boot reaches only a plug converted with it. An
+upstream build, for the 2 MB table and without the driver, is no update
+for an S61.
+
 ## Reverting to stock
 
 On a converted plug the stock `rt_ota` bootloader is still in place and applies

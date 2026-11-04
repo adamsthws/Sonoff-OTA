@@ -176,7 +176,7 @@ was interrupted, it checks the plug to work out where to resume from.
 
 **Sonoff:** A full backup of the plug's Sonoff firmware to restore later.
 
-> Afterward, Tasmota and ESPhome updates are applied as normal.
+> Afterward, Tasmota and ESPhome updates are applied as normal. Running the tool again updates the device's Tasmota or this project's ESPHome to the release the tool installs, keeping its settings.
 
 <br>
 

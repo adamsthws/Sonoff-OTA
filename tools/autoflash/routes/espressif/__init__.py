@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from typing import Any, Callable, TYPE_CHECKING
 
-from tools.autoflash import account
+from tools.autoflash import account, esphome, kinds
+from tools.autoflash.routes import update
 from tools.autoflash.routes.espressif import bundle, hub, installer, mover, sonoff, tasmota
 from tools.autoflash.routes.espressif.evidence import ATTEMPTED_EVIDENCE, DESTRUCTIVE_STEPS  # noqa: F401
-from tools.autoflash.routes.espressif.tasmota import STEP_VERIFIERS  # noqa: F401
 
 # Sonoff's firmware goes back on from the plug's own backup: there is no other.
 SONOFF_FROM_BACKUP = True
@@ -22,6 +22,13 @@ if TYPE_CHECKING:
 FIRMWARES = {"tasmota": "Tasmota", "esphome": "ESPHome", "sonoff": "Sonoff"}
 # After this step the plug no longer runs its Sonoff firmware.
 POINT_OF_NO_RETURN = "C2"
+
+
+def published_version(kind: kinds.Kind, firmware: str) -> str | None:
+    """The release of `firmware` this tool installs on a plug of `kind`: its
+    own ESPHome's, and the official Tasmota it pins."""
+    return {"esphome": str(esphome.PINS["image"]["version"]),
+            "tasmota": tasmota.OFFICIAL_TASMOTA_VERSION}.get(firmware)
 
 
 def resume_check(ctx: Context) -> None:
@@ -92,14 +99,31 @@ START_STEPS = [step for step in COMMON_STEPS if step[0] == "A5"]
 # lost it, which switches nothing.  It leaves Tasmota as any converted plug;
 # staying on Tasmota, it is given the template.
 SOURCES = ("sonoff", "tasmota", "esphome", "midway", "committed", "installer", "safeboot",
-           "untemplated")
+           "untemplated", "outdated")
 TASMOTA_BACK_STEP = ("T1", "Official Tasmota back, from Tasmota's safeboot", tasmota.step_tasmota_back)
+# "outdated": an earlier release of the ESPHome or official Tasmota this tool
+# installs (routes/update.py): updated as its firmware takes any update, its
+# settings kept; left for another firmware, it is a run from the one it runs.
+UPDATE_STEPS: dict[str, list[tuple[str, str, Callable[[Context], dict[str, Any]]]]] = {
+    "esphome": [
+        ("U1", "This release's ESPHome, sent as an ESPHome update", mover.step_esphome_update),
+        ("U2", "ESPHome updated, on the Wi-Fi and kept", mover.step_esphome_updated),
+    ],
+    "tasmota": [
+        ("U5", "This release's Tasmota, uploaded to Tasmota's safeboot", tasmota.step_tasmota_update),
+        ("U6", "Tasmota updated and on the Wi-Fi", tasmota.step_tasmota_updated),
+    ],
+}
 
 
 def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Callable[[Context], dict[str, Any]]]]:
     """The steps from `source` firmware to `firmware` (none, if it is the same)."""
     if firmware == source:
         return []
+    if source == "outdated":
+        if firmware not in UPDATE_STEPS:
+            raise ValueError(f"no route from {source} to {firmware}")
+        return START_STEPS + UPDATE_STEPS[firmware]
     final = {"tasmota": TASMOTA_FINAL_STEPS, "esphome": ESPHOME_FINAL_STEPS,
              "sonoff": SONOFF_FINAL_STEPS}[firmware]
     if source == "sonoff":
@@ -135,12 +159,16 @@ def steps_for(firmware: str, source: str = "sonoff") -> list[tuple[str, str, Cal
 # itself away from before writing, D4 the slot it is in, E2 the spare slot, G1
 # only over the recovery Safeboot), or sets what it sets again.  Not the steps that ask
 # for anything, nor C2 or E3, which must happen once.
+# U1 sends ESPHome an update, which it writes to the slot it does not run from;
+# U5 switches Tasmota to its safeboot, which takes app0 again until it holds.
 # I1 too: until the plug restarts it runs Tasmota from ota_1, and writes the
 # same checked image again; once it runs ESPHome, I1 finds it and stops.  I2
 # only waits for ESPHome and gives it the calibration again; T1 finds Tasmota
 # back already, or uploads to Tasmota's safeboot only.
 RETRY_STEPS = {"A2", "D1", "D4", "E1", "E2", "F4", "G1", "H1", "I1", "I2",
-               "L1", "M1", "X1", "X2", "D5", "R1", "T1"}
+               "L1", "M1", "X1", "X2", "D5", "R1", "T1", "U1", "U2", "U5", "U6"}
+# A step whose verifier doubts it, recorded done, is done again, unasked.
+STEP_VERIFIERS = {**tasmota.STEP_VERIFIERS, "U1": update.still_updated, "U5": update.still_updated}
 # The steps run on a Tasmota given the Wi-Fi: one that has lost its settings
 # instead raises its own network (F4 looks for that itself, F2 starts on the
 # startup firmware).
@@ -173,6 +201,10 @@ STAGE_NAMES = {
     "R1": "Restoring Sonoff firmware",
     "R2": "Checking Sonoff firmware",
     "T1": "Putting Tasmota back",
+    "U1": "Updating ESPHome",
+    "U2": "Checking ESPHome",
+    "U5": "Updating Tasmota",
+    "U6": "Checking Tasmota",
 }
 # Where a shared step means something else on the way to another firmware: D4
 # frees the half of the memory it goes into, and the layout is not changed.
@@ -207,4 +239,8 @@ PLAIN_DESCRIPTION = {
     "R1": "writes the device's own Sonoff firmware and settings back, from its backup",
     "R2": "checks the device has started its Sonoff firmware and joined your Wi-Fi",
     "T1": "puts official Tasmota back from its safeboot, its settings kept as they are",
+    "U1": "sends the device this release's ESPHome as an ordinary ESPHome update, its settings kept",
+    "U2": "checks the device has started the updated ESPHome, joined your Wi-Fi and kept it",
+    "U5": "switches Tasmota to its safeboot and uploads this release's Tasmota to it, its settings kept",
+    "U6": "checks the device has started the updated Tasmota and joined your Wi-Fi, then checks its meter",
 }

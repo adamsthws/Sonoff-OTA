@@ -243,8 +243,9 @@ class ResumeTests(unittest.TestCase):
     def test_every_destructive_step_records_an_attempt_first(self):
 
         # Every route's steps: STEPS holds only the route chosen for the run.
+        # From an earlier release ("outdated") only to this one: left, it is a run from what it runs.
         known = {step for firmware in espressif.FIRMWARES for source in espressif.SOURCES
-                 if firmware != source
+                 if firmware != source and (source != "outdated" or firmware in espressif.UPDATE_STEPS)
                  for step, _, _ in espressif.steps_for(firmware, source)}
         self.assertTrue(evidence.DESTRUCTIVE_STEPS <= known)
         self.assertIn("E3", evidence.DESTRUCTIVE_STEPS)
@@ -263,7 +264,7 @@ class ConfirmSkipTests(unittest.TestCase):
     def skip(self, verifier):
         from types import SimpleNamespace
         verifiers = {} if verifier is None else {"D1": verifier}
-        with mock.patch.dict(tasmota.STEP_VERIFIERS, verifiers, clear=True), \
+        with mock.patch.dict(espressif.STEP_VERIFIERS, verifiers, clear=True), \
              mock.patch.object(prompts, "ask_yes_no") as asked, \
              mock.patch.object(output, "say") as said, mock.patch.object(output, "transient_begin"), \
              mock.patch.object(output, "transient_end"):
