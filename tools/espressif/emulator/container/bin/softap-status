@@ -1,0 +1,15 @@
+#!/usr/bin/python3 -I
+"""Passes QEMU's output on, and keeps the file named as its argument holding the
+network the guest is broadcasting (empty: none), from the fork's "guest SoftAP"
+lines, for the nmcli stand-in, `plug` and `wifi join`."""
+import re
+import sys
+
+state = sys.argv[1]
+for line in sys.stdin.buffer:
+    sys.stdout.buffer.write(line)
+    sys.stdout.buffer.flush()
+    found = re.search(rb"esp32_wifi: guest SoftAP (.*) (up|gone \(.*\))\s*$", line)
+    if found:
+        with open(state, "wb") as out:
+            out.write(found[1] if found[2] == b"up" else b"")

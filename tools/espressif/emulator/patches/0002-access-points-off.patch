@@ -1,0 +1,185 @@
+From 02fad8b3331f2c93f71d1d811514981517c56664 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 15:45:10 +0000
+Subject: [PATCH] esp32 wifi: the access points can be switched off at run time
+
+The emulated access points live inside QEMU, so a guest's Wi-Fi cannot be taken
+away from it: cutting the network outside only cuts it off from the host. That
+leaves firmware's reconnect and fallback code, the part that most needs testing,
+out of reach.
+
+While the new property access-points-off is set, they send no beacons and answer
+nothing, and deauthenticate a station joined to one, as a router restarting does:
+the guest sees its Wi-Fi go, retries, and rejoins once the property is cleared.
+A guest's own SoftAP and a host's station on it carry on. Off by default, so
+nothing changes unless it is set:
+
+  (qemu) qom-set wifi access-points-off on
+
+or from the start: -global driver=esp32_wifi,property=access-points-off,value=on
+---
+ hw/misc/esp32_wifi.c         |  1 +
+ hw/misc/esp32_wifi_ap.c      | 76 +++++++++++++++++++++++++++++++++++-
+ hw/misc/esp32c3_wifi.c       |  1 +
+ include/hw/misc/esp32_wifi.h |  2 +
+ 4 files changed, 79 insertions(+), 1 deletion(-)
+
+diff --git a/hw/misc/esp32_wifi.c b/hw/misc/esp32_wifi.c
+index 5791444df8..bf001d3359 100644
+--- a/hw/misc/esp32_wifi.c
++++ b/hw/misc/esp32_wifi.c
+@@ -425,6 +425,7 @@ static void esp32_wifi_class_init(ObjectClass *klass, void *data)
+     set_bit(DEVICE_CATEGORY_NETWORK, dc->categories);
+     dc->desc = "Esp32 WiFi";
+     device_class_set_props(dc, esp32_wifi_properties);
++    Esp32_WLAN_class_init(klass);
+     ResettableClass *rc = RESETTABLE_CLASS(klass);
+     resettable_class_set_parent_phases(rc, esp32_wifi_reset_enter, NULL, NULL,
+                                    &rp);
+diff --git a/hw/misc/esp32_wifi_ap.c b/hw/misc/esp32_wifi_ap.c
+index af517791bc..1f5d492ba8 100644
+--- a/hw/misc/esp32_wifi_ap.c
++++ b/hw/misc/esp32_wifi_ap.c
+@@ -30,6 +30,7 @@
+ 
+ 
+ #include "qemu/osdep.h"
++#include "qom/object.h"
+ #include "net/net.h"
+ #include "qemu/timer.h"
+ 
+@@ -70,6 +71,45 @@ access_point_info access_points[]={
+ 
+ int nb_aps=sizeof(access_points)/sizeof(access_point_info);
+ 
++/* The access points can be switched off, as a router is when it restarts: while
++ * the property access-points-off is set, they send no beacons and answer
++ * nothing, and a guest station joined to one is deauthenticated - a few times,
++ * as real access points do, in case one is missed - so its Wi-Fi goes down as
++ * it would. The guest's own SoftAP and the host's station on it go on. */
++static bool esp32_wifi_get_access_points_off(Object *obj, Error **errp)
++{
++    return ESP32_WIFI(obj)->access_points_off;
++}
++
++static void esp32_wifi_set_access_points_off(Object *obj, bool value, Error **errp)
++{
++    ESP32_WIFI(obj)->access_points_off = value;
++}
++
++void Esp32_WLAN_class_init(ObjectClass *klass)
++{
++    object_class_property_add_bool(klass, "access-points-off",
++                                   esp32_wifi_get_access_points_off,
++                                   esp32_wifi_set_access_points_off);
++}
++
++static void esp32_wifi_send_deauth(Esp32WifiState *s)
++{
++    struct mac80211_frame *frame = Esp32_WLAN_create_deauthentication();
++    int8_t strength = -25;
++    for (int i = 0; i < nb_aps; i++) {
++        if (!memcmp(access_points[i].mac_address, s->associated_ap_macaddr, 6)) {
++            strength = access_points[i].sigstrength;
++        }
++    }
++    /* new_frame() leaves both unset: the guest would drop the frame. */
++    frame->signal_strength = strength;
++    memcpy(frame->destination_address, BROADCAST, 6);
++    memcpy(s->ap_macaddr, s->associated_ap_macaddr, 6);
++    Esp32_WLAN_init_ap_frame(s, frame);
++    Esp32_WLAN_insert_frame(s, frame);
++}
++
+ /* The host side of the network as a station of the guest's SoftAP,
+  * alongside the guest's own station link with the fork's access points - the
+  * guest may run both at once, as Tasmota and ESPHome do while trying Wi-Fi
+@@ -266,6 +306,32 @@ static void Esp32_WLAN_beacon_timer(void *opaque)
+     struct mac80211_frame *frame;
+     Esp32WifiState *s = (Esp32WifiState *)opaque;
+     esp32_softap_tick(s);
++    static int deauths_left;
++    static bool was_off;
++    if (s->access_points_off && s->mode == Esp32_Mode_Station) {
++        if (!was_off) {
++            was_off = true;
++            printf("esp32_wifi: access points off\n");
++            fflush(stdout);
++        }
++        if (s->ap_state == Esp32_WLAN__STATE_ASSOCIATED ||
++            s->ap_state == Esp32_WLAN__STATE_AUTHENTICATED) {
++            deauths_left = 5;
++            s->ap_state = Esp32_WLAN__STATE_NOT_AUTHENTICATED;
++        }
++        if (deauths_left > 0) {
++            deauths_left--;
++            esp32_wifi_send_deauth(s);
++        }
++        timer_mod(s->beacon_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + BEACON_TIME);
++        return;
++    }
++    if (was_off) {
++        was_off = false;
++        printf("esp32_wifi: access points on\n");
++        fflush(stdout);
++    }
++    deauths_left = 0;
+     // only send a beacon if we are an access point
+     if((ENABLE_BEACON)&&(s->mode == Esp32_Mode_Station)){
+       if(s->ap_state!=Esp32_WLAN__STATE_STA_ASSOCIATED) {
+@@ -899,7 +965,7 @@ void Esp32_WLAN_handle_frame(Esp32WifiState *s, struct mac80211_frame *frame)
+                 }
+                 break;
+         }
+-        if(ap_info) {
++        if(ap_info && !s->access_points_off) {
+             memcpy(s->ap_macaddr,ap_info->mac_address,6);
+             switch(frame->frame_control.sub_type) {
+                 case IEEE80211_TYPE_MGT_SUBTYPE_PROBE_REQ:
+@@ -932,6 +998,14 @@ void Esp32_WLAN_handle_frame(Esp32WifiState *s, struct mac80211_frame *frame)
+             }
+         }
+     }
++    if (s->access_points_off && s->mode == Esp32_Mode_Station &&
++        frame->frame_control.type == IEEE80211_TYPE_DATA) {
++        /* As a real access point does to a station that sends it data while
++         * not joined to it: it may have missed the first deauthentication. */
++        esp32_wifi_send_deauth(s);
++        Esp32_WLAN_frame_delivered(s);
++        return;
++    }
+     if ((frame->frame_control.type == IEEE80211_TYPE_DATA) &&
+         (frame->frame_control.sub_type == IEEE80211_TYPE_DATA_SUBTYPE_DATA)) {
+         if(s->ap_state == Esp32_WLAN__STATE_STA_DHCP) {
+diff --git a/hw/misc/esp32c3_wifi.c b/hw/misc/esp32c3_wifi.c
+index 399ac73ec8..7d38fc2640 100644
+--- a/hw/misc/esp32c3_wifi.c
++++ b/hw/misc/esp32c3_wifi.c
+@@ -249,6 +249,7 @@ static void esp32C3_wifi_class_init(ObjectClass *klass, void *data)
+     set_bit(DEVICE_CATEGORY_NETWORK, dc->categories);
+     dc->desc = "Esp32C3 WiFi";
+     device_class_set_props(dc, esp32C3_wifi_properties);
++    Esp32_WLAN_class_init(klass);
+     ResettableClass *rc = RESETTABLE_CLASS(klass);
+     resettable_class_set_parent_phases(rc, esp32c3_wifi_reset_enter, NULL, NULL, &rp);
+ }
+diff --git a/include/hw/misc/esp32_wifi.h b/include/hw/misc/esp32_wifi.h
+index 7ac57c1c62..aed765b877 100644
+--- a/include/hw/misc/esp32_wifi.h
++++ b/include/hw/misc/esp32_wifi.h
+@@ -55,6 +55,7 @@ typedef struct Esp32WifiState {
+     uint8_t softap_macaddr[6];       
+ 
+     uint8_t mode;  
++    bool access_points_off;
+ 
+ } Esp32WifiState;
+ 
+@@ -65,6 +66,7 @@ typedef struct Esp32WifiState {
+ void Esp32_WLAN_handle_frame(Esp32WifiState *s, struct mac80211_frame *frame);
+ void Esp32_WLAN_setup_ap(DeviceState *dev,Esp32WifiState *s);
+ void Esp32_WLAN_reset_ap(Esp32WifiState *s);
++void Esp32_WLAN_class_init(ObjectClass *klass);
+ void Esp32_sendFrame(Esp32WifiState *s, struct mac80211_frame *frame,int length, int signal_strength);
+ void Esp32_WLAN_frame_delivered(Esp32WifiState *s);
+ 

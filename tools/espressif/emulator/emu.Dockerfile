@@ -12,11 +12,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         build-essential ninja-build pkg-config python3 python3-venv git ca-certificates \
         libglib2.0-dev libpixman-1-dev libslirp-dev libgcrypt20-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
-# The fork's source at its pinned commit (lcgamboa/qemu e39508f), with the
+# The fork's source at its pinned commit (lcgamboa/qemu 64aed50), with the
 # subprojects its build would otherwise fetch, published with this repository
 # (emu.sh downloads it and checks it): nothing else is needed to build it, and
 # it is built with no network at all.
-ARG QEMU_SOURCE_SHA256=863c653128bd9dafd353e5321d5e31e00337dfd42346ee30e8d496eadaaf3b82
+ARG QEMU_SOURCE_SHA256=37f3cbc81b82c43a1bfa44b75c95278a506c871380be65e3727582f9c1640895
 COPY qemu-source.tar.xz /tmp/
 RUN echo "$QEMU_SOURCE_SHA256  /tmp/qemu-source.tar.xz" | sha256sum -c - \
     && tar -xJf /tmp/qemu-source.tar.xz -C / && mv /qemu /src && rm /tmp/qemu-source.tar.xz

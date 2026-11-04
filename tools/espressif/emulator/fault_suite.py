@@ -850,6 +850,12 @@ class Scenario:
         self.fault(fault, arg, since, headers)
         self.say("FAULT done")
 
+    def router(self, state):
+        """A switch QEMU did not take is an outage that never happened, not a pass."""
+        if self.ex(PLUG_CMD, "router", state).returncode:
+            self.say(f"FAULT: the router did not go {state}")
+            self.notes["router_not_switched"] = True
+
     def signal(self, sig, *patterns):
         for pattern in patterns or (TOOL,):
             self.ex("pkill", f"-{sig}", "-f", pattern)
@@ -857,7 +863,7 @@ class Scenario:
     def fault(self, fault, arg, since, headers):
         p = PLUG_CMD
         if fault == "outage":
-            self.ex(p, "router", "off"); time.sleep(arg); self.ex(p, "router", "on")
+            self.router("off"); time.sleep(arg); self.router("on")
         elif fault == "plugoff":
             self.ex(p, "off"); time.sleep(arg); self.ex(p, "on")
         elif fault == "crash":
@@ -896,7 +902,7 @@ class Scenario:
         elif fault == "fallback":
             # The home network gone long enough for the plug to raise its own;
             # the person joins that as soon as it appears, before being asked.
-            self.ex(PLUG_CMD, "router", "off")
+            self.router("off")
             ends = time.time() + arg
             joined = None
             while time.time() < ends:
@@ -909,7 +915,7 @@ class Scenario:
                     self.say(f"PERSON: joined {network} before being asked (rc {result.returncode})")
                     self.notes["joined_early"] = network
                 time.sleep(2)
-            self.ex(PLUG_CMD, "router", "on")
+            self.router("on")
             if not joined:
                 self.notes["no_own_network"] = True
         elif fault == "pcoff":
@@ -925,10 +931,10 @@ class Scenario:
         elif fault == "blips":
             # Two short outages in one Berry phase, from 10% to 90% of it:
             # further apart than its 20 s of retrying (BLIP_STEPS).
-            self.ex(p, "router", "off"); time.sleep(arg); self.ex(p, "router", "on")
+            self.router("off"); time.sleep(arg); self.router("on")
             time.sleep(max(0.0, 0.8 * self.step_length - arg))
             self.say(f"FAULT blips: the second, {0.8 * self.step_length:.0f}s after the first")
-            self.ex(p, "router", "off"); time.sleep(arg); self.ex(p, "router", "on")
+            self.router("off"); time.sleep(arg); self.router("on")
         elif fault == "lossy":
             # One packet in ten lost, as "weak", for the rest of the phase.
             self.ex("tc", "qdisc", "add", "dev", "tap0", "root", "netem",
@@ -1016,14 +1022,14 @@ class Scenario:
             # power cycles: done, and the Wi-Fi back.
             if not self.when_said(since, "the device is restarting into Tasmota", lambda: None):
                 return
-            self.ex(PLUG_CMD, "router", "off")
+            self.router("off")
             self.say("FAULT: the home Wi-Fi gone after the upload")
             if self.when_said(since, "Switch the device off and on 7 times", lambda: None, limit=900):
                 time.sleep(10)  # a person reads it
                 self.say("PERSON: switching the plug off and on 7 times")
                 self.ex(PLUG_CMD, "cycle", "7", timeout=300)
                 self.notes["seven_times"] = True
-            self.ex(PLUG_CMD, "router", "on")
+            self.router("on")
         elif fault == "nohook":
             pass  # the run's own condition (run_tool): there is nothing to do to it
 
@@ -1568,7 +1574,7 @@ class Scenario:
             with open(self.state / "logs/uart.log", "rb") as uart:
                 uart.seek(getattr(self, "uart_from", 0))
                 text = uart.read().decode("utf-8", "replace")
-            for network in re.findall(r"WIFIAP: guest SoftAP (\S+) up", text):
+            for network in re.findall(r"esp32_wifi: guest SoftAP (\S+) up", text):
                 if not networks or networks[-1] != network:
                     networks.append(network)
         except OSError:
@@ -1616,6 +1622,8 @@ class Scenario:
             self.notes["restore_carried_on_after"] = int(found[-1]) if found else 0
             if not self.notes.get("later_fired") and not special:
                 special = "NOT-FIRED"
+        if self.notes.get("router_not_switched") and not special:
+            special = "NOT-FIRED"
         ours = re.sub(r"\s+", " ", "".join(self.ours(p, t) for m, p, t in run_logs(self.state)
                                            if m >= self.started))
         converted_from_untemplated = "Converting the device from Tasmota without the device's template" in ours
@@ -1697,7 +1705,7 @@ class Scenario:
             uart = self.state / "logs/uart.log"
             tail = uart.read_text(errors="replace")[-20000:] if uart.exists() else ""
             bricked = "invalid header" in tail or "No bootable app" in tail or "ets_main.c" in tail
-        # Every setup network can be joined (the fork's wifi-to-softap.patch,
+        # Every setup network can be joined (lcgamboa/qemu #15,
         # and the bridge's open since 4.4.3): none is beyond the emulator.
         verdict = special or ("PASS" if converted else "BRICK" if bricked else
                               # Asked for the plug's own network to be joined: right only

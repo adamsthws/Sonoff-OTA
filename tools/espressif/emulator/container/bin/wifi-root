@@ -58,18 +58,18 @@ join)
         exit 1
     fi
     leave_plug_network
-    # Joined once the fork's station has associated with the plug's network
-    # (wifi-to-softap.patch): it has a MAC of its own, which this side takes.
+    # The fork's station on the plug's network (lcgamboa/qemu #15) joins it by
+    # itself once it is on air, within a second or two, and has a MAC of its own,
+    # which this side takes; udhcpc, below, asks until it has.
     for _ in $(seq 40); do
-        [ "$(cat "$RUN/softap.state" 2>/dev/null)" = associated ] && break
+        [ -n "$(cat "$RUN/softap" 2>/dev/null)" ] && break
         sleep 0.5
     done
-    station=$(cat "$RUN/softap.station" 2>/dev/null || true)
-    if [ -z "$station" ] || [ "$(cat "$RUN/softap.state" 2>/dev/null)" != associated ]; then
+    if [ -z "$(cat "$RUN/softap" 2>/dev/null)" ]; then
         echo "the emulated Wi-Fi did not join $ssid" >&2
         exit 1
     fi
-    ip link add "$JOINED" link "$LAN" address "$station" type macvlan mode bridge
+    ip link add "$JOINED" link "$LAN" address 02:53:36:30:00:02 type macvlan mode bridge
     ip link set "$JOINED" up
     # Off the home network while joined, as a laptop is: its traffic there and
     # to the internet stops; the router's (root's) goes on.

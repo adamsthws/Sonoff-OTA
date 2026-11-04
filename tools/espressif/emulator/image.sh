@@ -35,7 +35,7 @@ tag() {
 # archive and never changes (a new pin is a new release), downloaded once into
 # captures/emulation/cache and checked, so the image builds from nothing but
 # this repository - and again without a network once it is there.
-QEMU_SOURCE=qemu-lcgamboa-e39508f.tar.xz
+QEMU_SOURCE=qemu-lcgamboa-64aed50.tar.xz
 QEMU_COMMIT=${QEMU_SOURCE%.tar.xz}; QEMU_COMMIT=${QEMU_COMMIT##*-}
 QEMU_SOURCE_URL=${AUTOFLASH_QEMU_SOURCE_URL:-https://github.com/adamsthws/firmware-liberator/releases/download/emulator-source-qemu-$QEMU_COMMIT/$QEMU_SOURCE}
 qemu_source() {

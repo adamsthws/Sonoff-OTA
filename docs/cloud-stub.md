@@ -739,7 +739,7 @@ the other identifying values.
 
 **Run:** `unattended-test.sh --stub-cloud --fresh -- --firmware
 {tasmota,esphome}`, side by side, on an image with the emulator's Wi-Fi signal
-fix ([`wifi-rssi.patch`](emulator.md#the-qemu-fork-toolsemulatorforkpatch)).
+fix ([lcgamboa/qemu #16](https://github.com/lcgamboa/qemu/pull/16)).
 
 **Result:** the device list carried `ssid`, `bssid`, `fwVersion`,
 `only_device`, `model`, `staMac` and the product model, the ESPHome conversion

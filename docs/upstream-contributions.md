@@ -135,8 +135,8 @@ The [emulator](emulator.md) runs on [lcgamboa's QEMU fork](https://github.com/lc
 the one QEMU that emulates the ESP32-C3's Wi-Fi. Making an emulated plug behave
 on its network as a real one does took four changes to that Wi-Fi emulation,
 and one to its pins, each found because something went wrong on the emulator
-where it would not on a plug. They are kept in this repository as patches, and
-offered back:
+where it would not on a plug. All five are upstream now, and the emulator runs
+on them:
 
 | Project | Pull request | What it fixes |
 |---|---|---|
@@ -145,6 +145,13 @@ offered back:
 | QEMU (lcgamboa) | [#15](https://github.com/lcgamboa/qemu/pull/15) | The host could not join a network the guest raised itself - Tasmota's or ESPHome's setup network - nor could the guest stay a station while it did |
 | QEMU (lcgamboa) | [#16](https://github.com/lcgamboa/qemu/pull/16) | The signal strength reached the firmware 96 too high: Tasmota reported its Wi-Fi at +71 to +78 dBm |
 | QEMU (lcgamboa) | [#17](https://github.com/lcgamboa/qemu/pull/17) | Run on its own, every input pin read low, so Tasmota saw its button held and reset itself; the levels can now be set |
+
+Two more are open, and until they merge the emulator carries each as a patch:
+
+| Project | Pull request | What it fixes |
+|---|---|---|
+| QEMU (lcgamboa) | [#18](https://github.com/lcgamboa/qemu/pull/18) | `-monitor` bound its socket and never answered, on any machine: the fork's main loop iterates a context of its own, and the monitor registered with GLib's default. |
+| QEMU (lcgamboa) | [#19](https://github.com/lcgamboa/qemu/pull/19) | A guest's Wi-Fi could not be taken away from it, so firmware's reconnect and fallback code could not be tested: a property switches the emulated access points off, as a router restarting does. |
 
 #15 let the emulator test what a person does when a plug falls back
 to its own setup network: join it, and let the conversion carry on through it.

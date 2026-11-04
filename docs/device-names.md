@@ -263,7 +263,7 @@ add today's names to these lists rather than replacing them.
    firmware's hostname is in the emulator's DHCP log
    (`/run/autoflash-emu/dnsmasq.log` in the container), the network it
    raises in `/run/autoflash-emu/softap`, and every network that went out in
-   the plug's serial log (`WIFIAP: guest SoftAP <name> up`). Run every route
+   the plug's serial log (`esp32_wifi: guest SoftAP <name> up`). Run every route
    from stock and between the firmwares, and the routes through each
    firmware's own network (the fault suite's `fallback` scenarios). Run one
    plug with another MAC too, so a name made from the MAC is seen to follow

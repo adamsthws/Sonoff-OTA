@@ -503,10 +503,10 @@ WSL stops its VM, and Docker with it, soon after its last window closes: with
   [lcgamboa's fork](https://github.com/lcgamboa/qemu) (branch `picsimlab-esp32`),
   which emulates the ESP32-C3's Wi-Fi hardware and offers three open access
   points. Its Wi-Fi is wired to a tap device in the container. The fork's
-  source at the pinned commit (`e39508f`), with the subprojects its build
+  source at the pinned commit (`64aed50`), with the subprojects its build
   fetches, is an archive on a release of this repository named after that
   commit
-  ([`emulator-source-qemu-e39508f`](https://github.com/adamsthws/firmware-liberator/releases/tag/emulator-source-qemu-e39508f));
+  ([`emulator-source-qemu-64aed50`](https://github.com/adamsthws/firmware-liberator/releases/tag/emulator-source-qemu-64aed50));
   `emu.sh` downloads it once into `captures/emulation/cache/`, checks it
   against the SHA-256 in `emu.Dockerfile`, and the image is built from it with
   no network - so building needs nothing outside this repository. Releases
@@ -577,63 +577,41 @@ header - applied in name order, each on top of those before it, when the
 image is built. To change one, apply them all to the fork's source, make the
 change, and regenerate them. What they do:
 
-- **`0003-station-bridge.patch` - real addresses on the wire.** The fork rewrote
-  every frame's MAC addresses to its access point's, which works behind
-  QEMU's NAT (slirp) but not on a real network: Linux dropped the frames, so
-  the plug never got an address, and the tool could not find it by MAC. It now
-  bridges the real addresses. It also gives the fork's virtual station a
-  proper MAC after a cold start (it was all zeros).
-- **`0002-softap-status.patch` - the plug's own network is visible.** The fork
-  writes the name of the network the plug broadcasts, and the MAC its virtual
-  station joins it with, to a file the `nmcli` stand-in and `wifi join` read.
-- **`0001-gpio-pullups.patch` - the button is not held down.** Run on its own, the
-  fork drives no input pins, so they all read low. The S60's button (GPIO9)
-  is active low, so Tasmota saw it held, and after 40 seconds reset itself to
-  its defaults, losing its Wi-Fi. Inputs now idle high, as with pull-ups.
-- **`0006-wifi-switch.patch` - the router can be restarted.** The fork's access
-  points live inside QEMU, so blocking traffic outside it only cuts the plug
-  off from the computer; its Wi-Fi stays up. While the file
-  `$ESP32_WIFI_AP_OFF_FILE` exists (`plug router off`), they send no beacons
-  and answer nothing, and deauthenticate the plug - a few times, and again
-  whenever it sends data, as a real access point does to a station that is
-  not joined. The plug sees its Wi-Fi go within a second or two, retries as
-  a real one does ("Connect failed with AP timeout"), and rejoins within
-  seconds of `plug router on`. The fork's frame builder leaves a frame's
-  destination and signal strength unset, so the patch sets both, or the plug
-  drops the frame. To cut the plug off from the computer instead, block its
-  traffic in the container (`iptables -I INPUT -s 192.168.60.50 -j DROP`).
-- **`0007-wifi-to-softap.patch` - the computer can join the plug's own network,
-  while the plug also tries the home one.** The fork treated a guest
-  broadcasting its own network as a guest that was now only an access point:
-  its virtual station probed it once (never answered), then ran a DHCP
-  exchange of its own (never answered either), and the guest could not also
-  be a station. Now the computer's station on the plug's network is a link of
-  its own, with its own MAC (02:53:36:30:00:02), apart from the guest's
-  station link with the fork's access points. It authenticates and associates
-  once a second until the plug answers, passes the computer's traffic through
-  untouched, and is dropped when the plug stops beaconing. The guest can run
-  both at once (AP+STA), as Tasmota and ESPHome do while trying Wi-Fi details
-  their setup page was given: an access point addressed by its MAC answers on
-  whatever channel the radio is on, as the plug's own network keeps it on its
-  channel. How far the station has got is written to
-  `$ESP32_WIFI_SOFTAP_STATE_FILE`, which `wifi join` waits on.
-- **`0004-wifi-dma.patch` - frames go only where the hardware would put them.** The
-  fork wrote each received frame through the next receive descriptor whether
-  or not the driver had handed it over, and however big the buffer. Writing
-  into buffers the driver had taken back corrupted its heap, which then failed
-  in `free()` (`tlsf_free`) - seen as a crash when the plug's Wi-Fi stopped. A
-  frame is now written only into a descriptor the driver owns with room for it,
-  and dropped otherwise, as the hardware drops it.
-- **`0005-wifi-rssi.patch` - the signal strength has its minus sign.** The fork
-  added 96 to the strength of every frame the plug received, so the -25 dBm of
-  the plug's network reached the firmware as +71 to +80 dBm, and the firmware
-  passes it on as it is: the conversion's report said "Plug Wi-Fi signal:
-  72 dBm", where runs on the real plugs recorded -44 to -52 dBm. A frame now
-  carries its access point's own strength, as the hardware gives it, plus the
-  fork's jitter of up to 9 dB: -25 to -16 dBm for the plug's network.
+- **`0001-monitor-main-loop-context.patch` - QEMU's monitor answers.** The
+  fork's main loop iterates a context of its own, but the monitor registers its
+  handlers with GLib's default one, which nothing iterates: without this
+  `-monitor` opens its socket and never accepts a connection. Offered upstream
+  as [lcgamboa/qemu #18](https://github.com/lcgamboa/qemu/pull/18).
+- **`0002-access-points-off.patch` - the router can be restarted.** The fork's
+  access points live inside QEMU, so blocking traffic outside it only cuts the
+  plug off from the computer; its Wi-Fi stays up. While the device's
+  `access-points-off` property is set (`plug router off`, over QEMU's monitor),
+  they send no beacons and answer nothing, and deauthenticate the plug - a few
+  times, and again whenever it sends data, as a real access point does to a
+  station that is not joined. The plug sees its Wi-Fi go within a second or two,
+  retries as a real one does ("Connect failed with AP timeout"), and rejoins
+  within seconds of `plug router on`. To cut the plug off from the computer
+  instead, block its traffic in the container
+  (`iptables -I INPUT -s 192.168.60.50 -j DROP`). Offered upstream as
+  [lcgamboa/qemu #19](https://github.com/lcgamboa/qemu/pull/19).
+
+What else the emulator needed from the fork is
+[upstream now](upstream-contributions.md#the-emulators-wi-fi): real addresses on
+the wire, frames written only where the hardware would put them, a signal
+strength with its minus sign, and the computer joining the plug's own network
+while the plug also tries the home one, on a link of its own with its own MAC
+(02:53:36:30:00:02).
 
 ### How QEMU is run (`container/bin/plug-supervisor`)
 
+- **`softap-status`: the plug's own network is visible.** QEMU's output passes
+  through it, and it keeps the name of the network the plug broadcasts, from the
+  fork's `guest SoftAP` lines, in a file the `nmcli` stand-in and `wifi join` read.
+- **`gpio_in`: the button is not held down.** Run on its own, the fork drives no
+  input pins, so they all read low. The S60's button (GPIO9) is active low, so
+  Tasmota saw it held, and after 40 seconds reset itself to its defaults,
+  losing its Wi-Fi. `-global driver=esp32c3.gpio,property=gpio_in,value=0x3fffff`
+  makes inputs idle high, as with pull-ups.
 - **`-no-reboot`.** The fork keeps its peripherals running across a software
   reset, so firmware restarting into a different image (stock into the
   bridge, the bridge into Tasmota) crashed at start-up on what the previous
@@ -683,7 +661,6 @@ gives each request its own connection.
   checkout with the patches applied). Patches in `tools/espressif/emulator/patches/` apply
   in name order, each on top of those before it.
 - **The QEMU monitor** is at `/run/autoflash-emu/monitor.sock` in the container.
-  It does not answer while the guest is in a tight crash loop.
 - **gdb** (PlatformIO's `riscv32-esp-elf-gdb`) against QEMU's `-s` needs a
   pseudo-terminal (run it under `script -qfc`), and hardware breakpoints
   (`hbreak`): the bootloader overwrites software breakpoints in IRAM when it

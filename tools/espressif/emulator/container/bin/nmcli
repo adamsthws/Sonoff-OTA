@@ -2,9 +2,9 @@
 # Stand-in for NetworkManager's nmcli, just enough for the conversion tool's
 # Wi-Fi scan (`nmcli -t -f SSID device wifi list`). The emulated "air" holds
 # the fork's fixed access points and the plug's own networks: the one it is
-# broadcasting now (reported by our QEMU patch), and - as a real computer's
+# broadcasting now (softap-status), and - as a real computer's
 # list does - every one it went out under in the last minute, since gone or
-# renamed (the "WIFIAP: guest SoftAP <name> up" lines in its serial log). Put
+# renamed (the "esp32_wifi: guest SoftAP <name> up" lines in its serial log). Put
 # another number of seconds in $RUN/scan-cache to remember them for; 0 lists
 # only the one on air now.
 RUN=/run/autoflash-emu
@@ -43,7 +43,7 @@ if offset > size:  # the log started again
 try:
     with open(uart, "rb") as log:
         log.seek(offset)
-        for name in re.findall(rb"WIFIAP: guest SoftAP (\S+) up", log.read(size - offset)):
+        for name in re.findall(rb"esp32_wifi: guest SoftAP (\S+) up", log.read(size - offset)):
             seen[name.decode("utf-8", "replace")] = now
 except OSError:
     pass

@@ -21,6 +21,21 @@ kill_qemu() {
 
 current_pid() { cat "$RUN/qemu.pid" 2>/dev/null || true; }
 
+# The fork's access points, on or off, for a QEMU running now; plug-supervisor
+# starts the next one as $RUN/router-off says. Read back, so that an outage that
+# never happened cannot pass for one the plug survived.
+access_points() {
+    local off=on want=true pid answer; [ "$1" = on ] && { off=off; want=false; }
+    pid=$(current_pid)
+    kill -0 "$pid" 2>/dev/null || return 0
+    answer=$(printf 'qom-set wifi access-points-off %s\nqom-get wifi access-points-off\n' "$off" \
+        | timeout 10 socat -t2 - "UNIX-CONNECT:$RUN/monitor.sock" 2>/dev/null | tr -d '\r' || true)
+    grep -qx "$want" <<<"$answer" && return 0
+    [ "$(current_pid)" != "$pid" ] && return 0   # restarted meanwhile: the next one starts right
+    echo "QEMU did not take the switch: access-points-off is not $want" >&2
+    return 1
+}
+
 # Wait until a QEMU other than $1 (if given) is running.
 wait_running() {
     for _ in $(seq 100); do
@@ -78,8 +93,9 @@ router)
     case "${2:-}" in
     off)
         touch "$RUN/router-off"
+        access_points off
         if [ -n "${3:-}" ]; then
-            (sleep "$3"; rm -f "$RUN/router-off") >/dev/null 2>&1 &
+            (sleep "$3"; rm -f "$RUN/router-off"; access_points on) >/dev/null 2>&1 &
             echo "Router off: the plug's Wi-Fi is down for ${3}s."
         else
             echo "Router off: the plug's Wi-Fi is down until: plug router on"
@@ -87,6 +103,7 @@ router)
         ;;
     on)
         rm -f "$RUN/router-off"
+        access_points on
         echo "Router on: the plug rejoins by itself."
         ;;
     *) echo "usage: plug router off [SECS] | plug router on" >&2; exit 2 ;;

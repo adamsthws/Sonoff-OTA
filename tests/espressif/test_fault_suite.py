@@ -445,6 +445,17 @@ class ScenarioTests(unittest.TestCase):
                 mock.patch.object(fs, "run_logs", side_effect=logs):
             sc.person(stop)
 
+    def test_a_router_switch_not_taken_is_noted_and_one_taken_is_not(self):
+        sc = fs.Scenario(24, {"id": "x", "route": "sonoff>tasmota", "step": "D4", "fault": "outage",
+                              "arg": 60, "at": 40}, "/dev/null")
+        with mock.patch.object(sc, "ex", return_value=mock.Mock(returncode=0)) as ex:
+            sc.router("off")
+        ex.assert_called_once_with(fs.PLUG_CMD, "router", "off")
+        self.assertNotIn("router_not_switched", sc.notes)
+        with mock.patch.object(sc, "ex", return_value=mock.Mock(returncode=1)):
+            sc.router("off")
+        self.assertTrue(sc.notes["router_not_switched"])
+
     def test_a_legacy_run_is_killed_by_its_own_tools_name(self):
         # 2.0.x's tool is tools/autoflash_cli.py, 1.2.0's tools/s60_autoflash.py.
         import re

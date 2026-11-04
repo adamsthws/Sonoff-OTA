@@ -25,23 +25,21 @@ while true; do
         continue
     fi
     echo "===== plug powered on $(date '+%F %T') =====" >> "$LOG"
-    ESP32_WIFI_SOFTAP_FILE="$RUN/softap" ESP32_WIFI_AP_OFF_FILE="$RUN/router-off" \
-    ESP32_WIFI_SOFTAP_STATE_FILE="$RUN/softap.state" \
-    ESP32_WIFI_SOFTAP_STATE_FILE="$RUN/softap.state" \
+    router=()
+    [ -e "$RUN/router-off" ] && router=(-global "driver=esp32_wifi,property=access-points-off,value=on")
         /opt/qemu/bin/qemu-system-riscv32 \
         -L /opt/qemu/pc-bios -machine esp32c3-picsimlab -display none -no-reboot \
         -serial file:/dev/stdout -monitor "unix:$RUN/monitor.sock,server,nowait" -pidfile "$RUN/qemu.pid" \
         -drive file=/state/flash.bin,if=mtd,format=raw \
         -drive file=/state/efuse.bin,if=none,format=raw,id=efuse \
         -global driver=nvram.esp32c3.efuse,property=drive,value=efuse \
+        -global driver=esp32c3.gpio,property=gpio_in,value=0x3fffff \
         -netdev tap,id=n0,ifname=tap0,script=no,downscript=no \
-        -net nic,model=esp32c3_wifi,netdev=n0 "${capture[@]}" \
+        -net nic,model=esp32c3_wifi,netdev=n0 "${capture[@]}" "${router[@]}" \
         </dev/null 2>&1 \
+        | /opt/autoflash-emu/bin/softap-status "$RUN/softap" \
         | python3 -I /work/tools/espressif/emulator/redact.py /secrets/stock-flash.bin >> "$LOG"
     : > "$RUN/softap"
-    : > "$RUN/softap.station"
-    : > "$RUN/softap.state"
-    : > "$RUN/softap.state"
     rm -f "$RUN/qemu.pid"
     if [ -f "$RUN/power-cut" ]; then
         rm -f "$RUN/power-cut"

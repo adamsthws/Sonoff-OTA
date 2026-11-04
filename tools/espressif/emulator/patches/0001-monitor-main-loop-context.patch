@@ -1,0 +1,59 @@
+From 6d41e61d2dd8f847a8232faf6c359ba0cf3b1e51 Mon Sep 17 00:00:00 2001
+From: Adam Matthews <52178922+adamsthws@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 18:36:18 +0000
+Subject: [PATCH] monitor: serve it from the main loop's context
+
+The main loop iterates g_main_context_default_l, not GLib's default context,
+but the monitor still registered its chardev handlers with a NULL context,
+which means GLib's default, and nothing iterates that. So -monitor and non-OOB
+-qmp bind their socket and then never accept a connection, and a monitor on
+stdio prints its prompt and never reads a command. The gdbstub and the UART
+already pass g_main_context_default_l, which is why they work.
+---
+ monitor/hmp.c | 4 +++-
+ monitor/qmp.c | 4 +++-
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/monitor/hmp.c b/monitor/hmp.c
+index 460e8832f6..815e68a8cb 100644
+--- a/monitor/hmp.c
++++ b/monitor/hmp.c
+@@ -38,6 +38,8 @@
+ #include "sysemu/block-backend.h"
+ #include "trace.h"
+ 
++extern GMainContext *g_main_context_default_l;
++
+ static void monitor_command_cb(void *opaque, const char *cmdline,
+                                void *readline_opaque)
+ {
+@@ -1491,6 +1493,6 @@ void monitor_init_hmp(Chardev *chr, bool use_readline, Error **errp)
+     }
+ 
+     qemu_chr_fe_set_handlers(&mon->common.chr, monitor_can_read, monitor_read,
+-                             monitor_event, NULL, &mon->common, NULL, true);
++                             monitor_event, NULL, &mon->common, g_main_context_default_l, true);
+     monitor_list_append(&mon->common);
+ }
+diff --git a/monitor/qmp.c b/monitor/qmp.c
+index 5e538f34c0..25ddb7d167 100644
+--- a/monitor/qmp.c
++++ b/monitor/qmp.c
+@@ -33,6 +33,8 @@
+ #include "qapi/qmp/qlist.h"
+ #include "trace.h"
+ 
++extern GMainContext *g_main_context_default_l;
++
+ /*
+  * qmp_dispatcher_co_busy is used for synchronisation between the
+  * monitor thread and the main thread to ensure that the dispatcher
+@@ -547,7 +549,7 @@ void monitor_init_qmp(Chardev *chr, bool pretty, Error **errp)
+     } else {
+         qemu_chr_fe_set_handlers(&mon->common.chr, monitor_can_read,
+                                  monitor_qmp_read, monitor_qmp_event,
+-                                 NULL, &mon->common, NULL, true);
++                                 NULL, &mon->common, g_main_context_default_l, true);
+         monitor_list_append(&mon->common);
+     }
+ }
