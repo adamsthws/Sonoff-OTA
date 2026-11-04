@@ -311,11 +311,10 @@ the plug runs Tasmota.
 
 For an unattended run (testing, below), the email and password can be given
 in advance instead, in a `.env` file at the top of the checkout. Git ignores
-it, and so do the AI coding tools the repository has settings for (Claude
-Code, Copilot, Cursor, Windsurf, Aider, Gemini CLI). What it holds is read
-into the tool's memory only: it is not passed on to the helper tools'
-environment, and the passwords are kept out of the log. A password given
-this way is tried once; if eWeLink refuses it, it is asked for instead.
+it, and `AGENTS.md` tells AI coding tools not to read it. What it holds is
+read into the tool's memory only: it is not passed on to the helper tools'
+environment, and the passwords are kept out of the log. A password given this
+way is tried once; if eWeLink refuses it, it is asked for instead.
 
 A throwaway eWeLink account is fine, and limits what a mistake could expose:
 once the plug is converted, the account is no longer needed.

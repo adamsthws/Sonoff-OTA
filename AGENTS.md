@@ -7,7 +7,7 @@ What an assistant needs to know, beyond [CONTRIBUTING.md](CONTRIBUTING.md).
 The repository is public; the tool handles Wi-Fi passwords, eWeLink accounts
 and plugs' identities.
 
-- **Never read `.env`.** **`captures/` is private.**
+- **Never read or change `.env`.** **`captures/` is private.**
 - **Examples use made-up identifiers**, e.g. MAC `12:34:56:ab:cd:ef` - never a
   real plug's, network's or account's.
 - **The leak scan** (`tools/repo/leak_scan.py`, run by `.githooks/`) stops a
