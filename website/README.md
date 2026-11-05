@@ -65,7 +65,9 @@ permissions:
   Write (the settings below)
 
 A Worker can only be picked once it exists, so the very first one was
-uploaded by hand with an account-wide token, with no domain.
+uploaded by hand with an account-wide token, with no domain. A domain with
+DNS records of its own stops the deploy (Cloudflare's code 100117): delete
+them, and wrangler makes the Worker's.
 
 Set it with `gh secret set CLOUDFLARE_API_TOKEN --env website -R adamsthws/firmware-liberator`.
 
