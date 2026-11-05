@@ -10,9 +10,9 @@ from tools.autoflash.routes.espressif import tasmota
 
 class RecoveryWaitTests(unittest.TestCase):
     def ctx(self, versions):
-        device = types.SimpleNamespace(host="192.168.0.50", firmware_version=lambda: next(versions),
+        device = types.SimpleNamespace(host="192.0.2.50", firmware_version=lambda: next(versions),
                                        is_safeboot=lambda: False)
-        return types.SimpleNamespace(finder=types.SimpleNamespace(poll=lambda: "192.168.0.50"), device=device)
+        return types.SimpleNamespace(finder=types.SimpleNamespace(poll=lambda: "192.0.2.50"), device=device)
 
     def test_it_is_seen_once_the_version_says_safeboot(self):
         ctx = self.ctx(iter(["15.6.0(tasmota)", "15.6.0(safeboot)"]))

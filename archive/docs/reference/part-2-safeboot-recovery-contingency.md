@@ -78,11 +78,11 @@ Run recovery preflight, stage and commit with the recovery manifest:
 ```bash
 python3 tools/serve_safeboot_migration.py preflight \
   --manifest captures/safeboot-recovery-migration/manifest.json \
-  --listen-ip <WORKSTATION_LAN_IP> --device-ip 192.168.1.96
+  --listen-ip <WORKSTATION_LAN_IP> --device-ip 192.0.2.96
 
 python3 tools/serve_safeboot_migration.py stage \
   --manifest captures/safeboot-recovery-migration/manifest.json \
-  --listen-ip <WORKSTATION_LAN_IP> --device-ip 192.168.1.96
+  --listen-ip <WORKSTATION_LAN_IP> --device-ip 192.0.2.96
 ```
 
 Recovery preflight records incomplete NVS as expected but still requires the
@@ -106,7 +106,7 @@ After the pinned normal image is stable, require Berry
 ```bash
 python3 tools/serve_safeboot_migration.py restore \
   --manifest captures/safeboot-recovery-migration/manifest.json \
-  --listen-ip <WORKSTATION_LAN_IP> --device-ip 192.168.1.96 \
+  --listen-ip <WORKSTATION_LAN_IP> --device-ip 192.0.2.96 \
   --i-confirm-normal-app-is-stable
 ```
 

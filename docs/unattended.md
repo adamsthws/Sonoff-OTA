@@ -40,7 +40,7 @@ run you sit through there asks you everything, as a real one does, while
 
 ```sh
 python3 tools/repo/unattended_run.py                       # recorded, as below
-python3 tools/repo/unattended_run.py -- --plug-ip 192.168.1.50 --new
+python3 tools/repo/unattended_run.py -- --plug-ip 192.168.99.50 --new
 sh start.sh run --unattended                          # the same, unrecorded
 ```
 

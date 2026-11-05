@@ -8,8 +8,10 @@ The repository is public; the tool handles Wi-Fi passwords, eWeLink accounts
 and plugs' identities.
 
 - **Never read or change `.env`.** **`captures/` is private.**
-- **Examples use made-up identifiers**, e.g. MAC `12:34:56:ab:cd:ef` - never a
-  real plug's, network's or account's.
+- **Examples use made-up identifiers**, e.g. MAC `12:34:56:ab:cd:ef`, address
+  `192.0.2.50` (`192.168.99.50` where people read it) - never a real plug's,
+  network's or account's.
+  [Addresses](CONTRIBUTING.md#keeping-private-things-out)
 - **The leak scan** (`tools/repo/leak_scan.py`, run by `.githooks/`) stops a
   commit or push holding one: take it out, never `--no-verify`. A new
   made-up example goes in `tools/repo/leak-scan-allow`.

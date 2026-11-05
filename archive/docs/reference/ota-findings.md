@@ -95,7 +95,7 @@ genuine upgrade command containing the official URLs and digests was then sent,
 and the workstation repeated the same request 22 times over 12 seconds. Every
 post-command request also returned an empty HTTP 400; no firmware byte was
 stored. The cloud stream reported OTA start and then the device offline, but the
-S60 remained reachable at `192.168.1.96` with its expected MAC address and zero
+S60 remained reachable at `192.0.2.96` with its expected MAC address and zero
 ICMP packet loss, but it stayed offline in the eWeLink app. A power cycle was
 required for it to reconnect to eWeLink. Device Settings then confirmed that it
 was still running firmware 1.1.1.
@@ -133,9 +133,9 @@ router-level DNAT rule and a fail-closed relay proxy running on the workstation.
 
 ### Interception method
 
-The S60 at `192.168.1.96` connects to `52.57.99.135:8088` to download firmware.
+The S60 at `192.0.2.96` connects to `52.57.99.135:8088` to download firmware.
 A PREROUTING DNAT rule on the UniFi Cloud Gateway Ultra redirected those packets
-to `192.168.1.141:8088` (workstation relay). A POSTROUTING MASQUERADE rule was
+to `192.0.2.141:8088` (workstation relay). A POSTROUTING MASQUERADE rule was
 also required to avoid asymmetric routing - without it the S60 would receive
 SYN-ACK from the workstation's LAN address rather than from the vendor server,
 causing an immediate TCP RST.
@@ -146,11 +146,11 @@ directly via SSH to the gateway:
 
 ```
 iptables -t nat -A PREROUTING \
-  -s 192.168.1.96 -d 52.57.99.135 -p tcp --dport 8088 \
-  -j DNAT --to-destination 192.168.1.141:8088
+  -s 192.0.2.96 -d 52.57.99.135 -p tcp --dport 8088 \
+  -j DNAT --to-destination 192.0.2.141:8088
 
 iptables -t nat -A POSTROUTING \
-  -s 192.168.1.96 -d 192.168.1.141 -p tcp --dport 8088 \
+  -s 192.0.2.96 -d 192.0.2.141 -p tcp --dport 8088 \
   -j MASQUERADE
 ```
 

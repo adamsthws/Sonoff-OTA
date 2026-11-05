@@ -519,7 +519,7 @@ def main(argv: list[str] | None = None, *, secret: Callable[[str], str] = ask_se
     parser.add_argument("--hours", type=float, default=24.0)
     parser.add_argument("--plug-ip", help="the plug's LAN address")
     parser.add_argument("--plug-mac", help="filter on the plug's MAC instead; survives an address change")
-    parser.add_argument("--opnsense", help="SSH target for the router, e.g. root@192.168.1.1")
+    parser.add_argument("--opnsense", help="SSH target for the router, e.g. root@192.168.99.1")
     parser.add_argument("--interface", help="the router's LAN interface, e.g. igc1")
     parser.add_argument("--no-cloud", action="store_true", help="network view only")
     parser.add_argument("--email", help="eWeLink account; prompted when omitted")

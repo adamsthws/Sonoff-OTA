@@ -12,20 +12,20 @@ class FindBridgeTests(unittest.TestCase):
     def run_find(self, answers, by_mac=None, mac="aa:bb:cc:12:34:56"):
         ticks = iter(range(0, 1000, 3))
         return flash_readout.find_bridge(
-            "192.168.0.50", mac, timeout=30,
+            "192.0.2.50", mac, timeout=30,
             probe=lambda host: host in answers,
             by_mac=by_mac or (lambda m, s: None),
             clock=lambda: next(ticks), sleep=lambda s: None,
         )
 
     def test_found_where_the_plug_was(self):
-        self.assertEqual(self.run_find({"192.168.0.50"}), "192.168.0.50")
+        self.assertEqual(self.run_find({"192.0.2.50"}), "192.0.2.50")
 
     def test_found_by_hardware_address_when_moved(self):
-        self.assertEqual(self.run_find({"192.168.0.77"}, by_mac=lambda m, s: "192.168.0.77"), "192.168.0.77")
+        self.assertEqual(self.run_find({"192.0.2.77"}, by_mac=lambda m, s: "192.0.2.77"), "192.0.2.77")
 
     def test_another_device_at_the_moved_address_is_not_taken(self):
-        self.assertIsNone(self.run_find(set(), by_mac=lambda m, s: "192.168.0.77"))
+        self.assertIsNone(self.run_find(set(), by_mac=lambda m, s: "192.0.2.77"))
 
     def test_gives_up_without_a_mac(self):
         self.assertIsNone(self.run_find(set(), mac=None))
@@ -54,7 +54,7 @@ class DeliverTests(unittest.TestCase):
             with mock.patch.object(flash_readout, "ROOT", root), \
                  mock.patch.object(flash_readout.subprocess, "Popen", side_effect=KeyboardInterrupt):
                 with self.assertRaises(KeyboardInterrupt):
-                    flash_readout.deliver("192.168.0.50", "192.168.0.110", 8088, "a@b", "1.2.0", root, {})
+                    flash_readout.deliver("192.0.2.50", "192.0.2.110", 8088, "a@b", "1.2.0", root, {})
             self.assertTrue((root / safety_locks.DIR / "RECOVERY_LOCK").exists())
             self.assertFalse((root / safety_locks.DIR / "RECOVERY_LOCK.owner-authorized").exists())
 
@@ -68,7 +68,7 @@ class DeliverTests(unittest.TestCase):
             with mock.patch.object(flash_readout, "ROOT", root), \
                  mock.patch.object(flash_readout.subprocess, "Popen", side_effect=sender), \
                  mock.patch("builtins.print"):
-                self.assertEqual(flash_readout.deliver("192.168.0.50", "192.168.0.110", 8088, "a@b", "1.2.0", root, {}), 0)
+                self.assertEqual(flash_readout.deliver("192.0.2.50", "192.0.2.110", 8088, "a@b", "1.2.0", root, {}), 0)
             self.assertFalse(seen["lock_present"])
             self.assertIn(str(flash_readout.READOUT_OTA), seen["command"])
             self.assertIn("1.2.0", seen["command"])
@@ -96,7 +96,7 @@ class CloudChatterTests(unittest.TestCase):
             with mock.patch.object(flash_readout, "ROOT", root), \
                  mock.patch.object(flash_readout.subprocess, "Popen", side_effect=sender), \
                  mock.patch("builtins.print") as printed:
-                flash_readout.deliver("192.168.0.50", "192.168.0.110", 8088, "a@b", "1.2.0", root, {})
+                flash_readout.deliver("192.0.2.50", "192.0.2.110", 8088, "a@b", "1.2.0", root, {})
             shown = "".join(call.args[0] for call in printed.call_args_list)
             self.assertNotIn("Cloud", shown)
             self.assertIn("Serving", shown)
@@ -105,7 +105,7 @@ class CloudChatterTests(unittest.TestCase):
 
 class SenderOutputTests(unittest.TestCase):
     SERVED = "  Served /user1.bin bytes 389,220-399,459 (10,240 bytes)\n"
-    REQUEST = '  [192.168.0.50] "GET /user1.bin?deviceid=1&ts=2&sign=3 HTTP/1.1" 206 -\n'
+    REQUEST = '  [192.0.2.50] "GET /user1.bin?deviceid=1&ts=2&sign=3 HTTP/1.1" 206 -\n'
 
     def test_routine_http_lines_are_not_shown(self):
         self.assertEqual(flash_readout.sender_line_kind(self.SERVED), "served")
@@ -128,7 +128,7 @@ class SenderOutputTests(unittest.TestCase):
             with mock.patch.object(flash_readout, "ROOT", root), \
                  mock.patch.object(flash_readout.subprocess, "Popen", side_effect=sender), \
                  mock.patch("builtins.print") as printed, mock.patch("sys.stdout"):
-                flash_readout.deliver("192.168.0.50", "192.168.0.110", 8088, "a@b", "1.2.0", root, {})
+                flash_readout.deliver("192.0.2.50", "192.0.2.110", 8088, "a@b", "1.2.0", root, {})
             shown = "".join(call.args[0] for call in printed.call_args_list)
             self.assertNotIn("GET", shown)
             self.assertNotIn("Served", shown)

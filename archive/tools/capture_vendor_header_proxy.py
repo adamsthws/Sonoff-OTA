@@ -203,7 +203,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--listen-ip", required=True)
     parser.add_argument("--listen-port", type=int, default=8088)
-    parser.add_argument("--source-ip", default="192.168.1.96")
+    parser.add_argument("--source-ip", default="192.0.2.96")
     parser.add_argument("--email")
     parser.add_argument("--country-code", default="+44")
     parser.add_argument("--region", choices=sorted(API), default="eu")

@@ -17,7 +17,7 @@ With these a plug can be put back to stock later whatever happens: stage the
 stock RBL (AutoflashRevertToStock), and if the config region were ever lost,
 rewrite it from the copy. The backup is never overwritten once made.
 
-  python3 backup.py --plug http://192.168.1.100 [--stock-rbl stock_app_1.0.2.rbl]
+  python3 backup.py --plug http://192.168.99.100 [--stock-rbl stock_app_1.0.2.rbl]
 """
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ def factory_mac(region: bytes) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Back up a converted S61's stock config region from OpenBeken.")
-    ap.add_argument("--plug", required=True, help="OpenBeken base URL, e.g. http://192.168.1.100")
+    ap.add_argument("--plug", required=True, help="OpenBeken base URL, e.g. http://192.168.99.100")
     ap.add_argument("--stock-rbl", default=None, help="repackaged stock app RBL to file beside it")
     ap.add_argument("--captures", default=None, help="captures directory (default: the repository's)")
     a = ap.parse_args()

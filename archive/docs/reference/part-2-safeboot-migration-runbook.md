@@ -92,7 +92,7 @@ They do not trust a moving `firmware/release` URL or manifest edits.
    ESP-IDF Wi-Fi-stack NVS write. Every later phase therefore requires the live
    NVS bytes to retain the exact preflight hash.
 5. Keep the plug powered from a stable outlet and keep its reserved address at
-   `192.168.1.96`.
+   `192.0.2.96`.
 
 ## Stage 2: read-only live preflight
 
@@ -102,7 +102,7 @@ plug can reach:
 ```bash
 python3 tools/serve_safeboot_migration.py preflight \
   --listen-ip <WORKSTATION_LAN_IP> \
-  --device-ip 192.168.1.96
+  --device-ip 192.0.2.96
 ```
 
 The server prints one long `s60_urlbeload(...)` line. Paste it as **one line**
@@ -165,7 +165,7 @@ Start a new, single-purpose server:
 ```bash
 python3 tools/serve_safeboot_migration.py stage \
   --listen-ip <WORKSTATION_LAN_IP> \
-  --device-ip 192.168.1.96
+  --device-ip 192.0.2.96
 ```
 
 Paste the printed one-line loader in the Berry scripting console. The device
@@ -203,7 +203,7 @@ server with its explicit risk acknowledgement:
 mv REPARTITION_LOCK REPARTITION_LOCK.owner-authorized
 python3 tools/serve_safeboot_migration.py commit \
   --listen-ip <WORKSTATION_LAN_IP> \
-  --device-ip 192.168.1.96 \
+  --device-ip 192.0.2.96 \
   --i-accept-power-loss-may-require-opening-the-plug
 ```
 

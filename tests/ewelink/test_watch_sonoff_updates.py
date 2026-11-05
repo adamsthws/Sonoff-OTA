@@ -16,16 +16,16 @@ from tools.ewelink.watch_sonoff_updates import (PacketParser, Recorder, describe
 CAPTURE = """\
 2026-10-03 05:00:00.000000 aa:bb:cc:11:22:33 > ff:ff:ff:ff:ff:ff, ethertype IPv4 (0x0800), length 282: 0.0.0.0.68 > 255.255.255.255.67: BOOTP/DHCP, Request, length 240
 E.......@.y..........D.C...........
-2026-10-03 05:00:01.000000 aa:bb:cc:11:22:33 > 00:11:22:33:44:55, ethertype IPv4 (0x0800), length 78: 192.168.1.96.40000 > 192.168.1.1.53: 4660+ A? eu-disp.coolkit.cc. (36)
+2026-10-03 05:00:01.000000 aa:bb:cc:11:22:33 > 00:11:22:33:44:55, ethertype IPv4 (0x0800), length 78: 192.0.2.96.40000 > 192.0.2.1.53: 4660+ A? eu-disp.coolkit.cc. (36)
 E..@....@......`.....@.5.,...4...........eu-disp.coolkit.cc.....
-2026-10-03 05:00:02.000000 00:11:22:33:44:55 > aa:bb:cc:11:22:33, ethertype IPv4 (0x0800), length 94: 192.168.1.1.53 > 192.168.1.96.40000: 4660 1/0/0 A 52.57.99.135 (52)
-2026-10-03 05:00:03.000000 aa:bb:cc:11:22:33 > 00:11:22:33:44:55, ethertype IPv4 (0x0800), length 54: 192.168.1.96.50000 > 52.57.99.135.8088: Flags [S], seq 1, win 64240, length 0
-2026-10-03 05:00:04.000000 00:11:22:33:44:55 > aa:bb:cc:11:22:33, ethertype IPv4 (0x0800), length 54: 52.57.99.135.8088 > 192.168.1.96.50000: Flags [S.], seq 1, ack 0, win 64240, length 0
-2026-10-03 05:00:05.000000 aa:bb:cc:11:22:33 > 00:11:22:33:44:55, ethertype IPv4 (0x0800), length 172: 192.168.1.96.50000 > 52.57.99.135.8088: Flags [P.], seq 2:120, ack 4294967295, win 64240, length 118
+2026-10-03 05:00:02.000000 00:11:22:33:44:55 > aa:bb:cc:11:22:33, ethertype IPv4 (0x0800), length 94: 192.0.2.1.53 > 192.0.2.96.40000: 4660 1/0/0 A 52.57.99.135 (52)
+2026-10-03 05:00:03.000000 aa:bb:cc:11:22:33 > 00:11:22:33:44:55, ethertype IPv4 (0x0800), length 54: 192.0.2.96.50000 > 52.57.99.135.8088: Flags [S], seq 1, win 64240, length 0
+2026-10-03 05:00:04.000000 00:11:22:33:44:55 > aa:bb:cc:11:22:33, ethertype IPv4 (0x0800), length 54: 52.57.99.135.8088 > 192.0.2.96.50000: Flags [S.], seq 1, ack 0, win 64240, length 0
+2026-10-03 05:00:05.000000 aa:bb:cc:11:22:33 > 00:11:22:33:44:55, ethertype IPv4 (0x0800), length 172: 192.0.2.96.50000 > 52.57.99.135.8088: Flags [P.], seq 2:120, ack 4294967295, win 64240, length 118
 E.......@. ....`49c..P..........P.......GET /ota/rom/abc/user1.1024.new.2.bin?deviceid=x&ts=1&sign=y HTTP/1.1
 Range: bytes=0-23
-2026-10-03 05:00:06.000000 aa:bb:cc:11:22:33 > 00:11:22:33:44:55, ethertype IPv4 (0x0800), length 54: 192.168.1.96.50001 > 3.120.0.1.443: Flags [S], seq 1, win 64240, length 0
-2026-10-03 05:00:07.000000 aa:bb:cc:11:22:33 > 00:11:22:33:44:55, ethertype IPv4 (0x0800), length 90: 192.168.1.96.40001 > 192.168.1.1.123: NTPv4, Client, length 48
+2026-10-03 05:00:06.000000 aa:bb:cc:11:22:33 > 00:11:22:33:44:55, ethertype IPv4 (0x0800), length 54: 192.0.2.96.50001 > 3.120.0.1.443: Flags [S], seq 1, win 64240, length 0
+2026-10-03 05:00:07.000000 aa:bb:cc:11:22:33 > 00:11:22:33:44:55, ethertype IPv4 (0x0800), length 90: 192.0.2.96.40001 > 192.0.2.1.123: NTPv4, Client, length 48
 """
 
 
@@ -48,16 +48,16 @@ class PacketParserTests(unittest.TestCase):
         self.assertEqual(events[5]["port"], 443)
 
     def test_matching_by_address_sees_the_same_traffic_once_it_has_one(self):
-        kinds = [e["kind"] for e in parse(PacketParser("192.168.1.96", None))]
+        kinds = [e["kind"] for e in parse(PacketParser("192.0.2.96", None))]
         self.assertNotIn("dhcp", kinds)    # it had no address yet
         self.assertIn("http_request", kinds)
 
     def test_replies_and_syn_acks_are_not_new_connections(self):
-        connects = [e for e in parse(PacketParser("192.168.1.96", None)) if e["kind"] == "connect"]
+        connects = [e for e in parse(PacketParser("192.0.2.96", None)) if e["kind"] == "connect"]
         self.assertEqual([c["port"] for c in connects], [8088, 443])
 
     def test_firmware_traffic_is_flagged(self):
-        events = parse(PacketParser("192.168.1.96", None))
+        events = parse(PacketParser("192.0.2.96", None))
         flagged = [e["kind"] for e in events if describe(e)[1]]
         self.assertEqual(flagged, ["connect", "http_request"])
         self.assertIn("FIRMWARE DOWNLOAD", describe(events[3])[0])
@@ -65,7 +65,7 @@ class PacketParserTests(unittest.TestCase):
 
 
 def tls(second, outbound, length):
-    src, dst = ("192.168.0.50.49200", "3.120.0.1.8081") if outbound else ("3.120.0.1.8081", "192.168.0.50.49200")
+    src, dst = ("192.0.2.50.49200", "3.120.0.1.8081") if outbound else ("3.120.0.1.8081", "192.0.2.50.49200")
     smac, dmac = ("aa:bb:cc:12:34:56", "02:00:00:00:00:01") if outbound else ("02:00:00:00:00:01", "aa:bb:cc:12:34:56")
     import datetime
     stamp = (datetime.datetime(2026, 10, 7, 13) + datetime.timedelta(seconds=second)).strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -154,7 +154,7 @@ class SummaryTests(unittest.TestCase):
             if posix:
                 self.assertEqual(os.stat(recorder.directory).st_mode & 0o777, 0o700)
             with contextlib.redirect_stdout(io.StringIO()):
-                for event in parse(PacketParser("192.168.1.96", None)):
+                for event in parse(PacketParser("192.0.2.96", None)):
                     screen, notable = describe(event)
                     recorder.event(event.pop("kind"), screen, notable=notable, **event)
                 recorder.event("cloud_state", "cloud", online=True, version="1.2.0")
@@ -189,8 +189,8 @@ class RouterSafetyTests(unittest.TestCase):
 
     def test_an_address_filter_is_used_without_a_mac(self):
         import shlex
-        self.assertTrue(shlex.split(self.command(plug_ip="192.168.0.50", plug_mac=None))[-1]
-                        .startswith("host 192.168.0.50 and ("))
+        self.assertTrue(shlex.split(self.command(plug_ip="192.0.2.50", plug_mac=None))[-1]
+                        .startswith("host 192.0.2.50 and ("))
 
     def test_a_process_that_ignores_terminate_is_killed(self):
         import subprocess

@@ -33,7 +33,7 @@ class MdnsTests(unittest.TestCase):
         ptr = service + struct.pack("!HHIH", 12, 1, 120, len(instance)) + instance
         srv_data = struct.pack("!HHH", 0, 0, 8081) + host
         srv = instance + struct.pack("!HHIH", 33, 1, 120, len(srv_data)) + srv_data
-        address = socket.inet_aton("192.168.1.96")
+        address = socket.inet_aton("192.0.2.96")
         arecord = host + struct.pack("!HHIH", 1, 1, 120, len(address)) + address
         packet = struct.pack("!HHHHHH", 0, 0x8400, 0, 1, 0, 2) + ptr + srv + arecord
 
@@ -41,7 +41,7 @@ class MdnsTests(unittest.TestCase):
 
         self.assertEqual(records[0]["value"], "eWeLink_test._ewelink._tcp.local")
         self.assertEqual(records[1]["value"]["port"], 8081)
-        self.assertEqual(records[2]["value"], "192.168.1.96")
+        self.assertEqual(records[2]["value"], "192.0.2.96")
 
     def test_only_answers_count_as_devices(self):
         # The eWeLink app on a phone asks for devices, listing the plug it
@@ -64,9 +64,9 @@ class MdnsTests(unittest.TestCase):
         known = service + struct.pack("!HHIH", 12, 1, 4500, len(instance)) + instance
         question = struct.pack("!HHHHHH", 0, 0x0000, 0, 1, 0, 0) + known
         answer = struct.pack("!HHHHHH", 0, 0x8400, 0, 1, 0, 0) + known
-        self.assertIsNone(_keep(question, "192.168.0.194", None))
-        self.assertEqual(_keep(answer, "192.168.0.50", None)["source"], "192.168.0.50")
-        self.assertIsNone(_keep(answer, "192.168.0.50", "192.168.0.51"))  # not the target
+        self.assertIsNone(_keep(question, "192.0.2.194", None))
+        self.assertEqual(_keep(answer, "192.0.2.50", None)["source"], "192.0.2.50")
+        self.assertIsNone(_keep(answer, "192.0.2.50", "192.0.2.51"))  # not the target
 
 
 def addresses(route, others=()):
@@ -78,12 +78,12 @@ def addresses(route, others=()):
 
 class SweepTests(unittest.TestCase):
     def test_every_other_address_on_this_computers_slash_24(self):
-        with addresses("192.168.0.110"):
+        with addresses("192.0.2.110"):
             targets = sweep_targets()
         self.assertEqual(len(targets), 253)
-        self.assertNotIn("192.168.0.110", targets)
-        self.assertIn("192.168.0.50", targets)
-        self.assertNotIn("192.168.0.255", targets)
+        self.assertNotIn("192.0.2.110", targets)
+        self.assertIn("192.0.2.50", targets)
+        self.assertNotIn("192.0.2.255", targets)
 
     def test_no_network_means_no_sweep(self):
         with addresses(None):
@@ -126,9 +126,9 @@ class NetworkTests(unittest.TestCase):
 
     def test_the_ids_that_answered(self):
         packets = [
-            {"source": "192.168.0.50", "records": [{"type": "TXT", "value": ["type=plug", "id=10000abcde"]}]},
-            {"source": "192.168.0.51", "records": [{"type": "PTR", "value": "x"}]},
-            {"source": "192.168.0.52", "parse_error": "truncated"},
+            {"source": "192.0.2.50", "records": [{"type": "TXT", "value": ["type=plug", "id=10000abcde"]}]},
+            {"source": "192.0.2.51", "records": [{"type": "PTR", "value": "x"}]},
+            {"source": "192.0.2.52", "parse_error": "truncated"},
         ]
         self.assertEqual(answered_ids(packets), {"10000abcde"})
 

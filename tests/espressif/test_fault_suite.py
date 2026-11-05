@@ -201,7 +201,7 @@ class RunWordsTests(unittest.TestCase):
                                  command=test_autoflash.ConfigureStepTests.console([]), is_safeboot=lambda: False,
                                  at_next_save=lambda commands, timeout=None: False)
         state = SimpleNamespace(input=lambda key: {"product_model": "S60TPF"}.get(key))
-        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.168.1.51"), device=device, state=state)
+        ctx = SimpleNamespace(finder=SimpleNamespace(poll=lambda: "192.0.2.51"), device=device, state=state)
         with mock.patch.object(output, "say") as said:
             tasmota.step_configure(ctx)
         self.assertRegex(" ".join(str(c.args[0]) for c in said.call_args_list), fs.NOHOOK_RESET)

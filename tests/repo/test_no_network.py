@@ -48,7 +48,7 @@ class NoNetworkTests(unittest.TestCase):
             result = self.outcome(lambda: self.connect_to(server.getsockname()))
         self.assertEqual((result.errors, result.failures), ([], []))
         self.assertFalse(no_network.beyond(("::1", 80)) or no_network.beyond(("localhost", 80)))
-        self.assertTrue(no_network.beyond(("192.168.0.50", 80)) and no_network.beyond(("plug.example", 80)))
+        self.assertTrue(no_network.beyond(("192.0.2.50", 80)) and no_network.beyond(("plug.example", 80)))
 
     @staticmethod
     def connect_to(address):

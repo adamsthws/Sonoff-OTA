@@ -84,8 +84,8 @@ wifi:
   password: !secret wifi_password
   # Added: a fixed address
   manual_ip:
-    static_ip: 192.168.1.60
-    gateway: 192.168.1.1
+    static_ip: 192.168.99.60
+    gateway: 192.168.99.1
     subnet: 255.255.255.0
 # Added: fewer log lines
 logger:

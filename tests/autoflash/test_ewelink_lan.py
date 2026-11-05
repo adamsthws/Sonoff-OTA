@@ -41,10 +41,10 @@ class AdvertTests(unittest.TestCase):
         self.assertEqual(ewelink_lan.signal(ewelink_lan.advert_state({"data1": data}, KEY)), -70)
 
     def test_the_advert_is_found_by_its_device_id(self):
-        report = {"packets": [{"source": "192.168.0.7", "records": [
+        report = {"packets": [{"source": "192.0.2.7", "records": [
             {"type": "TXT", "value": ["id=1000ffffff", "data1=x"]}]},
-            {"source": "192.168.0.50", "records": [
-                {"type": "A", "value": "192.168.0.50"},
+            {"source": "192.0.2.50", "records": [
+                {"type": "A", "value": "192.0.2.50"},
                 {"type": "TXT", "value": [f"{k}={v}" for k, v in ADVERT.items()]}]}]}
         self.assertEqual(ewelink_lan.advert_fields(report, "1000abcdef"), ADVERT)
         self.assertIsNone(ewelink_lan.advert_fields(report, "1000000000"))

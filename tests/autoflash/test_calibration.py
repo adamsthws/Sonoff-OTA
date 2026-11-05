@@ -163,7 +163,7 @@ class StepTests(unittest.TestCase):
 
     def ctx(self, command=None):
         from types import SimpleNamespace
-        inputs = {"plug_ip": "192.168.1.51", "plug_mac": "12:34:56:ab:cd:ef"}
+        inputs = {"plug_ip": "192.0.2.51", "plug_mac": "12:34:56:ab:cd:ef"}
         return SimpleNamespace(device=SimpleNamespace(command=command), esphome_key=None,
                                state=SimpleNamespace(input=inputs.get))
 
@@ -208,7 +208,7 @@ class StepTests(unittest.TestCase):
              mock.patch.object(esphome, "calibration_state", return_value="from backup, factor 1.02"), \
              mock.patch.object(output, "say") as said:
             outcome = mover.calibrate_esphome_meter(self.ctx())
-        give.assert_called_once_with("192.168.1.51", numbers, key=None)
+        give.assert_called_once_with("192.0.2.51", numbers, key=None)
         self.assertEqual(outcome, {"calibration": "from backup, factor 1.02"})
         self.assertIn("from its Sonoff backup", said.call_args.args[0])
 

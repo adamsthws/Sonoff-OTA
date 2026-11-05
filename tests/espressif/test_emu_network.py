@@ -24,7 +24,7 @@ def pick(taken: str) -> str:
 
 class EmulatorNetworkTests(unittest.TestCase):
     def test_the_first_free_candidate_is_taken(self):
-        self.assertEqual(pick("default\n192.168.0.0/24\n172.17.0.0/16\n"), "198.18.60.0/24")
+        self.assertEqual(pick("default\n192.0.2.0/24\n172.17.0.0/16\n"), "198.18.60.0/24")
 
     def test_one_that_overlaps_a_route_or_network_is_passed_over(self):
         self.assertEqual(pick("198.18.0.0/15\n"), "172.31.60.0/24")          # a route wider than it

@@ -9,7 +9,7 @@ Run only after creating the source-specific DNAT and MASQUERADE rules.
 The plug must be switched off and the local OTA server must not be running.
 
 Example:
-  sudo ./tools/espressif/test_ota_firewall.sh wlo1 192.168.1.50 192.168.1.20 203.0.113.10 8088
+  sudo ./tools/espressif/test_ota_firewall.sh wlo1 192.168.99.50 192.168.99.20 203.0.113.10 8088
 EOF
 }
 

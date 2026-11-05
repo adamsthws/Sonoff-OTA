@@ -21,10 +21,10 @@ class PrivacyTestCase(unittest.TestCase):
 class ScrubTests(PrivacyTestCase):
     def test_what_identifies_someone_is_replaced(self):
         cases = {
-            "--email someone@gmail.com --listen-ip 192.168.0.110": "--email <email> --listen-ip 192.168.0.110",
+            "--email someone@gmail.com --listen-ip 192.0.2.110": "--email <email> --listen-ip 192.0.2.110",
             '"GET /user1.bin?deviceid=1001234abc&ts=4708736&sign=fafd2f9d3bcc HTTP/1.1"':
                 '"GET /user1.bin?deviceid=<device-id>&ts=4708736&sign=<signature> HTTP/1.1"',
-            "Tasmota is at 192.168.0.50 as tasmota-1A2B3C-4567.": "Tasmota is at 192.168.0.50 as <device-name>.",
+            "Tasmota is at 192.0.2.50 as tasmota-1A2B3C-4567.": "Tasmota is at 192.0.2.50 as <device-name>.",
             "Join tasmota-1a2b3c or esphome-1a2b3c.": "Join <device-name> or <device-name>.",
             "ESPHome 1.4.0 is Sonoff S60 1a2b3c.": "ESPHome 1.4.0 is <device-name>.",
             "OpenBeken answered, named 'openbeken-1a2b3c'; ESPHome is esphome 1a2b3c.":
@@ -39,7 +39,7 @@ class ScrubTests(PrivacyTestCase):
             self.assertEqual(output.scrub(line), expected)
 
     def test_what_is_needed_to_follow_a_run_stays(self):
-        for line in ("The plug is at 192.168.0.50; this computer is 10.0.0.2 and 172.16.4.1",
+        for line in ("The plug is at 192.0.2.50; this computer is 10.0.0.2 and 172.16.4.1",
                      "Tasmota 15.6.0(release-tasmota), template tasmota-settings-template-15.6.0.0.bin",
                      "Stage 3 - Discovering the plug - Complete (4s)",
                      "Sonoff S60 Device model S60TPG"):
@@ -85,10 +85,10 @@ class LogFileTests(PrivacyTestCase):
         with tempfile.TemporaryDirectory() as directory:
             state = RunState.open(Path(directory))
             state.set_input("device_name", "kitchen-plug")
-            state.set_input("plug_ip", "192.168.0.50")
+            state.set_input("plug_ip", "192.0.2.50")
             output._private.clear()
             RunState.open(Path(directory))  # as a new run reads it back
-        self.assertEqual(output.scrub("kitchen-plug at 192.168.0.50"), "<device-name> at 192.168.0.50")
+        self.assertEqual(output.scrub("kitchen-plug at 192.0.2.50"), "<device-name> at 192.0.2.50")
 
 
 if __name__ == "__main__":

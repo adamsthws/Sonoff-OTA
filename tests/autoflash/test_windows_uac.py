@@ -97,7 +97,7 @@ class FirewallRuleTests(unittest.TestCase):
     def open(self, answer):
         """open_firewall, with `answer(script) -> exit code` standing in for the prompt."""
         with mock.patch.object(hostsys, "elevated", side_effect=lambda command: answer(decoded(command))):
-            return hostsys.open_firewall("192.168.1.50", [8088, 8089])
+            return hostsys.open_firewall("192.0.2.50", [8088, 8089])
 
     @staticmethod
     def result_path(script):
@@ -120,7 +120,7 @@ class FirewallRuleTests(unittest.TestCase):
             return 0
 
         rule = self.open(allowed)
-        self.assertEqual((rule.kind, rule.plug_ip, rule.ports), ("windows", "192.168.1.50", [8088, 8089]))
+        self.assertEqual((rule.kind, rule.plug_ip, rule.ports), ("windows", "192.0.2.50", [8088, 8089]))
         self.assertEqual(rule.detail, {"program": PYTHON, "paused": ["{block-1}"], "name": "Autoflash"})
 
     def test_yes_without_a_result_still_gives_the_rule(self):
@@ -130,28 +130,28 @@ class FirewallRuleTests(unittest.TestCase):
         scripts = []
         self.open(lambda script: scripts.append(script) or 0)
         self.assertIn("$program = 'C:\\Users\\O''Brien\\Autoflash\\.python\\python.exe'", scripts[0])
-        self.assertIn("'remoteip=192.168.1.50'", scripts[0])
+        self.assertIn("'remoteip=192.0.2.50'", scripts[0])
         self.assertIn("'localport=8088,8089'", scripts[0])
 
     def test_removing_it_on_no_reports_it_left(self):
-        rule = hostsys.FirewallRule("windows", "192.168.1.50", [8088, 8089],
+        rule = hostsys.FirewallRule("windows", "192.0.2.50", [8088, 8089],
                                     {"program": PYTHON, "paused": ["{block-1}"], "name": "Autoflash"})
         with mock.patch.object(hostsys, "elevated", return_value=1223):
             self.assertFalse(hostsys.close_firewall(rule))
         scripts = []
         with mock.patch.object(hostsys, "elevated", side_effect=lambda c: scripts.append(decoded(c)) or 0):
             self.assertTrue(hostsys.close_firewall(rule))
-        self.assertIn("'name=Autoflash 192.168.1.50'", scripts[0])
+        self.assertIn("'name=Autoflash 192.0.2.50'", scripts[0])
         self.assertIn("@('{block-1}')", scripts[0])  # the paused block rule, back on
 
     def test_a_rule_that_was_already_there_is_left_without_asking(self):
-        rule = hostsys.FirewallRule("windows", "192.168.1.50", [8088], {"preexisting": True})
+        rule = hostsys.FirewallRule("windows", "192.0.2.50", [8088], {"preexisting": True})
         with mock.patch.object(hostsys, "elevated") as asked:
             self.assertTrue(hostsys.close_firewall(rule))
         asked.assert_not_called()
 
     def test_by_hand_the_paused_rules_are_quoted(self):
-        rule = hostsys.FirewallRule("windows", "192.168.1.50", [8088], {"program": PYTHON, "paused": ["it's"]})
+        rule = hostsys.FirewallRule("windows", "192.0.2.50", [8088], {"program": PYTHON, "paused": ["it's"]})
         self.assertEqual(hostsys.undo_commands(rule)[-1], "Enable-NetFirewallRule -Name 'it''s'")
 
 
@@ -169,7 +169,7 @@ class FakeState:
 class ToolTests(unittest.TestCase):
     """What the person sees when they answer the prompt No."""
 
-    RULE = hostsys.FirewallRule("windows", "192.168.1.50", [8088, 8089],
+    RULE = hostsys.FirewallRule("windows", "192.0.2.50", [8088, 8089],
                                 {"program": PYTHON, "paused": [], "name": "Autoflash"})
 
     def setUp(self):
@@ -190,7 +190,7 @@ class ToolTests(unittest.TestCase):
 
     def ctx(self, rules=()):
         return types.SimpleNamespace(state=FakeState(
-            plug_ip="192.168.1.50", firewall_rules=[rule.to_json() for rule in rules]))
+            plug_ip="192.0.2.50", firewall_rules=[rule.to_json() for rule in rules]))
 
     def test_it_says_windows_will_ask_before_asking(self):
         def prompt(plug_ip, ports):
@@ -208,7 +208,7 @@ class ToolTests(unittest.TestCase):
             firewall.ensure_firewall(ctx)  # does not raise
         screen = "\n".join(self.screen)
         self.assertIn("The firewall rule could not be added", screen)
-        self.assertIn('netsh advfirewall firewall add rule "name=Autoflash 192.168.1.50"', screen)
+        self.assertIn('netsh advfirewall firewall add rule "name=Autoflash 192.0.2.50"', screen)
         self.assertIn("Adding it needs administrator rights", screen)
         self.assertEqual(firewall.recorded_rules(ctx), [])
 
@@ -219,7 +219,7 @@ class ToolTests(unittest.TestCase):
         screen = "\n".join(self.screen)
         self.assertIn("Windows will ask for permission again", screen)
         self.assertIn("Remove the temporary firewall rules yourself", screen)
-        self.assertIn('netsh advfirewall firewall delete rule "name=Autoflash 192.168.1.50"', screen)
+        self.assertIn('netsh advfirewall firewall delete rule "name=Autoflash 192.0.2.50"', screen)
         self.assertEqual(firewall.recorded_rules(ctx), [self.RULE])  # kept, to try again next time
 
     def test_yes_on_the_way_out_forgets_the_rule(self):

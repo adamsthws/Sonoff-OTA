@@ -18,7 +18,7 @@ What happens to the plug, in about three minutes:
 While its settings are reset, the plug forgets its own template, so whatever is
 plugged into it may switch off until step 4.
 
-    python tools/espressif/capture_tasmota_template.py --host 192.168.0.53
+    python tools/espressif/capture_tasmota_template.py --host 192.168.99.53
 
 With --verify, the saved template itself is tested instead (steps 1, 3 and 4,
 no reset): exactly the file D1 will send, filled with the plug's own Wi-Fi.

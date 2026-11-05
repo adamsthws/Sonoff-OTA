@@ -632,7 +632,7 @@ def ask_ipv4(
     *,
     help_lines: Sequence[str] = (),
     default: str | None = None,
-    example: str | None = "192.168.1.50",
+    example: str | None = "192.168.99.50",
     must_respond: bool = False,
     check: Callable[[str], list[str]] | None = None,
 ) -> str:
@@ -650,11 +650,11 @@ def ask_ipv4(
         except ValueError:
             return False, (
                 f"'{answer}' is not an address. It should be four numbers "
-                "separated by dots, like 192.168.1.50 - not a name and not an "
+                "separated by dots, like 192.168.99.50 - not a name and not an "
                 "interface like eth0."
             )
         if address.version != 4:
-            return False, "This needs an IPv4 address, like 192.168.1.50."
+            return False, "This needs an IPv4 address, like 192.168.99.50."
         if not address.is_private:
             return False, (
                 f"{answer} is not a home-network address. Those normally start "

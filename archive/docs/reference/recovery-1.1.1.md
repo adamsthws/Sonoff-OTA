@@ -65,9 +65,9 @@ before it is considered for use.
 
 The temporary UCG rules used during interception matched:
 
-- S60 source `192.168.1.96`
+- S60 source `192.0.2.96`
 - vendor destination `52.57.99.135:8088`
-- relay destination `192.168.1.141:8088`
+- relay destination `192.0.2.141:8088`
 
 A read-only SSH audit was attempted, but the gateway correctly required
 interactive authentication. Confirm in UniFi that the temporary DNAT,

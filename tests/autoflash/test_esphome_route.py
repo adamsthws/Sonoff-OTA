@@ -52,7 +52,7 @@ class RouteTestCase(unittest.TestCase):
     def ctx(self, given=None, run="run", **inputs):
         state = RunState.open(Path(self.tmp.name) / run)
         for key, value in {"product_model": "S60TPF", "stock_version": "1.2.0",
-                           "plug_ip": "192.168.0.50", **inputs}.items():
+                           "plug_ip": "192.0.2.50", **inputs}.items():
             state.set_input(key, value)
         return SimpleNamespace(state=state, firmware_given=given, esphome_firmware=None, replace_own_build=False,
                                dry_run=False, finder=SimpleNamespace(poll=lambda: None),
@@ -384,11 +384,11 @@ class SignalSensorTests(unittest.TestCase):
     def test_without_the_sensor_the_api_is_asked(self):
         with mock.patch.object(esphome, "sensor_signal", return_value=None), \
                 mock.patch.object(esphome, "api_signal", return_value=-66) as api:
-            self.assertEqual(esphome.signal("192.168.0.50"), -66)
-        api.assert_called_once_with("192.168.0.50", key=None)
+            self.assertEqual(esphome.signal("192.0.2.50"), -66)
+        api.assert_called_once_with("192.0.2.50", key=None)
         with mock.patch.object(esphome, "sensor_signal", return_value=-58), \
                 mock.patch.object(esphome, "api_signal") as api:
-            self.assertEqual(esphome.signal("192.168.0.50"), -58)
+            self.assertEqual(esphome.signal("192.0.2.50"), -58)
         api.assert_not_called()
 
 

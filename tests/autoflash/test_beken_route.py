@@ -96,7 +96,7 @@ def a_context(tmp, **inputs):
     return SimpleNamespace(state=run, dry_run=False, finder=SimpleNamespace(poll=lambda: None),
                            esphome_password=None, esphome_key=None, esphome_firmware=None,
                            args=SimpleNamespace(no_backup=False), consented=True,
-                           listen_ip=lambda: "192.168.0.2", email=lambda: "owner@example.com",
+                           listen_ip=lambda: "192.0.2.2", email=lambda: "owner@example.com",
                            ewelink_env=lambda: {"EWELINK_PASSWORD": "pw"}, account_plug=None,
                            account_devices=lambda: None,
                            # OpenBeken answering Tasmota's Status 11, its Wi-Fi signal in it.
@@ -242,7 +242,7 @@ class FromStockTests(unittest.TestCase):
             self.assertEqual(sent["firmware"], fota_wrap.wrap(image, name=S61.wrapper_model, version=images.FOTA_VERSION))
             self.assertEqual(result["bytes"], len(sent["firmware"]))
             self.assertEqual((sent["device_id"], sent["device_ip"], sent["listen_ip"], sent["listen_port"]),
-                             ("1001234abc", "127.0.0.1", "192.168.0.2", 8088))
+                             ("1001234abc", "127.0.0.1", "192.0.2.2", 8088))
             self.assertEqual(sent["names"], ("user1.bin",))
             self.assertIs(sent["live"], False)   # what it fetches is logged, never drawn over the stage line
             # The plug must be as it was at B1: another model, or firmware, is refused before sending.
@@ -419,7 +419,7 @@ class OnwardTests(unittest.TestCase):
             image, version = images.image(ctx, "esphome")
             self.assertEqual(fetched["image"], image)
             self.assertEqual(result["version"], version)
-            self.assertEqual(self.server.commands, ["ota_http http://192.168.0.2:8088/firmware.rbl"])
+            self.assertEqual(self.server.commands, ["ota_http http://192.0.2.2:8088/firmware.rbl"])
             # Served under the name the plug is sent to fetch (it was once 404).
             self.assertIn("firmware.rbl", fetched["names"])
             # Its progress logged, never drawn over the stage line.
@@ -461,7 +461,7 @@ class OnwardTests(unittest.TestCase):
             with mock.patch.object(images, "stock_rbl", return_value=(b"RBL stock", "1.0.2")):
                 result = self.served(ctx, onward.step_openbeken_to_sonoff, fetched)
             self.assertEqual((fetched["image"], result["version"]), (b"RBL stock", "1.0.2"))
-            self.assertEqual(self.server.commands, ["AutoflashRevertToStock http://192.168.0.2:8088/firmware.rbl"])
+            self.assertEqual(self.server.commands, ["AutoflashRevertToStock http://192.0.2.2:8088/firmware.rbl"])
             self.assertIn("firmware.rbl", fetched["names"])
             # An OpenBeken without the module cannot check where the image would go: refused.
             self.server.unknown.add("AutoflashRevertToStock")
@@ -520,7 +520,7 @@ class OnwardTests(unittest.TestCase):
             self.assertFalse(asked.called or signal.called)
             image, version = images.image(ctx, "esphome")
             self.assertEqual((fetched["image"], result["version"]), (image, version))
-            self.assertEqual(self.server.commands, ["ota_http http://192.168.0.2:8088/firmware.rbl"])
+            self.assertEqual(self.server.commands, ["ota_http http://192.0.2.2:8088/firmware.rbl"])
 
     def test_a_plug_still_on_the_interim_firmware_did_not_take_esphome(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -588,7 +588,7 @@ class FromTheInterimFirmwareTests(unittest.TestCase):
             said = self.going_ahead(ctx, onward.step_interim_to_esphome)
             self.assertIn("the device's interim firmware is replaced", said)
             self.assertNotIn("openbeken", said.lower())
-            self.assertEqual(self.server.commands[-1], "ota_http http://192.168.0.2:8088/firmware.rbl")
+            self.assertEqual(self.server.commands[-1], "ota_http http://192.0.2.2:8088/firmware.rbl")
 
     def test_to_sonoffs_firmware_it_fetches_it_as_openbeken_would(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -596,7 +596,7 @@ class FromTheInterimFirmwareTests(unittest.TestCase):
             ctx.consented = False
             said = self.going_ahead(ctx, onward.step_interim_to_sonoff)
             self.assertIn("the device's interim firmware is replaced", said)
-            self.assertEqual(self.server.commands[-1], "AutoflashRevertToStock http://192.168.0.2:8088/firmware.rbl")
+            self.assertEqual(self.server.commands[-1], "AutoflashRevertToStock http://192.0.2.2:8088/firmware.rbl")
             # Still on it afterwards: the image was not applied, and is sent again.
             with mock.patch.object(detect, "identify", return_value="interim"):
                 self.assertEqual(onward.evidence_installed(ctx),
@@ -724,8 +724,8 @@ class OpenBekenUpdateTests(unittest.TestCase):
             result = onward.step_openbeken_update(ctx)
         image, version = images.image(ctx, "openbeken")
         self.assertEqual(served.call_args.args[1], image)
-        served.call_args.args[3]("http://192.168.0.2:8088/firmware.rbl")
-        self.assertEqual(self.server.commands[-1], "ota_http http://192.168.0.2:8088/firmware.rbl")
+        served.call_args.args[3]("http://192.0.2.2:8088/firmware.rbl")
+        self.assertEqual(self.server.commands[-1], "ota_http http://192.0.2.2:8088/firmware.rbl")
         self.assertEqual((result["seconds"], result["version"]), (4.0, version))
 
     def test_the_check_waits_for_the_new_release(self):

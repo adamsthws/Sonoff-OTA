@@ -33,9 +33,9 @@ Examples below use these tested addresses; substitute yours:
 
 | Purpose | Address |
 |---|---|
-| S60 | `192.168.1.96` |
-| workstation | `192.168.1.141` |
-| UniFi gateway | `192.168.1.1` |
+| S60 | `192.0.2.96` |
+| workstation | `192.0.2.141` |
+| UniFi gateway | `192.0.2.1` |
 | captured vendor OTA host | `52.57.99.135:8088` |
 
 ## 1. Pair and inventory the stock plug
@@ -48,7 +48,7 @@ From the project directory:
 ```sh
 python3 tools/discover_ewelink.py \
   --timeout 8 \
-  --target 192.168.1.96 \
+  --target 192.0.2.96 \
   --output captures/my-s60/mdns.json
 python3 tools/get_device_key.py \
   --mdns-capture captures/my-s60/mdns.json \
@@ -56,7 +56,7 @@ python3 tools/get_device_key.py \
 python3 tools/query_ota.py \
   --mdns-capture captures/my-s60/mdns.json \
   --output captures/my-s60/ota-metadata.json
-python3 tools/lan_get_state.py 192.168.1.96 \
+python3 tools/lan_get_state.py 192.0.2.96 \
   --key-file captures/my-s60/device-key.json \
   --output captures/my-s60/lan-state.json
 ```
@@ -109,12 +109,12 @@ from the workstation does not work. Redirect only traffic from the plug to the
 workstation. On the tested UniFi gateway:
 
 ```sh
-ssh root@192.168.1.1
+ssh root@192.0.2.1
 iptables -t nat -I PREROUTING 1 \
-  -s 192.168.1.96 -d 52.57.99.135 -p tcp --dport 8088 \
-  -j DNAT --to-destination 192.168.1.141:8088
+  -s 192.0.2.96 -d 52.57.99.135 -p tcp --dport 8088 \
+  -j DNAT --to-destination 192.0.2.141:8088
 iptables -t nat -I POSTROUTING 1 \
-  -s 192.168.1.96 -d 192.168.1.141 -p tcp --dport 8088 \
+  -s 192.0.2.96 -d 192.0.2.141 -p tcp --dport 8088 \
   -j MASQUERADE
 ```
 
@@ -125,10 +125,10 @@ Confirm both exact rules exist by repeating them with `-C` instead of `-I`:
 
 ```sh
 iptables -t nat -C PREROUTING \
-  -s 192.168.1.96 -d 52.57.99.135 -p tcp --dport 8088 \
-  -j DNAT --to-destination 192.168.1.141:8088
+  -s 192.0.2.96 -d 52.57.99.135 -p tcp --dport 8088 \
+  -j DNAT --to-destination 192.0.2.141:8088
 iptables -t nat -C POSTROUTING \
-  -s 192.168.1.96 -d 192.168.1.141 -p tcp --dport 8088 \
+  -s 192.0.2.96 -d 192.0.2.141 -p tcp --dport 8088 \
   -j MASQUERADE
 ```
 
@@ -138,7 +138,7 @@ and run this on the workstation:
 
 ```sh
 sudo ./tools/test_ota_firewall.sh \
-  wlo1 192.168.1.96 192.168.1.141 52.57.99.135 8088
+  wlo1 192.0.2.96 192.0.2.141 52.57.99.135 8088
 ```
 
 Continue only after both interception checks pass and the script confirms that
@@ -155,9 +155,9 @@ Run the sender on the workstation, substituting your account email:
 
 ```sh
 python3 tools/serve_tasmota_ota.py \
-  --listen-ip 192.168.1.141 \
+  --listen-ip 192.0.2.141 \
   --listen-port 8088 \
-  --device-ip 192.168.1.96 \
+  --device-ip 192.0.2.96 \
   --firmware artifacts/s60-ota-bridge-v3-1.2.1.ota \
   --email YOUR_EWELINK_EMAIL \
   --expected-current-version 1.1.1 \
@@ -249,10 +249,10 @@ On the gateway, delete the exact rules added earlier:
 
 ```sh
 iptables -t nat -D PREROUTING \
-  -s 192.168.1.96 -d 52.57.99.135 -p tcp --dport 8088 \
-  -j DNAT --to-destination 192.168.1.141:8088
+  -s 192.0.2.96 -d 52.57.99.135 -p tcp --dport 8088 \
+  -j DNAT --to-destination 192.0.2.141:8088
 iptables -t nat -D POSTROUTING \
-  -s 192.168.1.96 -d 192.168.1.141 -p tcp --dport 8088 \
+  -s 192.0.2.96 -d 192.0.2.141 -p tcp --dport 8088 \
   -j MASQUERADE
 ```
 

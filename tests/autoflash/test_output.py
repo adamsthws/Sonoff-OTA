@@ -307,7 +307,7 @@ class ConciseTests(OutputTestCase):
                 output.before_input("The plug's address: ")
                 now[0] += 60                    # the person thinking
                 self.assertEqual(output.waited(), 60)
-                output.answered("192.168.0.50")
+                output.answered("192.0.2.50")
                 now[0] += 5                     # working again
                 self.assertEqual(output.waited(), 60)
                 output.stage_end("complete")
@@ -324,7 +324,7 @@ class ConciseTests(OutputTestCase):
                 output.before_input("The plug's address: ")
                 now[0] += 60
                 self.assertEqual(output.waited(), 60)
-                output.answered("192.168.0.50")
+                output.answered("192.0.2.50")
                 output.stage_end("complete")
             self.run_with(FakeTerminal(), False, body)
 
@@ -427,7 +427,7 @@ class ConciseTests(OutputTestCase):
         def body():
             with mock.patch.object(output, "colour_ok", return_value=True), \
                  mock.patch("shutil.get_terminal_size", return_value=os.terminal_size((80, 6))), \
-                 mock.patch("builtins.input", side_effect=["maybe", "192.168.0.50", "n"]):
+                 mock.patch("builtins.input", side_effect=["maybe", "192.0.2.50", "n"]):
                 output.stage_begin(3, "Discovering the plug")
                 output.transient_begin()
                 self.assertFalse(prompts.ask_yes_no("Use it anyway?", default=False))
@@ -711,14 +711,14 @@ class FallbackScreenTests(OutputTestCase):
 
     def test_the_setup_network_steps_are_all_on_screen(self):
         from tools.autoflash import setup_network
-        polls = iter([None, "192.168.0.77"])
+        polls = iter([None, "192.0.2.77"])
         ctx = mock.Mock(wifi=lambda why=None: ("Home-2G", "password-one"))
         ctx.finder.poll = lambda: next(polls)
 
         def body():
             with mock.patch.object(hostsys, "wifi_menu_hint", return_value="the Wi-Fi menu"), \
                  mock.patch.object(setup_network, "wait_for_port", return_value=True), \
-                 mock.patch.object(setup_network, "send_wifi", return_value=("saved", "192.168.0.77")), \
+                 mock.patch.object(setup_network, "send_wifi", return_value=("saved", "192.0.2.77")), \
                  mock.patch.object(join, "name_with_the_wifi"), \
                  mock.patch.object(time, "sleep"):
                 join.configure_plug_wifi(ctx, "tasmota-5A3C1F-7340")
@@ -733,9 +733,9 @@ class FallbackScreenTests(OutputTestCase):
 
     def send(self, outcomes, unattended=False, gone=False):
         from tools.autoflash import prompts, setup_network
-        polls = iter([None, "192.168.0.77"])
+        polls = iter([None, "192.0.2.77"])
         ctx = mock.Mock(wifi=lambda why=None: ("Home-2G", "password-one"))
-        ctx.finder.poll = lambda: next(polls, "192.168.0.77")
+        ctx.finder.poll = lambda: next(polls, "192.0.2.77")
         results = iter(outcomes)
         sent = []
 
@@ -763,7 +763,7 @@ class FallbackScreenTests(OutputTestCase):
     def test_no_word_from_the_plug_it_is_sent_again(self):
         from tools.autoflash import setup_network
         sent, screen = self.send([setup_network.SetupError("no answer"), ("unknown", None),
-                                  ("saved", "192.168.0.77")])
+                                  ("saved", "192.0.2.77")])
         self.assertEqual(sent, ["Home-2G"] * 3)
         self.assertIn("sending them again (attempt 3 of 3)", screen)
         self.assertIn("restarting onto it", screen)
@@ -779,7 +779,7 @@ class FallbackScreenTests(OutputTestCase):
         self.assertIn("Back to your usual Wi-Fi", screen)
 
     def test_rejected_details_are_asked_for_again(self):
-        sent, _ = self.send([("rejected", None), ("saved", "192.168.0.77")])
+        sent, _ = self.send([("rejected", None), ("saved", "192.0.2.77")])
         self.assertEqual(sent, ["Home-2G", "Home-New"])
         self.assertTrue(self.asked)
 
@@ -842,7 +842,7 @@ class ReportTests(OutputTestCase):
         from tools.autoflash.state import RunState
         state = RunState.open(Path(self.tmp.name) / "run")
         for key, value in {"product_model": "S60TPG", "stock_version": "1.2.0",
-                           "email": "me@example.com", "plug_ip": "192.168.0.50",
+                           "email": "me@example.com", "plug_ip": "192.0.2.50",
                            "device_name": "tasmota-1A2B3C-4567", **inputs}.items():
             state.set_input(key, value)
         state.capture("D1.upload_route", "home network")
@@ -987,7 +987,7 @@ class ReportTests(OutputTestCase):
             ctx.state.mark(step, DONE)
         step = routes.STEPS[9][0]
         where = f"stage 10 of {len(routes.STEPS)} ({routes.stage_name(step)})"
-        ctx.state.mark(step, "failed", error="GET /chunk/safeboot/20 from 192.168.0.50 "
+        ctx.state.mark(step, "failed", error="GET /chunk/safeboot/20 from 192.0.2.50 "
                                              "(58:cf:79:01:02:03) returned HTTP -1 after 8 attempts")
         self.assertEqual(report.run_result(ctx, "failed"),
                          f"stopped at {where}: GET /chunk/safeboot/20 from <address> (<mac>) "
@@ -1125,14 +1125,14 @@ class ReportTests(OutputTestCase):
     def test_the_plug_page_is_the_plug_or_the_emulators_forward(self):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("AUTOFLASH_EMULATOR_URL", None)
-            self.assertEqual(report.plug_page_url("192.168.0.50"), "http://192.168.0.50")   # no trailing slash
+            self.assertEqual(report.plug_page_url("192.0.2.50"), "http://192.0.2.50")   # no trailing slash
             self.assertIsNone(report.plug_page_url(None))
         with mock.patch.dict(os.environ, {"AUTOFLASH_EMULATOR_URL": "http://localhost:8080"}):
             self.assertEqual(report.plug_page_url("192.168.60.50"), "http://localhost:8080")
 
     def test_the_report_holds_nothing_private(self):
         markdown = report.report_markdown(report.report_fields(self.ctx(), 441, False))
-        for private in ("me@example.com", "192.168.0.50", "tasmota-1A2B3C-4567", "1001234abc"):
+        for private in ("me@example.com", "192.0.2.50", "tasmota-1A2B3C-4567", "1001234abc"):
             self.assertNotIn(private, markdown)
 
     def test_fallbacks_and_unknown_models_are_reported_as_such(self):

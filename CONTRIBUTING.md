@@ -81,7 +81,13 @@ eWeLink accounts and plugs' identities.
 - `.env` (passwords for unattended runs) and `captures/` (each plug's
   backup and runs) are never committed; Git ignores both.
 - In examples, tests and docs, use the made-up MAC `12:34:56:ab:cd:ef` and
-  addresses that are nobody's - never your plug's, network's or account's.
+  addresses that are nobody's - never your plug's, network's or account's. A
+  test's address can be a real device where it runs. Tests, the archive and
+  internal defaults use `192.0.2.x`, reserved for examples. What people read -
+  prompts, help text, docs, screenshots - uses `192.168.99.x`, which looks like
+  a home network, with `192.168.99.50` the plug. An address a program really
+  uses stays, such as the Beken emulator's built-in network;
+  `tests/repo/test_example_addresses.py` holds every file to this and lists them.
 - If the leak scan stops a commit, take the finding out. A new made-up
   example belongs in `tools/repo/leak-scan-allow`; nothing real is ever let through
   with `--no-verify`.

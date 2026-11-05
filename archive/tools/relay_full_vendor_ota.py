@@ -13,7 +13,7 @@ used in the 100-byte header's 8-byte field at offset 0x50.
 
 Usage (from the project root, outside device_bash):
   python3 tools/relay_full_vendor_ota.py \
-      --listen-ip 192.168.1.141 --email YOUR@EMAIL \
+      --listen-ip 192.0.2.141 --email YOUR@EMAIL \
       --i-accept-vendor-flash
 """
 
@@ -49,7 +49,7 @@ except ModuleNotFoundError:
 
 UPSTREAM_HOST = "52.57.99.135"
 UPSTREAM_PORT = 8088
-DEVICE_IP = "192.168.1.96"
+DEVICE_IP = "192.0.2.96"
 
 
 class FullRelayHandler(http.server.BaseHTTPRequestHandler):
@@ -72,7 +72,7 @@ class FullRelayHandler(http.server.BaseHTTPRequestHandler):
         print(f"  [device] GET {path[:80]}  Range: {range_hdr or '(full)'}")
 
         # Only accept connections from the device (may appear as router due to MASQUERADE)
-        allowed_ips = {DEVICE_IP, "192.168.1.1"}
+        allowed_ips = {DEVICE_IP, "192.0.2.1"}
         if self.client_address[0] not in allowed_ips:
             print(f"  [rejected] unexpected source {self.client_address[0]}")
             self._send_error_plain(403)
@@ -218,7 +218,7 @@ def analyse_binary(data: bytes, output_dir: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--listen-ip", default="192.168.1.141")
+    parser.add_argument("--listen-ip", default="192.0.2.141")
     parser.add_argument("--listen-port", type=int, default=8088)
     parser.add_argument("--email")
     parser.add_argument("--country-code", default="+44")

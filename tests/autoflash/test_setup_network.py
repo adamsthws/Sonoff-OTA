@@ -59,7 +59,7 @@ class FakePlugHandler(http.server.BaseHTTPRequestHandler):
                 self.reply("<h3>Connect failed to Home<br>Please, check your credentials</h3>")
             else:
                 self.reply("Successful WiFi Connection<br>Redirecting to new device's IP "
-                           "address<br><a href='http://192.168.1.77'>192.168.1.77</a>")
+                           "address<br><a href='http://192.0.2.77'>192.0.2.77</a>")
             return
         self.reply("not found", 404)
 
@@ -146,7 +146,7 @@ class SetupNetworkTests(unittest.TestCase):
         plug = self.start("tasmota")
         outcome = setup_network.send_wifi(
             "Home & Garden", "p@ss word", host=plug.host, settle=0.05, poll=0.05)
-        self.assertEqual(outcome, ("saved", "192.168.1.77"))
+        self.assertEqual(outcome, ("saved", "192.0.2.77"))
         self.assertEqual(plug.wifi, {"ssid": "Home & Garden", "password": "p@ss word"})
         # A look while still testing, then the verdict - no rapid polling,
         # which on a real plug scans and knocks the computer off its network.

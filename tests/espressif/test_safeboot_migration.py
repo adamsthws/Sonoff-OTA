@@ -152,7 +152,7 @@ class MigrationFixture:
             self.manifest_path,
             self.manifest,
             phase,
-            "http://192.168.1.10:8089",
+            "http://192.0.2.10:8089",
             self.evidence_dir,
             7200,
         )
@@ -611,7 +611,7 @@ class MigrationValidationTests(unittest.TestCase):
                 report["target_table_sha256"] = commit_table
                 (fixture.evidence_dir / "commit-report.json").write_text(json.dumps(report))
         return MigrationState(fixture.manifest_path, fixture.manifest, "restore",
-                              "http://192.168.1.10:8089", fixture.evidence_dir, 7200,
+                              "http://192.0.2.10:8089", fixture.evidence_dir, 7200,
                               recovery_unproven=True), fixture
 
     def test_unproven_needs_no_record_of_the_firmware_it_writes_over(self):
@@ -637,7 +637,7 @@ class MigrationValidationTests(unittest.TestCase):
             fixture.enable_recovery()
             with self.assertRaisesRegex(ValueError, "only the restore"):
                 MigrationState(fixture.manifest_path, fixture.manifest, "stage",
-                               "http://192.168.1.10:8089", fixture.evidence_dir, 7200,
+                               "http://192.0.2.10:8089", fixture.evidence_dir, 7200,
                                recovery_unproven=True)
 
     def test_the_plug_is_told_where_to_carry_on(self):
@@ -1063,7 +1063,7 @@ class PlanPhaseTests(unittest.TestCase):
 
     def state(self, fixture, plan=None):
         return MigrationState(fixture.manifest_path, fixture.manifest, "plan",
-                              "http://192.168.1.10:8089", fixture.evidence_dir, 7200,
+                              "http://192.0.2.10:8089", fixture.evidence_dir, 7200,
                               plan=plan or plans.esphome(self.IMAGE))
 
     def report(self, state, **changes):
@@ -1166,8 +1166,8 @@ class PlanPhaseTests(unittest.TestCase):
             fixture = MigrationFixture(Path(directory))
             with self.assertRaisesRegex(ValueError, "plan-from-stdin"):
                 MigrationState(fixture.manifest_path, fixture.manifest, "plan",
-                               "http://192.168.1.10:8089", fixture.evidence_dir, 7200)
+                               "http://192.0.2.10:8089", fixture.evidence_dir, 7200)
             with self.assertRaisesRegex(ValueError, "takes no plan"):
                 MigrationState(fixture.manifest_path, fixture.manifest, "preflight",
-                               "http://192.168.1.10:8089", fixture.evidence_dir, 7200,
+                               "http://192.0.2.10:8089", fixture.evidence_dir, 7200,
                                plan=plans.esphome(self.IMAGE))

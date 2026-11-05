@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class PlanServerCommandTests(unittest.TestCase):
     def test_the_plan_server_script_is_where_the_command_says(self):
         runner = PhaseRunner(repo_root=ROOT, manifest=ROOT / "m.json", evidence_dir=ROOT / "live",
-                             listen_ip="192.168.1.141", device=types.SimpleNamespace(host="192.168.1.50"),
+                             listen_ip="192.0.2.141", device=types.SimpleNamespace(host="192.0.2.50"),
                              log=lambda _: None)
         for phase in ("stage", "commit", "restore"):
             with self.subTest(phase=phase):

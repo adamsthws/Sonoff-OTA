@@ -75,7 +75,7 @@ def main() -> int:
         "--manifest", type=Path, default=Path("captures/safeboot-migration/manifest.json")
     )
     parser.add_argument("--evidence-dir", type=Path)
-    parser.add_argument("--device-ip", default="192.168.1.96")
+    parser.add_argument("--device-ip", default="192.0.2.96")
     args = parser.parse_args()
 
     manifest_path = args.manifest.resolve()

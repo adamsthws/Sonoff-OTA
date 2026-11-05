@@ -45,7 +45,7 @@ class TasmotaTests(unittest.TestCase):
         self.addCleanup(patch.stop)
     def kind(self, fake):
         with mock.patch.object(detect, "Device", fake):
-            found = detect._tasmota("192.168.0.137", 2.0)
+            found = detect._tasmota("192.0.2.137", 2.0)
         return found and found[0]
 
     def test_the_routes_own_tasmota_on_sonoffs_layout_is_part_way(self):
@@ -62,7 +62,7 @@ class TasmotaTests(unittest.TestCase):
     def found_busy(self, fake):
         """What the search and identify make of `fake`, a plug this computer
         knows that answers as a Tasmota once its Berry is free."""
-        neighbours = {"192.168.0.137": "12:34:56:ab:cd:ef"}
+        neighbours = {"192.0.2.137": "12:34:56:ab:cd:ef"}
         with mock.patch.object(detect, "Device", fake), \
                 mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
@@ -71,8 +71,8 @@ class TasmotaTests(unittest.TestCase):
                 mock.patch.object(detect, "answers_as_tasmota", return_value=True), \
                 mock.patch.object(detect.esphome, "page", return_value="other"), \
                 mock.patch.object(detect.esphome_ota, "probe", return_value=None):
-            return (detect.converted_plugs("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"}),
-                    detect.identify("192.168.0.137"))
+            return (detect.converted_plugs("192.0.2.1", known_macs={"12:34:56:ab:cd:ef"}),
+                    detect.identify("192.0.2.137"))
 
     def test_a_tasmota_too_busy_to_answer_is_asked_again(self):
         # Seen in the fault suite: its Berry held for 18 s by a phase whose
@@ -101,7 +101,7 @@ class TasmotaTests(unittest.TestCase):
         fake = FakeTasmota(version="", table=None)
 
         def not_found(command):
-            raise urllib.error.HTTPError("http://192.168.0.137/cm", 404, "Not Found", {}, io.BytesIO())
+            raise urllib.error.HTTPError("http://192.0.2.137/cm", 404, "Not Found", {}, io.BytesIO())
         fake.command = not_found
         self.assertIsNone(self.kind(fake))
 
@@ -156,69 +156,69 @@ class TasmotaTests(unittest.TestCase):
                 raise TimeoutError("timed out")
             return answers(command)
         fake.command = no_template
-        neighbours = {"192.168.0.137": "12:34:56:ab:cd:ef"}
+        neighbours = {"192.0.2.137": "12:34:56:ab:cd:ef"}
         with mock.patch.object(detect, "Device", fake), \
                 mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
                 mock.patch.object(detect, "_is_installer", return_value=False), \
                 mock.patch.object(detect.esphome, "page", return_value="other"):
-            self.assertEqual(detect.converted_plugs("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"}), [])
-            self.assertIsNone(detect.identify("192.168.0.137"))
+            self.assertEqual(detect.converted_plugs("192.0.2.1", known_macs={"12:34:56:ab:cd:ef"}), [])
+            self.assertIsNone(detect.identify("192.0.2.137"))
 
     def test_a_safeboot_is_taken_only_with_a_mac_this_computer_knows(self):
         # It answers no commands: nothing else tells this tool's startup
         # firmware from any Tasmota part way through an update.
         self.assertEqual(self.kind(FakeTasmota(version="", table="", safeboot=True)), "startup")
         fake = FakeTasmota(version="", table="", safeboot=True)
-        neighbours = {"192.168.0.137": "12:34:56:ab:cd:ef", "192.168.0.99": "aa:bb:cc:dd:ee:ff"}
+        neighbours = {"192.0.2.137": "12:34:56:ab:cd:ef", "192.0.2.99": "aa:bb:cc:dd:ee:ff"}
         with mock.patch.object(detect, "Device", fake), \
                 mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
                 mock.patch.object(detect.esphome, "page", return_value="other"), \
                 mock.patch.object(detect, "_is_installer", return_value=False):  # nothing real asked
-            found = detect.converted_plugs("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
-        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.137", "midway")])
+            found = detect.converted_plugs("192.0.2.1", known_macs={"12:34:56:ab:cd:ef"})
+        self.assertEqual([(f.host, f.firmware) for f in found], [("192.0.2.137", "midway")])
 
     def test_the_mover_is_taken_only_with_a_mac_this_computer_knows(self):
         # No page, only ESPHome's update service: as any ESPHome built without
         # a web server looks - seen on a network with four of them.
-        neighbours = {"192.168.0.137": "12:34:56:ab:cd:ef", "192.168.0.99": "aa:bb:cc:dd:ee:ff"}
+        neighbours = {"192.0.2.137": "12:34:56:ab:cd:ef", "192.0.2.99": "aa:bb:cc:dd:ee:ff"}
         with mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
                 mock.patch.object(detect, "_port_open", return_value=False), \
                 mock.patch.object(detect.esphome_ota, "probe", return_value=object()):
-            found = detect.converted_plugs("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
-        self.assertEqual([(f.host, f.name) for f in found], [("192.168.0.137", "the mover")])
+            found = detect.converted_plugs("192.0.2.1", known_macs={"12:34:56:ab:cd:ef"})
+        self.assertEqual([(f.host, f.name) for f in found], [("192.0.2.137", "the mover")])
 
     def test_a_converted_tasmota_is_found_with_its_kind(self):
         fake = FakeTasmota(version="15.6.0(release-tasmota32)", table=TASMOTA_TABLE)
         with mock.patch.object(detect, "Device", fake), \
                 mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table",
-                                  return_value={"192.168.0.137": "12:34:56:ab:cd:ef"}), \
+                                  return_value={"192.0.2.137": "12:34:56:ab:cd:ef"}), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
                 mock.patch.object(detect.esphome, "page", return_value="other"), \
                 mock.patch.object(detect, "_is_installer", return_value=False):  # nothing real asked
-            found = detect.converted_plugs("192.168.0.1")
+            found = detect.converted_plugs("192.0.2.1")
         self.assertEqual([(f.host, f.firmware, f.kind) for f in found],
-                         [("192.168.0.137", "tasmota", "sonoff-s60")])
-        self.assertTrue(found[0].describe().startswith("the device at 192.168.0.137"))
+                         [("192.0.2.137", "tasmota", "sonoff-s60")])
+        self.assertTrue(found[0].describe().startswith("the device at 192.0.2.137"))
 
     def test_a_tasmota_not_yet_set_up_is_taken_only_with_a_mac_this_computer_knows(self):
         # Official Tasmota, put on by a run stopped before it gave it the S60's
         # template: any Tasmota could look like it.
         fake = FakeTasmota(version="15.6.0(release-tasmota32)", table=TASMOTA_TABLE, module="Generic")
-        neighbours = {"192.168.0.137": "12:34:56:ab:cd:ef", "192.168.0.99": "aa:bb:cc:dd:ee:ff"}
+        neighbours = {"192.0.2.137": "12:34:56:ab:cd:ef", "192.0.2.99": "aa:bb:cc:dd:ee:ff"}
         with mock.patch.object(detect, "Device", fake), \
                 mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
                 mock.patch.object(detect.esphome, "page", return_value="other"), \
                 mock.patch.object(detect, "_is_installer", return_value=False):  # nothing real asked
-            found = detect.converted_plugs("192.168.0.1", known_macs={"12:34:56:ab:cd:ef"})
-        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.137", "untemplated")])
+            found = detect.converted_plugs("192.0.2.1", known_macs={"12:34:56:ab:cd:ef"})
+        self.assertEqual([(f.host, f.firmware) for f in found], [("192.0.2.137", "untemplated")])
 
 
 class LoginPage(http.server.ThreadingHTTPServer):
@@ -285,16 +285,16 @@ class WebPasswordTests(unittest.TestCase):
                           if authorization or LockedTasmota.PASSWORD in path], [])
 
     def test_found_by_address_or_on_the_network_it_is_named_locked(self):
-        neighbours = {"192.168.0.42": "12:34:56:ab:cd:ef"}
-        with mock.patch.object(detect, "_tasmota", side_effect=detect.Locked("192.168.0.42")), \
+        neighbours = {"192.0.2.42": "12:34:56:ab:cd:ef"}
+        with mock.patch.object(detect, "_tasmota", side_effect=detect.Locked("192.0.2.42")), \
                 mock.patch.object(detect.esphome, "page", return_value="other"), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
                 mock.patch.object(detect, "_is_installer", return_value=False), \
                 mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours):
-            self.assertEqual(detect.identify("192.168.0.42"), "locked")
-            found = detect.converted_plugs("192.168.0.1")
-        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.42", "locked")])
+            self.assertEqual(detect.identify("192.0.2.42"), "locked")
+            found = detect.converted_plugs("192.0.2.1")
+        self.assertEqual([(f.host, f.firmware) for f in found], [("192.0.2.42", "locked")])
         self.assertIn("web password", found[0].describe())
 
 
@@ -396,15 +396,15 @@ class EsphomeLoginTests(unittest.TestCase):
         self.assertEqual([authorization for _, authorization in router.seen if authorization], [])
 
     def test_found_by_address_or_on_the_network_it_is_named(self):
-        neighbours = {"192.168.0.42": "12:34:56:ab:cd:ef"}
+        neighbours = {"192.0.2.42": "12:34:56:ab:cd:ef"}
         with mock.patch.object(detect.esphome, "page", return_value="login"), \
                 mock.patch.object(detect.esphome_ota, "probe", return_value=object()), \
                 mock.patch.object(detect, "_port_open", return_value=True), \
                 mock.patch.object(detect.hostsys, "sweep"), \
                 mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours):
-            self.assertEqual(detect.identify("192.168.0.42"), "esphome-login")
-            found = detect.converted_plugs("192.168.0.1")
-        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.42", "esphome-login")])
+            self.assertEqual(detect.identify("192.0.2.42"), "esphome-login")
+            found = detect.converted_plugs("192.0.2.1")
+        self.assertEqual([(f.host, f.firmware) for f in found], [("192.0.2.42", "esphome-login")])
         self.assertIn("web login", found[0].describe())
 
     def test_before_this_it_was_taken_for_the_mover(self):
@@ -413,7 +413,7 @@ class EsphomeLoginTests(unittest.TestCase):
         with mock.patch.object(detect.esphome, "page", return_value="login"), \
                 mock.patch.object(detect.esphome_ota, "probe", return_value=object()), \
                 mock.patch.object(detect, "_port_open", return_value=True):
-            self.assertNotEqual(detect.identify("192.168.0.42"), "mover")
+            self.assertNotEqual(detect.identify("192.0.2.42"), "mover")
 
 
 class InstallerTests(unittest.TestCase):
@@ -430,17 +430,17 @@ class InstallerTests(unittest.TestCase):
         with mock.patch.object(detect.esphome, "page", return_value="other"), \
              mock.patch.object(detect, "_port_open", return_value=True), \
              mock.patch.object(detect, "_is_installer", return_value=True):
-            self.assertEqual(detect.identify("192.168.0.137"), "installer")
+            self.assertEqual(detect.identify("192.0.2.137"), "installer")
 
     def test_found_on_the_network_it_is_offered(self):
-        neighbours = {"192.168.0.137": "12:34:56:ab:cd:ef"}
+        neighbours = {"192.0.2.137": "12:34:56:ab:cd:ef"}
         with mock.patch.object(detect.hostsys, "sweep"), \
              mock.patch.object(detect.hostsys, "neighbour_table", return_value=neighbours), \
              mock.patch.object(detect, "_port_open", return_value=True), \
              mock.patch.object(detect.esphome, "page", return_value="other"), \
              mock.patch.object(detect, "_is_installer", return_value=True):
-            found = detect.converted_plugs("192.168.0.1")
-        self.assertEqual([(f.host, f.firmware) for f in found], [("192.168.0.137", "installer")])
+            found = detect.converted_plugs("192.0.2.1")
+        self.assertEqual([(f.host, f.firmware) for f in found], [("192.0.2.137", "installer")])
 
 
 

@@ -18,7 +18,7 @@ class FakeState:
 
 
 class ReleaseFirewallTests(unittest.TestCase):
-    RULE = hostsys.FirewallRule("ufw", "192.168.1.50", [8088, 8089])
+    RULE = hostsys.FirewallRule("ufw", "192.0.2.50", [8088, 8089])
 
     def ctx(self, rules=(RULE,)):
         return types.SimpleNamespace(state=FakeState(list(rules)))
@@ -45,7 +45,7 @@ class ReleaseFirewallTests(unittest.TestCase):
             firewall.release_firewall(ctx)  # does not raise
         screen = "\n".join(lines)
         self.assertIn("was not removed (stopped with Ctrl-C)", screen)
-        self.assertIn("192.168.1.50", screen)
+        self.assertIn("192.0.2.50", screen)
         self.assertEqual(firewall.recorded_rules(ctx), [self.RULE])  # still recorded for cleanup
 
 

@@ -115,7 +115,7 @@ the bridge remains the automatic fallback.
 
 In your router's client list, find the device whose manufacturer is Espressif
 or Sonoff. Reserve its IP so it will not change. In the successful test it was
-`192.168.1.96`; yours may be different.
+`192.0.2.96`; yours may be different.
 
 Write down:
 
@@ -133,7 +133,7 @@ hostname -I
 ```
 
 Use the address beginning with the same first three numbers as the plug. For
-example, if the plug is `192.168.1.96`, the workstation will normally be
+example, if the plug is `192.0.2.96`, the workstation will normally be
 `192.168.1.something`.
 
 ## Part 2: open the project and run the safe checks
@@ -303,11 +303,11 @@ Example only:
 
 ```sh
 iptables -t nat -I PREROUTING 1 \
-  -s 192.168.1.96 -d 52.57.99.135 -p tcp --dport 8088 \
-  -j DNAT --to-destination 192.168.1.141:8088
+  -s 192.0.2.96 -d 52.57.99.135 -p tcp --dport 8088 \
+  -j DNAT --to-destination 192.0.2.141:8088
 
 iptables -t nat -I POSTROUTING 1 \
-  -s 192.168.1.96 -d 192.168.1.141 -p tcp --dport 8088 \
+  -s 192.0.2.96 -d 192.0.2.141 -p tcp --dport 8088 \
   -j MASQUERADE
 ```
 
@@ -347,7 +347,7 @@ For example only:
 
 ```sh
 sudo ./tools/test_ota_firewall.sh \
-  wlo1 192.168.1.96 192.168.1.141 52.57.99.135 8088
+  wlo1 192.0.2.96 192.0.2.141 52.57.99.135 8088
 ```
 
 Continue only after both interception checks say `PASS` and the final line says
@@ -475,7 +475,7 @@ Your browser should open Tasmota's Wi-Fi setup page. If it does not, open
 2. Enter its password.
 3. Save.
 4. Reconnect the computer to the normal Wi-Fi network.
-5. Open the plug's reserved LAN IP, for example `http://192.168.1.96/`.
+5. Open the plug's reserved LAN IP, for example `http://192.0.2.96/`.
 
 ## Part 8: test everything
 

@@ -233,7 +233,7 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, metavar="MINUTES",
                         help="stop the run (as Ctrl-C would) if it is still going after this long")
     parser.add_argument("run_options", nargs=argparse.REMAINDER,
-                        help="after --: options for the run itself, e.g. -- --plug-ip 192.168.1.50")
+                        help="after --: options for the run itself, e.g. -- --plug-ip 192.168.99.50")
     args = parser.parse_args()
     if not hasattr(os, "fork"):
         print("This needs Linux or macOS. On Windows, start.cmd run --unattended "

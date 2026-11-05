@@ -45,7 +45,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/info":
             self._send(200, json.dumps({
-                "uptime_s": self.server.uptime, "build": f"Built on Oct 30 2026 12:00:00 version {self.server.version}", "ip": "192.168.0.50",
+                "uptime_s": self.server.uptime, "build": f"Built on Oct 30 2026 12:00:00 version {self.server.version}", "ip": "192.0.2.50",
                 "mac": "12:34:56:AB:CD:EF", "flags": "0", "mqtthost": ":1883", "mqtttopic": "obk",
                 "chipset": "BK7238", "webapp": "", "shortName": self.server.short_name, "startcmd": "",
                 "supportsSSDP": 0, "supportsClientDeviceDB": True}).encode())
@@ -165,8 +165,8 @@ class OpenBekenTests(unittest.TestCase):
             openbeken.command(self.server.host, "NoSuchCommand 1")
 
     def test_ota_http_sends_the_url_as_one_argument(self):
-        openbeken.ota_http(self.server.host, "http://192.168.0.2:8088/esphome.rbl")
-        self.assertEqual(self.server.commands, ["ota_http http://192.168.0.2:8088/esphome.rbl"])
+        openbeken.ota_http(self.server.host, "http://192.0.2.2:8088/esphome.rbl")
+        self.assertEqual(self.server.commands, ["ota_http http://192.0.2.2:8088/esphome.rbl"])
 
     def test_a_restart_is_seen_by_its_uptime(self):
         self.assertTrue(openbeken.restart(self.server.host, wait=10))

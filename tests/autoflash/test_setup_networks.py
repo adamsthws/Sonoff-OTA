@@ -108,7 +108,7 @@ class SearchTests(SetupNetworkTestCase):
 class LocateTests(SetupNetworkTestCase):
     def test_a_plug_not_found_can_be_set_up_on_its_own_network_instead(self):
         ctx = self.ctx()
-        ctx.state.set_input("plug_ip", "192.168.0.50")
+        ctx.state.set_input("plug_ip", "192.0.2.50")
         ctx.finder = SimpleNamespace(poll=lambda: None)
         ctx.set_plug_ip = lambda ip: ctx.state.set_input("plug_ip", ip)
         offered = []
@@ -122,8 +122,8 @@ class LocateTests(SetupNetworkTestCase):
                 mock.patch.object(time, "monotonic", side_effect=iter(range(0, 10_000, 100))), \
                 mock.patch.object(prompts, "wait_for_host", return_value=False), \
                 mock.patch.object(prompts, "ask_choice", side_effect=choose), \
-                mock.patch.object(join, "configure_plug_wifi", return_value="192.168.0.77") as setup:
-            self.assertEqual(join.locate_plug(ctx, setup=True), "192.168.0.77")
+                mock.patch.object(join, "configure_plug_wifi", return_value="192.0.2.77") as setup:
+            self.assertEqual(join.locate_plug(ctx, setup=True), "192.0.2.77")
         setup.assert_called_once_with(ctx, None)
         self.assertIn("tasmota-ABCDEF-NNNN, or ESP_ABCDF0", offered[2])
 
@@ -133,8 +133,8 @@ class LocateTests(SetupNetworkTestCase):
                 mock.patch.object(prompts, "wait_for_host", return_value=False), \
                 mock.patch.object(prompts, "ask_choice",
                                   side_effect=lambda q, options, help_lines=(): offered.extend(options) or 1), \
-                mock.patch.object(prompts, "ask_ipv4", return_value="192.168.0.9"):
-            self.assertEqual(prompts.wait_or_ask("192.168.0.50"), "192.168.0.9")
+                mock.patch.object(prompts, "ask_ipv4", return_value="192.0.2.9"):
+            self.assertEqual(prompts.wait_or_ask("192.0.2.50"), "192.0.2.9")
         self.assertEqual(len(offered), 2)
 
 

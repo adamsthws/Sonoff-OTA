@@ -18,5 +18,5 @@
 <text x="18" y="296" xml:space="preserve"> <tspan fill="#4e9a06">Stage 11 of 11</tspan> - Checking ESPHome            - <tspan fill="#4e9a06">Complete</tspan> (12s)</text>
 <text x="18" y="334" xml:space="preserve"> <tspan fill="#4e9a06">Conversion complete!</tspan></text>
 <text x="18" y="353" xml:space="preserve"> The plug is running ESPHome...</text>
-<text x="18" y="372" xml:space="preserve">     <tspan class="b pf">Your plug:</tspan> http://192.168.1.50/</text>
+<text x="18" y="372" xml:space="preserve">     <tspan class="b pf">Your plug:</tspan> http://192.168.99.50/</text>
 </svg>

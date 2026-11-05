@@ -63,7 +63,7 @@ rather than asking in the thread.
 On Linux, blocked connections show in the kernel log:
 
 ```sh
-journalctl -k | grep "SRC=192.168.1.50"
+journalctl -k | grep "SRC=192.168.99.50"
 ```
 
 **The computer's address changed mid-run**
@@ -73,7 +73,7 @@ computer's address afresh each time and says when it has changed, so nothing
 needs doing. If it chooses the wrong connection, name the address yourself:
 
 ```sh
-python3 -m tools.autoflash run --listen-ip 192.168.1.20
+python3 -m tools.autoflash run --listen-ip 192.168.99.20
 ```
 
 Stay on one connection from the rebuild onwards, ideally wired.
@@ -216,7 +216,7 @@ measure, and refuses by closing the connection - which looks exactly like the
 device being switched off. Add the header:
 
 ```sh
-curl -H "Referer: http://192.168.1.50/" "http://192.168.1.50/cm?cmnd=Status%2011"
+curl -H "Referer: http://192.168.99.50/" "http://192.168.99.50/cm?cmnd=Status%2011"
 ```
 
 The tool already does this.
@@ -419,7 +419,7 @@ the plug.
 ## Checking a finished plug at any time
 
 ```sh
-python3 -m tools.autoflash step H1 --plug-ip 192.168.1.50
+python3 -m tools.autoflash step H1 --plug-ip 192.168.99.50
 ```
 
 Reads four areas of the plug's memory - the bootloader, the memory map, Safeboot

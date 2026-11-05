@@ -15,57 +15,57 @@ class FirewallCommandTests(unittest.TestCase):
     """The add and remove commands must undo each other exactly."""
 
     def test_ufw_rule_admits_only_the_plug_on_both_ports(self):
-        add, remove = hostsys.firewall_commands("ufw", "192.168.1.50", [8088, 8089])
-        self.assertEqual(add, ["ufw", "allow", "from", "192.168.1.50", "to", "any", "port",
+        add, remove = hostsys.firewall_commands("ufw", "192.0.2.50", [8088, 8089])
+        self.assertEqual(add, ["ufw", "allow", "from", "192.0.2.50", "to", "any", "port",
                                "8088,8089", "proto", "tcp", "comment", "Autoflash"])
-        self.assertEqual(remove, ["ufw", "delete", "allow", "from", "192.168.1.50", "to", "any",
+        self.assertEqual(remove, ["ufw", "delete", "allow", "from", "192.0.2.50", "to", "any",
                                   "port", "8088,8089", "proto", "tcp"])
 
     def test_firewalld_rule_is_runtime_only(self):
-        add, remove = hostsys.firewall_commands("firewalld", "192.168.1.50", [8088, 8089])
+        add, remove = hostsys.firewall_commands("firewalld", "192.0.2.50", [8088, 8089])
         self.assertNotIn("--permanent", add)
         self.assertEqual(add[1].replace("--add-", "--remove-"), remove[1])
-        self.assertIn("source address=192.168.1.50", add[1])
+        self.assertIn("source address=192.0.2.50", add[1])
 
     def test_windows_rule_is_named_per_plug_and_removed_by_name(self):
-        add, remove = hostsys.firewall_commands("windows", "192.168.1.50", [8088, 8089])
-        self.assertIn("name=Autoflash 192.168.1.50", add)
-        self.assertIn("remoteip=192.168.1.50", add)
+        add, remove = hostsys.firewall_commands("windows", "192.0.2.50", [8088, 8089])
+        self.assertIn("name=Autoflash 192.0.2.50", add)
+        self.assertIn("remoteip=192.0.2.50", add)
         self.assertIn("localport=8088,8089", add)
-        self.assertEqual(remove[-1], "name=Autoflash 192.168.1.50")
+        self.assertEqual(remove[-1], "name=Autoflash 192.0.2.50")
 
     def test_a_windows_rule_is_removed_by_the_name_it_was_added_under(self):
         # One a run before 2.0.0 added has no name with it: it was called that.
         for detail, name in (({"name": "Autoflash"}, "Autoflash"), ({}, "S60 autoflash")):
-            rule = hostsys.FirewallRule("windows", "192.168.1.50", [8088],
+            rule = hostsys.FirewallRule("windows", "192.0.2.50", [8088],
                                         {"program": r"C:\Python\python.exe", **detail})
             with mock.patch.object(hostsys, "IS_WINDOWS", True):
-                self.assertIn(f'"name={name} 192.168.1.50"', hostsys.undo_commands(rule)[0])
+                self.assertIn(f'"name={name} 192.0.2.50"', hostsys.undo_commands(rule)[0])
             with mock.patch.object(hostsys, "_elevated_powershell", return_value=0) as ran:
                 self.assertTrue(hostsys.close_firewall(rule))
-            self.assertIn(f"'name={name} 192.168.1.50'", ran.call_args[0][0])
+            self.assertIn(f"'name={name} 192.0.2.50'", ran.call_args[0][0])
 
     def test_a_rule_that_was_already_there_is_left_alone(self):
-        rule = hostsys.FirewallRule("macos", "192.168.1.50", [8088], {"preexisting": True})
+        rule = hostsys.FirewallRule("macos", "192.0.2.50", [8088], {"preexisting": True})
         with mock.patch.object(hostsys, "elevated") as elevated:
             self.assertTrue(hostsys.close_firewall(rule))
         elevated.assert_not_called()
 
     def test_a_rule_survives_the_run_state_round_trip(self):
-        rule = hostsys.FirewallRule("ufw", "192.168.1.50", [8088, 8089])
+        rule = hostsys.FirewallRule("ufw", "192.0.2.50", [8088, 8089])
         self.assertEqual(hostsys.FirewallRule.from_json(rule.to_json()), rule)
 
     def test_no_firewall_means_no_rule(self):
         with mock.patch.object(hostsys, "active_firewall", return_value=None), \
              mock.patch.object(hostsys, "elevated") as elevated:
-            self.assertIsNone(hostsys.open_firewall("192.168.1.50", [8088]))
+            self.assertIsNone(hostsys.open_firewall("192.0.2.50", [8088]))
         elevated.assert_not_called()
 
     def test_a_refused_elevation_is_an_error(self):
         with mock.patch.object(hostsys, "active_firewall", return_value="ufw"), \
              mock.patch.object(hostsys, "elevated_output", return_value=(1, "")):
             with self.assertRaises(OSError):
-                hostsys.open_firewall("192.168.1.50", [8088])
+                hostsys.open_firewall("192.0.2.50", [8088])
 
     def test_a_rule_that_already_existed_is_not_removed_afterwards(self):
         for kind, reply in (("ufw", "Skipping adding existing rule\n"),
@@ -73,7 +73,7 @@ class FirewallCommandTests(unittest.TestCase):
             with mock.patch.object(hostsys, "active_firewall", return_value=kind), \
                  mock.patch.object(hostsys, "elevated_output", return_value=(0, reply)), \
                  mock.patch.object(hostsys, "elevated") as elevated:
-                rule = hostsys.open_firewall("192.168.1.50", [8088])
+                rule = hostsys.open_firewall("192.0.2.50", [8088])
                 self.assertTrue(rule.detail.get("preexisting"))
                 self.assertTrue(hostsys.close_firewall(rule))
             elevated.assert_not_called()
@@ -82,7 +82,7 @@ class FirewallCommandTests(unittest.TestCase):
         # Seen in the fault suite: a run stopped with Ctrl-C as ufw added the
         # rule, before it was recorded; the next took it for the computer's own.
         status = ("Status: active\n\nTo                         Action      From\n"
-                  "8088/tcp                   ALLOW       192.168.1.50               # {}\n")
+                  "8088/tcp                   ALLOW       192.0.2.50               # {}\n")
         # Its comment now, and before 2.0.0.
         for comment in ("Autoflash", "S60 autoflash"):
             with mock.patch.object(hostsys, "active_firewall", return_value="ufw"), \
@@ -90,25 +90,25 @@ class FirewallCommandTests(unittest.TestCase):
                                    side_effect=[(0, "Skipping adding existing rule\n"),
                                                 (0, status.format(comment))]), \
                  mock.patch.object(hostsys, "elevated", return_value=0) as elevated:
-                rule = hostsys.open_firewall("192.168.1.50", [8088])
+                rule = hostsys.open_firewall("192.0.2.50", [8088])
                 self.assertFalse(rule.detail.get("preexisting"), comment)
                 self.assertTrue(rule.detail.get("left_by_earlier_run"), comment)
                 self.assertTrue(hostsys.close_firewall(rule))
             elevated.assert_called_once()
 
     def test_one_without_the_comment_is_the_computers_own(self):
-        status = "Status: active\n\n8088/tcp                   ALLOW       192.168.1.50\n"
+        status = "Status: active\n\n8088/tcp                   ALLOW       192.0.2.50\n"
         with mock.patch.object(hostsys, "active_firewall", return_value="ufw"), \
              mock.patch.object(hostsys, "elevated_output",
                                side_effect=[(0, "Skipping adding existing rule\n"), (0, status)]):
-            rule = hostsys.open_firewall("192.168.1.50", [8088])
+            rule = hostsys.open_firewall("192.0.2.50", [8088])
         self.assertTrue(rule.detail.get("preexisting"))
 
     def test_a_rule_this_run_added_is_removed_afterwards(self):
         with mock.patch.object(hostsys, "active_firewall", return_value="ufw"), \
              mock.patch.object(hostsys, "elevated_output", return_value=(0, "Rule added\n")), \
              mock.patch.object(hostsys, "elevated", return_value=0) as elevated:
-            rule = hostsys.open_firewall("192.168.1.50", [8088])
+            rule = hostsys.open_firewall("192.0.2.50", [8088])
             self.assertTrue(hostsys.close_firewall(rule))
         elevated.assert_called_once()
 
@@ -132,7 +132,7 @@ class WindowsFirewallTests(unittest.TestCase):
         reply = mock.Mock(returncode=0, stdout=json.dumps(state))
         with mock.patch.object(hostsys, "powershell", return_value=reply), \
                 mock.patch.object(hostsys, "interface_towards", return_value=interface):
-            return hostsys.windows_firewall("192.168.1.50")
+            return hostsys.windows_firewall("192.0.2.50")
 
     def test_the_plugs_network_decides_which_profile_counts(self):
         state = self.read(self.STATE)
@@ -154,7 +154,7 @@ class WindowsFirewallTests(unittest.TestCase):
         self.read(public)
         with mock.patch.object(hostsys, "IS_WINDOWS", True), \
                 mock.patch.object(hostsys, "interface_towards", return_value="Wi-Fi"):
-            text = " ".join(hostsys.firewall_advice("192.168.1.50", [8088, 8089]))
+            text = " ".join(hostsys.firewall_advice("192.0.2.50", [8088, 8089]))
         self.assertIn("Norton Security", text)
         self.assertIn("8088,8089", text)
         self.assertIn("Group Policy", text)
@@ -163,18 +163,18 @@ class WindowsFirewallTests(unittest.TestCase):
         self.read(self.STATE)
         with mock.patch.object(hostsys, "IS_WINDOWS", True), \
                 mock.patch.object(hostsys, "interface_towards", return_value="Wi-Fi"):
-            before = " ".join(hostsys.firewall_advice("192.168.1.50", [8088]))
-            after = " ".join(hostsys.firewall_advice("192.168.1.50", [8088], after_failure=True))
+            before = " ".join(hostsys.firewall_advice("192.0.2.50", [8088]))
+            after = " ".join(hostsys.firewall_advice("192.0.2.50", [8088], after_failure=True))
         self.assertNotIn("domain", before)
         self.assertIn("domain", after)
 
     def test_the_rule_names_python_so_windows_security_does_not_ask(self):
-        add, remove = hostsys.firewall_commands("windows", "192.168.1.50", [8088], r"C:\Program Files\Python\python.exe")
+        add, remove = hostsys.firewall_commands("windows", "192.0.2.50", [8088], r"C:\Program Files\Python\python.exe")
         self.assertIn(r"program=C:\Program Files\Python\python.exe", add)
         self.assertNotIn("program", " ".join(remove))  # removed by name
 
     def test_paused_block_rules_are_put_back(self):
-        rule = hostsys.FirewallRule("windows", "192.168.1.50", [8088],
+        rule = hostsys.FirewallRule("windows", "192.0.2.50", [8088],
                                     {"program": r"C:\Python\python.exe", "paused": ["{abc}"]})
         with mock.patch.object(hostsys, "IS_WINDOWS", True):
             undo = hostsys.undo_commands(rule)
@@ -182,7 +182,7 @@ class WindowsFirewallTests(unittest.TestCase):
         with mock.patch.object(hostsys, "_elevated_powershell", return_value=0) as ran:
             self.assertTrue(hostsys.close_firewall(rule))
         script = ran.call_args[0][0]
-        self.assertIn("'name=S60 autoflash 192.168.1.50'", script)  # added before 2.0.0
+        self.assertIn("'name=S60 autoflash 192.0.2.50'", script)  # added before 2.0.0
         self.assertIn("@('{abc}')", script)
 
     def test_windows_commands_are_shown_with_double_quotes(self):
@@ -281,7 +281,7 @@ class MacFirewallTests(unittest.TestCase):
                 mock.patch.object(hostsys, "python_program", return_value=self.APP), \
                 mock.patch.object(hostsys, "mac_app_already_allowed", return_value=False), \
                 mock.patch.object(hostsys, "elevated_output", return_value=(0, "")) as added:
-            rule = hostsys.open_firewall("192.168.1.50", [8088])
+            rule = hostsys.open_firewall("192.0.2.50", [8088])
         self.assertEqual(added.call_args[0][0][1:], ["--add", self.APP, "--unblockapp", self.APP])
         self.assertEqual(rule.detail["program"], self.APP)
         # Removed by what was added, even if this Python would now say otherwise.
@@ -295,7 +295,7 @@ class MacFirewallTests(unittest.TestCase):
                 mock.patch.object(hostsys, "python_program", return_value=self.APP), \
                 mock.patch.object(hostsys, "mac_app_already_allowed", return_value=True) as checked, \
                 mock.patch.object(hostsys, "elevated_output") as added:
-            rule = hostsys.open_firewall("192.168.1.50", [8088])
+            rule = hostsys.open_firewall("192.0.2.50", [8088])
         checked.assert_called_once_with(self.APP)
         added.assert_not_called()
         self.assertTrue(rule.detail["preexisting"])
@@ -344,14 +344,14 @@ class PythonScriptTests(unittest.TestCase):
 
 class WindowsElevationTests(unittest.TestCase):
     def test_an_argument_with_spaces_stays_one_argument(self):
-        add, _ = hostsys.firewall_commands("windows", "192.168.1.50", [8088, 8089])
+        add, _ = hostsys.firewall_commands("windows", "192.0.2.50", [8088, 8089])
         with mock.patch.object(hostsys, "IS_WINDOWS", True), \
                 mock.patch.object(hostsys.subprocess, "run",
                                   return_value=mock.Mock(returncode=0, stdout="")) as run:
             self.assertEqual(hostsys.elevated(add), 0)
         script = run.call_args[0][0][-1]
         # Start-Process given a list joins it unquoted; one quoted line keeps the name whole.
-        self.assertIn("-ArgumentList 'advfirewall firewall add rule \"name=Autoflash 192.168.1.50\" "
+        self.assertIn("-ArgumentList 'advfirewall firewall add rule \"name=Autoflash 192.0.2.50\" "
                       "dir=in action=allow", script)
 
     @unittest.skipUnless(hostsys.IS_WINDOWS, "runs PowerShell")
@@ -382,12 +382,12 @@ class SystemCommandTests(unittest.TestCase):
             for patch in patches:
                 patch.start()
             try:
-                add, remove = hostsys.alias_commands("eth0", "192.168.1.50")
+                add, remove = hostsys.alias_commands("eth0", "192.0.2.50")
             finally:
                 for patch in patches:
                     patch.stop()
-            self.assertIn("192.168.1.50", " ".join(add))
-            self.assertIn("192.168.1.50", " ".join(remove))
+            self.assertIn("192.0.2.50", " ".join(add))
+            self.assertIn("192.0.2.50", " ".join(remove))
             self.assertNotEqual(add, remove)
 
     def test_mac_addresses_are_normalised(self):
@@ -416,10 +416,10 @@ class RedirectTestTests(unittest.TestCase):
             calls.append(command)
             return 0
 
-        with mock.patch.object(hostsys, "local_addresses", return_value={"192.168.1.20"}), \
+        with mock.patch.object(hostsys, "local_addresses", return_value={"192.0.2.20"}), \
              mock.patch.object(hostsys, "ping_ok", return_value=False):
             try:
-                redirect_test.run(interface="eth0", plug_ip="192.168.1.50", own_ip="192.168.1.20",
+                redirect_test.run(interface="eth0", plug_ip="192.0.2.50", own_ip="192.0.2.20",
                                   vendor_ip="203.0.113.10", vendor_port=8088, log=lambda _: None,
                                   elevated=elevated, connect=lambda src, *_: reaches[src])
                 result = None
@@ -428,24 +428,24 @@ class RedirectTestTests(unittest.TestCase):
         return result, calls
 
     def test_a_working_rule_passes_and_the_address_is_returned(self):
-        error, calls = self.run_test({"192.168.1.50": False, "192.168.1.20": True})
+        error, calls = self.run_test({"192.0.2.50": False, "192.0.2.20": True})
         self.assertIsNone(error)
         self.assertEqual(len(calls), 2, "borrow then give back")
 
     def test_a_missing_rule_fails_and_still_returns_the_address(self):
-        error, calls = self.run_test({"192.168.1.50": True, "192.168.1.20": True})
+        error, calls = self.run_test({"192.0.2.50": True, "192.0.2.20": True})
         self.assertIn("not catching it", str(error))
         self.assertEqual(len(calls), 2)
 
     def test_no_internet_is_inconclusive_not_a_pass(self):
-        error, _ = self.run_test({"192.168.1.50": False, "192.168.1.20": False})
+        error, _ = self.run_test({"192.0.2.50": False, "192.0.2.20": False})
         self.assertIn("cannot tell", str(error))
 
     def test_a_plug_still_powered_stops_the_test(self):
         with mock.patch.object(hostsys, "local_addresses", return_value=set()), \
              mock.patch.object(hostsys, "ping_ok", return_value=True):
             with self.assertRaisesRegex(redirect_test.RedirectTestError, "unplug"):
-                redirect_test.run(interface="eth0", plug_ip="192.168.1.50", own_ip="192.168.1.20",
+                redirect_test.run(interface="eth0", plug_ip="192.0.2.50", own_ip="192.0.2.20",
                                   vendor_ip="203.0.113.10", vendor_port=8088,
                                   elevated=lambda _: self.fail("must not borrow the address"))
 
@@ -570,7 +570,7 @@ class LanAddressesTests(unittest.TestCase):
             "11: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP\\    link/ether 12:34:56:ab:cd:06 brd ff:ff:ff:ff:ff:ff\n")
         addresses = (
             "1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever preferred_lft forever\n"
-            "2: wlp1s0    inet 192.168.0.10/24 brd 192.168.0.255 scope global dynamic wlp1s0\\       valid_lft 80000sec\n"
+            "2: wlp1s0    inet 192.0.2.10/24 brd 192.0.2.255 scope global dynamic wlp1s0\\       valid_lft 80000sec\n"
             "3: tap0    inet 192.168.60.10/24 brd 192.168.60.255 scope global tap0\\       valid_lft forever\n"
             "4: tailscale0    inet 100.64.0.7/32 scope global tailscale0\\       valid_lft forever\n"
             "5: wg0    inet 10.8.0.2/24 scope global wg0\\       valid_lft forever\n"
@@ -581,7 +581,7 @@ class LanAddressesTests(unittest.TestCase):
             "11: br0    inet 10.20.5.9/22 brd 10.20.7.255 scope global br0\\       valid_lft forever\n")
         # Docker's and libvirt's bridges are left out; a bridge of the person's own, br0, is kept.
         self.assertEqual(hostsys.lan_networks_linux(addresses, links),
-                         {"192.168.0.10": 24, "192.168.60.10": 24, "10.20.5.9": 22})
+                         {"192.0.2.10": 24, "192.168.60.10": 24, "10.20.5.9": 22})
 
     def test_mac_keeps_interfaces_with_a_hardware_address_not_point_to_point(self):
         ifconfig = (
@@ -589,10 +589,10 @@ class LanAddressesTests(unittest.TestCase):
             "\tinet 127.0.0.1 netmask 0xff000000\n"
             "en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n"
             "\tether 12:34:56:ab:cd:ef\n"
-            "\tinet 192.168.0.10 netmask 0xffffff00 broadcast 192.168.0.255\n"
+            "\tinet 192.0.2.10 netmask 0xffffff00 broadcast 192.0.2.255\n"
             "bridge100: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n"
             "\tether 12:34:56:ab:cd:01\n"
-            "\tinet 192.168.2.1 netmask 0xffffff00 broadcast 192.168.2.255\n"
+            "\tinet 192.0.2.1 netmask 0xffffff00 broadcast 192.0.2.255\n"
             "utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280\n"
             "\tinet 100.64.0.7 --> 100.64.0.7 netmask 0xffffffff\n"
             "en5: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n"
@@ -601,13 +601,13 @@ class LanAddressesTests(unittest.TestCase):
             "en6: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500\n"
             "\tether 12:34:56:ab:cd:03\n"
             "\tinet 10.20.5.9 netmask 0xfffffc00 broadcast 10.20.7.255\n")
-        self.assertEqual(hostsys.lan_networks_mac(ifconfig), {"192.168.0.10": 24, "192.168.2.1": 24, "10.20.5.9": 22})
+        self.assertEqual(hostsys.lan_networks_mac(ifconfig), {"192.0.2.10": 24, "192.0.2.1": 24, "10.20.5.9": 22})
 
     def test_windows_keeps_adapters_carrying_ethernet_the_tap_adapter_among_them(self):
         up, down = hostsys.IF_OPER_STATUS_UP, 2
         # As GetAdaptersAddresses gave them on the emulator's Windows, and the tunnels it may meet.
         rows = [("192.168.60.10", 24, 53, up, 6),    # the emulator's TAP-Windows: "virtual", with a MAC
-                ("192.168.0.10", 24, 71, up, 6),     # Wi-Fi
+                ("192.0.2.10", 24, 71, up, 6),     # Wi-Fi
                 ("10.0.2.15", 24, 6, up, 6),         # Ethernet
                 ("10.8.0.2", 24, 53, up, 0),         # Wintun (WireGuard): "virtual", no MAC
                 ("100.64.0.7", 32, 6, up, 6),        # one address: a tunnel, whatever it says
@@ -616,7 +616,7 @@ class LanAddressesTests(unittest.TestCase):
                 ("169.254.148.5", 16, 53, down, 6),  # an unused TAP adapter
                 ("127.0.0.1", 8, 24, up, 0)]         # the loopback
         self.assertEqual(hostsys.lan_networks_windows(rows),
-                         {"192.168.60.10": 24, "192.168.0.10": 24, "10.0.2.15": 24})
+                         {"192.168.60.10": 24, "192.0.2.10": 24, "10.0.2.15": 24})
 
     def test_it_reads_this_systems_own_tool(self):
         for flag, expected in (("IS_LINUX", ["ip", "-o", "-4", "address"]), ("IS_MAC", ["ifconfig"])):
@@ -639,18 +639,18 @@ class NetworkOfTests(unittest.TestCase):
     def test_a_network_is_swept_at_its_real_size(self):
         self.assertEqual(self.width("10.20.5.9", {"10.20.5.9": 22}), ("10.20.4.0/22", 1022))
         self.assertEqual(self.width("10.20.5.9", {"10.20.5.9": 23}), ("10.20.4.0/23", 510))
-        self.assertEqual(self.width("192.168.1.70", {"192.168.1.70": 26}), ("192.168.1.64/26", 62))
+        self.assertEqual(self.width("192.0.2.70", {"192.0.2.70": 26}), ("192.0.2.64/26", 62))
 
     def test_a_wider_one_only_across_the_widest_around_the_address(self):
         self.assertEqual(self.width("10.20.5.9", {"10.20.5.9": 16}), ("10.20.4.0/22", 1022))
 
     def test_an_address_on_another_of_its_networks_takes_that_ones_size(self):
         # The plug's address, on the computer's /23: the plug's half of it, not a /24.
-        self.assertEqual(self.width("10.20.4.200", {"10.20.5.9": 23, "192.168.0.10": 24}), ("10.20.4.0/23", 510))
+        self.assertEqual(self.width("10.20.4.200", {"10.20.5.9": 23, "192.0.2.10": 24}), ("10.20.4.0/23", 510))
 
     def test_a_network_this_computer_does_not_know_is_a_24(self):
         self.assertEqual(self.width("10.0.0.2", {}), ("10.0.0.0/24", 254))
-        self.assertEqual(self.width("10.0.0.2", {"192.168.0.10": 24}), ("10.0.0.0/24", 254))
+        self.assertEqual(self.width("10.0.0.2", {"192.0.2.10": 24}), ("10.0.0.0/24", 254))
 
 
 class SweepTests(unittest.TestCase):

@@ -196,7 +196,7 @@ class AnnouncedVersionTests(unittest.TestCase):
         from tools.ewelink.ota_push import Delivery
         bridge = ROOT / installer.BRIDGE_OTA
         exists = Path.exists
-        argv = ["serve_tasmota_ota.py", "--listen-ip", "192.168.1.2", "--device-ip", "192.168.1.3",
+        argv = ["serve_tasmota_ota.py", "--listen-ip", "192.0.2.2", "--device-ip", "192.0.2.3",
                 "--firmware", str(bridge), "--email", "someone@example.com",
                 "--expected-current-version", "1.2.0", "--mdns-capture", "mdns.json", sender.SAFETY_FLAG]
         with mock.patch.object(sys, "argv", argv), \
