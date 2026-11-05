@@ -37,7 +37,7 @@ python3 tools/repo/leak_scan.py install
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install --require-hashes -r requirements/ci.txt -r requirements/lint.txt
+.venv/bin/python -m pip install --require-hashes --no-deps -r requirements/ci.txt -r requirements/lint.txt
 ```
 
 [uv](https://docs.astral.sh/uv/) works as well and faster, from the same

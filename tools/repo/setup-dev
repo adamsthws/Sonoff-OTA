@@ -19,7 +19,7 @@ if [ ! -x "$venv/bin/python" ]; then
 fi
 
 echo "setup-dev: installing test helpers and linters (requirements/ci.txt + lint.txt)"
-"$venv/bin/python" -m pip install --require-hashes \
+"$venv/bin/python" -m pip install --require-hashes --no-deps \
     -r "$root/requirements/ci.txt" -r "$root/requirements/lint.txt"
 
 echo "setup-dev: done - the tests and ruff/shellcheck/actionlint/zizmor are in $venv"

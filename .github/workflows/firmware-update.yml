@@ -137,7 +137,7 @@ jobs:
         run: |
           command -v rsync >/dev/null || sudo apt-get install -y -q rsync
           python3 -m venv .venv
-          .venv/bin/pip install -q --require-hashes -r requirements/ci.txt
+          .venv/bin/pip install -q --require-hashes --no-deps -r requirements/ci.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$BRANCH"

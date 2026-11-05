@@ -205,7 +205,7 @@ if [ ${#plan[@]} -gt 0 ]; then
         case "$step" in
         nvs)
             [ -x "$venv/bin/python" ] || python3 -m venv "$venv"
-            "$venv/bin/python" -m pip install -q --require-hashes -r "$ROOT/requirements/ci.txt"
+            "$venv/bin/python" -m pip install -q --require-hashes --no-deps -r "$ROOT/requirements/ci.txt"
             ;;
         windows)
             mkdir -p "$CACHE"

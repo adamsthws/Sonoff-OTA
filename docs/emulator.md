@@ -35,7 +35,7 @@ another regional version's power meter.
   in the repository's `.venv`, as the workflows pin them:
 
   ```sh
-  .venv/bin/python -m pip install --require-hashes -r requirements/ci.txt
+  .venv/bin/python -m pip install --require-hashes --no-deps -r requirements/ci.txt
   ```
 
 ### Hardware
