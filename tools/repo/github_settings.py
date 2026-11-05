@@ -41,9 +41,13 @@ SECURITY = {
     "dependabot_security_updates": "enabled",
 }
 
-# CodeQL's own setup: the Python and the workflows, on each push and pull
-# request to main and weekly. (The C under archive/ is history.)
-CODE_SCANNING = {"state": "configured", "languages": ["actions", "python"], "query_suite": "default"}
+# CodeQL's own setup: the Python, the website's JavaScript and the workflows,
+# on each push and pull request to main and weekly. (The C under archive/ is
+# history.)
+CODE_SCANNING = {"state": "configured", "languages": ["actions", "javascript-typescript", "python"],
+                 "query_suite": "default"}
+# GitHub answers with the one language above under these names as well.
+CODE_SCANNING_ALIASES = {"javascript", "typescript"}
 
 # On/off settings, each at repos/REPOSITORY/<path>: private vulnerability
 # reporting, which SECURITY.md asks for; immutable releases - a release's
@@ -147,7 +151,8 @@ def differences() -> list[tuple[str, str, Any]]:
                           ("PATCH", "", {"security_and_analysis": {key: {"status": want}}})))
     scanning = api("/code-scanning/default-setup")
     have = {key: scanning.get(key) for key in CODE_SCANNING}
-    if have["state"] != CODE_SCANNING["state"] or sorted(have["languages"] or []) != CODE_SCANNING["languages"] \
+    languages = sorted(set(have["languages"] or []) - CODE_SCANNING_ALIASES)
+    if have["state"] != CODE_SCANNING["state"] or languages != CODE_SCANNING["languages"] \
             or have["query_suite"] != CODE_SCANNING["query_suite"]:
         found.append(("CodeQL", f"is {have}, should be {CODE_SCANNING}",
                       ("PATCH", "/code-scanning/default-setup", CODE_SCANNING)))

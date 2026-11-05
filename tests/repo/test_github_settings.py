@@ -146,6 +146,13 @@ class GitHubSettingsTests(unittest.TestCase):
         self.assertEqual((code, fake.sent), (0, []))
         self.assertIn("every setting is as tools/repo/github_settings.py says", out)
 
+    def test_codeql_as_github_names_javascript_is_no_difference(self):
+        fake = FakeGitHub()
+        fake.scanning = {**gs.CODE_SCANNING, "languages": [
+            "actions", "javascript", "javascript-typescript", "python", "typescript"]}
+        with mock.patch.object(gs, "api", fake):
+            self.assertNotIn("CodeQL", [what for what, _, _ in gs.differences()])
+
     def test_pages_is_turned_off(self):
         fake = FakeGitHub()
         code, out = run(fake)
